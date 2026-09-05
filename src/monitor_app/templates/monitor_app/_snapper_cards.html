@@ -375,10 +375,10 @@
     <div class="text-muted mb-2">This instant is inside the reconstructed arrivals record: arrival counters only, rebuilt from the catalog's creation times. Inventory, ghosts, backlog, rules and capacity begin at the census.</div>
     {% endif %}
     <div class="d-flex flex-wrap column-gap-4 row-gap-3 align-items-start">
-      <table class="table table-sm table-bordered table-striped w-auto mb-0">
+      <table class="table table-sm table-bordered table-striped w-auto mb-0 swf-latch-head swf-latch-titled-head">
         <thead>
-          <tr class="table-secondary"><th colspan="4">Inventory · production replicas here</th></tr>
-          <tr><th>Replica state</th><th class="text-end">Files</th><th class="text-end">Δ prev snap</th><th class="text-end">TB</th></tr>
+          <tr class="swf-latch-title-row"><th colspan="4">Inventory · production replicas here</th></tr>
+          <tr class="swf-latch-column-row"><th>Replica state</th><th class="text-end">Files</th><th class="text-end">Δ prev snap</th><th class="text-end">TB</th></tr>
         </thead>
         <tbody>
         {% for r in s.inventory %}
@@ -389,8 +389,8 @@
         <tr><td colspan="4" class="text-muted small">Datasets: {{ s.datasets.total|default_if_none:"0" }} total · {{ s.datasets.complete|default_if_none:"0" }} complete · {{ s.datasets.partial|default_if_none:"0" }} partial · {{ s.datasets.empty|default_if_none:"0" }} empty · {{ s.datasets.unavailable|default_if_none:"0" }} unavailable</td></tr>
         </tbody>
       </table>
-      <table class="table table-sm table-bordered table-striped w-auto mb-0">
-        <thead><tr class="table-secondary"><th colspan="2">Capacity · RSE-wide usage against the eicprod limit</th></tr></thead>
+      <table class="table table-sm table-bordered table-striped w-auto mb-0 swf-latch-head swf-latch-titled-head">
+        <thead><tr class="swf-latch-title-row"><th colspan="2">Capacity · RSE-wide usage against the eicprod limit</th></tr></thead>
         <tbody>
         <tr><td><span data-curve="{{ s.capacity.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>used</td><td class="text-end">{{ s.capacity.used_tb|default_if_none:"—" }} TB · {{ s.capacity.files }} files</td></tr>
         <tr><td>account limit</td><td class="text-end">{% if s.capacity.limit_tb is not None %}{{ s.capacity.limit_tb }} TB{% else %}none{% endif %}</td></tr>
@@ -399,16 +399,16 @@
         <tr><td>usage as of</td><td class="text-end text-nowrap">{% if s.capacity.as_of %}{{ s.capacity.as_of|fmt_dt }} ET{% else %}—{% endif %}</td></tr>
         </tbody>
       </table>
-      <table class="table table-sm table-bordered table-striped w-auto mb-0">
-        <thead><tr class="table-secondary"><th colspan="2">Copying backlog</th></tr></thead>
+      <table class="table table-sm table-bordered table-striped w-auto mb-0 swf-latch-head swf-latch-titled-head">
+        <thead><tr class="swf-latch-title-row"><th colspan="2">Copying backlog</th></tr></thead>
         <tbody>
         <tr><td><span data-curve="{{ s.backlog.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>copying</td><td class="text-end">{{ s.backlog.files }} files · {{ s.backlog.tb|default_if_none:"—" }} TB</td></tr>
         <tr><td><span data-curve="{{ s.backlog.over_curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>over {{ s.backlog.stuck_hours }} h</td><td class="text-end">{{ s.backlog.over }}</td></tr>
         <tr><td>age median · 90th · oldest</td><td class="text-end">{{ s.backlog.median_h|default_if_none:"—" }} · {{ s.backlog.p90_h|default_if_none:"—" }} · {{ s.backlog.max_h|default_if_none:"—" }} h</td></tr>
         </tbody>
       </table>
-      <table class="table table-sm table-bordered table-striped w-auto mb-0">
-        <thead><tr class="table-secondary"><th colspan="2"><a href="{{ s.ghosts.url }}">Ghosts</a> · registered, no available replica anywhere</th></tr></thead>
+      <table class="table table-sm table-bordered table-striped w-auto mb-0 swf-latch-head swf-latch-titled-head">
+        <thead><tr class="swf-latch-title-row"><th colspan="2"><a href="{{ s.ghosts.url }}">Ghosts</a> · registered, no available replica anywhere</th></tr></thead>
         <tbody>
         <tr><td>total</td><td class="text-end">{{ s.ghosts.files }} files{% if s.ghosts.delta %} ({{ s.ghosts.delta }}){% endif %} · {{ s.ghosts.tb|default_if_none:"—" }} TB</td></tr>
         {% for g in s.ghosts.by_state %}
@@ -419,8 +419,8 @@
         <tr><td colspan="2" class="text-muted small" style="max-width:30em;">Copying ghosts are registrations whose upload never completed; unavailable ghosts lost their replica, or had it declared bad, after arrival. Ghosts larger than the arrived mean point at large-file timeouts; equal sizes point at the path, not the file.</td></tr>
         </tbody>
       </table>
-      <table class="table table-sm table-bordered table-striped w-auto mb-0">
-        <thead><tr class="table-secondary"><th colspan="2"><a href="{{ s.rules.url }}">Rules and locks</a></th></tr></thead>
+      <table class="table table-sm table-bordered table-striped w-auto mb-0 swf-latch-head swf-latch-titled-head">
+        <thead><tr class="swf-latch-title-row"><th colspan="2"><a href="{{ s.rules.url }}">Rules and locks</a></th></tr></thead>
         <tbody>
         <tr><td>rules by state</td><td class="text-end">{% for state, n in s.rules.by_state %}{{ state|lower }} {{ n }}{% if not forloop.last %} · {% endif %}{% empty %}—{% endfor %}</td></tr>
         <tr><td>locks ok</td><td class="text-end">{{ s.rules.ok }}</td></tr>
@@ -429,10 +429,10 @@
         <tr><td>rules expiring within 30 d</td><td class="text-end">{{ s.rules.expiring_30d }}</td></tr>
         </tbody>
       </table>
-      <table class="table table-sm table-bordered table-striped w-auto mb-0">
+      <table class="table table-sm table-bordered table-striped w-auto mb-0 swf-latch-head swf-latch-titled-head">
         <thead>
-          <tr class="table-secondary"><th colspan="3">Flow since {% if s.basis %}{{ s.basis }}{% else %}window start{% endif %}</th></tr>
-          <tr><th></th><th class="text-end">Files</th><th class="text-end">TB</th></tr>
+          <tr class="swf-latch-title-row"><th colspan="3">Flow since {% if s.basis %}{{ s.basis }}{% else %}window start{% endif %}</th></tr>
+          <tr class="swf-latch-column-row"><th></th><th class="text-end">Files</th><th class="text-end">TB</th></tr>
         </thead>
         <tbody>
         {% for f in s.flow %}
@@ -450,10 +450,10 @@
       {% if card.scope.reconstructed %}<span class="text-muted fs-6">reconstructed arrivals record; the state record begins at the census</span>{% else %}<span class="snapper-chip fs-6" style="background:{{ card.scope.overall_chip.color }}">{{ card.scope.overall }}</span>{% endif %}
       <span class="text-muted fs-6">{{ card.scope.pass.mode }} pass{% if card.scope.interval.end %} · interval {{ card.scope.interval.start|fmt_dt }} – {{ card.scope.interval.end|fmt_dt }} ET{% endif %} · {{ card.scope.pass.files }} files and {{ card.scope.pass.datasets }} datasets checked in {{ card.scope.pass.duration_min }} min{% if card.scope.pass.errors %} · <span class="text-danger">{{ card.scope.pass.errors }} read errors</span>{% endif %}</span>
       <span class="fs-6">· <a href="{{ card.scope.urls.ghosts }}">Storage exceptions</a></span></div>
-    <table class="table table-sm table-bordered table-striped w-auto mb-3">
+    <table class="table table-sm table-bordered table-striped w-auto mb-3 swf-latch-head swf-latch-titled-head">
       <thead>
-        <tr class="table-secondary"><th colspan="8">RSE capacity at this instant · the rows of rucio account limit list eicprod <span class="fw-normal text-muted">(usage is RSE-wide until the account usage is recorded; click the plot at another time for the table then)</span></th></tr>
-        <tr><th>RSE</th><th>Type</th><th class="text-end">Used TB</th><th class="text-end">Limit TB</th><th class="text-end">Quota left TB</th><th class="text-end">Fill</th><th class="text-end">Files</th><th>Usage as of</th></tr>
+        <tr class="swf-latch-title-row"><th colspan="8">RSE capacity at this instant · the rows of rucio account limit list eicprod <span class="fw-normal text-muted">(usage is RSE-wide until the account usage is recorded; click the plot at another time for the table then)</span></th></tr>
+        <tr class="swf-latch-column-row"><th>RSE</th><th>Type</th><th class="text-end">Used TB</th><th class="text-end">Limit TB</th><th class="text-end">Quota left TB</th><th class="text-end">Fill</th><th class="text-end">Files</th><th>Usage as of</th></tr>
       </thead>
       <tbody>
       {% for r in card.scope.capacity_rows %}
@@ -464,8 +464,8 @@
     {% if not card.scope.capacity_only %}
     {% for c in card.scope.campaigns %}
     <div class="d-flex flex-wrap column-gap-4 row-gap-3 align-items-start mb-3">
-      <table class="table table-sm table-bordered table-striped w-auto mb-0">
-        <thead><tr class="table-secondary"><th colspan="2">Campaign {{ c.name }} · {{ c.files }} files · {{ c.tb|default_if_none:"—" }} TB registered
+      <table class="table table-sm table-bordered table-striped w-auto mb-0 swf-latch-head swf-latch-titled-head">
+        <thead><tr class="swf-latch-title-row"><th colspan="2">Campaign {{ c.name }} · {{ c.files }} files · {{ c.tb|default_if_none:"—" }} TB registered
           {% for v in c.verdicts %} <span class="fw-normal" title="{{ v.threshold }}"><span class="snapper-chip" style="background:{{ v.chip.color }}">{{ v.chip.value }}</span> {{ v.name }}</span>{% endfor %}</th></tr></thead>
         <tbody>
         <tr><td><span data-curve="stopc_{{ c.segment }}_single" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>single copy</td><td class="text-end">{{ c.single }}{% if c.single_old %} · {{ c.single_old }} older than the warning age{% endif %}</td></tr>
@@ -479,10 +479,10 @@
         </tbody>
       </table>
       {% if c.latency %}
-      <table class="table table-sm table-bordered table-striped w-auto mb-0">
+      <table class="table table-sm table-bordered table-striped w-auto mb-0 swf-latch-head swf-latch-titled-head">
         <thead>
-          <tr class="table-secondary"><th colspan="4">Latency in the interval · {{ c.name }}</th></tr>
-          <tr><th>Kind</th><th class="text-end">n</th><th class="text-end">Median h</th><th class="text-end">90th h</th></tr>
+          <tr class="swf-latch-title-row"><th colspan="4">Latency in the interval · {{ c.name }}</th></tr>
+          <tr class="swf-latch-column-row"><th>Kind</th><th class="text-end">n</th><th class="text-end">Median h</th><th class="text-end">90th h</th></tr>
         </thead>
         <tbody>
         {% for l in c.latency %}
@@ -494,11 +494,11 @@
     </div>
     {% endfor %}
     <div class="d-flex flex-wrap column-gap-4 row-gap-3 align-items-start">
-      <div class="snapper-scrollpane" style="max-height:24em; overflow:auto;">
-        <table class="table table-sm table-bordered table-striped w-auto mb-0">
+      <div>
+        <table class="table table-sm table-bordered table-striped w-auto mb-0 swf-latch-head swf-latch-titled-head">
           <thead>
-            <tr class="table-secondary"><th colspan="7"><a href="{{ card.scope.urls.ghosts }}">Ghosts</a> · the record's oldest{% if card.scope.overflow.ghosts %} and {{ card.scope.overflow.ghosts }} more{% endif %} · full list on the Storage exceptions page</th></tr>
-            <tr><th>Dataset</th><th>File</th><th>RSE</th><th>State</th><th>Campaign</th><th class="text-end">MB</th><th>Registered</th></tr>
+            <tr class="swf-latch-title-row"><th colspan="7"><a href="{{ card.scope.urls.ghosts }}">Ghosts</a> · the record's oldest{% if card.scope.overflow.ghosts %} and {{ card.scope.overflow.ghosts }} more{% endif %} · full list on the Storage exceptions page</th></tr>
+            <tr class="swf-latch-column-row"><th>Dataset</th><th>File</th><th>RSE</th><th>State</th><th>Campaign</th><th class="text-end">MB</th><th>Registered</th></tr>
           </thead>
           <tbody>
           {% for g in card.scope.ghosts %}
@@ -509,11 +509,11 @@
           </tbody>
         </table>
       </div>
-      <div class="snapper-scrollpane" style="max-height:24em; overflow:auto;">
-        <table class="table table-sm table-bordered table-striped w-auto mb-0">
+      <div>
+        <table class="table table-sm table-bordered table-striped w-auto mb-0 swf-latch-head swf-latch-titled-head">
           <thead>
-            <tr class="table-secondary"><th colspan="4"><a href="{{ card.scope.urls.stuck_rules }}">Stuck rules</a> · the record's oldest{% if card.scope.overflow.stuck_rules %} and {{ card.scope.overflow.stuck_rules }} more{% endif %}</th></tr>
-            <tr><th>Dataset</th><th>RSE</th><th>Stuck since</th><th class="text-end">Stuck locks</th></tr>
+            <tr class="swf-latch-title-row"><th colspan="4"><a href="{{ card.scope.urls.stuck_rules }}">Stuck rules</a> · the record's oldest{% if card.scope.overflow.stuck_rules %} and {{ card.scope.overflow.stuck_rules }} more{% endif %}</th></tr>
+            <tr class="swf-latch-column-row"><th>Dataset</th><th>RSE</th><th>Stuck since</th><th class="text-end">Stuck locks</th></tr>
           </thead>
           <tbody>
           {% for r in card.scope.stuck %}
@@ -524,11 +524,11 @@
           </tbody>
         </table>
       </div>
-      <div class="snapper-scrollpane" style="max-height:24em; overflow:auto;">
-        <table class="table table-sm table-bordered table-striped w-auto mb-0">
+      <div>
+        <table class="table table-sm table-bordered table-striped w-auto mb-0 swf-latch-head swf-latch-titled-head">
           <thead>
-            <tr class="table-secondary"><th colspan="3"><a href="{{ card.scope.urls.stalled_datasets }}">Stalled datasets</a>{% if card.scope.overflow.stalled_datasets %} · and {{ card.scope.overflow.stalled_datasets }} more{% endif %}</th></tr>
-            <tr><th>Dataset</th><th>Campaign</th><th>Last arrival</th></tr>
+            <tr class="swf-latch-title-row"><th colspan="3"><a href="{{ card.scope.urls.stalled_datasets }}">Stalled datasets</a>{% if card.scope.overflow.stalled_datasets %} · and {{ card.scope.overflow.stalled_datasets }} more{% endif %}</th></tr>
+            <tr class="swf-latch-column-row"><th>Dataset</th><th>Campaign</th><th>Last arrival</th></tr>
           </thead>
           <tbody>
           {% for r in card.scope.stalled %}
