@@ -2051,10 +2051,15 @@ def _storage_rse_families(rse, quantity, lens, panels='lifecycle'):
 def _storage_campaign_families(campaigns, quantity, panels='lifecycle'):
     """The scope-level families, per target campaign, in panel order:
     the campaigns' arrivals under status, everything under all panels,
-    none under the capacity and ghosts sets."""
+    none under the capacity set; the consequences strip (the
+    data-management job failures of the error record) closes the
+    status, ghosts and all-panels sets."""
     names = []
     if panels == 'status':
-        return [f'Storage arrived {name} {quantity}' for name in campaigns]
+        return ([f'Storage arrived {name} {quantity}' for name in campaigns]
+                + ['Storage consequences'])
+    if panels == 'ghosts':
+        return ['Storage consequences']
     if panels != 'lifecycle':
         return names
     for name in campaigns:
@@ -2064,6 +2069,7 @@ def _storage_campaign_families(campaigns, quantity, panels='lifecycle'):
                   f'Storage arrived {name} {quantity}']
     if campaigns:
         names.append('Storage archival backlog')
+    names.append('Storage consequences')
     return names
 
 
@@ -2306,6 +2312,20 @@ def _storage_groups():
             'title': 'Archival backlog · on disk and not on tape',
             'prefixes': ['stopa_'], 'ids': [],
             'panel_px': 110, 'units': 'TB'})
+    # The consequences strip (SNAPPER_STORAGE.md): the error record's
+    # data-management job failures, the ddm component's events, binned
+    # at render with the Errors view's terminal-state chips. The entries
+    # carry no RSE, so the strip is scope-level, once.
+    groups.append({
+        'name': 'Storage consequences',
+        'title': 'Data-management job failures · all queues (ddm errors)',
+        'prefixes': [], 'ids': ['perrc_ddm'],
+        'event_flow': True, 'end_stamped': True, 'stacked': True,
+        'member_ticks': False,
+        'panel_px': 150, 'units': 'errors',
+        'qualifier_label': 'Terminal state', 'qualifier_param': 'states',
+        'qualifiers_off': ['closed'],
+        'empty_note': 'No data-management job failures in this window'})
     return tuple(groups)
 
 
@@ -2357,7 +2377,8 @@ def _storage_focus_view():
         'selector_label': 'RSE display',
         'jump_label': 'RSEs by peak arrivals',
         'cache_series': True,
-        'components': ('storage',),
+        # The error record's events feed the consequences strip.
+        'components': ('storage', 'errors'),
         'prewarm_series': False,
         'default_window': '7d',
         'note': ('Per RSE: status (arrivals and ghosts per bin, with '
