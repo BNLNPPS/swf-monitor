@@ -53,6 +53,7 @@ variant.
 | `prod_hub_corun_counts` | corun-ai assessment/narrative counts | 600 s |
 | `evgen_convention:v2` | EVGEN paths implied by recorded produced outputs (`pcs.services.evgen_convention_paths_cached`) | 26 h; refreshed by the EVGEN sweep |
 | `evgen_coverage:v2` | EVGEN registration worklist (`pcs.services.build_evgen_coverage`) | 26 h; refreshed by the EVGEN sweep |
+| `storage_ghosts:v1` | the storage record's ghost population with holders (`swf_epicprod.analytics.storage_listings.build_ghost_population`), behind the Storage exceptions page, the `epicprod_storage` tool and the REST listing | 90 min; refreshed by the storage sweep as its last step (`refresh_ghost_product`) |
 
 A producer that changes a product's input refreshes the product as its
 last step, synchronously, so the page serves the new product at once.
