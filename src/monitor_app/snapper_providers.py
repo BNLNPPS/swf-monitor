@@ -1763,14 +1763,19 @@ def _storage_inventory():
     first = (carrying.order_by('snap_time')
              .values_list('snap_time', flat=True).first())
     data = component_data(state or {}, 'storage')
+    rse_blocks = {rse: block for rse, block in (data.get('rses') or {}).items()
+                  if isinstance(block, dict)}
     inventory = {
-        'rses': tuple(sorted(
-            rse for rse, block in (data.get('rses') or {}).items()
-            if isinstance(block, dict))),
+        'rses': tuple(sorted(rse_blocks)),
         'campaigns': tuple(sorted(
             name for name, block in (data.get('campaigns') or {}).items()
             if isinstance(block, dict))),
         'first': first,
+        # Whether the record carries the production account's own usage
+        # yet; until it does, the capacity band is the RSE-wide usage.
+        'account': any(
+            (block.get('capacity') or {}).get('account_used') is not None
+            for block in rse_blocks.values()),
     }
     _STORAGE_CACHE.update({'at': now, 'inventory': inventory})
     return inventory
@@ -2161,22 +2166,35 @@ def _storage_groups():
                 # The eicprod account's usage is the band, what the limit
                 # charges; the limit and the RSE-wide usage (every
                 # account, unticked by default) are foreground lines,
-                # never summed in.
-                groups.append({
-                    'name': f'Storage capacity {rse} bytes',
-                    'title': f'Capacity · {rse}',
-                    'prefixes': [],
-                    'ids': [f'stobu_{rse}_account', f'stobu_{rse}_used',
-                            f'stobu_{rse}_limit'],
-                    'order': [f'stobu_{rse}_account', f'stobu_{rse}_used',
-                              f'stobu_{rse}_limit'],
-                    'overlay_ids': [f'stobu_{rse}_used', f'stobu_{rse}_limit'],
-                    'default_off_ids': [f'stobu_{rse}_used'],
-                    # The ranking curve rides the capacity-only reading.
-                    'extra_cache_prefixes': [f'stoxa_{rse}_'],
-                    'stacked': True, 'panel_px': 150, 'units': 'TB',
-                    'detail_key': f'sto-{rse}'})
-            else:
+                # never summed in. Until the record carries the account
+                # usage, the RSE-wide usage is the band.
+                if inventory['account']:
+                    groups.append({
+                        'name': f'Storage capacity {rse} bytes',
+                        'title': f'Capacity · {rse}',
+                        'prefixes': [],
+                        'ids': [f'stobu_{rse}_account', f'stobu_{rse}_used',
+                                f'stobu_{rse}_limit'],
+                        'order': [f'stobu_{rse}_account', f'stobu_{rse}_used',
+                                  f'stobu_{rse}_limit'],
+                        'overlay_ids': [f'stobu_{rse}_used', f'stobu_{rse}_limit'],
+                        'default_off_ids': [f'stobu_{rse}_used'],
+                        # The ranking curve rides the capacity-only reading.
+                        'extra_cache_prefixes': [f'stoxa_{rse}_'],
+                        'stacked': True, 'panel_px': 150, 'units': 'TB',
+                        'detail_key': f'sto-{rse}'})
+                else:
+                    groups.append({
+                        'name': f'Storage capacity {rse} bytes',
+                        'title': f'Capacity · {rse} (RSE-wide usage)',
+                        'prefixes': [],
+                        'ids': [f'stobu_{rse}_used', f'stobu_{rse}_limit'],
+                        'order': [f'stobu_{rse}_used', f'stobu_{rse}_limit'],
+                        'overlay_ids': [f'stobu_{rse}_limit'],
+                        'extra_cache_prefixes': [f'stoxa_{rse}_'],
+                        'stacked': True, 'panel_px': 150, 'units': 'TB',
+                        'detail_key': f'sto-{rse}'})
+            elif inventory['account']:
                 groups.append({
                     'name': f'Storage capacity {rse} files',
                     'title': f'Capacity · {rse}',
@@ -2185,6 +2203,14 @@ def _storage_groups():
                     'order': [f'stofu_{rse}_account_files', f'stofu_{rse}_files'],
                     'overlay_ids': [f'stofu_{rse}_files'],
                     'default_off_ids': [f'stofu_{rse}_files'],
+                    'extra_cache_prefixes': [f'stoxa_{rse}_'],
+                    'stacked': True, 'panel_px': 150, 'units': 'files',
+                    'detail_key': f'sto-{rse}'})
+            else:
+                groups.append({
+                    'name': f'Storage capacity {rse} files',
+                    'title': f'Capacity · {rse} (files on the RSE)',
+                    'prefixes': [], 'ids': [f'stofu_{rse}_files'],
                     'extra_cache_prefixes': [f'stoxa_{rse}_'],
                     'stacked': True, 'panel_px': 150, 'units': 'files',
                     'detail_key': f'sto-{rse}'})
