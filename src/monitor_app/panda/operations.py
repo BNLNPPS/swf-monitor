@@ -7,7 +7,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from monitor_app.activemq_connection import ActiveMQConnectionManager
-from monitor_app.models import PandaTaskOperation
+from monitor_app.models import PandaQueue, PandaTaskOperation
 
 PAUSE_REJECTED_TASK_STATUSES = frozenset(
     ('finished', 'failed', 'done', 'aborted', 'broken', 'paused'))
@@ -223,11 +223,12 @@ def _send_operation_message(message, records):
 
 def retry_parameters(raw):
     """The PanDA task parameters a failure retry may change, from the
-    request form: memory per core in MB and wall time in hours. PanDA
-    merges them into the task's stored parameters and re-executes the
-    task with them (the retry API's new_parameters); the server accepts
-    that only for a task in a terminal state, which the retry
-    eligibility already requires. Returns None when nothing is set."""
+    request form: memory per core in MB, wall time in hours, and the
+    target queue. PanDA merges them into the task's stored parameters
+    and re-executes the task with them (the retry API's new_parameters);
+    the server accepts that only for a task in a terminal state, which
+    the retry eligibility already requires. Returns None when nothing
+    is set."""
     if raw in (None, '', {}):
         return None
     if not isinstance(raw, dict):
@@ -254,6 +255,17 @@ def retry_parameters(raw):
         # Seconds, as the PCS submission sets it; JEDI's refiner reads
         # the bare value and leaves the unit unset.
         params['walltime'] = int(round(hours * 3600))
+    queue = raw.get('target_queue')
+    if queue not in (None, ''):
+        queue = str(queue).strip()
+        known = set(PandaQueue.objects.values_list('queue_name', flat=True))
+        if queue not in known:
+            raise PandaTaskOperationError(
+                f'Unknown PanDA queue {queue!r}; known queues: '
+                + ', '.join(sorted(known)))
+        # The task's target queue, under the taskParamMap key the PCS
+        # submission sets (pcs/commands.py, 'site').
+        params['site'] = queue
     return params or None
 
 

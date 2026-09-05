@@ -835,9 +835,15 @@ def panda_jobs_filter_counts(request):
 def panda_tasks_list(request):
     days = _get_days(request)
     from ..middleware import is_tunnel_request
+    from ..models import PandaQueue
 
     context = {
         'table_title': 'PanDA Tasks',
+        # The retry's target queue choices: the cached PanDA queue
+        # inventory, the names the retry validator accepts.
+        'panda_queue_names': list(
+            PandaQueue.objects.order_by('queue_name')
+            .values_list('queue_name', flat=True)),
         'table_description': f'JEDI tasks from the last {days} days.',
         'ajax_url': reverse('monitor_app:panda_tasks_datatable_ajax'),
         'filter_counts_url': reverse('monitor_app:panda_tasks_filter_counts'),
