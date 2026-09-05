@@ -2141,6 +2141,9 @@ def _storage_groups():
                     # The limit is a threshold, not a quantity of data:
                     # a foreground line over the usage band.
                     'overlay_ids': [f'stobu_{rse}_limit'],
+                    # The option's ranking curve (files held) rides the
+                    # cached series under bytes counting too.
+                    'extra_cache_prefixes': [f'stofu_{rse}_'],
                     'stacked': True, 'panel_px': 150, 'units': 'TB',
                     'detail_key': f'sto-{rse}'})
             else:
