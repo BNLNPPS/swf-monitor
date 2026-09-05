@@ -397,10 +397,11 @@
         </tbody>
       </table>
       <table class="table table-sm table-bordered table-striped w-auto mb-0 swf-latch-head swf-latch-titled-head">
-        <thead><tr class="swf-latch-title-row table-secondary"><th colspan="2">Capacity · RSE-wide usage against the eicprod limit</th></tr></thead>
+        <thead><tr class="swf-latch-title-row table-secondary"><th colspan="2">Capacity · eicprod usage against its limit</th></tr></thead>
         <tbody>
-        <tr><td><span data-curve="{{ s.capacity.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>used</td><td class="text-end">{{ s.capacity.used_tb|default_if_none:"—" }} TB · {{ s.capacity.files }} files</td></tr>
-        <tr><td>account limit</td><td class="text-end">{% if s.capacity.limit_tb is not None %}{{ s.capacity.limit_tb }} TB{% else %}none{% endif %}</td></tr>
+        <tr><td><span data-curve="{{ s.capacity.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>eicprod usage</td><td class="text-end">{% if s.capacity.account_tb is not None %}{{ s.capacity.account_tb }} TB · {{ s.capacity.account_files|default_if_none:"—" }} files{% else %}<span class="text-muted">not yet recorded</span>{% endif %}</td></tr>
+        <tr><td>RSE-wide usage, every account</td><td class="text-end">{{ s.capacity.used_tb|default_if_none:"—" }} TB · {{ s.capacity.files }} files</td></tr>
+        <tr><td>eicprod limit</td><td class="text-end">{% if s.capacity.limit_tb is not None %}{{ s.capacity.limit_tb }} TB{% else %}none{% endif %}</td></tr>
         <tr><td>quota left</td><td class="text-end">{% if s.capacity.left_tb is not None %}{{ s.capacity.left_tb }} TB{% else %}—{% endif %}</td></tr>
         <tr><td>fill</td><td class="text-end">{% if s.capacity.fill_pct is not None %}{{ s.capacity.fill_pct }}%{% else %}—{% endif %}</td></tr>
         <tr><td>usage as of</td><td class="text-end text-nowrap">{% if s.capacity.as_of %}{{ s.capacity.as_of|fmt_dt }} ET{% else %}—{% endif %}</td></tr>
@@ -452,18 +453,18 @@
     </div>
   </div>
   {% endfor %}
-  <div data-snapper-detail-key="{{ card.scope.key }}" class="snapper-cut-card">
+  <div data-snapper-detail-key="{{ card.scope.key }}" data-snapper-summary="Storage record" class="snapper-cut-card">
     <div class="mb-1 fs-5"><strong>Storage record</strong> <span class="fs-6">· <a href="{{ card.scope.urls.ghosts }}">Storage exceptions</a></span></div>
     <div class="mb-1">{% if card.scope.reconstructed %}<span class="text-muted">Reconstructed arrivals record; the state record begins at the census.</span>{% else %}<span class="snapper-chip" style="background:{{ card.scope.overall_chip.color }}">{{ card.scope.overall }}</span> {{ card.scope.verdict_summary }}; each is stated with its RSE or campaign below.{% endif %}</div>
     <div class="mb-2 text-muted">The {{ card.scope.pass.mode }} pass that published this state ended {{ card.scope.interval.end|fmt_dt }} ET{% if card.scope.pass.duration_min %}, having checked {{ card.scope.pass.files }} files and {{ card.scope.pass.datasets }} datasets in {{ card.scope.pass.duration_min }} min{% endif %}{% if card.scope.interval.start %}; it covers the changes since the previous publication at {{ card.scope.interval.start|fmt_dt }} ET{% endif %}.{% if card.scope.pass.errors %} <span class="text-danger">{{ card.scope.pass.errors }} catalog reads failed.</span>{% endif %}</div>
     <table class="table table-sm table-bordered table-striped w-auto mb-3 swf-latch-head swf-latch-titled-head">
       <thead>
-        <tr class="swf-latch-title-row table-secondary"><th colspan="8">RSE capacity at this instant · the rows of rucio account limit list eicprod <span class="fw-normal text-muted">(usage is RSE-wide until the account usage is recorded; click the plot at another time for the table then)</span></th></tr>
-        <tr class="swf-latch-column-row"><th>RSE</th><th>Type</th><th class="text-end">Used TB</th><th class="text-end">Limit TB</th><th class="text-end">Quota left TB</th><th class="text-end">Fill</th><th class="text-end">Files</th><th>Usage as of</th></tr>
+        <tr class="swf-latch-title-row table-secondary"><th colspan="9">RSE capacity at this instant · the rows of rucio account limit list eicprod <span class="fw-normal text-muted">({% if card.scope.account_recorded %}quota against the eicprod usage; the RSE-wide column counts every account{% else %}eicprod usage not yet in this record: quota against the RSE-wide usage{% endif %}; click the plot at another time for the table then)</span></th></tr>
+        <tr class="swf-latch-column-row"><th>RSE</th><th>Type</th><th class="text-end">eicprod TB</th><th class="text-end">RSE-wide TB</th><th class="text-end">Limit TB</th><th class="text-end">Quota left TB</th><th class="text-end">Fill</th><th class="text-end">eicprod files</th><th>Usage as of</th></tr>
       </thead>
       <tbody>
       {% for r in card.scope.capacity_rows %}
-      <tr{% if r.shown %} class="fw-bold"{% endif %}><td><span data-curve="{{ r.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span><a href="{{ r.url }}">{{ r.rse }}</a></td><td>{{ r.type }}</td><td class="text-end">{{ r.used_tb|default_if_none:"—" }}</td><td class="text-end">{% if r.limit_tb is not None %}{{ r.limit_tb }}{% else %}none{% endif %}</td><td class="text-end">{{ r.left_tb|default_if_none:"—" }}</td><td class="text-end">{% if r.fill_pct is not None %}{{ r.fill_pct }}%{% else %}—{% endif %}</td><td class="text-end">{{ r.files }}</td><td class="text-nowrap">{{ r.as_of|fmt_dt }}</td></tr>
+      <tr{% if r.shown %} class="fw-bold"{% endif %}><td><span data-curve="{{ r.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span><a href="{{ r.url }}">{{ r.rse }}</a></td><td>{{ r.type }}</td><td class="text-end">{{ r.account_tb|default_if_none:"—" }}</td><td class="text-end">{{ r.used_tb|default_if_none:"—" }}</td><td class="text-end">{% if r.limit_tb is not None %}{{ r.limit_tb }}{% else %}none{% endif %}</td><td class="text-end">{{ r.left_tb|default_if_none:"—" }}</td><td class="text-end">{% if r.fill_pct is not None %}{{ r.fill_pct }}%{% else %}—{% endif %}</td><td class="text-end">{{ r.account_files|default_if_none:"—" }}</td><td class="text-nowrap">{{ r.as_of|fmt_dt }}</td></tr>
       {% endfor %}
       </tbody>
     </table>

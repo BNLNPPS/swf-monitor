@@ -1866,6 +1866,13 @@ def _storage_curve_values(state):
             values[f'stoxl_{rse}_replicating'] = int(locks.get('replicating') or 0)
             values[f'stoxl_{rse}_stuck'] = int(locks.get('stuck') or 0)
         capacity = block.get('capacity') or {}
+        # The production account's own usage (what the limit charges,
+        # the rows of rucio account limit list eicprod) beside the
+        # RSE-wide usage the catalog reports for every account.
+        if capacity.get('account_used') is not None:
+            values[f'stobu_{rse}_account'] = _storage_tb(capacity.get('account_used'))
+        if capacity.get('account_files') is not None:
+            values[f'stofu_{rse}_account_files'] = int(capacity.get('account_files') or 0)
         if capacity.get('used') is not None:
             values[f'stobu_{rse}_used'] = _storage_tb(capacity.get('used'))
         if capacity.get('limit'):
@@ -1930,7 +1937,8 @@ _STORAGE_MEMBER_COLORS = {
     'copying': '#f9a825', 'over': '#c62828',
     'appeared': '#c62828', 'cleared': '#2e7d32',
     'replicating': '#f9a825', 'stuck': '#c62828',
-    'used': '#1565c0', 'limit': '#424242', 'files': '#1565c0',
+    'account': '#1565c0', 'account_files': '#1565c0',
+    'used': '#8ab6e8', 'limit': '#424242', 'files': '#8ab6e8',
     'median': '#8ab6e8', 'p90': '#1565c0', 'max': '#0d47a1',
     'single': '#f9a825', 'two_plus': '#2e7d32',
     'disk_only': '#f9a825', 'tape_only': '#78909c',
@@ -1950,7 +1958,8 @@ _STORAGE_MEMBER_LABELS = {
     'median': 'median age', 'p90': '90th percentile age', 'max': 'oldest',
     'appeared': 'ghosts appeared', 'cleared': 'ghosts cleared',
     'replicating': 'replicating locks', 'stuck': 'stuck locks',
-    'used': 'used (RSE-wide)', 'limit': 'account limit',
+    'account': 'eicprod usage', 'account_files': 'eicprod files',
+    'used': 'RSE-wide usage', 'limit': 'eicprod limit',
     'single': 'single copy', 'two_plus': 'two or more copies',
     'disk_only': 'disk only', 'tape_only': 'tape only',
     'disk_and_tape': 'disk and tape',
@@ -1982,7 +1991,8 @@ def _storage_curve_label(curve_id):
     if code in ('fi', 'bi'):
         return 'ghosts'
     if code == 'fu':
-        return 'files on the RSE'
+        return ('eicprod files' if member == 'account_files'
+                else 'files on the RSE, every account')
     if code == 'pa':
         return _storage_unslug(segment)
     if code in ('fm', 'bm', 'fc', 'bc', 'fh'):
@@ -2148,15 +2158,20 @@ def _storage_groups():
                     'title': f'Ghosts · {rse}',
                     'prefixes': [], 'ids': [f'stobi_{rse}_bytes'],
                     'stacked': True, 'panel_px': 200, 'units': 'TB'})
+                # The eicprod account's usage is the band, what the limit
+                # charges; the limit and the RSE-wide usage (every
+                # account, unticked by default) are foreground lines,
+                # never summed in.
                 groups.append({
                     'name': f'Storage capacity {rse} bytes',
-                    'title': f'Capacity · {rse} (RSE-wide usage)',
+                    'title': f'Capacity · {rse}',
                     'prefixes': [],
-                    'ids': [f'stobu_{rse}_used', f'stobu_{rse}_limit'],
-                    'order': [f'stobu_{rse}_used', f'stobu_{rse}_limit'],
-                    # The limit is a threshold, not a quantity of data:
-                    # a foreground line over the usage band.
-                    'overlay_ids': [f'stobu_{rse}_limit'],
+                    'ids': [f'stobu_{rse}_account', f'stobu_{rse}_used',
+                            f'stobu_{rse}_limit'],
+                    'order': [f'stobu_{rse}_account', f'stobu_{rse}_used',
+                              f'stobu_{rse}_limit'],
+                    'overlay_ids': [f'stobu_{rse}_used', f'stobu_{rse}_limit'],
+                    'default_off_ids': [f'stobu_{rse}_used'],
                     # The ranking curve rides the capacity-only reading.
                     'extra_cache_prefixes': [f'stoxa_{rse}_'],
                     'stacked': True, 'panel_px': 150, 'units': 'TB',
@@ -2164,8 +2179,12 @@ def _storage_groups():
             else:
                 groups.append({
                     'name': f'Storage capacity {rse} files',
-                    'title': f'Capacity · {rse} (files on the RSE)',
-                    'prefixes': [], 'ids': [f'stofu_{rse}_files'],
+                    'title': f'Capacity · {rse}',
+                    'prefixes': [],
+                    'ids': [f'stofu_{rse}_account_files', f'stofu_{rse}_files'],
+                    'order': [f'stofu_{rse}_account_files', f'stofu_{rse}_files'],
+                    'overlay_ids': [f'stofu_{rse}_files'],
+                    'default_off_ids': [f'stofu_{rse}_files'],
                     'extra_cache_prefixes': [f'stoxa_{rse}_'],
                     'stacked': True, 'panel_px': 150, 'units': 'files',
                     'detail_key': f'sto-{rse}'})
@@ -4013,6 +4032,10 @@ def _storage_card(data, previous_data, ctx):
         locks = rules.get('locks') or {}
         capacity = block.get('capacity') or {}
         used, limit = capacity.get('used'), capacity.get('limit')
+        account_used = capacity.get('account_used')
+        # The quota reads against the account's own usage when the
+        # record has it, else against the RSE-wide usage.
+        charged = account_used if account_used is not None else used
 
         def _since(key, _flow=flow, _base=base_flow):
             if not _base or key is None:
@@ -4087,16 +4110,20 @@ def _storage_card(data, previous_data, ctx):
                 'expiring_30d': int(rules.get('expiring_30d') or 0),
                 'url': f"{listing_urls['stuck_rules']}?rse={quote(rse)}"},
             'capacity': {
+                'account_tb': _tb(account_used),
+                'account_files': (_fmt_count(capacity.get('account_files'))
+                                  if capacity.get('account_files') is not None
+                                  else None),
                 'used_tb': _tb(used),
                 'limit_tb': _tb(limit) if limit else None,
-                'left_tb': (_tb(limit - used)
-                            if limit and used is not None else None),
-                'fill_pct': (round(100 * float(capacity['fraction']), 1)
-                             if capacity.get('fraction') is not None else None),
+                'left_tb': (_tb(limit - charged)
+                            if limit and charged is not None else None),
+                'fill_pct': (round(100 * float(charged) / float(limit), 1)
+                             if limit and charged is not None else None),
                 'files': _fmt_count(capacity.get('files')),
                 'as_of': capacity.get('as_of'),
-                'curve': (f'stobu_{rse}_used' if quantity_code == 'b'
-                          else f'stofu_{rse}_files')},
+                'curve': (f'stobu_{rse}_account' if quantity_code == 'b'
+                          else f'stofu_{rse}_account_files')},
             'flow': flow_rows,
             'basis': basis_text if base_flow else '',
         })
@@ -4107,20 +4134,27 @@ def _storage_card(data, previous_data, ctx):
             continue
         capacity = block.get('capacity') or {}
         used, limit = capacity.get('used'), capacity.get('limit')
+        account_used = capacity.get('account_used')
+        charged = account_used if account_used is not None else used
         capacity_rows.append({
             'rse': rse, 'type': str(block.get('type') or '').lower(),
             'url': f"{listing_urls['ghosts']}?rse={quote(rse)}",
+            'account_tb': _tb(account_used),
+            'account_files': (_fmt_count(capacity.get('account_files'))
+                              if capacity.get('account_files') is not None
+                              else None),
             'used_tb': _tb(used),
             'limit_tb': _tb(limit) if limit else None,
-            'left_tb': (_tb(limit - used)
-                        if limit and used is not None else None),
-            'fill_pct': (round(100 * float(capacity['fraction']), 1)
-                         if capacity.get('fraction') is not None else None),
+            'left_tb': (_tb(limit - charged)
+                        if limit and charged is not None else None),
+            'fill_pct': (round(100 * float(charged) / float(limit), 1)
+                         if limit and charged is not None else None),
             'files': _fmt_count(capacity.get('files')),
             'as_of': capacity.get('as_of'),
             'shown': rse in ticked,
-            'curve': (f'stobu_{rse}_used' if quantity_code == 'b'
-                      else f'stofu_{rse}_files')})
+            'curve': (f'stobu_{rse}_account' if quantity_code == 'b'
+                      else f'stofu_{rse}_account_files')})
+    account_recorded = any(row['account_tb'] is not None for row in capacity_rows)
 
     campaigns = []
     since_campaigns = since_data.get('campaigns') or {}
@@ -4193,6 +4227,7 @@ def _storage_card(data, previous_data, ctx):
         'scope': {
             'key': 'sto-scope',
             'capacity_only': capacity_only,
+            'account_recorded': account_recorded,
             # A cut inside the arrivals backfill (STORAGE.md, Backfill)
             # reads a reconstructed publication carrying counters alone.
             'reconstructed': (pass_info.get('mode') == 'backfill'),

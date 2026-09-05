@@ -138,14 +138,16 @@ docked above its own panel.
    campaign and root groupings, the per-campaign or per-root totals
    over all states.
 6. *Rule locks* — replicating and stuck lock counts, two lines.
-7. *Capacity* — the production account's usage at this RSE in TB,
-   with the account's limit as an overlay line where the catalog
-   reports one; under files counting, the account's file count. This
-   is the quantity `rucio account limit list eicprod` prints, tracked
-   over time. The fill fraction and the quota left are on the card and
-   in hover, not curves. Until the pass records the account usage
-   (see Record additions), the panel plots the RSE-wide usage the
-   record carries, and says so in its title.
+7. *Capacity* — the production account's usage at this RSE in TB as
+   the band, the quantity `rucio account limit list eicprod` prints,
+   tracked over time; the account's limit as an overlay line where the
+   catalog reports one, and the RSE-wide usage (every account) as a
+   second overlay line, unticked by default. Under files counting the
+   account's file count, with the RSE's file count as the unticked
+   line. The fill fraction and the quota left are on the card and in
+   hover, not curves. The record carries the account usage from the
+   pass of 2026-09-05 afternoon (read as `eicprod` through the agent's
+   proxy, STORAGE.md RSE tier); before that only the RSE-wide usage.
 
 **Scope-level families**, after the RSE sections, one family per
 target campaign where the record is per campaign:
@@ -202,10 +204,9 @@ own panels as the Site view docks its queue slice:
   exceptions page filtered to the RSE;
 - rule locks by state, the oldest stuck age, rules expiring within
   thirty days;
-- capacity: the account's usage, the limit, the quota left and the
-  fill fraction, with the RSE-wide usage beside them; a total only
-  where a storage source reports one (the catalog's own usage source
-  reports none);
+- capacity: the account's usage and files, the RSE-wide usage and
+  files beside them, the limit, the quota left and the fill fraction
+  against the account's usage;
 - the flow since the window's left edge, differenced from the
   counters at the basis snap: first copies, replicas, transfers,
   deletions, ghosts appeared and cleared, bad replicas.
@@ -241,15 +242,10 @@ Retrieval).
 ## Record additions requested from the pass
 
 The view is designed to the projection as published. STORAGE.md
-names four quantities the projection does not yet carry, and the
-capacity family needs a fifth; the families that need them are added
-when the pass records them:
+names four quantities the projection does not yet carry (the account
+usage per RSE, asked for the same day, is recorded since 2026-09-05);
+the families that need them are added when the pass records them:
 
-- the production account's usage per RSE, bytes and files, from the
-  account usage listing, beside the RSE-wide usage the record carries
-  today (the catalog's `rucio` usage source counts every account, and
-  reports `total` equal to `used`), for the Capacity family and the
-  capacity table;
 - ghosts by root per RSE, for the ghost panel under the root grouping;
 - ghosts per target campaign, for the catalog-quality family;
 - jobs finished per campaign, for the arrival yield family (files
