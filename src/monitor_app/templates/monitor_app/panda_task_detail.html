@@ -36,6 +36,24 @@
     <div class="alert alert-danger">{{ error }}</div>
     {% else %}
 
+    {% if pcs_adopt and pcs_adopt.applicable %}
+    <!-- A task submitted outside PCS, linked to its PCS task by name only, is moved into PCS here, first thing on the page (swf-epicprod docs/JEDI_INTEGRATION.md, Residual rerun). -->
+    <div class="card mb-3" id="pcs-adopt-card">
+        <div class="card-header"><strong>Move this task to PCS</strong></div>
+        <div class="card-body">
+            <p class="mb-2">This task was submitted outside PCS and is linked to its PCS task by name only, so the PCS retry and rerun operations do not apply to it yet. Moving it records PanDA task {{ pcs_adopt.jedi_task_id }} as the PCS task's submission{% if pcs_adopt.config %} and binds {{ pcs_adopt.config }}{% endif %}; the PanDA operations on the PCS task page, Rerun Residual included, then apply. Nothing is submitted by the move.</p>
+            {% if pcs_adopt.eligible %}
+            <form id="pcs-adopt-form" class="d-flex align-items-center gap-2 mb-0">{% csrf_token %}
+                <button type="button" class="btn btn-success btn-sm" id="pcs-adopt-btn" {% if not request.user.is_authenticated %}disabled title="Sign in to move it"{% endif %}>Move this task to PCS</button>
+                <span id="pcs-adopt-status"></span>
+            </form>
+            {% else %}
+            <div class="alert alert-warning py-2 px-3 mb-0"><strong>Blocked</strong> {{ pcs_adopt.blocked }} <a href="{% url 'pcs:evgen_inputs' %}?view=coverage">Open the Registration view.</a></div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
     <div class="row">
         <!-- Task Info -->
         <div class="col-md-6 mb-3">
@@ -291,24 +309,6 @@
                 {% endfor %}
                 </tbody>
             </table>
-        </div>
-    </div>
-    {% endif %}
-
-    {% if pcs_adopt and pcs_adopt.applicable %}
-    <!-- A task submitted outside PCS, linked to its PCS task by name only, is moved into PCS here (swf-epicprod docs/JEDI_INTEGRATION.md, Residual rerun). -->
-    <div class="card mb-3" id="pcs-adopt-card">
-        <div class="card-header"><strong>Move this task to PCS</strong></div>
-        <div class="card-body">
-            <p class="mb-2">This task was submitted outside PCS and is linked to its PCS task by name only, so the PCS retry and rerun operations do not apply to it yet. Moving it records PanDA task {{ pcs_adopt.jedi_task_id }} as the PCS task's submission{% if pcs_adopt.config %} and binds {{ pcs_adopt.config }}{% endif %}; the PanDA operations on the PCS task page, Rerun Residual included, then apply. Nothing is submitted by the move.</p>
-            {% if pcs_adopt.eligible %}
-            <form id="pcs-adopt-form" class="d-flex align-items-center gap-2 mb-0">{% csrf_token %}
-                <button type="button" class="btn btn-success btn-sm" id="pcs-adopt-btn" {% if not request.user.is_authenticated %}disabled title="Sign in to move it"{% endif %}>Move this task to PCS</button>
-                <span id="pcs-adopt-status"></span>
-            </form>
-            {% else %}
-            <div class="alert alert-warning py-2 px-3 mb-0"><strong>Blocked</strong> {{ pcs_adopt.blocked }} <a href="{% url 'pcs:evgen_inputs' %}?view=coverage">Open the Registration view.</a></div>
-            {% endif %}
         </div>
     </div>
     {% endif %}
