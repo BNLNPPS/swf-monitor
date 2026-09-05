@@ -470,7 +470,7 @@
     </table>
     {% if not card.scope.capacity_only %}
     {% for c in card.scope.campaigns %}
-    <div class="d-flex flex-wrap column-gap-4 row-gap-3 align-items-start mb-3">
+    <div class="d-flex flex-wrap column-gap-4 row-gap-3 align-items-start mb-3" data-snapper-summary="Campaign {{ c.name }}">
       <table class="table table-sm table-bordered table-striped w-auto mb-0 swf-latch-head swf-latch-titled-head">
         <thead><tr class="swf-latch-title-row table-secondary"><th colspan="2">Campaign {{ c.name }} · {{ c.files }} files · {{ c.tb|default_if_none:"—" }} TB registered</th></tr></thead>
         <tbody>
@@ -503,7 +503,7 @@
     </div>
     {% endfor %}
     <div class="d-flex flex-wrap column-gap-4 row-gap-3 align-items-start">
-      <div>
+      <div data-snapper-summary="Ghosts">
         <table class="table table-sm table-bordered table-striped w-auto mb-0 swf-latch-head swf-latch-titled-head">
           <thead>
             <tr class="swf-latch-title-row table-secondary"><th colspan="7"><a href="{{ card.scope.urls.ghosts }}">Ghosts</a> · the record's oldest{% if card.scope.overflow.ghosts %} and {{ card.scope.overflow.ghosts }} more{% endif %} · full list on the Storage exceptions page</th></tr>
@@ -518,7 +518,7 @@
           </tbody>
         </table>
       </div>
-      <div>
+      <div data-snapper-summary="Stuck rules">
         <table class="table table-sm table-bordered table-striped w-auto mb-0 swf-latch-head swf-latch-titled-head">
           <thead>
             <tr class="swf-latch-title-row table-secondary"><th colspan="4"><a href="{{ card.scope.urls.stuck_rules }}">Stuck rules</a> · the record's oldest{% if card.scope.overflow.stuck_rules %} and {{ card.scope.overflow.stuck_rules }} more{% endif %}</th></tr>
@@ -533,7 +533,7 @@
           </tbody>
         </table>
       </div>
-      <div>
+      <div data-snapper-summary="Stalled datasets">
         <table class="table table-sm table-bordered table-striped w-auto mb-0 swf-latch-head swf-latch-titled-head">
           <thead>
             <tr class="swf-latch-title-row table-secondary"><th colspan="3"><a href="{{ card.scope.urls.stalled_datasets }}">Stalled datasets</a>{% if card.scope.overflow.stalled_datasets %} · and {{ card.scope.overflow.stalled_datasets }} more{% endif %}</th></tr>
