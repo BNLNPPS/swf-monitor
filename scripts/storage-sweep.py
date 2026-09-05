@@ -51,6 +51,9 @@ def main():
                              '(works on a copy of the store, no publish)')
     parser.add_argument('--limit-datasets', type=int, default=0,
                         help='cap the dataset tier for a validation run')
+    parser.add_argument('--resume', type=int, default=0, metavar='PASS_ID',
+                        help='continue an interrupted pass by id, skipping '
+                             'the locations it already stamped')
     parser.add_argument('--no-publish', action='store_true',
                         help='run the pass without publishing the component')
     parser.add_argument('--dump', default='',
@@ -64,7 +67,8 @@ def main():
 
     summary, data = run_pass(mode_name, campaigns=campaigns,
                              limit_files=args.limit_files,
-                             limit_datasets=args.limit_datasets)
+                             limit_datasets=args.limit_datasets,
+                             resume_pass=args.resume or None)
     if args.dump:
         with open(args.dump, 'w') as handle:
             json.dump(data, handle, indent=1, sort_keys=True)
