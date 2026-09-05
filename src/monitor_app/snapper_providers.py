@@ -2321,6 +2321,9 @@ def _storage_groups():
         'title': 'Data-management job failures · all queues (ddm errors)',
         'prefixes': [], 'ids': ['perrc_ddm'],
         'event_flow': True, 'end_stamped': True, 'stacked': True,
+        # Bins twice the ladder rung: a handful of events a week draws
+        # as hairlines at the 15-minute rung of a 7-day window.
+        'event_flow_bin_scale': 2,
         'member_ticks': False,
         'panel_px': 150, 'units': 'errors',
         'qualifier_label': 'Terminal state', 'qualifier_param': 'states',
