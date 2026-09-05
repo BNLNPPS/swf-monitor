@@ -237,14 +237,19 @@ when the pass records them:
 ## Implementation notes
 
 - swf-monitor `monitor_app/snapper_providers.py`: curve extraction
-  from the storage component under the `sto` prefixes (one family
-  prefix per panel kind, the RSE or campaign as the second segment,
-  the member last; campaign segments carry hyphens for dots), the
-  labels and colors, the families resolved per render from the
-  record's RSE and campaign inventories, the Storage focus view
-  declaration with its two selector axes and the per-option activity
-  curve, and the storage card. The component card registration and
-  the focus-view tuple gain the storage entries.
+  from the storage component under the `sto` prefixes (`sto`, a
+  two-letter code for the quantity and panel kind, the RSE or campaign
+  as the second segment, the member last; campaign segments carry
+  hyphens for dots), the labels and colors, the families resolved per
+  render from the record's RSE and campaign inventories, the Storage
+  focus view declaration with its two selector axes and the per-option
+  activity curve, and the storage card. The component card
+  registration and the focus-view tuple gain the storage entries. The
+  scope-level campaign families ride a `Campaign totals` option
+  declared `pin: 'last'` (snapper-ai INTEGRATION.md), so they render
+  after the ranked RSE sections and never as idle. The small
+  secondary panels (copying age, ghost flow, rule locks, catalog
+  quality, datasets, latency) start closed behind their rotators.
 - `monitor_app/templates/monitor_app/_snapper_cards.html`: the
   `storage` card kind, the RSE sections keyed for docking.
 - The focus series cache TTL rule gains the storage key class

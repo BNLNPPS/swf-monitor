@@ -639,6 +639,7 @@ def _epicprod_curve_values(state):
     values.update(_site_curve_values(panda))
     values.update(_delivery_curve_values(state))
     values.update(_platform_curve_values(state))
+    values.update(_storage_curve_values(state))
     return values
 
 
@@ -810,6 +811,8 @@ def _epicprod_curve_color(curve_id):
     several types sharing one status must stay distinguishable."""
     from .panda.constants import JOB_STATE_COLORS, TASK_STATE_COLORS
 
+    if curve_id.startswith('sto'):
+        return _storage_curve_color(curve_id)
     # Operator-set colors on every jobs panel: the running pair reads
     # as blues — cores dark, running jobs lighter — and activated is
     # grey context rather than health/completion green.
@@ -930,6 +933,8 @@ def _epicprod_curve_label(curve_id):
     # label is the lifecycle stage alone. 'running' says 'running
     # jobs' — 'running cores' sits beside it and the bare word is
     # ambiguous.
+    if curve_id.startswith('sto'):
+        return _storage_curve_label(curve_id)
     if curve_id in _PLATFORM_LABELS:
         return _PLATFORM_LABELS[curve_id]
     if curve_id.startswith('plss_'):
@@ -1498,7 +1503,7 @@ def _epicprod_groups():
     callable form) so new campaigns and sites appear without an app
     restart."""
     return (EPICPROD_GROUPS + _delivery_groups() + _site_groups()
-            + _errors_groups() + _platform_groups())
+            + _errors_groups() + _platform_groups() + _storage_groups())
 
 
 # The Platform view's families in panel order — load, platform,
@@ -1646,6 +1651,546 @@ def _platform_focus_view():
                          lens: list(families)
                          for lens, families in PLATFORM_FAMILIES_BY_LENS.items()},
                      'component': 'platform'}],
+    }
+
+
+# ── Storage view (docs/SNAPPER_STORAGE.md) ──────────────────────────────
+
+_STORAGE_CACHE = {'at': None, 'inventory': None}
+_STORAGE_STATE_ORDER = ('AVAILABLE', 'COPYING', 'TEMPORARY_UNAVAILABLE',
+                        'UNAVAILABLE', 'BAD')
+_STORAGE_ROOT_ORDER = ('RECO', 'FULL', 'EVGEN')
+_STORAGE_LENSES = ({'value': 'campaign', 'label': 'campaign'},
+                   {'value': 'state', 'label': 'replica state'},
+                   {'value': 'root', 'label': 'data root'})
+_STORAGE_QUANTITIES = ({'value': 'files', 'label': 'files'},
+                       {'value': 'bytes', 'label': 'bytes'})
+# The option carrying the scope-level campaign families, pinned after
+# the ranked RSE sections.
+_STORAGE_CAMPAIGNS_OPTION = 'campaigns'
+_TB = 1e12
+
+
+def _storage_slug(name):
+    """Campaign names carry dots; curve-id segments carry hyphens."""
+    return str(name).replace('.', '-')
+
+
+def _storage_unslug(segment):
+    return str(segment).replace('-', '.')
+
+
+def _storage_tb(value):
+    return round(int(value or 0) / _TB, 4)
+
+
+def _storage_inventory():
+    """RSEs, campaigns and the record's first snap, from the latest snap
+    carrying the storage component; resolved per render (cached
+    briefly) so a new RSE or campaign appears without a restart."""
+    from django.utils import timezone
+
+    from snapper_ai.models import SystemSnap
+
+    now = timezone.now()
+    if (_STORAGE_CACHE['at'] is not None
+            and _STORAGE_CACHE['inventory'] is not None
+            and (now - _STORAGE_CACHE['at']).total_seconds() < 300):
+        return _STORAGE_CACHE['inventory']
+    carrying = SystemSnap.objects.filter(
+        scope='epicprod', state__components__has_key='storage')
+    state = (carrying.order_by('-snap_time')
+             .values_list('state', flat=True).first())
+    first = (carrying.order_by('snap_time')
+             .values_list('snap_time', flat=True).first())
+    data = component_data(state or {}, 'storage')
+    inventory = {
+        'rses': tuple(sorted(
+            rse for rse, block in (data.get('rses') or {}).items()
+            if isinstance(block, dict))),
+        'campaigns': tuple(sorted(
+            name for name, block in (data.get('campaigns') or {}).items()
+            if isinstance(block, dict))),
+        'first': first,
+    }
+    _STORAGE_CACHE.update({'at': now, 'inventory': inventory})
+    return inventory
+
+
+def _storage_curve_values(state):
+    """Curves from the storage component (docs/SNAPPER_STORAGE.md): per
+    RSE the flow counters (raw cumulative values; the counter_flow
+    families project them to per-bin deltas at render), the backlog,
+    ghost and inventory gauges under the three groupings, rule locks
+    and capacity; per campaign the protection, quality, dataset and
+    latency gauges and the arrival counters. Bytes plot in TB.
+
+    Ids are ``sto`` + a two-letter code (quantity f/b/x, then the
+    panel kind; ``p`` + kind for the campaign families) + ``_`` + the
+    RSE or campaign segment + ``_`` + the member. RSE names carry no
+    underscore and campaign segments carry hyphens for dots, so the
+    member is the remainder after the segment."""
+    values = {}
+    sto = component_data(state, 'storage')
+    if not sto:
+        return values
+    for rse, block in (sto.get('rses') or {}).items():
+        if not isinstance(block, dict):
+            continue
+        flow = block.get('flow') or {}
+        values[f'stofa_{rse}_first'] = int(flow.get('first_copy_files') or 0)
+        values[f'stofa_{rse}_replica'] = int(flow.get('replica_files') or 0)
+        values[f'stoba_{rse}_first'] = _storage_tb(flow.get('first_copy_bytes'))
+        values[f'stoba_{rse}_replica'] = _storage_tb(flow.get('replica_bytes'))
+        values[f'stoft_{rse}_transfers'] = int(flow.get('transfers_completed') or 0)
+        values[f'stoft_{rse}_deleted'] = int(flow.get('deleted_files') or 0)
+        values[f'stobt_{rse}_deleted'] = _storage_tb(flow.get('deleted_bytes'))
+        values[f'stoxe_{rse}_appeared'] = int(flow.get('ghosts_appeared') or 0)
+        values[f'stoxe_{rse}_cleared'] = int(flow.get('ghosts_cleared') or 0)
+        backlog = block.get('backlog') or {}
+        values[f'stofs_{rse}_copying'] = int(backlog.get('copying_files') or 0)
+        values[f'stobs_{rse}_copying'] = _storage_tb(backlog.get('copying_bytes'))
+        values[f'stoxo_{rse}_over'] = int(backlog.get('over_threshold') or 0)
+        ages = backlog.get('age_s') or {}
+        for member in ('median', 'p90', 'max'):
+            if ages.get(member) is not None:
+                values[f'stoxb_{rse}_{member}'] = round(
+                    float(ages[member]) / 3600, 2)
+        inventory = block.get('inventory') or {}
+        for state_name, entry in (inventory.get('by_state') or {}).items():
+            entry = entry or {}
+            values[f'stofn_{rse}_{state_name}'] = int(entry.get('files') or 0)
+            values[f'stobn_{rse}_{state_name}'] = _storage_tb(entry.get('bytes'))
+        # Campaign and root maps carry files_<STATE> and bytes_<STATE>:
+        # the inventory total over states, and the copying slice.
+        for total_f, total_b, copy_f, copy_b, mapping, segment_of in (
+                ('fm', 'bm', 'fc', 'bc',
+                 inventory.get('by_campaign') or {}, _storage_slug),
+                ('fo', 'bo', 'fr', 'br',
+                 inventory.get('by_root') or {}, str)):
+            for name, entry in mapping.items():
+                entry = entry or {}
+                segment = segment_of(name)
+                values[f'sto{total_f}_{rse}_{segment}'] = sum(
+                    int(v or 0) for k, v in entry.items()
+                    if k.startswith('files_'))
+                values[f'sto{total_b}_{rse}_{segment}'] = round(sum(
+                    int(v or 0) for k, v in entry.items()
+                    if k.startswith('bytes_')) / _TB, 4)
+                values[f'sto{copy_f}_{rse}_{segment}'] = int(
+                    entry.get('files_COPYING') or 0)
+                values[f'sto{copy_b}_{rse}_{segment}'] = _storage_tb(
+                    entry.get('bytes_COPYING'))
+        ghosts = block.get('ghosts') or {}
+        for state_name, count in (ghosts.get('by_state') or {}).items():
+            values[f'stofg_{rse}_{state_name}'] = int(count or 0)
+        for name, entry in (ghosts.get('by_campaign') or {}).items():
+            values[f'stofh_{rse}_{_storage_slug(name)}'] = int(
+                (entry or {}).get('files') or 0)
+        values[f'stofi_{rse}_files'] = int(ghosts.get('files') or 0)
+        values[f'stobi_{rse}_bytes'] = _storage_tb(ghosts.get('bytes'))
+        locks = (block.get('rules') or {}).get('locks') or {}
+        values[f'stoxl_{rse}_replicating'] = int(locks.get('replicating') or 0)
+        values[f'stoxl_{rse}_stuck'] = int(locks.get('stuck') or 0)
+        capacity = block.get('capacity') or {}
+        if capacity.get('used') is not None:
+            values[f'stobu_{rse}_used'] = _storage_tb(capacity.get('used'))
+        if capacity.get('limit'):
+            values[f'stobu_{rse}_limit'] = _storage_tb(capacity.get('limit'))
+        if capacity.get('files') is not None:
+            values[f'stofu_{rse}_files'] = int(capacity.get('files') or 0)
+    for name, block in (sto.get('campaigns') or {}).items():
+        if not isinstance(block, dict):
+            continue
+        segment = _storage_slug(name)
+        protection = block.get('protection') or {}
+        values[f'stopc_{segment}_single'] = int(protection.get('single_copy') or 0)
+        values[f'stopc_{segment}_two_plus'] = int(protection.get('two_plus') or 0)
+        for member in ('disk_only', 'tape_only', 'disk_and_tape'):
+            values[f'stopp_{segment}_{member}'] = int(protection.get(member) or 0)
+        values[f'stopa_{segment}'] = _storage_tb(block.get('archival_backlog_bytes'))
+        values[f'stopq_{segment}_unattached'] = int(block.get('unattached_files') or 0)
+        values[f'stopq_{segment}_no_events'] = int(block.get('no_events_attr') or 0)
+        datasets = block.get('datasets') or {}
+        for member in ('open', 'partial_anywhere', 'quiet_open', 'stalled'):
+            values[f'stopd_{segment}_{member}'] = int(datasets.get(member) or 0)
+        for kind, entry in (block.get('latency_s') or {}).items():
+            median = (entry or {}).get('median')
+            if median is not None:
+                values[f'stopl_{segment}_{kind}'] = round(float(median) / 3600, 2)
+        flow = block.get('flow') or {}
+        values[f'stopf_{segment}_arrived'] = int(flow.get('arrived_files') or 0)
+        values[f'stopf_{segment}_archived'] = int(flow.get('archived_files') or 0)
+        values[f'stopb_{segment}_arrived'] = _storage_tb(flow.get('arrived_bytes'))
+        values[f'stopb_{segment}_archived'] = _storage_tb(flow.get('archived_bytes'))
+    return values
+
+
+def _storage_curve_parts(curve_id):
+    """(code, segment, member) of a storage curve id, else None."""
+    if not curve_id.startswith('sto') or len(curve_id) < 7 or curve_id[5] != '_':
+        return None
+    segment, _, member = curve_id[6:].partition('_')
+    return curve_id[3:5], segment, member
+
+
+# Members with semantic color: replica states on the house vocabulary
+# (available blue, copying the warning color, unavailable and bad the
+# failure color), completion green, deletions and tape grey, the limit
+# a dark neutral line. Campaign, root and latency members take the
+# palette.
+_STORAGE_MEMBER_COLORS = {
+    'AVAILABLE': '#1565c0', 'COPYING': '#f9a825',
+    'TEMPORARY_UNAVAILABLE': '#ef6c00', 'UNAVAILABLE': '#c62828',
+    'BAD': '#b71c1c',
+    'first': '#1565c0', 'replica': '#8ab6e8',
+    'transfers': '#2e7d32', 'deleted': '#78909c',
+    'copying': '#f9a825', 'over': '#c62828',
+    'appeared': '#c62828', 'cleared': '#2e7d32',
+    'replicating': '#f9a825', 'stuck': '#c62828',
+    'used': '#1565c0', 'limit': '#424242', 'files': '#1565c0',
+    'median': '#8ab6e8', 'p90': '#1565c0', 'max': '#0d47a1',
+    'single': '#f9a825', 'two_plus': '#2e7d32',
+    'disk_only': '#f9a825', 'tape_only': '#78909c',
+    'disk_and_tape': '#2e7d32',
+    'unattached': '#ef6c00', 'no_events': '#7e57c2',
+    'open': '#1565c0', 'partial_anywhere': '#f9a825',
+    'quiet_open': '#8a8a8a', 'stalled': '#c62828',
+    'arrived': '#1565c0', 'archived': '#78909c',
+}
+_STORAGE_PALETTE_CODES = frozenset(
+    ('fm', 'bm', 'fc', 'bc', 'fh', 'fo', 'bo', 'fr', 'br', 'pa', 'pl'))
+_STORAGE_MEMBER_LABELS = {
+    'first': 'first copies', 'replica': 'replicas',
+    'transfers': 'transfers completed', 'deleted': 'deleted',
+    'copying': 'copying', 'over': 'over the stuck threshold',
+    'median': 'median age', 'p90': '90th percentile age', 'max': 'oldest',
+    'appeared': 'ghosts appeared', 'cleared': 'ghosts cleared',
+    'replicating': 'replicating locks', 'stuck': 'stuck locks',
+    'used': 'used (RSE-wide)', 'limit': 'account limit',
+    'single': 'single copy', 'two_plus': 'two or more copies',
+    'disk_only': 'disk only', 'tape_only': 'tape only',
+    'disk_and_tape': 'disk and tape',
+    'unattached': 'unattached files', 'no_events': 'no event count',
+    'open': 'open', 'partial_anywhere': 'partial somewhere',
+    'quiet_open': 'quiet and open', 'stalled': 'stalled',
+    'arrived': 'arrived', 'archived': 'archived',
+}
+
+
+def _storage_curve_color(curve_id):
+    parts = _storage_curve_parts(curve_id)
+    if parts is None:
+        return None
+    code, _segment, member = parts
+    if code in ('fi', 'bi'):
+        return '#7e57c2'
+    if code in _STORAGE_PALETTE_CODES:
+        return None
+    return _STORAGE_MEMBER_COLORS.get(member)
+
+
+def _storage_curve_label(curve_id):
+    parts = _storage_curve_parts(curve_id)
+    if parts is None:
+        return None
+    code, segment, member = parts
+    if code in ('fi', 'bi'):
+        return 'ghosts'
+    if code == 'fu':
+        return 'files on the RSE'
+    if code == 'pa':
+        return _storage_unslug(segment)
+    if code in ('fm', 'bm', 'fc', 'bc', 'fh'):
+        return _storage_unslug(member)
+    if code in ('fo', 'bo', 'fr', 'br'):
+        return member
+    if code in ('fn', 'bn', 'fg'):
+        return member.lower().replace('_', ' ')
+    if code == 'pl':
+        return member.replace('_', ' ')
+    return _STORAGE_MEMBER_LABELS.get(member, member)
+
+
+def _storage_rse_families(rse, quantity, lens):
+    """The per-RSE families for one quantity and grouping, in panel
+    order (docs/SNAPPER_STORAGE.md, Families per RSE)."""
+    return [f'Storage arrivals {rse} {quantity}',
+            f'Storage transfers {rse} {quantity}',
+            f'Storage backlog {rse} {quantity} {lens}',
+            f'Storage backlog age {rse}',
+            (f'Storage ghosts {rse} files {lens}' if quantity == 'files'
+             else f'Storage ghosts {rse} bytes'),
+            f'Storage ghost flow {rse}',
+            f'Storage inventory {rse} {quantity} {lens}',
+            f'Storage locks {rse}',
+            f'Storage capacity {rse} {quantity}']
+
+
+def _storage_campaign_families(campaigns, quantity):
+    """The scope-level families, per target campaign, in panel order."""
+    names = []
+    for name in campaigns:
+        names += [f'Storage copies {name}', f'Storage placement {name}',
+                  f'Storage catalog quality {name}',
+                  f'Storage datasets {name}', f'Storage latency {name}',
+                  f'Storage arrived {name} {quantity}']
+    if campaigns:
+        names.append('Storage archival backlog')
+    return names
+
+
+def _storage_groups():
+    """Curve families of the Storage view, resolved per render from the
+    record's RSE and campaign inventories: per RSE, per quantity and
+    grouping, with the quantity-independent families (backlog age,
+    ghost flow, locks) shared; then the campaign families. Absent from
+    the compact scope families, so they render only on the Storage
+    focus page. Small secondary panels start closed."""
+    inventory = _storage_inventory()
+    groups = []
+    closed = {'focus_closed': True, 'start_closed': True}
+    backlog_code = {'campaign': 'c', 'state': 's', 'root': 'r'}
+    inventory_code = {'campaign': 'm', 'state': 'n', 'root': 'o'}
+    for rse in inventory['rses']:
+        for quantity in ('files', 'bytes'):
+            q = quantity[0]
+            units = 'files' if quantity == 'files' else 'TB'
+            groups.append({
+                'name': f'Storage arrivals {rse} {quantity}',
+                'title': f'Arrivals · {rse}',
+                'prefixes': [f'sto{q}a_{rse}_'], 'ids': [],
+                'order': [f'sto{q}a_{rse}_first', f'sto{q}a_{rse}_replica'],
+                # The option's activity curve is the files first-copy
+                # flow; under bytes counting it rides the cached series
+                # without joining the display.
+                'extra_cache_prefixes': (
+                    [f'stofa_{rse}_'] if quantity == 'bytes' else []),
+                'counter_flow': True, 'end_stamped': True, 'stacked': True,
+                'panel_px': 150, 'units': units,
+                'empty_note': 'No arrivals in this window'})
+            groups.append({
+                'name': f'Storage transfers {rse} {quantity}',
+                'title': f'Transfers and deletions · {rse}',
+                'prefixes': [f'sto{q}t_{rse}_'], 'ids': [],
+                'order': [f'sto{q}t_{rse}_transfers',
+                          f'sto{q}t_{rse}_deleted'],
+                'counter_flow': True, 'end_stamped': True, 'stacked': True,
+                'panel_px': 110, 'units': units,
+                'empty_note': 'No transfers or deletions in this window'})
+            for lens, code in backlog_code.items():
+                backlog = {
+                    'name': f'Storage backlog {rse} {quantity} {lens}',
+                    'title': f'Copying backlog · {rse}',
+                    'prefixes': ([f'sto{q}{code}_{rse}_']
+                                 if lens != 'state' else []),
+                    'ids': ([f'sto{q}s_{rse}_copying']
+                            if lens == 'state' else []),
+                    'stacked': True, 'panel_px': 200, 'units': units}
+                if lens == 'root':
+                    backlog['order'] = [f'sto{q}r_{rse}_{root}'
+                                        for root in _STORAGE_ROOT_ORDER]
+                if quantity == 'files':
+                    # The count over the stuck threshold rides the
+                    # stack as a foreground line, never summed in.
+                    backlog['ids'] = backlog['ids'] + [f'stoxo_{rse}_over']
+                    backlog['overlay_ids'] = [f'stoxo_{rse}_over']
+                groups.append(backlog)
+                if quantity == 'files':
+                    ghosts = {
+                        'name': f'Storage ghosts {rse} files {lens}',
+                        'title': f'Ghosts · {rse}',
+                        'prefixes': [], 'ids': [],
+                        'stacked': True, 'panel_px': 200, 'units': 'files'}
+                    if lens == 'state':
+                        ghosts['prefixes'] = [f'stofg_{rse}_']
+                        ghosts['order'] = [f'stofg_{rse}_{s}'
+                                           for s in _STORAGE_STATE_ORDER]
+                    elif lens == 'campaign':
+                        ghosts['prefixes'] = [f'stofh_{rse}_']
+                    else:
+                        # Ghosts by root are not recorded yet
+                        # (SNAPPER_STORAGE.md, Record additions).
+                        ghosts['ids'] = [f'stofi_{rse}_files']
+                        ghosts['title'] = (f'Ghosts · {rse} '
+                                           '(total; by root not yet recorded)')
+                    groups.append(ghosts)
+                inventory_group = {
+                    'name': f'Storage inventory {rse} {quantity} {lens}',
+                    'title': f'Inventory · {rse}',
+                    'prefixes': [f'sto{q}{inventory_code[lens]}_{rse}_'],
+                    'ids': [],
+                    'stacked': True, 'panel_px': 220, 'units': units}
+                if lens == 'state':
+                    inventory_group['order'] = [
+                        f'sto{q}n_{rse}_{s}' for s in _STORAGE_STATE_ORDER]
+                elif lens == 'root':
+                    inventory_group['order'] = [
+                        f'sto{q}o_{rse}_{root}' for root in _STORAGE_ROOT_ORDER]
+                groups.append(inventory_group)
+            if quantity == 'bytes':
+                groups.append({
+                    'name': f'Storage ghosts {rse} bytes',
+                    'title': f'Ghosts · {rse}',
+                    'prefixes': [], 'ids': [f'stobi_{rse}_bytes'],
+                    'stacked': True, 'panel_px': 200, 'units': 'TB'})
+                groups.append({
+                    'name': f'Storage capacity {rse} bytes',
+                    'title': f'Capacity · {rse} (RSE-wide usage)',
+                    'prefixes': [],
+                    'ids': [f'stobu_{rse}_used', f'stobu_{rse}_limit'],
+                    'order': [f'stobu_{rse}_used', f'stobu_{rse}_limit'],
+                    # The limit is a threshold, not a quantity of data:
+                    # a foreground line over the usage band.
+                    'overlay_ids': [f'stobu_{rse}_limit'],
+                    'stacked': True, 'panel_px': 150, 'units': 'TB',
+                    'detail_key': f'sto-{rse}'})
+            else:
+                groups.append({
+                    'name': f'Storage capacity {rse} files',
+                    'title': f'Capacity · {rse} (files on the RSE)',
+                    'prefixes': [], 'ids': [f'stofu_{rse}_files'],
+                    'stacked': True, 'panel_px': 150, 'units': 'files',
+                    'detail_key': f'sto-{rse}'})
+        groups.append({
+            'name': f'Storage backlog age {rse}',
+            'title': f'Copying age · {rse}',
+            'prefixes': [],
+            'ids': [f'stoxb_{rse}_median', f'stoxb_{rse}_p90',
+                    f'stoxb_{rse}_max'],
+            'order': [f'stoxb_{rse}_median', f'stoxb_{rse}_p90',
+                      f'stoxb_{rse}_max'],
+            'panel_px': 110, 'units': 'hours', **closed})
+        groups.append({
+            'name': f'Storage ghost flow {rse}',
+            'title': f'Ghosts appeared and cleared · {rse}',
+            'prefixes': [],
+            'ids': [f'stoxe_{rse}_appeared', f'stoxe_{rse}_cleared'],
+            'order': [f'stoxe_{rse}_appeared', f'stoxe_{rse}_cleared'],
+            'counter_flow': True, 'end_stamped': True, 'stacked': True,
+            'panel_px': 110, 'units': 'files',
+            'empty_note': 'No ghost movement in this window', **closed})
+        groups.append({
+            'name': f'Storage locks {rse}',
+            'title': f'Rule locks · {rse}',
+            'prefixes': [],
+            'ids': [f'stoxl_{rse}_replicating', f'stoxl_{rse}_stuck'],
+            'order': [f'stoxl_{rse}_replicating', f'stoxl_{rse}_stuck'],
+            'panel_px': 110, 'units': 'locks', **closed})
+    for name in inventory['campaigns']:
+        segment = _storage_slug(name)
+        copies = [f'stopc_{segment}_single', f'stopc_{segment}_two_plus']
+        placement = [f'stopp_{segment}_{m}'
+                     for m in ('disk_only', 'tape_only', 'disk_and_tape')]
+        groups.append({
+            'name': f'Storage copies {name}', 'title': f'Copies · {name}',
+            'prefixes': [], 'ids': copies, 'order': copies,
+            'stacked': True, 'panel_px': 150, 'units': 'files'})
+        groups.append({
+            'name': f'Storage placement {name}',
+            'title': f'Placement · {name}',
+            'prefixes': [], 'ids': placement, 'order': placement,
+            'stacked': True, 'panel_px': 150, 'units': 'files'})
+        groups.append({
+            'name': f'Storage catalog quality {name}',
+            'title': f'Catalog quality · {name}',
+            'prefixes': [],
+            'ids': [f'stopq_{segment}_unattached', f'stopq_{segment}_no_events'],
+            'panel_px': 110, 'units': 'files', **closed})
+        groups.append({
+            'name': f'Storage datasets {name}', 'title': f'Datasets · {name}',
+            'prefixes': [],
+            'ids': [f'stopd_{segment}_{m}' for m in
+                    ('open', 'partial_anywhere', 'quiet_open', 'stalled')],
+            'panel_px': 110, 'units': 'datasets', **closed})
+        groups.append({
+            'name': f'Storage latency {name}',
+            'title': f'Latency medians · {name}',
+            'prefixes': [f'stopl_{segment}_'], 'ids': [],
+            'panel_px': 110, 'units': 'hours', **closed})
+        for quantity in ('files', 'bytes'):
+            q = quantity[0]
+            groups.append({
+                'name': f'Storage arrived {name} {quantity}',
+                'title': f'Arrived and archived · {name}',
+                'prefixes': [],
+                'ids': [f'stop{q}_{segment}_arrived', f'stop{q}_{segment}_archived'],
+                'order': [f'stop{q}_{segment}_arrived',
+                          f'stop{q}_{segment}_archived'],
+                'counter_flow': True, 'end_stamped': True, 'stacked': True,
+                'panel_px': 110,
+                'units': 'files' if quantity == 'files' else 'TB',
+                'empty_note': 'No arrivals in this window'})
+    if inventory['campaigns']:
+        groups.append({
+            'name': 'Storage archival backlog',
+            'title': 'Archival backlog · on disk and not on tape',
+            'prefixes': ['stopa_'], 'ids': [],
+            'panel_px': 110, 'units': 'TB'})
+    return tuple(groups)
+
+
+def _storage_focus_view():
+    """The Storage focus tab (docs/SNAPPER_STORAGE.md): the data
+    lifecycle per RSE — arrivals, transfers and deletions, the copying
+    backlog, ghosts, inventory, rule locks and capacity — with the
+    campaign families pinned after the ranked RSE sections, and the
+    cut narrowed to the storage component's card. The window floor is
+    the later of the record's first snap and thirty days ago."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    inventory = _storage_inventory()
+    if not inventory['rses']:
+        return None
+    floor = None
+    if inventory['first'] is not None:
+        floor = max(inventory['first'], timezone.now() - timedelta(days=30))
+    options = [
+        {'value': rse, 'label': rse,
+         'activity': f'stofa_{rse}_first',
+         'families_by': {
+             f"{quantity['value']}|{lens['value']}": _storage_rse_families(
+                 rse, quantity['value'], lens['value'])
+             for quantity in _STORAGE_QUANTITIES
+             for lens in _STORAGE_LENSES},
+         'component': 'storage', 'start': floor}
+        for rse in inventory['rses']]
+    if inventory['campaigns']:
+        options.append({
+            'value': _STORAGE_CAMPAIGNS_OPTION, 'label': 'Campaign totals',
+            'pin': 'last',
+            'families_by': {
+                f"{quantity['value']}|{lens['value']}":
+                    _storage_campaign_families(inventory['campaigns'],
+                                               quantity['value'])
+                for quantity in _STORAGE_QUANTITIES
+                for lens in _STORAGE_LENSES},
+            'component': 'storage', 'start': floor})
+    return {
+        'param': 'rse',
+        'label': 'Storage',
+        'selector_label': 'RSE display',
+        'jump_label': 'RSEs by peak first-copy arrivals',
+        'cache_series': True,
+        'components': ('storage',),
+        'prewarm_series': False,
+        'note': ('The data lifecycle per RSE: arrivals, transfers and '
+                 'deletions per bin from the record\'s counters; backlog, '
+                 'ghosts, inventory, rule locks and capacity as the state '
+                 'at each storage pass. Bytes plot in TB. Click the plot '
+                 'for the RSE\'s standing at that instant and the capacity '
+                 'table across RSEs.'),
+        'default': 'all',
+        'activity_label': 'first copies per bin',
+        'selectors': [
+            {'param': 'quantity', 'label': 'Counting',
+             'default': 'files', 'choices': list(_STORAGE_QUANTITIES)},
+            {'param': 'lens', 'label': 'Grouping',
+             'default': 'campaign', 'choices': list(_STORAGE_LENSES)},
+        ],
+        'options': options,
     }
 
 
@@ -3155,6 +3700,307 @@ def _platform_card(data, previous_data, ctx):
     }
 
 
+def _storage_card(data, previous_data, ctx):
+    """The storage cut card (docs/SNAPPER_STORAGE.md). For each shown
+    RSE its standing at the instant — verdicts, inventory by replica
+    state, datasets, the copying backlog and its ages, ghosts, rules
+    and locks, capacity — and the flow since the window's left edge,
+    differenced from the counters at the basis snap; each section docks
+    beneath its RSE's panels. Then the scope section once: the pass and
+    interval, the capacity table across every RSE (the rows of
+    ``rucio account limit list eicprod`` at this instant), the target
+    campaigns' standing, and the exception heads the component carries
+    with their overflow counts."""
+    from urllib.parse import quote
+
+    from django.urls import reverse
+
+    if not data or 'rses' not in data:
+        return None
+    params = (ctx or {}).get('params') or {}
+    since = (ctx or {}).get('since')
+    since_data = (ctx or {}).get('since_data') or {}
+    quantity_code = 'b' if (params.get('quantity') or 'files') == 'bytes' else 'f'
+    rses = {rse: block for rse, block in (data.get('rses') or {}).items()
+            if isinstance(block, dict)}
+    prev_rses = previous_data.get('rses') or {}
+    since_rses = since_data.get('rses') or {}
+    thresholds = data.get('thresholds') or {}
+    assessment = data.get('assessment') or {}
+    verdicts = assessment.get('verdicts') or {}
+    selected = [value for value in (params.get('rse') or '').split(',')
+                if value]
+    shown = [rse for rse in selected if rse in rses]
+    basis_text = (since.astimezone(ET_ZONE).strftime('%m-%d %H:%M ET')
+                  if since is not None else '')
+    threshold_text = {
+        'transfers_stuck': (
+            'copying replicas older than '
+            f"{thresholds.get('storage_copying_stuck_hours')} h "
+            '(storage_copying_stuck_hours)'),
+        'rules_stuck': 'rules with stuck locks',
+        'datasets_stalled': (
+            'open datasets with no arrival for '
+            f"{thresholds.get('storage_stalled_hours')} h while their "
+            'task runs (storage_stalled_hours)'),
+        'single_copy_old': (
+            'single-copy files older than '
+            f"{thresholds.get('storage_single_copy_warn_days')} d "
+            '(storage_single_copy_warn_days)'),
+    }
+    listing_urls = {
+        listing: reverse('pcs:storage_listings', kwargs={'listing': listing})
+        for listing in ('ghosts', 'stuck_rules', 'stalled_datasets')}
+
+    def _chip(verdict):
+        return cut_chip('ok' if verdict == 'ok'
+                        else 'warning' if verdict == 'warning'
+                        else 'unknown')
+
+    def _verdict_rows(prefix):
+        return [{'name': key[len(prefix):].replace('_', ' '),
+                 'chip': _chip(verdict),
+                 'threshold': threshold_text.get(key[len(prefix):], '')}
+                for key, verdict in sorted(verdicts.items())
+                if key.startswith(prefix)]
+
+    def _tb(value):
+        return None if value is None else round(int(value or 0) / _TB, 2)
+
+    def _hours(seconds):
+        return None if seconds is None else round(float(seconds) / 3600, 1)
+
+    def _days(seconds):
+        return None if seconds is None else round(float(seconds) / 86400, 1)
+
+    def _did_url(name):
+        return reverse('pcs:rucio_did_detail',
+                       kwargs={'scope': 'epic',
+                               'name': str(name or '').lstrip('/')})
+
+    def _state_key(state):
+        return ((_STORAGE_STATE_ORDER.index(state)
+                 if state in _STORAGE_STATE_ORDER
+                 else len(_STORAGE_STATE_ORDER)), state)
+
+    def _state_label(state):
+        return str(state).lower().replace('_', ' ')
+
+    sections = []
+    for rse in shown:
+        block = rses[rse]
+        prev = prev_rses.get(rse) or {}
+        flow = block.get('flow') or {}
+        base_flow = (since_rses.get(rse) or {}).get('flow') or {}
+        by_state = (block.get('inventory') or {}).get('by_state') or {}
+        prev_by_state = (prev.get('inventory') or {}).get('by_state') or {}
+        inventory = [
+            {'state': _state_label(state),
+             'curve': f'sto{quantity_code}n_{rse}_{state}',
+             'files': _fmt_num(int((entry or {}).get('files') or 0)),
+             'tb': _tb((entry or {}).get('bytes')),
+             'delta': cut_delta((entry or {}).get('files'),
+                                (prev_by_state.get(state) or {}).get('files'))
+             or ''}
+            for state, entry in sorted(by_state.items(),
+                                       key=lambda kv: _state_key(kv[0]))]
+        backlog = block.get('backlog') or {}
+        ages = backlog.get('age_s') or {}
+        ghosts = block.get('ghosts') or {}
+        rules = block.get('rules') or {}
+        locks = rules.get('locks') or {}
+        capacity = block.get('capacity') or {}
+        used, limit = capacity.get('used'), capacity.get('limit')
+
+        def _since(key, _flow=flow, _base=base_flow):
+            if not _base or key is None:
+                return None
+            return max(0, int(_flow.get(key) or 0) - int(_base.get(key) or 0))
+
+        flow_rows = []
+        if base_flow:
+            for label, files_key, bytes_key, curve in (
+                    ('first copies', 'first_copy_files', 'first_copy_bytes',
+                     f'sto{quantity_code}a_{rse}_first'),
+                    ('replicas', 'replica_files', 'replica_bytes',
+                     f'sto{quantity_code}a_{rse}_replica'),
+                    ('transfers completed', 'transfers_completed', None,
+                     f'sto{quantity_code}t_{rse}_transfers'),
+                    ('deleted', 'deleted_files', 'deleted_bytes',
+                     f'sto{quantity_code}t_{rse}_deleted'),
+                    ('ghosts appeared', 'ghosts_appeared', None,
+                     f'stoxe_{rse}_appeared'),
+                    ('ghosts cleared', 'ghosts_cleared', None,
+                     f'stoxe_{rse}_cleared'),
+                    ('bad replicas appeared', 'bad_appeared', None, '')):
+                flow_rows.append({
+                    'label': label, 'curve': curve,
+                    'files': _fmt_num(_since(files_key)),
+                    'tb': _tb(_since(bytes_key)) if bytes_key else None})
+        sections.append({
+            'rse': rse, 'key': f'sto-{rse}',
+            'type': str(block.get('type') or '').lower(),
+            'url': f"{listing_urls['ghosts']}?rse={quote(rse)}",
+            'verdicts': _verdict_rows(f'rse:{rse}:'),
+            'inventory': inventory,
+            'datasets': block.get('datasets') or {},
+            'backlog': {
+                'files': _fmt_num(int(backlog.get('copying_files') or 0)),
+                'tb': _tb(backlog.get('copying_bytes')),
+                'median_h': _hours(ages.get('median')),
+                'p90_h': _hours(ages.get('p90')),
+                'max_h': _hours(ages.get('max')),
+                'over': _fmt_num(int(backlog.get('over_threshold') or 0)),
+                'stuck_hours': thresholds.get('storage_copying_stuck_hours'),
+                'curve': f'sto{quantity_code}s_{rse}_copying',
+                'over_curve': f'stoxo_{rse}_over'},
+            'ghosts': {
+                'files': _fmt_num(int(ghosts.get('files') or 0)),
+                'tb': _tb(ghosts.get('bytes')),
+                'delta': cut_delta(ghosts.get('files'),
+                                   (prev.get('ghosts') or {}).get('files')) or '',
+                'by_state': [
+                    {'state': _state_label(state),
+                     'files': _fmt_num(int(count or 0)),
+                     'curve': f'stofg_{rse}_{state}'}
+                    for state, count in sorted(
+                        (ghosts.get('by_state') or {}).items(),
+                        key=lambda kv: _state_key(kv[0]))],
+                'oldest_d': _days(ghosts.get('oldest_age_s')),
+                'url': f"{listing_urls['ghosts']}?rse={quote(rse)}"},
+            'rules': {
+                'by_state': sorted((rules.get('by_state') or {}).items()),
+                'ok': _fmt_num(int(locks.get('ok') or 0)),
+                'replicating': _fmt_num(int(locks.get('replicating') or 0)),
+                'stuck': _fmt_num(int(locks.get('stuck') or 0)),
+                'oldest_stuck_d': _days(rules.get('oldest_stuck_age_s')),
+                'expiring_30d': int(rules.get('expiring_30d') or 0),
+                'url': f"{listing_urls['stuck_rules']}?rse={quote(rse)}"},
+            'capacity': {
+                'used_tb': _tb(used),
+                'limit_tb': _tb(limit) if limit else None,
+                'left_tb': (_tb(limit - used)
+                            if limit and used is not None else None),
+                'fill_pct': (round(100 * float(capacity['fraction']), 1)
+                             if capacity.get('fraction') is not None else None),
+                'files': _fmt_num(capacity.get('files')),
+                'as_of': capacity.get('as_of'),
+                'curve': (f'stobu_{rse}_used' if quantity_code == 'b'
+                          else f'stofu_{rse}_files')},
+            'flow': flow_rows,
+            'basis': basis_text if base_flow else '',
+        })
+
+    capacity_rows = []
+    for rse, block in sorted(rses.items()):
+        if rse == 'none':
+            continue
+        capacity = block.get('capacity') or {}
+        used, limit = capacity.get('used'), capacity.get('limit')
+        capacity_rows.append({
+            'rse': rse, 'type': str(block.get('type') or '').lower(),
+            'url': f"{listing_urls['ghosts']}?rse={quote(rse)}",
+            'used_tb': _tb(used),
+            'limit_tb': _tb(limit) if limit else None,
+            'left_tb': (_tb(limit - used)
+                        if limit and used is not None else None),
+            'fill_pct': (round(100 * float(capacity['fraction']), 1)
+                         if capacity.get('fraction') is not None else None),
+            'files': _fmt_num(capacity.get('files')),
+            'as_of': capacity.get('as_of'),
+            'shown': rse in shown,
+            'curve': (f'stobu_{rse}_used' if quantity_code == 'b'
+                      else f'stofu_{rse}_files')})
+
+    campaigns = []
+    since_campaigns = since_data.get('campaigns') or {}
+    for name, block in sorted((data.get('campaigns') or {}).items()):
+        if not isinstance(block, dict):
+            continue
+        protection = block.get('protection') or {}
+        flow = block.get('flow') or {}
+        base = (since_campaigns.get(name) or {}).get('flow') or {}
+
+        def _campaign_since(key, _flow=flow, _base=base):
+            if not _base:
+                return None
+            return max(0, int(_flow.get(key) or 0) - int(_base.get(key) or 0))
+
+        campaigns.append({
+            'name': name, 'segment': _storage_slug(name),
+            'verdicts': _verdict_rows(f'campaign:{name}:'),
+            'files': _fmt_num(int(block.get('files') or 0)),
+            'tb': _tb(block.get('bytes')),
+            'single': _fmt_num(int(protection.get('single_copy') or 0)),
+            'single_old': int(protection.get('single_copy_old') or 0),
+            'two_plus': _fmt_num(int(protection.get('two_plus') or 0)),
+            'disk_only': _fmt_num(int(protection.get('disk_only') or 0)),
+            'tape_only': _fmt_num(int(protection.get('tape_only') or 0)),
+            'disk_and_tape': _fmt_num(int(protection.get('disk_and_tape') or 0)),
+            'archival_tb': _tb(block.get('archival_backlog_bytes')),
+            'unattached': _fmt_num(int(block.get('unattached_files') or 0)),
+            'no_events': _fmt_num(int(block.get('no_events_attr') or 0)),
+            'datasets': block.get('datasets') or {},
+            'latency': [
+                {'kind': str(kind).replace('_', ' '),
+                 'n': (entry or {}).get('n'),
+                 'median_h': _hours((entry or {}).get('median')),
+                 'p90_h': _hours((entry or {}).get('p90'))}
+                for kind, entry in sorted((block.get('latency_s') or {}).items())],
+            'arrived_files': _fmt_num(_campaign_since('arrived_files')),
+            'arrived_tb': _tb(_campaign_since('arrived_bytes')),
+            'archived_files': _fmt_num(_campaign_since('archived_files')),
+            'archived_tb': _tb(_campaign_since('archived_bytes')),
+            'basis': basis_text if base else '',
+        })
+
+    exceptions = data.get('exceptions') or {}
+    ghost_rows = []
+    for row in (exceptions.get('ghosts') or []):
+        if not isinstance(row, (list, tuple)) or len(row) < 6:
+            continue
+        name = str(row[0])
+        dataset, _, file_name = name.rpartition('/')
+        ghost_rows.append({
+            'dataset': dataset, 'url': _did_url(dataset), 'file': file_name,
+            'rse': row[1], 'state': _state_label(row[2] or ''),
+            'campaign': row[3], 'mb': round(int(row[4] or 0) / 1e6, 1),
+            'created': row[5]})
+    stuck_rows = [
+        {'dataset': row[0], 'url': _did_url(row[0]), 'rse': row[1],
+         'stuck_at': row[2], 'locks': row[3]}
+        for row in (exceptions.get('stuck_rules') or [])
+        if isinstance(row, (list, tuple)) and len(row) >= 4]
+    stalled_rows = [
+        {'dataset': row[0], 'url': _did_url(row[0]), 'campaign': row[1],
+         'last_arrival': row[2]}
+        for row in (exceptions.get('stalled_datasets') or [])
+        if isinstance(row, (list, tuple)) and len(row) >= 3]
+    pass_info = data.get('pass') or {}
+    return {
+        'kind': 'storage',
+        'sections': sections,
+        'scope': {
+            'key': 'sto-scope',
+            'overall': assessment.get('overall') or 'unknown',
+            'overall_chip': _chip(assessment.get('overall')),
+            'interval': data.get('interval') or {},
+            'pass': {
+                'mode': pass_info.get('mode') or '',
+                'files': _fmt_num(pass_info.get('files_checked')),
+                'datasets': _fmt_num(pass_info.get('datasets_checked')),
+                'duration_min': round(float(pass_info.get('duration_s') or 0) / 60),
+                'errors': int(pass_info.get('error_count') or 0)},
+            'capacity_rows': capacity_rows,
+            'campaigns': campaigns,
+            'ghosts': ghost_rows, 'stuck': stuck_rows, 'stalled': stalled_rows,
+            'overflow': {key: int(value or 0) for key, value
+                         in (exceptions.get('overflow') or {}).items()},
+            'urls': listing_urls,
+        },
+    }
+
+
 def _fmt_num(value):
     if value is None:
         return '—'
@@ -3737,8 +4583,10 @@ def _series_cache(key, builder, refresh=False):
     # every refresh cycle; its products take the live TTL, not the
     # day-granular focus backstop.
     # The Platform focus (param 'platform') likewise plots components
-    # that advance every refresh cycle.
-    if ':focus:task:' in key or ':focus:platform:' in key:
+    # that advance every refresh cycle, and the Storage focus (param
+    # 'rse') a record that advances with every storage pass.
+    if (':focus:task:' in key or ':focus:platform:' in key
+            or ':focus:rse:' in key):
         ttl_seconds = 90
     else:
         ttl_seconds = 6 * 3600 if ':focus:' in key else 90
@@ -3785,11 +4633,13 @@ def register_snapper_providers():
         # and platform have their focus views and their cards live there.
         scope_components=('panda', 'health', 'delivery'),
         focus_view=(_delivery_focus_view, _site_focus_view,
-                    _errors_focus_view, _platform_focus_view),
+                    _errors_focus_view, _platform_focus_view,
+                    _storage_focus_view),
         component_cards={'panda': _panda_card,
                          'delivery': _delivery_card,
                          'errors': _errors_card,
-                         'platform': _platform_card},
+                         'platform': _platform_card,
+                         'storage': _storage_card},
         card_template=CARD_TEMPLATE,
         annotate_references=annotate_references,
     ))
