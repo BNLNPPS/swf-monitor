@@ -35,7 +35,7 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'swf_monitor_project.settings')
 import django  # noqa: E402
 django.setup()
 
-from swf_epicprod.analytics.storage import project_store, run_pass  # noqa: E402
+from swf_epicprod.analytics.storage import log, project_store, run_pass  # noqa: E402
 
 
 def main():
@@ -91,6 +91,19 @@ def main():
         summary['published'] = True
         summary['revision'] = publication.update.revision
         summary['content_changed'] = publication.update.content_changed
+        # The ghost product is rebuilt as the pass's last step, so the
+        # Storage exceptions page, the epicprod_storage tool and the REST
+        # listing serve this pass's ghosts at once (STORAGE.md, Retrieval;
+        # swf-monitor docs/CACHED_PRODUCTS.md). A failure here is logged
+        # and never fails the sweep: the product's TTL rebuilds it behind
+        # the next page view.
+        try:
+            from swf_epicprod.analytics.storage_listings import (
+                refresh_ghost_product)
+            summary['ghost_product'] = refresh_ghost_product()
+        except Exception as exc:                                  # noqa: BLE001
+            log(f'ERROR ghost product refresh: {exc}')
+            summary['ghost_product'] = {'error': str(exc)}
     print('SUMMARY ' + json.dumps(summary))
     return 0 if not summary.get('errors') else 3
 
