@@ -361,100 +361,100 @@
 
 {% elif card.kind == 'storage' %}
   {# The storage cut: one section per shown RSE — its standing at the   #}
-  {# instant and the flow since the window start — docked beneath the  #}
-  {# RSE's panels; then the scope section below the plot stack: the    #}
-  {# pass, the capacity table across RSEs, the campaigns, and the      #}
-  {# exception heads with their overflow counts.                       #}
+  {# instant and the flow since the window start, each fact group its  #}
+  {# own titled table — docked beneath the RSE's panels; then the scope #}
+  {# section below the plot stack: the pass, the capacity table across #}
+  {# RSEs, the campaigns, and the exception heads with their overflow  #}
+  {# counts.                                                            #}
   {% for s in card.sections %}
   <div data-snapper-detail-key="{{ s.key }}" class="snapper-cut-card mb-2">
-    <div class="mb-2"><strong><a href="{{ s.url }}">{{ s.rse }}</a></strong> <span class="text-muted small">{{ s.type }}</span>
-      {% for v in s.verdicts %} <span title="{{ v.threshold }}"><span class="snapper-chip" style="background:{{ v.chip.color }}">{{ v.chip.value }}</span> {{ v.name }}</span>{% endfor %}
+    <div class="mb-2 fs-5"><strong><a href="{{ s.url }}">{{ s.rse }}</a></strong> <span class="text-muted fs-6">{{ s.type }}</span>
+      {% for v in s.verdicts %} <span class="fs-6" title="{{ v.threshold }}"><span class="snapper-chip" style="background:{{ v.chip.color }}">{{ v.chip.value }}</span> {{ v.name }}</span>{% endfor %}
     </div>
     {% if card.scope.reconstructed %}
     <div class="text-muted mb-2">This instant is inside the reconstructed arrivals record: arrival counters only, rebuilt from the catalog's creation times. Inventory, ghosts, backlog, rules and capacity begin at the census.</div>
     {% endif %}
-    <div class="d-flex flex-wrap column-gap-4 row-gap-2 align-items-start">
-      <div>
-        <div class="mb-1"><strong>Inventory</strong></div>
-        <table class="table table-sm table-bordered w-auto mb-1">
-          <thead><tr><th>Replica state</th><th class="text-end">Files</th><th class="text-end">Δ prev snap</th><th class="text-end">TB</th></tr></thead>
-          <tbody>
-          {% for r in s.inventory %}
-          <tr><td><span data-curve="{{ r.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>{{ r.state }}</td><td class="text-end">{{ r.files }}</td><td class="text-end">{{ r.delta }}</td><td class="text-end">{{ r.tb|default_if_none:"—" }}</td></tr>
-          {% empty %}
-          <tr><td colspan="4" class="text-muted">No production replicas recorded here.</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-        <div class="text-muted small mb-2">Datasets: {{ s.datasets.total|default_if_none:"0" }} total · {{ s.datasets.complete|default_if_none:"0" }} complete · {{ s.datasets.partial|default_if_none:"0" }} partial · {{ s.datasets.empty|default_if_none:"0" }} empty · {{ s.datasets.unavailable|default_if_none:"0" }} unavailable</div>
-        <div class="mb-1"><strong>Capacity</strong> <span class="text-muted small">RSE-wide usage against the eicprod limit{% if s.capacity.as_of %} · usage as of {{ s.capacity.as_of|fmt_dt }} ET{% endif %}</span></div>
-        <table class="table table-sm table-bordered w-auto mb-1">
-          <tbody>
-          <tr><td><span data-curve="{{ s.capacity.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>used</td><td class="text-end">{{ s.capacity.used_tb|default_if_none:"—" }} TB · {{ s.capacity.files }} files</td></tr>
-          <tr><td>account limit</td><td class="text-end">{% if s.capacity.limit_tb is not None %}{{ s.capacity.limit_tb }} TB{% else %}none{% endif %}</td></tr>
-          <tr><td>quota left</td><td class="text-end">{% if s.capacity.left_tb is not None %}{{ s.capacity.left_tb }} TB{% else %}—{% endif %}</td></tr>
-          <tr><td>fill</td><td class="text-end">{% if s.capacity.fill_pct is not None %}{{ s.capacity.fill_pct }}%{% else %}—{% endif %}</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div>
-        <div class="mb-1"><strong>Copying backlog</strong></div>
-        <table class="table table-sm table-bordered w-auto mb-2">
-          <tbody>
-          <tr><td><span data-curve="{{ s.backlog.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>copying</td><td class="text-end">{{ s.backlog.files }} files · {{ s.backlog.tb|default_if_none:"—" }} TB</td></tr>
-          <tr><td><span data-curve="{{ s.backlog.over_curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>over {{ s.backlog.stuck_hours }} h</td><td class="text-end">{{ s.backlog.over }}</td></tr>
-          <tr><td>age median · 90th · oldest</td><td class="text-end">{{ s.backlog.median_h|default_if_none:"—" }} · {{ s.backlog.p90_h|default_if_none:"—" }} · {{ s.backlog.max_h|default_if_none:"—" }} h</td></tr>
-          </tbody>
-        </table>
-        <div class="mb-1"><strong><a href="{{ s.ghosts.url }}">Ghosts</a></strong> <span class="text-muted small">registered, no available replica anywhere</span></div>
-        <table class="table table-sm table-bordered w-auto mb-1">
-          <tbody>
-          <tr><td>total</td><td class="text-end">{{ s.ghosts.files }} files{% if s.ghosts.delta %} ({{ s.ghosts.delta }}){% endif %} · {{ s.ghosts.tb|default_if_none:"—" }} TB</td></tr>
-          {% for g in s.ghosts.by_state %}
-          <tr><td><span data-curve="{{ g.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>{{ g.state }}</td><td class="text-end">{{ g.files }}</td></tr>
-          {% endfor %}
-          <tr><td>oldest</td><td class="text-end">{% if s.ghosts.oldest_d is not None %}{{ s.ghosts.oldest_d }} d{% else %}—{% endif %}</td></tr>
-          <tr><td>mean size: ghosts · arrived first copies</td><td class="text-end">{% if s.ghosts.mean_mb is not None %}{{ s.ghosts.mean_mb }} MB{% else %}—{% endif %} · {% if s.ghosts.arrived_mean_mb is not None %}{{ s.ghosts.arrived_mean_mb }} MB{% else %}—{% endif %}</td></tr>
-          </tbody>
-        </table>
-        <div class="text-muted small mb-2" style="max-width:34em;">Copying ghosts are registrations whose upload never completed; unavailable ghosts lost their replica, or had it declared bad, after arrival. Ghosts larger than the arrived mean point at large-file timeouts; equal sizes point at the path, not the file.</div>
-        <div class="mb-1"><strong><a href="{{ s.rules.url }}">Rules and locks</a></strong></div>
-        <table class="table table-sm table-bordered w-auto mb-1">
-          <tbody>
-          <tr><td>rules by state</td><td class="text-end">{% for state, n in s.rules.by_state %}{{ state|lower }} {{ n }}{% if not forloop.last %} · {% endif %}{% empty %}—{% endfor %}</td></tr>
-          <tr><td>locks ok</td><td class="text-end">{{ s.rules.ok }}</td></tr>
-          <tr><td><span data-curve="stoxl_{{ s.rse }}_replicating" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>locks replicating</td><td class="text-end">{{ s.rules.replicating }}</td></tr>
-          <tr><td><span data-curve="stoxl_{{ s.rse }}_stuck" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>locks stuck</td><td class="text-end">{{ s.rules.stuck }}{% if s.rules.oldest_stuck_d is not None %} · oldest {{ s.rules.oldest_stuck_d }} d{% endif %}</td></tr>
-          <tr><td>rules expiring within 30 d</td><td class="text-end">{{ s.rules.expiring_30d }}</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div>
-        <div class="mb-1"><strong>Flow since {% if s.basis %}{{ s.basis }}{% else %}window start{% endif %}</strong></div>
-        {% if s.flow %}
-        <table class="table table-sm table-bordered w-auto mb-1">
-          <thead><tr><th></th><th class="text-end">Files</th><th class="text-end">TB</th></tr></thead>
-          <tbody>
-          {% for f in s.flow %}
-          <tr><td><span data-curve="{{ f.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;{% if not f.curve %} visibility:hidden;{% endif %}"></span>{{ f.label }}</td><td class="text-end">{{ f.files }}</td><td class="text-end">{{ f.tb|default_if_none:"" }}</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-        {% else %}
-        <div class="text-muted mb-1">No counter record at the window start yet; the flow needs a pass before the window's left edge.</div>
-        {% endif %}
-      </div>
+    <div class="d-flex flex-wrap column-gap-4 row-gap-3 align-items-start">
+      <table class="table table-sm table-bordered table-striped w-auto mb-0">
+        <thead>
+          <tr class="table-secondary"><th colspan="4">Inventory · production replicas here</th></tr>
+          <tr><th>Replica state</th><th class="text-end">Files</th><th class="text-end">Δ prev snap</th><th class="text-end">TB</th></tr>
+        </thead>
+        <tbody>
+        {% for r in s.inventory %}
+        <tr><td><span data-curve="{{ r.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>{{ r.state }}</td><td class="text-end">{{ r.files }}</td><td class="text-end">{{ r.delta }}</td><td class="text-end">{{ r.tb|default_if_none:"—" }}</td></tr>
+        {% empty %}
+        <tr><td colspan="4" class="text-muted">none recorded here</td></tr>
+        {% endfor %}
+        <tr><td colspan="4" class="text-muted small">Datasets: {{ s.datasets.total|default_if_none:"0" }} total · {{ s.datasets.complete|default_if_none:"0" }} complete · {{ s.datasets.partial|default_if_none:"0" }} partial · {{ s.datasets.empty|default_if_none:"0" }} empty · {{ s.datasets.unavailable|default_if_none:"0" }} unavailable</td></tr>
+        </tbody>
+      </table>
+      <table class="table table-sm table-bordered table-striped w-auto mb-0">
+        <thead><tr class="table-secondary"><th colspan="2">Capacity · RSE-wide usage against the eicprod limit</th></tr></thead>
+        <tbody>
+        <tr><td><span data-curve="{{ s.capacity.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>used</td><td class="text-end">{{ s.capacity.used_tb|default_if_none:"—" }} TB · {{ s.capacity.files }} files</td></tr>
+        <tr><td>account limit</td><td class="text-end">{% if s.capacity.limit_tb is not None %}{{ s.capacity.limit_tb }} TB{% else %}none{% endif %}</td></tr>
+        <tr><td>quota left</td><td class="text-end">{% if s.capacity.left_tb is not None %}{{ s.capacity.left_tb }} TB{% else %}—{% endif %}</td></tr>
+        <tr><td>fill</td><td class="text-end">{% if s.capacity.fill_pct is not None %}{{ s.capacity.fill_pct }}%{% else %}—{% endif %}</td></tr>
+        <tr><td>usage as of</td><td class="text-end text-nowrap">{% if s.capacity.as_of %}{{ s.capacity.as_of|fmt_dt }} ET{% else %}—{% endif %}</td></tr>
+        </tbody>
+      </table>
+      <table class="table table-sm table-bordered table-striped w-auto mb-0">
+        <thead><tr class="table-secondary"><th colspan="2">Copying backlog</th></tr></thead>
+        <tbody>
+        <tr><td><span data-curve="{{ s.backlog.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>copying</td><td class="text-end">{{ s.backlog.files }} files · {{ s.backlog.tb|default_if_none:"—" }} TB</td></tr>
+        <tr><td><span data-curve="{{ s.backlog.over_curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>over {{ s.backlog.stuck_hours }} h</td><td class="text-end">{{ s.backlog.over }}</td></tr>
+        <tr><td>age median · 90th · oldest</td><td class="text-end">{{ s.backlog.median_h|default_if_none:"—" }} · {{ s.backlog.p90_h|default_if_none:"—" }} · {{ s.backlog.max_h|default_if_none:"—" }} h</td></tr>
+        </tbody>
+      </table>
+      <table class="table table-sm table-bordered table-striped w-auto mb-0">
+        <thead><tr class="table-secondary"><th colspan="2"><a href="{{ s.ghosts.url }}">Ghosts</a> · registered, no available replica anywhere</th></tr></thead>
+        <tbody>
+        <tr><td>total</td><td class="text-end">{{ s.ghosts.files }} files{% if s.ghosts.delta %} ({{ s.ghosts.delta }}){% endif %} · {{ s.ghosts.tb|default_if_none:"—" }} TB</td></tr>
+        {% for g in s.ghosts.by_state %}
+        <tr><td><span data-curve="{{ g.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>{{ g.state }}</td><td class="text-end">{{ g.files }}</td></tr>
+        {% endfor %}
+        <tr><td>oldest</td><td class="text-end">{% if s.ghosts.oldest_d is not None %}{{ s.ghosts.oldest_d }} d{% else %}—{% endif %}</td></tr>
+        <tr><td>mean size: ghosts · arrived first copies</td><td class="text-end">{% if s.ghosts.mean_mb is not None %}{{ s.ghosts.mean_mb }} MB{% else %}—{% endif %} · {% if s.ghosts.arrived_mean_mb is not None %}{{ s.ghosts.arrived_mean_mb }} MB{% else %}—{% endif %}</td></tr>
+        <tr><td colspan="2" class="text-muted small" style="max-width:30em;">Copying ghosts are registrations whose upload never completed; unavailable ghosts lost their replica, or had it declared bad, after arrival. Ghosts larger than the arrived mean point at large-file timeouts; equal sizes point at the path, not the file.</td></tr>
+        </tbody>
+      </table>
+      <table class="table table-sm table-bordered table-striped w-auto mb-0">
+        <thead><tr class="table-secondary"><th colspan="2"><a href="{{ s.rules.url }}">Rules and locks</a></th></tr></thead>
+        <tbody>
+        <tr><td>rules by state</td><td class="text-end">{% for state, n in s.rules.by_state %}{{ state|lower }} {{ n }}{% if not forloop.last %} · {% endif %}{% empty %}—{% endfor %}</td></tr>
+        <tr><td>locks ok</td><td class="text-end">{{ s.rules.ok }}</td></tr>
+        <tr><td><span data-curve="stoxl_{{ s.rse }}_replicating" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>locks replicating</td><td class="text-end">{{ s.rules.replicating }}</td></tr>
+        <tr><td><span data-curve="stoxl_{{ s.rse }}_stuck" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>locks stuck</td><td class="text-end">{{ s.rules.stuck }}{% if s.rules.oldest_stuck_d is not None %} · oldest {{ s.rules.oldest_stuck_d }} d{% endif %}</td></tr>
+        <tr><td>rules expiring within 30 d</td><td class="text-end">{{ s.rules.expiring_30d }}</td></tr>
+        </tbody>
+      </table>
+      <table class="table table-sm table-bordered table-striped w-auto mb-0">
+        <thead>
+          <tr class="table-secondary"><th colspan="3">Flow since {% if s.basis %}{{ s.basis }}{% else %}window start{% endif %}</th></tr>
+          <tr><th></th><th class="text-end">Files</th><th class="text-end">TB</th></tr>
+        </thead>
+        <tbody>
+        {% for f in s.flow %}
+        <tr><td><span data-curve="{{ f.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;{% if not f.curve %} visibility:hidden;{% endif %}"></span>{{ f.label }}</td><td class="text-end">{{ f.files }}</td><td class="text-end">{{ f.tb|default_if_none:"" }}</td></tr>
+        {% empty %}
+        <tr><td colspan="3" class="text-muted">no counter record at the window start yet; the flow needs a pass before the window's left edge</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
     </div>
   </div>
   {% endfor %}
   <div data-snapper-detail-key="{{ card.scope.key }}" class="snapper-cut-card">
-    <div class="mb-2"><strong>Storage record</strong>
-      {% if card.scope.reconstructed %}<span class="text-muted">reconstructed arrivals record; the state record begins at the census</span>{% else %}<span class="snapper-chip" style="background:{{ card.scope.overall_chip.color }}">{{ card.scope.overall }}</span>{% endif %}
-      <span class="text-muted small">{{ card.scope.pass.mode }} pass{% if card.scope.interval.end %} · interval {{ card.scope.interval.start|fmt_dt }} – {{ card.scope.interval.end|fmt_dt }} ET{% endif %} · {{ card.scope.pass.files }} files and {{ card.scope.pass.datasets }} datasets checked in {{ card.scope.pass.duration_min }} min{% if card.scope.pass.errors %} · <span class="text-danger">{{ card.scope.pass.errors }} read errors</span>{% endif %}</span>
-      · <a href="{{ card.scope.urls.ghosts }}">Storage exceptions</a></div>
-    <div class="mb-1"><strong>RSE capacity at this instant</strong> <span class="text-muted small">the rows of rucio account limit list eicprod; usage is RSE-wide until the account usage is recorded; click the plot at another time for the table then</span></div>
-    <table class="table table-sm table-bordered w-auto mb-3">
-      <thead><tr><th>RSE</th><th>Type</th><th class="text-end">Used TB</th><th class="text-end">Limit TB</th><th class="text-end">Quota left TB</th><th class="text-end">Fill</th><th class="text-end">Files</th><th>Usage as of</th></tr></thead>
+    <div class="mb-2 fs-5"><strong>Storage record</strong>
+      {% if card.scope.reconstructed %}<span class="text-muted fs-6">reconstructed arrivals record; the state record begins at the census</span>{% else %}<span class="snapper-chip fs-6" style="background:{{ card.scope.overall_chip.color }}">{{ card.scope.overall }}</span>{% endif %}
+      <span class="text-muted fs-6">{{ card.scope.pass.mode }} pass{% if card.scope.interval.end %} · interval {{ card.scope.interval.start|fmt_dt }} – {{ card.scope.interval.end|fmt_dt }} ET{% endif %} · {{ card.scope.pass.files }} files and {{ card.scope.pass.datasets }} datasets checked in {{ card.scope.pass.duration_min }} min{% if card.scope.pass.errors %} · <span class="text-danger">{{ card.scope.pass.errors }} read errors</span>{% endif %}</span>
+      <span class="fs-6">· <a href="{{ card.scope.urls.ghosts }}">Storage exceptions</a></span></div>
+    <table class="table table-sm table-bordered table-striped w-auto mb-3">
+      <thead>
+        <tr class="table-secondary"><th colspan="8">RSE capacity at this instant · the rows of rucio account limit list eicprod <span class="fw-normal text-muted">(usage is RSE-wide until the account usage is recorded; click the plot at another time for the table then)</span></th></tr>
+        <tr><th>RSE</th><th>Type</th><th class="text-end">Used TB</th><th class="text-end">Limit TB</th><th class="text-end">Quota left TB</th><th class="text-end">Fill</th><th class="text-end">Files</th><th>Usage as of</th></tr>
+      </thead>
       <tbody>
       {% for r in card.scope.capacity_rows %}
       <tr{% if r.shown %} class="fw-bold"{% endif %}><td><span data-curve="{{ r.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span><a href="{{ r.url }}">{{ r.rse }}</a></td><td>{{ r.type }}</td><td class="text-end">{{ r.used_tb|default_if_none:"—" }}</td><td class="text-end">{% if r.limit_tb is not None %}{{ r.limit_tb }}{% else %}none{% endif %}</td><td class="text-end">{{ r.left_tb|default_if_none:"—" }}</td><td class="text-end">{% if r.fill_pct is not None %}{{ r.fill_pct }}%{% else %}—{% endif %}</td><td class="text-end">{{ r.files }}</td><td class="text-nowrap">{{ r.as_of|fmt_dt }}</td></tr>
@@ -463,20 +463,15 @@
     </table>
     {% if not card.scope.capacity_only %}
     {% for c in card.scope.campaigns %}
-    <div class="mb-1"><strong>{{ c.name }}</strong>
-      {% for v in c.verdicts %} <span title="{{ v.threshold }}"><span class="snapper-chip" style="background:{{ v.chip.color }}">{{ v.chip.value }}</span> {{ v.name }}</span>{% endfor %}
-      <span class="text-muted small">· {{ c.files }} files · {{ c.tb|default_if_none:"—" }} TB registered</span></div>
-    <div class="d-flex flex-wrap column-gap-4 row-gap-1 align-items-start mb-2">
-      <table class="table table-sm table-bordered w-auto mb-1">
+    <div class="d-flex flex-wrap column-gap-4 row-gap-3 align-items-start mb-3">
+      <table class="table table-sm table-bordered table-striped w-auto mb-0">
+        <thead><tr class="table-secondary"><th colspan="2">Campaign {{ c.name }} · {{ c.files }} files · {{ c.tb|default_if_none:"—" }} TB registered
+          {% for v in c.verdicts %} <span class="fw-normal" title="{{ v.threshold }}"><span class="snapper-chip" style="background:{{ v.chip.color }}">{{ v.chip.value }}</span> {{ v.name }}</span>{% endfor %}</th></tr></thead>
         <tbody>
         <tr><td><span data-curve="stopc_{{ c.segment }}_single" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>single copy</td><td class="text-end">{{ c.single }}{% if c.single_old %} · {{ c.single_old }} older than the warning age{% endif %}</td></tr>
         <tr><td><span data-curve="stopc_{{ c.segment }}_two_plus" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>two or more copies</td><td class="text-end">{{ c.two_plus }}</td></tr>
         <tr><td>disk only · tape only · disk and tape</td><td class="text-end">{{ c.disk_only }} · {{ c.tape_only }} · {{ c.disk_and_tape }}</td></tr>
         <tr><td><span data-curve="stopa_{{ c.segment }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>archival backlog</td><td class="text-end">{{ c.archival_tb|default_if_none:"—" }} TB</td></tr>
-        </tbody>
-      </table>
-      <table class="table table-sm table-bordered w-auto mb-1">
-        <tbody>
         <tr><td><span data-curve="stopq_{{ c.segment }}_unattached" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>unattached files</td><td class="text-end">{{ c.unattached }}</td></tr>
         <tr><td><span data-curve="stopq_{{ c.segment }}_no_events" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>files without an event count</td><td class="text-end">{{ c.no_events }}</td></tr>
         <tr><td>datasets open · partial · quiet · stalled</td><td class="text-end">{{ c.datasets.open|default_if_none:"0" }} · {{ c.datasets.partial_anywhere|default_if_none:"0" }} · {{ c.datasets.quiet_open|default_if_none:"0" }} · {{ c.datasets.stalled|default_if_none:"0" }}</td></tr>
@@ -484,8 +479,11 @@
         </tbody>
       </table>
       {% if c.latency %}
-      <table class="table table-sm table-bordered w-auto mb-1">
-        <thead><tr><th>Latency in the interval</th><th class="text-end">n</th><th class="text-end">Median h</th><th class="text-end">90th h</th></tr></thead>
+      <table class="table table-sm table-bordered table-striped w-auto mb-0">
+        <thead>
+          <tr class="table-secondary"><th colspan="4">Latency in the interval · {{ c.name }}</th></tr>
+          <tr><th>Kind</th><th class="text-end">n</th><th class="text-end">Median h</th><th class="text-end">90th h</th></tr>
+        </thead>
         <tbody>
         {% for l in c.latency %}
         <tr><td>{{ l.kind }}</td><td class="text-end">{{ l.n|default_if_none:"—" }}</td><td class="text-end">{{ l.median_h|default_if_none:"—" }}</td><td class="text-end">{{ l.p90_h|default_if_none:"—" }}</td></tr>
@@ -495,13 +493,13 @@
       {% endif %}
     </div>
     {% endfor %}
-    <div class="mb-1"><strong>Exception heads</strong> <span class="text-muted small">the record's bounded heads, oldest first; the full lists are on the <a href="{{ card.scope.urls.ghosts }}">Storage exceptions</a> page</span></div>
-    <div class="d-flex flex-wrap column-gap-4 row-gap-2 align-items-start">
-      <div>
-        <div class="mb-1"><a href="{{ card.scope.urls.ghosts }}">Ghosts</a>{% if card.scope.overflow.ghosts %} <span class="text-muted small">and {{ card.scope.overflow.ghosts }} more</span>{% endif %}</div>
-        <div class="snapper-scrollpane" style="max-height:22em; overflow:auto;">
-        <table class="table table-sm table-bordered w-auto mb-1">
-          <thead><tr><th>Dataset</th><th>File</th><th>RSE</th><th>State</th><th>Campaign</th><th class="text-end">MB</th><th>Registered</th></tr></thead>
+    <div class="d-flex flex-wrap column-gap-4 row-gap-3 align-items-start">
+      <div class="snapper-scrollpane" style="max-height:24em; overflow:auto;">
+        <table class="table table-sm table-bordered table-striped w-auto mb-0">
+          <thead>
+            <tr class="table-secondary"><th colspan="7"><a href="{{ card.scope.urls.ghosts }}">Ghosts</a> · the record's oldest{% if card.scope.overflow.ghosts %} and {{ card.scope.overflow.ghosts }} more{% endif %} · full list on the Storage exceptions page</th></tr>
+            <tr><th>Dataset</th><th>File</th><th>RSE</th><th>State</th><th>Campaign</th><th class="text-end">MB</th><th>Registered</th></tr>
+          </thead>
           <tbody>
           {% for g in card.scope.ghosts %}
           <tr><td style="overflow-wrap:anywhere;"><a href="{{ g.url }}">{{ g.dataset }}</a></td><td class="small" style="overflow-wrap:anywhere;">{{ g.file }}</td><td>{{ g.rse }}</td><td>{{ g.state }}</td><td>{{ g.campaign }}</td><td class="text-end">{{ g.mb }}</td><td class="text-nowrap">{{ g.created|fmt_dt }}</td></tr>
@@ -510,13 +508,13 @@
           {% endfor %}
           </tbody>
         </table>
-        </div>
       </div>
-      <div>
-        <div class="mb-1"><a href="{{ card.scope.urls.stuck_rules }}">Stuck rules</a>{% if card.scope.overflow.stuck_rules %} <span class="text-muted small">and {{ card.scope.overflow.stuck_rules }} more</span>{% endif %}</div>
-        <div class="snapper-scrollpane" style="max-height:22em; overflow:auto;">
-        <table class="table table-sm table-bordered w-auto mb-1">
-          <thead><tr><th>Dataset</th><th>RSE</th><th>Stuck since</th><th class="text-end">Stuck locks</th></tr></thead>
+      <div class="snapper-scrollpane" style="max-height:24em; overflow:auto;">
+        <table class="table table-sm table-bordered table-striped w-auto mb-0">
+          <thead>
+            <tr class="table-secondary"><th colspan="4"><a href="{{ card.scope.urls.stuck_rules }}">Stuck rules</a> · the record's oldest{% if card.scope.overflow.stuck_rules %} and {{ card.scope.overflow.stuck_rules }} more{% endif %}</th></tr>
+            <tr><th>Dataset</th><th>RSE</th><th>Stuck since</th><th class="text-end">Stuck locks</th></tr>
+          </thead>
           <tbody>
           {% for r in card.scope.stuck %}
           <tr><td style="overflow-wrap:anywhere;"><a href="{{ r.url }}">{{ r.dataset }}</a></td><td>{{ r.rse }}</td><td class="text-nowrap">{{ r.stuck_at|fmt_dt }}</td><td class="text-end">{{ r.locks }}</td></tr>
@@ -525,13 +523,13 @@
           {% endfor %}
           </tbody>
         </table>
-        </div>
       </div>
-      <div>
-        <div class="mb-1"><a href="{{ card.scope.urls.stalled_datasets }}">Stalled datasets</a>{% if card.scope.overflow.stalled_datasets %} <span class="text-muted small">and {{ card.scope.overflow.stalled_datasets }} more</span>{% endif %}</div>
-        <div class="snapper-scrollpane" style="max-height:22em; overflow:auto;">
-        <table class="table table-sm table-bordered w-auto mb-1">
-          <thead><tr><th>Dataset</th><th>Campaign</th><th>Last arrival</th></tr></thead>
+      <div class="snapper-scrollpane" style="max-height:24em; overflow:auto;">
+        <table class="table table-sm table-bordered table-striped w-auto mb-0">
+          <thead>
+            <tr class="table-secondary"><th colspan="3"><a href="{{ card.scope.urls.stalled_datasets }}">Stalled datasets</a>{% if card.scope.overflow.stalled_datasets %} · and {{ card.scope.overflow.stalled_datasets }} more{% endif %}</th></tr>
+            <tr><th>Dataset</th><th>Campaign</th><th>Last arrival</th></tr>
+          </thead>
           <tbody>
           {% for r in card.scope.stalled %}
           <tr><td style="overflow-wrap:anywhere;"><a href="{{ r.url }}">{{ r.dataset }}</a></td><td>{{ r.campaign }}</td><td class="text-nowrap">{{ r.last_arrival|fmt_dt }}</td></tr>
@@ -540,7 +538,6 @@
           {% endfor %}
           </tbody>
         </table>
-        </div>
       </div>
     </div>
     {% endif %}
