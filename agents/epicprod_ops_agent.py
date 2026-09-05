@@ -137,6 +137,11 @@ FILE_EVENTS_TIMEOUT = int(os.environ.get("EPICPROD_FILE_EVENTS_TIMEOUT", "3600")
 
 DELIVERY_DAILY_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "delivery-daily-rebuild.py"
 DELIVERY_DAILY_TIMEOUT = int(os.environ.get("EPICPROD_DELIVERY_DAILY_TIMEOUT", "3600"))
+# A catalog_sync step that fails on a JLab Rucio authentication stall is run
+# once more after this wait, one wait per chain (2026-09-04: a stall of a
+# few minutes took out five steps in a row).
+RUCIO_STALL_RETRY_WAIT = int(os.environ.get("EPICPROD_RUCIO_STALL_RETRY_WAIT", "300"))
+RUCIO_STALL_MARKS = ('JLab Rucio auth failed', 'read operation timed out')
 
 # Discrete events reach feed consumers through notice routing
 # (swf-monitor docs/NOTICE_ROUTING.md): this agent only logs actions,
@@ -1307,23 +1312,61 @@ class EpicProdOpsAgent(BaseAgent):
             ('file_events_measure', self._do_file_events_measure),
             ('delivery_daily_rebuild', self._do_delivery_daily_rebuild),
         ]
-        failed = []
-        for name, step in steps:
-            try:
-                step(dict(m, created_by=created_by))
-            except Exception as e:
-                failed.append(name)
-                self.logger.error(f"PRODOPS catalog_sync step {name} raised: {e}")
+        failed, retried, raised = self._run_sync_chain(
+            steps, dict(m, created_by=created_by))
+        failed_names = [name for name, _ in failed]
         self._log_action(
             'catalog_sync', t0,
             outcome='ok' if not failed else 'error',
-            reason=('step(s) raised: ' + ', '.join(failed)) if failed else '',
+            reason=('; '.join(f'{name}: {why}' for name, why in failed)
+                    if failed else ''),
             username=created_by,
             sublevel='high', live_default=True,
             level=logging.INFO if not failed else logging.ERROR,
             summary=(f'all {len(steps)} sync steps completed'
-                     if not failed else ''),
-            steps=len(steps), raised=failed)
+                     if not failed else
+                     f'{len(steps) - len(failed)} of {len(steps)} sync steps '
+                     f'completed; failed: {", ".join(failed_names)}'),
+            steps=len(steps), failed=failed_names, retried=retried,
+            raised=raised)
+
+    def _run_sync_chain(self, steps, msg):
+        """Run the chain's steps in order. A step's outcome is the action
+        record it logged last; a step that raises is an error. The first
+        step to fail on a JLab Rucio authentication stall is run once more
+        after RUCIO_STALL_RETRY_WAIT, one wait per chain; later steps that
+        still find the catalog unresponsive fail without waiting. Returns
+        ([(step, why)...] failed, [step...] retried, [step...] raised)."""
+        failed, retried, raised = [], [], []
+        stall_waited = False
+        for name, step in steps:
+            outcome, reason = self._run_sync_step(name, step, msg, raised)
+            if (outcome not in ('ok', 'warning', 'skipped') and not stall_waited
+                    and any(mark in reason for mark in RUCIO_STALL_MARKS)):
+                stall_waited = True
+                self.logger.warning(
+                    f"PRODOPS catalog_sync: {name} hit a JLab Rucio stall "
+                    f"({reason}); waiting {RUCIO_STALL_RETRY_WAIT}s and "
+                    f"running it once more")
+                time.sleep(RUCIO_STALL_RETRY_WAIT)
+                retried.append(name)
+                outcome, reason = self._run_sync_step(name, step, msg, raised)
+            if outcome not in ('ok', 'warning', 'skipped'):
+                failed.append((name, f'{outcome}' + (f' ({reason})' if reason else '')))
+        return failed, retried, raised
+
+    def _run_sync_step(self, name, step, msg, raised):
+        """One chain step; returns (outcome, reason) from the action record
+        the step logged last, or ('error', ...) when it raised."""
+        self._last_action = {}
+        try:
+            step(msg)
+        except Exception as e:
+            raised.append(name)
+            self.logger.error(f"PRODOPS catalog_sync step {name} raised: {e}")
+            return 'error', f'raised: {str(e)[:200]}'
+        last = self._last_action or {}
+        return str(last.get('outcome') or 'ok'), str(last.get('reason') or '')[:200]
 
     def _handle_panda_sandbox_keepalive(self, m):
         """Keep retryable tasks' sandbox tarballs alive in the PanDA server
@@ -2194,6 +2237,10 @@ class EpicProdOpsAgent(BaseAgent):
             'sublevel': str(sublevel),
             'live_default': bool(live_default),
         }
+        # The chain runner reads a step's outcome from the record the step
+        # logged last, so a step needs no return contract.
+        self._last_action = {'action': str(action), 'outcome': str(outcome),
+                             'reason': str(reason or '')}
         if subject_type:
             extra['subject_type'] = str(subject_type)
         if subject_key:
