@@ -540,11 +540,41 @@ def _platform_series_transform(series):
     return series
 
 
+def _storage_series_transform(series):
+    """Derive the ghost yield per RSE (docs/SNAPPER_STORAGE.md) from the
+    projected flows: ghosts appeared over registrations, first copies
+    arrived plus ghosts appeared, per bin; absent where nothing was
+    registered in the bin. Both inputs are counter-flow projections on
+    the same bin ladder, so stamps align."""
+    curves = series.get('curves') or {}
+    for curve_id in [c for c in curves
+                     if c.startswith('stoxe_') and c.endswith('_appeared')]:
+        rse = curve_id[len('stoxe_'):-len('_appeared')]
+        first = curves.get(f'stofa_{rse}_first')
+        if not first:
+            continue
+        appeared = {point[0]: point[1] for point in curves[curve_id].get('points') or []}
+        points = []
+        for stamp, arrived in first.get('points') or []:
+            ghosts = appeared.get(stamp)
+            if ghosts is None:
+                continue
+            total = float(arrived or 0) + float(ghosts or 0)
+            if total > 0:
+                points.append([stamp, round(float(ghosts or 0) / total, 3)])
+        if points:
+            curves[f'stoxy_{rse}_yield'] = {
+                'label': _STORAGE_MEMBER_LABELS['yield'], 'points': points}
+    series['curves'] = curves
+    return series
+
+
 def _epicprod_series_transform(series):
     """Rank and fold queue curves using the series already assembled."""
     from datetime import datetime
 
     series = _platform_series_transform(series)
+    series = _storage_series_transform(series)
     curves = series.get('curves') or {}
     queue_curves = {
         curve_id: curve for curve_id, curve in curves.items()
@@ -1857,6 +1887,7 @@ _STORAGE_MEMBER_COLORS = {
     'open': '#1565c0', 'partial_anywhere': '#f9a825',
     'quiet_open': '#8a8a8a', 'stalled': '#c62828',
     'arrived': '#1565c0', 'archived': '#78909c',
+    'yield': '#c62828',
 }
 _STORAGE_PALETTE_CODES = frozenset(
     ('fm', 'bm', 'fc', 'bc', 'fh', 'fo', 'bo', 'fr', 'br', 'pa', 'pl'))
@@ -1875,6 +1906,7 @@ _STORAGE_MEMBER_LABELS = {
     'open': 'open', 'partial_anywhere': 'partial somewhere',
     'quiet_open': 'quiet and open', 'stalled': 'stalled',
     'arrived': 'arrived', 'archived': 'archived',
+    'yield': 'ghost yield',
 }
 
 
@@ -1922,6 +1954,7 @@ def _storage_rse_families(rse, quantity, lens):
             (f'Storage ghosts {rse} files {lens}' if quantity == 'files'
              else f'Storage ghosts {rse} bytes'),
             f'Storage ghost flow {rse}',
+            f'Storage ghost yield {rse}',
             f'Storage inventory {rse} {quantity} {lens}',
             f'Storage locks {rse}',
             f'Storage capacity {rse} {quantity}']
@@ -1961,8 +1994,8 @@ def _storage_groups():
                 'title': f'Arrivals · {rse}',
                 'prefixes': [f'sto{q}a_{rse}_'], 'ids': [],
                 'order': [f'sto{q}a_{rse}_first', f'sto{q}a_{rse}_replica'],
-                # The option's activity curve is the files first-copy
-                # flow; under bytes counting it rides the cached series
+                # Under bytes counting the files first-copy flow, which
+                # the ghost yield divides by, rides the cached series
                 # without joining the display.
                 'extra_cache_prefixes': (
                     [f'stofa_{rse}_'] if quantity == 'bytes' else []),
@@ -2070,6 +2103,15 @@ def _storage_groups():
             'counter_flow': True, 'end_stamped': True, 'stacked': True,
             'panel_px': 110, 'units': 'files',
             'empty_note': 'No ghost movement in this window', **closed})
+        # Ghost yield: ghosts appeared over registrations (first copies
+        # arrived plus ghosts appeared) per bin, derived at series time
+        # from the two projected flows (_storage_series_transform).
+        groups.append({
+            'name': f'Storage ghost yield {rse}',
+            'title': f'Ghost yield · {rse}',
+            'prefixes': [], 'ids': [f'stoxy_{rse}_yield'],
+            'panel_px': 110, 'units': 'ghosts / registrations',
+            'empty_note': 'No registrations in this window'})
         groups.append({
             'name': f'Storage locks {rse}',
             'title': f'Rule locks · {rse}',
@@ -2149,7 +2191,10 @@ def _storage_focus_view():
         floor = max(inventory['first'], timezone.now() - timedelta(days=30))
     options = [
         {'value': rse, 'label': rse,
-         'activity': f'stofa_{rse}_first',
+         # Presentation follows holdings, the files on the RSE, so an
+         # RSE with data lands open whatever the window's arrivals; an
+         # RSE holding nothing is the idle one.
+         'activity': f'stofu_{rse}_files',
          'families_by': {
              f"{quantity['value']}|{lens['value']}": _storage_rse_families(
                  rse, quantity['value'], lens['value'])
@@ -2172,7 +2217,7 @@ def _storage_focus_view():
         'param': 'rse',
         'label': 'Storage',
         'selector_label': 'RSE display',
-        'jump_label': 'RSEs by peak first-copy arrivals',
+        'jump_label': 'RSEs by files held',
         'cache_series': True,
         'components': ('storage',),
         'prewarm_series': False,
@@ -2183,7 +2228,7 @@ def _storage_focus_view():
                  'for the RSE\'s standing at that instant and the capacity '
                  'table across RSEs.'),
         'default': 'all',
-        'activity_label': 'first copies per bin',
+        'activity_label': 'files held',
         'selectors': [
             {'param': 'quantity', 'label': 'Counting',
              'default': 'files', 'choices': list(_STORAGE_QUANTITIES)},
@@ -3859,6 +3904,14 @@ def _storage_card(data, previous_data, ctx):
                 'tb': _tb(ghosts.get('bytes')),
                 'delta': cut_delta(ghosts.get('files'),
                                    (prev.get('ghosts') or {}).get('files')) or '',
+                # The size fingerprint: mean ghost size against the mean
+                # first copy arrived here, over the record's counters.
+                'mean_mb': (round(int(ghosts.get('bytes') or 0)
+                                  / int(ghosts['files']) / 1e6, 1)
+                            if ghosts.get('files') else None),
+                'arrived_mean_mb': (round(int(flow.get('first_copy_bytes') or 0)
+                                          / int(flow['first_copy_files']) / 1e6, 1)
+                                    if flow.get('first_copy_files') else None),
                 'by_state': [
                     {'state': _state_label(state),
                      'files': _fmt_num(int(count or 0)),

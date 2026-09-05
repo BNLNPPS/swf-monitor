@@ -76,10 +76,12 @@ jump list, and the RSE's detail docked beneath its own panels.
 **Parameters**, in conformance with the Site and Campaign views:
 
 - focus `rse`: one option per recorded RSE, default all. With several
-  shown, presentation follows the peak first-copy arrival rate over
-  the window: RSEs ordered by that peak, idle RSEs last in
-  alphabetical order with their sections closed, and a jump list
-  under the tick row in the same order with each peak in brackets.
+  shown, presentation follows holdings, the files on the RSE over the
+  window: RSEs ordered by that peak, so an RSE with data lands open
+  whatever the window's arrivals; RSEs holding nothing are the idle
+  ones, last in alphabetical order with their sections closed; a jump
+  list under the tick row in the same order with each peak in
+  brackets.
   The log stores and the `none` pseudo-RSE are options like any other
   and sort by their own activity.
 - **Counting** selector: files or bytes. Bytes plot in TB; the panel
@@ -117,7 +119,10 @@ docked above its own panel.
    carries no ghosts by root, so under the root grouping the panel
    shows the total until the pass records it (see Record additions).
    Under bytes counting the total only. *Ghosts appeared and cleared*
-   follows: per-bin flows from the two counters.
+   follows: per-bin flows from the two counters. *Ghost yield* follows
+   that: ghosts appeared over registrations (first copies arrived plus
+   ghosts appeared) per bin, derived at series time, the upload
+   failure rate of the RSE read against its arrival rate.
 5. *Inventory* — files or bytes by replica state, stacked; under the
    campaign and root groupings, the per-campaign or per-root totals
    over all states.
@@ -175,8 +180,12 @@ own panels as the Site view docks its queue slice:
 - datasets: total, complete, partial, empty, unavailable;
 - the copying backlog: files and bytes, ages, the count over the
   threshold;
-- ghosts: files and bytes, by state, the oldest age, linking to the
-  Storage exceptions page filtered to the RSE;
+- ghosts: files and bytes, by state, the oldest age, the mean ghost
+  size against the mean first copy arrived at the RSE (the size
+  fingerprint of a large-file timeout), and the reading of the states
+  (a copying ghost is an upload that never completed, an unavailable
+  ghost a replica lost after arrival), linking to the Storage
+  exceptions page filtered to the RSE;
 - rule locks by state, the oldest stuck age, rules expiring within
   thirty days;
 - capacity: the account's usage, the limit, the quota left and the

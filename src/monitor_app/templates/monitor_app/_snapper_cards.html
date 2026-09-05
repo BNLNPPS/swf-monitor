@@ -404,15 +404,17 @@
           </tbody>
         </table>
         <div class="mb-1"><strong><a href="{{ s.ghosts.url }}">Ghosts</a></strong> <span class="text-muted small">registered, no available replica anywhere</span></div>
-        <table class="table table-sm table-bordered w-auto mb-2">
+        <table class="table table-sm table-bordered w-auto mb-1">
           <tbody>
           <tr><td>total</td><td class="text-end">{{ s.ghosts.files }} files{% if s.ghosts.delta %} ({{ s.ghosts.delta }}){% endif %} · {{ s.ghosts.tb|default_if_none:"—" }} TB</td></tr>
           {% for g in s.ghosts.by_state %}
           <tr><td><span data-curve="{{ g.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>{{ g.state }}</td><td class="text-end">{{ g.files }}</td></tr>
           {% endfor %}
           <tr><td>oldest</td><td class="text-end">{% if s.ghosts.oldest_d is not None %}{{ s.ghosts.oldest_d }} d{% else %}—{% endif %}</td></tr>
+          <tr><td>mean size: ghosts · arrived first copies</td><td class="text-end">{% if s.ghosts.mean_mb is not None %}{{ s.ghosts.mean_mb }} MB{% else %}—{% endif %} · {% if s.ghosts.arrived_mean_mb is not None %}{{ s.ghosts.arrived_mean_mb }} MB{% else %}—{% endif %}</td></tr>
           </tbody>
         </table>
+        <div class="text-muted small mb-2" style="max-width:34em;">Copying ghosts are registrations whose upload never completed; unavailable ghosts lost their replica, or had it declared bad, after arrival. Ghosts larger than the arrived mean point at large-file timeouts; equal sizes point at the path, not the file.</div>
         <div class="mb-1"><strong><a href="{{ s.rules.url }}">Rules and locks</a></strong></div>
         <table class="table table-sm table-bordered w-auto mb-1">
           <tbody>
