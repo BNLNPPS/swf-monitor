@@ -26,6 +26,7 @@ store's last completed pass, for a pass whose publish step failed.
 import argparse
 import json
 import os
+import signal
 import sys
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -36,10 +37,18 @@ import django  # noqa: E402
 django.setup()
 
 from swf_epicprod.analytics.storage import (  # noqa: E402
-    PassInProgress, log, project_store, run_pass)
+    PassInProgress, log, mark_pass_interrupted, project_store, run_pass)
+
+
+def _on_signal(signum, frame):
+    raise KeyboardInterrupt(signal.Signals(signum).name)
 
 
 def main():
+    # A signal to the doer (a stop by hand, or systemd's stop timeout)
+    # ends the pass through the interrupted path below instead of killing
+    # the process with its pass row left as if still running.
+    signal.signal(signal.SIGTERM, _on_signal)
     parser = argparse.ArgumentParser()
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--census', action='store_true',
@@ -86,6 +95,16 @@ def main():
             print('SUMMARY ' + json.dumps({'mode': mode_name,
                                            'skipped': str(exc)}))
             return 4
+        except KeyboardInterrupt as exc:
+            # The pass row records the interruption and stays unfinished:
+            # the next pass redoes the interval and is not blocked once
+            # this process is gone (storage.py, run_pass).
+            pass_id = mark_pass_interrupted(str(exc) or 'interrupt')
+            log(f'pass {pass_id} interrupted: {exc}')
+            print('SUMMARY ' + json.dumps({'mode': mode_name,
+                                           'pass_id': pass_id,
+                                           'interrupted': str(exc)}))
+            return 143
     if args.dump:
         with open(args.dump, 'w') as handle:
             json.dump(data, handle, indent=1, sort_keys=True)

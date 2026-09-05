@@ -305,7 +305,7 @@ The deployment script automatically:
 12. **Syncs Apache vhost conf** — compares release's `apache-swf-monitor.conf` with live `/etc/httpd/conf.d/swf-monitor.conf`; if different, timestamped backup + install + `httpd -t` validates, rollback on failure
 13. **Reloads** Apache (`systemctl reload httpd`) so mod_wsgi processes pick up the new code and any validated configuration change
 14. **Restarts** the ASGI worker (`systemctl restart swf-monitor-mcp-asgi.service`) so uvicorn picks up new code
-15. **Restarts** the epicprod operations agent so its doers use the new release and environment
+15. **Restarts** the epicprod operations agent when it is idle; a working agent (or one whose state cannot be read) is signalled alone to step down, finishes its work in flight, and is restarted by systemd on the new release, the previous release staying on disk meanwhile
 16. **Health-checks** the deployment by hitting `/swf-monitor/api/`
 17. **Conditionally restarts** bots and the live publisher when their code changed relative to the previous release
 18. **Cleans up** old releases (keeps the last 5)

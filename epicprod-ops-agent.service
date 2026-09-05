@@ -20,6 +20,14 @@ EnvironmentFile=/opt/swf-monitor/config/env/production.env
 ExecStart=/opt/swf-monitor/current/.venv/bin/python /opt/swf-monitor/current/agents/epicprod_ops_agent.py
 Restart=always
 RestartSec=15
+# A stop or restart signals the agent alone (mixed): its doer subprocesses are
+# never signalled directly and finish under BaseAgent's drain, which exits when
+# no work is in flight. The stop timeout sits above the longest doer's own
+# timeout (the storage sweep, 3600 s), so a stop never kills a working doer
+# short of that. The deploy restarts an idle agent and asks a working one to
+# step down (systemctl kill --kill-who=main); systemd then restarts it.
+KillMode=mixed
+TimeoutStopSec=3900
 # Deliberate-shutdown back door: the agent exits 100 on a bus 'shutdown' (see
 # agents/epicprod_ops_agent.py). systemd must treat that as a clean, final stop,
 # not a failure to restart. Any other exit code is a crash and is restarted.
