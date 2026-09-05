@@ -661,9 +661,12 @@ def fulfil_ping(ping_id: str, *, by: str = '') -> Entry:
 
 
 def _origin_attrs(origin):
-    """Action-stream attributes of an origin: manual, or the AI proposal
-    that was approved (AI_PROPOSALS.md, origin-stamped events)."""
+    """Action-stream attributes of an origin: manual, the AI proposal that
+    was approved (AI_PROPOSALS.md, origin-stamped events), or the rule
+    that verified its own condition (PINGS.md, Lifecycle)."""
     origin = origin or {}
+    if origin.get('kind') == 'rule':
+        return {'origin': 'rule', 'proposer': origin.get('proposer', '')}
     if origin.get('kind') != 'ai_proposal':
         return {'origin': 'manual'}
     return {k: v for k, v in {

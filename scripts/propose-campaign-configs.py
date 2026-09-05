@@ -49,7 +49,7 @@ def main():
         'applied': bool(args.apply),
         'pings': result['pings'], 'remedies': result['remedies'],
         'withdrawn': result['withdrawn'],
-        'fulfil_proposed': result['fulfil_proposed'],
+        'fulfilled': result['fulfilled'], 'errors': result['errors'],
     }
     print('SUMMARY ' + json.dumps(summary))
     return 0

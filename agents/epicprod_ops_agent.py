@@ -1834,7 +1834,9 @@ class EpicProdOpsAgent(BaseAgent):
                 + (f": {', '.join(editions)}" if editions else '')
                 + f"; {len(pings)} new ping(s) proposed, "
                   f"{summary.get('withdrawn', 0)} withdrawn, "
-                  f"{len(summary.get('fulfil_proposed') or [])} fulfilment(s) proposed")
+                  f"{len(summary.get('fulfilled') or [])} open ping(s) fulfilled"
+                + (f", {len(summary['errors'])} fulfilment error(s)"
+                   if summary.get('errors') else ''))
         self.logger.info(f"PRODOPS campaign_config_propose done: {text}")
         self._log_action('campaign_config_propose', t0, outcome='ok',
                          summary=text, username=username, sublevel='low',

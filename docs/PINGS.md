@@ -52,9 +52,13 @@ every ping through the engine's ordinary tick:
 - **Fulfilled.** A person marks the ping fulfilled on the dashboard, or
   accepts an AI proposal to that effect. The module no longer yields it,
   and the engine clears the event on the next tick, the same auto-clear
-  every alarm has. Nothing observes fulfilment on its own: a renewed
-  certificate does not close a ping, a person does, and the next AI look
-  at the certificate proposes the closure if it is still open.
+  every alarm has. A condition the system cannot verify is closed by a
+  person: a renewed certificate does not close a ping, a person does,
+  and the next AI look at the certificate proposes the closure if it is
+  still open. A rule-based proposer that can verify its own condition
+  fulfils its pings itself, origin the rule: the campaign configuration
+  proposer fulfils an open configuration ping once the configuration
+  exists, whoever created either.
 
 Severity is carried on the event (`data.severity`) and on the incident
 the transition logs, so subscribers filter on it: a Capcom feed at
@@ -122,7 +126,7 @@ its Fulfilled control: approving the remedy fulfils the ping, Fulfilled
 records that a person did the work by hand. The heartbeat withdraws and
 re-derives both proposals while the condition holds; when it no longer
 holds, neither returns, and an open ping whose condition was met by hand
-gets a fulfilment proposal.
+is fulfilled by the proposer's next run, origin the rule.
 
 The first such proposer is the **campaign configuration** rule: every
 campaign edition that has tasks and no `<edition> Standard
