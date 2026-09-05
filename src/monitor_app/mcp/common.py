@@ -285,6 +285,11 @@ def get_available_tools_list() -> list:
             "parameters": ["campaign", "window_days", "targets_only"],
         },
         {
+            "name": "epicprod_storage",
+            "description": "Storage record exception listings from the storage pass's store: ghosts (registered files with no available replica, with the by-RSE account), stuck rules, stalled datasets; filtered by RSE and campaign, paged, with the pass the record reaches.",
+            "parameters": ["listing", "rse", "campaign", "state", "limit", "offset"],
+        },
+        {
             "name": "ai_list_proposals",
             "description": "List AI proposals awaiting human decision (default) or by status. Show the returned display text to the human verbatim; each line starts with the proposal ref (e.g. cp-12).",
             "parameters": ["status", "limit"],

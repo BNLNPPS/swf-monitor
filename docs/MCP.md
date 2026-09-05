@@ -115,6 +115,7 @@ The full tool catalog is in [MCP tool reference](MCP_TOOL_REFERENCE.md).
 | AI Proposals | `ai_list_proposals`, `ai_decide_proposal` | 2 |
 | Campaign Status | `epicprod_campaign_status` | 1 |
 | Action Stream | `epicprod_list_actions` | 1 |
+| Storage Record | `epicprod_storage` | 1 |
 | Snapper State History | `snapper_latest`, `snapper_state_at`, `snapper_component_history`, `snapper_changes_between`, `snapper_context_around`, `snapper_series`, `snapper_cut_summary` | 7 |
 | PCS Tags | `pcs_list_tags`, `pcs_get_tag`, `pcs_search_tags` | 3 |
 | PCS Datasets and Prod Tasks | `pcs_dataset_list`, `pcs_dataset_get`, `pcs_dataset_intake`, `pcs_prodtask_list`, `pcs_prodtask_get`, `pcs_prodtask_artifact`, `pcs_prodtask_intake`, `pcs_prodtask_link_input`, `pcs_prodtask_set_status` | 9 |

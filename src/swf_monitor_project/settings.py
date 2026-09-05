@@ -380,6 +380,7 @@ COMMON QUERIES:
 - What is PCS? → PCS = Physics Configuration System, manages configuration of production tasks based on physics inputs
 - List physics tags? → pcs_list_tags(tag_type='p')
 - What is tag p1001? → pcs_get_tag(tag_label='p1001')
+- Ghost DIDs by RSE, stuck rules, stalled datasets? → epicprod_storage(listing='ghosts', rse='ASGC-XRD') — the storage record's store; never scan Rucio for these
 - Reco tags? → pcs_list_tags(tag_type='r')
 - Photoproduction tags? → pcs_search_tags(query='photoproduction')
 - DIS tags? → pcs_list_tags(tag_type='p', category='DIS')
