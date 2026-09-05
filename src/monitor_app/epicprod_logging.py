@@ -90,6 +90,13 @@ ACTION_DEFAULTS = {
                        "an approved standard_config proposal, the remedy of "
                        "a campaign configuration ping.",
     },
+    'prodtask_adopt': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Move a name-matched legacy task into PCS: its latest "
+                       "PanDA try recorded as the submission and the edition's "
+                       "Standard Production configuration bound, so the retry "
+                       "family applies. Nothing is submitted.",
+    },
     # ops agent
     'task_submit': {
         'sublevel': 'high', 'live': True,
