@@ -168,12 +168,17 @@ propagation pilot is the worked example of each item.
   remedies. Precondition: no configuration of that name exists (the
   proposal is stale once one does). Executor
   `pcs.services.standard_prodconfig_create`, the identical call the
-  `create_standard_prodconfig.py` script makes, which logs one
-  origin-stamped `standard_prodconfig_create` event and, when the linked
-  ping is open, marks it fulfilled through `ping_fulfil_execute` with the
-  same origin. Dry-runnable: the payload's values are the preview. Review
-  surface: the remedy's row beside its ping in the Pings section, with
-  approve and deny, and the proposals page. Proposer:
+  `create_standard_prodconfig.py` script makes: it creates the
+  configuration, marks the linked open ping fulfilled through
+  `ping_fulfil_execute` with the same origin, and logs one origin-stamped
+  `standard_prodconfig_create` event carrying what it fulfilled. The
+  decide path treats the remedy and its ping proposal as one item:
+  approval first executes a still-pending ping proposal with the linked
+  title, so the remedy fulfils the ping it just entered; denial denies
+  both; a remedy stale because the configuration exists makes the ping
+  proposal stale with it. Dry-runnable: the payload's values are the
+  preview. Review surface: one row in the Pings section with approve and
+  deny, and the proposals page. Proposer:
   `campaign-config`, rule-based, comments wholly code-filled.
   Reversibility: mitigable, a configuration created in error is deleted
   while no task is bound to it.

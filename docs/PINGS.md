@@ -111,14 +111,18 @@ each one, with the date editable.
 Some obligations the system can carry out itself once a person agrees.
 For those the proposer emits two proposals at once: the ping, and a
 remedy, a proposal in the obligation's own category whose executor does
-the work and, on success, marks the ping fulfilled in the same act with
-the same origin. The remedy proposal carries the ping's title as its
-link; the Pings section shows the remedy beside the ping with approve
-and deny, so the reviewer's one tap both fixes the condition and closes
-the obligation. Denying the remedy leaves the ping standing for a person
-to fulfil by hand; denying the ping leaves the remedy, which then closes
-nothing. The heartbeat withdraws and re-derives both while the condition
-holds; when it no longer holds, neither returns.
+the work. The remedy carries the ping's title as its link, and the Pings
+section shows the pair as one item with one decision. Approve runs the
+remedy: the ping is entered and marked fulfilled in the same act, both
+proposals are executed, and the fulfilled history records the obligation
+as raised and met by the remedy. Deny denies both; neither is re-proposed
+until the finding changes. A ping already open when its remedy is
+proposed (entered by hand, or accepted earlier) shows the remedy beside
+its Fulfilled control: approving the remedy fulfils the ping, Fulfilled
+records that a person did the work by hand. The heartbeat withdraws and
+re-derives both proposals while the condition holds; when it no longer
+holds, neither returns, and an open ping whose condition was met by hand
+gets a fulfilment proposal.
 
 The first such proposer is the **campaign configuration** rule: every
 campaign edition that has tasks and no `<edition> Standard
@@ -189,4 +193,7 @@ two pings raised on the engine's tick. Step 2 was completed the same day:
 the `ping` and `ping_fulfil` proposal categories, the `ai_propose_ping`
 MCP tool, and the proposal rows on the dashboard with an editable due
 date; the first two pings were re-issued as proposals for acceptance.
-Steps 3 and 4 are not started.
+Step 3 began 2026-09-05 with the campaign configuration proposer in
+production: its first run proposed the pings and remedies for 26.07.1 and
+26.07.2, approved the same day. The credential and certificate proposers
+and step 4 are not started.

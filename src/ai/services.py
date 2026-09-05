@@ -616,38 +616,82 @@ def propose_standard_configs(items, *, proposer='', batch_id='',
             'invalid': invalid}
 
 
+def _mark_decided(row, status, decided_by, now, quality=None, log_id=None):
+    row.status = status
+    row.decided_by = decided_by
+    row.decided_at = now
+    fields = ['status', 'decided_by', 'decided_at']
+    if status in ('denied', 'executed'):
+        row.quality = quality
+        fields.append('quality')
+    if log_id is not None:
+        row.executed_log_id = log_id
+        fields.append('executed_log_id')
+    row.save(update_fields=fields)
+
+
 def _decide_standard_configs(rows, decision, decided_by, quality, now):
-    """Decide pending standard_config proposals: stale once the
-    configuration exists; approval runs the executor, which creates the
-    configuration and fulfils the linked ping in one origin-stamped act."""
+    """Decide pending standard_config proposals, each one item with the
+    ping proposal it remedies (PINGS.md, Pings with a remedy): stale once
+    the configuration exists, the ping proposal stale with it; denial
+    denies both; approval first enters a still-pending ping proposal, then
+    runs the executor, which creates the configuration and fulfils that
+    ping in one origin-stamped act, so the fulfilled history records the
+    obligation as raised and met whichever way the reviewer came to it."""
+    from monitor_app import alarms_data
     from pcs.models import ProdConfig
 
     stale, denied, approved = [], [], []
     for row in rows:
         with transaction.atomic():
             payload = dict(row.payload or {})
+            ping_title = (payload.get('ping_title') or '').strip()
+            linked = None
+            if ping_title:
+                linked = Proposal.objects.filter(
+                    action='ping', status='proposed',
+                    subject_key=_ping_subject_key(ping_title)).first()
             if ProdConfig.objects.filter(name=row.subject_key).exists():
-                row.status = 'stale'
-                row.decided_by = decided_by
-                row.decided_at = now
-                row.save(update_fields=['status', 'decided_by', 'decided_at'])
-                stale.append(row.ref)
+                for r in (row, linked):
+                    if r is not None:
+                        _mark_decided(r, 'stale', decided_by, now)
+                        stale.append(r.ref)
                 continue
             if decision == 'deny':
-                row.status = 'denied'
-                row.quality = quality
-                row.decided_by = decided_by
-                row.decided_at = now
-                row.save(update_fields=['status', 'quality', 'decided_by',
-                                        'decided_at'])
-                denied.append(row.ref)
+                for r in (row, linked):
+                    if r is not None:
+                        _mark_decided(r, 'denied', decided_by, now, quality)
+                        denied.append(r.ref)
                 continue
+            if linked is not None:
+                if alarms_data.open_ping_with_title(ping_title) is None:
+                    # Enter the obligation first, so the remedy fulfils it
+                    # and the fulfilled history records it raised and met.
+                    ping_origin = {
+                        'kind': 'ai_proposal', 'ref': linked.ref,
+                        'proposer': linked.proposer,
+                        'batch_id': linked.batch_id,
+                        'proposed_at': linked.created_at.isoformat()}
+                    try:
+                        _entry, ping_log_id = alarms_data.ping_create_execute(
+                            dict(linked.payload or {}), changed_by=decided_by,
+                            origin=ping_origin)
+                    except alarms_data.PingError as e:
+                        raise ServiceError(f'{linked.ref}: {e}')
+                    _mark_decided(linked, 'executed', decided_by, now,
+                                  quality, ping_log_id)
+                    approved.append(linked.ref)
+                else:
+                    # An open ping with the title already exists; the
+                    # proposal is stale, as its own decide path would find.
+                    _mark_decided(linked, 'stale', decided_by, now)
+                    stale.append(linked.ref)
             origin = {'kind': 'ai_proposal', 'ref': row.ref,
                       'proposer': row.proposer, 'batch_id': row.batch_id,
                       'proposed_at': row.created_at.isoformat()}
             result = standard_prodconfig_create(
                 payload.get('edition'), changed_by=decided_by, origin=origin,
-                ping_title=payload.get('ping_title') or '')
+                ping_title=ping_title)
             row.status = 'executed'
             row.quality = quality
             row.decided_by = decided_by

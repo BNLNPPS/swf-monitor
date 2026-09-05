@@ -238,19 +238,25 @@
             </thead>
             <tbody>
                 {% for pr in ping_proposals %}
-                <tr class="ping-proposal" data-proposal-id="{{ pr.id }}" data-orig-due="{{ pr.due }}" style="background-color: var(--ai-bg);">
-                    <td>{% if pr.url %}<a href="{{ pr.url }}" target="_blank" rel="noopener">{{ pr.title }}</a>{% else %}{{ pr.title }}{% endif %}{% if pr.note %}<div class="text-muted" style="font-size:0.9em;">{{ pr.note|truncatechars:200 }}</div>{% endif %}<div class="ai-attr-text" style="font-size:0.85em; display:inline-block; padding:1px 6px; border-radius:3px; margin-top:2px;">AI proposal {{ pr.ref }}: {{ pr.comment }}</div>{% if pr.remedy %}<div class="ai-attr-text" style="font-size:0.85em; padding:2px 6px; border-radius:3px; margin-top:4px;" data-proposal-id="{{ pr.remedy.id }}"><span>Remedy {{ pr.remedy.ref }}: {{ pr.remedy.label }} ({{ pr.remedy.detail }}); approving it also fulfils this ping.</span>
-                      <button type="button" class="btn btn-success btn-sm ping-proposal-decide ms-2" data-decision="approve" {% if not user.is_authenticated %}disabled{% endif %} title="{% if user.is_authenticated %}Create the configuration now and fulfil the obligation{% else %}Sign in to approve{% endif %}">Approve remedy</button>
-                      <button type="button" class="btn btn-secondary btn-sm ping-proposal-decide" data-decision="deny" {% if not user.is_authenticated %}disabled{% endif %} title="Deny the remedy; the ping stands for a person to fulfil">Deny</button></div>{% endif %}</td>
-                    <td style="white-space:nowrap;"><input type="date" class="form-control form-control-sm ping-proposal-due" value="{{ pr.due }}" style="width:11em; display:inline-block;" title="Editable before acceptance; the amended date is recorded with the decision" {% if not user.is_authenticated %}disabled{% endif %}></td>
-                    <td class="text-end"><input type="number" step="1" class="form-control form-control-sm ping-proposal-days" value="{{ pr.days_left|default_if_none:'' }}" data-today="{{ ping_today }}" style="width:5.5em; display:inline-block; text-align:right;" title="Editable before acceptance; moves the due date" {% if not user.is_authenticated %}disabled{% endif %}></td>
+                {# A ping with a remedy is one item with one decision: the row decides the remedy, and the ping follows (PINGS.md, Pings with a remedy). #}
+                <tr class="ping-proposal" data-proposal-id="{% if pr.remedy %}{{ pr.remedy.id }}{% else %}{{ pr.id }}{% endif %}" data-orig-due="{{ pr.due }}" style="background-color: var(--ai-bg);">
+                    <td>{% if pr.url %}<a href="{{ pr.url }}" target="_blank" rel="noopener">{{ pr.title }}</a>{% else %}{{ pr.title }}{% endif %}{% if pr.note %}<div class="text-muted" style="font-size:0.9em;">{{ pr.note|truncatechars:200 }}</div>{% endif %}<div class="ai-attr-text" style="font-size:0.85em; display:inline-block; padding:1px 6px; border-radius:3px; margin-top:2px;">AI proposal {{ pr.ref }}: {{ pr.comment }}{% if pr.remedy %} Remedy {{ pr.remedy.ref }}: {{ pr.remedy.label }} ({{ pr.remedy.detail }}). Approve creates it now and records the obligation as raised and met.{% endif %}</div></td>
+                    <td style="white-space:nowrap;">{% if pr.remedy %}{{ pr.due }}{% else %}<input type="date" class="form-control form-control-sm ping-proposal-due" value="{{ pr.due }}" style="width:11em; display:inline-block;" title="Editable before acceptance; the amended date is recorded with the decision" {% if not user.is_authenticated %}disabled{% endif %}>{% endif %}</td>
+                    <td class="text-end">{% if pr.remedy %}{{ pr.days_left|default_if_none:'—' }}{% else %}<input type="number" step="1" class="form-control form-control-sm ping-proposal-days" value="{{ pr.days_left|default_if_none:'' }}" data-today="{{ ping_today }}" style="width:5.5em; display:inline-block; text-align:right;" title="Editable before acceptance; moves the due date" {% if not user.is_authenticated %}disabled{% endif %}>{% endif %}</td>
                     <td class="ai-fill" style="white-space:nowrap; color: var(--ai-fg); font-weight:600;">proposed</td>
-                    <td>{{ pr.owner|default:'—' }}<div class="text-muted" style="font-size:0.85em;">AI proposal {{ pr.ref }} by {{ pr.proposer|default:'?' }}</div></td>
+                    <td>{{ pr.owner|default:'—' }}<div class="text-muted" style="font-size:0.85em;">AI proposal {{ pr.ref }}{% if pr.remedy %} and remedy {{ pr.remedy.ref }}{% endif %} by {{ pr.proposer|default:'?' }}</div></td>
                     <td style="white-space:nowrap;">
+                      {% if pr.remedy %}
+                      <button type="button" class="btn btn-success btn-sm ping-proposal-decide" data-decision="approve" {% if not user.is_authenticated %}disabled{% endif %}
+                              title="{% if user.is_authenticated %}Create the configuration now; the obligation is recorded as raised and met{% else %}Sign in to approve{% endif %}">Approve</button>
+                      <button type="button" class="btn btn-secondary btn-sm ping-proposal-decide" data-decision="deny" {% if not user.is_authenticated %}disabled{% endif %}
+                              title="{% if user.is_authenticated %}Deny the remedy and the ping; neither is re-proposed until the finding changes{% else %}Sign in to deny{% endif %}">Deny</button>
+                      {% else %}
                       <button type="button" class="btn btn-success btn-sm ping-proposal-decide" data-decision="approve" {% if not user.is_authenticated %}disabled{% endif %}
                               title="{% if user.is_authenticated %}Accept the proposal and enter the ping with the date shown{% else %}Sign in to accept{% endif %}">Approve</button>
                       <button type="button" class="btn btn-secondary btn-sm ping-proposal-decide" data-decision="deny" {% if not user.is_authenticated %}disabled{% endif %}
                               title="{% if user.is_authenticated %}Deny the proposal; it is not re-proposed until its inputs change{% else %}Sign in to deny{% endif %}">Deny</button>
+                      {% endif %}
                     </td>
                 </tr>
                 {% endfor %}
