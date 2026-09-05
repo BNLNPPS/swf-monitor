@@ -1693,8 +1693,8 @@ class EpicProdOpsAgent(BaseAgent):
 
     def _handle_storage_sweep(self, m):
         """Run the storage pass (swf-epicprod STORAGE.md): the nightly full
-        pass as a catalog_sync chain step, the hourly incremental pass by
-        cron enqueue; directly invokable with mode 'full' or 'incremental'."""
+        pass as a catalog_sync chain step, the four-hourly incremental pass
+        by cron enqueue; directly invokable with mode 'full' or 'incremental'."""
         self.run_in_background(
             self._do_storage_sweep, m,
             dedup_key="storage_sweep", label="storage_sweep")

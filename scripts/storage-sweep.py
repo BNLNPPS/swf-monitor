@@ -4,8 +4,8 @@ data on every JLab RSE, kept in the storage store and published as the
 epicprod ``storage`` Snapper component.
 
 The prod-ops agent's doer for the ``storage_sweep`` step (nightly in
-the ``catalog_sync`` chain as a full pass; hourly by cron enqueue as an
-incremental pass). Logic in ``swf_epicprod/analytics/storage.py``,
+the ``catalog_sync`` chain as a full pass; every four hours by cron
+enqueue as an incremental pass). Logic in ``swf_epicprod/analytics/storage.py``,
 publication in ``monitor_app/snapper_storage.py``; design in
 ``swf-epicprod/docs/STORAGE.md``. Django-bootstrap standalone script —
 also usable by hand.
@@ -91,7 +91,7 @@ def main():
                                      resume_pass=args.resume or None)
         except PassInProgress as exc:
             # Another pass holds the store, the census or a full pass still
-            # running when the hourly enqueue lands: skipped, not failed.
+            # running when the cron enqueue lands: skipped, not failed.
             print('SUMMARY ' + json.dumps({'mode': mode_name,
                                            'skipped': str(exc)}))
             return 4
