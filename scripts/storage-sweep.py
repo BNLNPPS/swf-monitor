@@ -16,9 +16,12 @@ Usage::
     source ../../swf-testbed/.venv/bin/activate && source ~/.env
     python ../scripts/storage-sweep.py [--census | --full] [--campaigns 26.07]
                                        [--limit-files N] [--limit-datasets N]
+                                       [--resume PASS_ID] [--publish-only]
                                        [--no-publish] [--dump projection.json]
 
 A run with a limit works on a copy of the store and never publishes.
+``--publish-only`` skips the crawl and publishes the projection of the
+store's last completed pass, for a pass whose publish step failed.
 """
 import argparse
 import json
@@ -32,7 +35,7 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'swf_monitor_project.settings')
 import django  # noqa: E402
 django.setup()
 
-from swf_epicprod.analytics.storage import run_pass  # noqa: E402
+from swf_epicprod.analytics.storage import project_store, run_pass  # noqa: E402
 
 
 def main():
@@ -42,6 +45,9 @@ def main():
                       help='every file under the production roots, once')
     mode.add_argument('--full', action='store_true',
                       help='every dataset; the target campaigns\' files')
+    mode.add_argument('--publish-only', action='store_true',
+                      help='no crawl: publish the projection of the store\'s '
+                           'last completed pass (after a failed publish)')
     parser.add_argument('--campaigns', default='',
                         help='comma-separated campaign families '
                              '(default: the delivery record\'s targets, or '
@@ -65,10 +71,13 @@ def main():
                       if c.strip()) or None
     validation = bool(args.limit_files or args.limit_datasets)
 
-    summary, data = run_pass(mode_name, campaigns=campaigns,
-                             limit_files=args.limit_files,
-                             limit_datasets=args.limit_datasets,
-                             resume_pass=args.resume or None)
+    if args.publish_only:
+        summary, data = project_store()
+    else:
+        summary, data = run_pass(mode_name, campaigns=campaigns,
+                                 limit_files=args.limit_files,
+                                 limit_datasets=args.limit_datasets,
+                                 resume_pass=args.resume or None)
     if args.dump:
         with open(args.dump, 'w') as handle:
             json.dump(data, handle, indent=1, sort_keys=True)
