@@ -137,6 +137,8 @@ FILE_EVENTS_TIMEOUT = int(os.environ.get("EPICPROD_FILE_EVENTS_TIMEOUT", "3600")
 
 DELIVERY_DAILY_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "delivery-daily-rebuild.py"
 DELIVERY_DAILY_TIMEOUT = int(os.environ.get("EPICPROD_DELIVERY_DAILY_TIMEOUT", "3600"))
+STORAGE_SWEEP_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "storage-sweep.py"
+STORAGE_SWEEP_TIMEOUT = int(os.environ.get("EPICPROD_STORAGE_SWEEP_TIMEOUT", "3600"))
 # A catalog_sync step that fails on a JLab Rucio authentication stall is run
 # once more after this wait, one wait per chain (2026-09-04: a stall of a
 # few minutes took out five steps in a row).
@@ -229,6 +231,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "capture_system_snap",
                    "rucio_arrivals_sweep", "epic_prod_past_import",
                    "file_events_measure", "delivery_daily_rebuild",
+                   "storage_sweep",
                    "assessment_completed",
                    "health_ping", "shutdown"}
 
@@ -1311,6 +1314,8 @@ class EpicProdOpsAgent(BaseAgent):
             ('campaign_progress_refresh', self._do_campaign_progress_refresh),
             ('file_events_measure', self._do_file_events_measure),
             ('delivery_daily_rebuild', self._do_delivery_daily_rebuild),
+            ('storage_sweep',
+             lambda msg: self._do_storage_sweep(dict(msg, mode='full'))),
         ]
         failed, retried, raised = self._run_sync_chain(
             steps, dict(m, created_by=created_by))
@@ -1675,6 +1680,92 @@ class EpicProdOpsAgent(BaseAgent):
         self.run_in_background(
             self._do_delivery_daily_rebuild, m,
             dedup_key="delivery_daily_rebuild", label="delivery_daily_rebuild")
+
+    def _handle_storage_sweep(self, m):
+        """Run the storage pass (swf-epicprod STORAGE.md): the nightly full
+        pass as a catalog_sync chain step, the hourly incremental pass by
+        cron enqueue; directly invokable with mode 'full' or 'incremental'."""
+        self.run_in_background(
+            self._do_storage_sweep, m,
+            dedup_key="storage_sweep", label="storage_sweep")
+
+    def _do_storage_sweep(self, m):
+        """One storage pass through the storage-sweep doer, which crawls
+        the JLab catalog into the storage store and publishes the storage
+        component. The doer exits 4 for a skipped pass, when another pass
+        holds the store (the census, or a full pass still running), and 3
+        for a pass that completed and published with read errors."""
+        mode = 'full' if str(m.get('mode') or '') == 'full' else 'incremental'
+        username = str(m.get('created_by') or '')
+        cmd = [sys.executable, str(STORAGE_SWEEP_SCRIPT),
+               "--created-by", str(m.get('created_by') or 'prodops_agent')]
+        if mode == 'full':
+            cmd.append("--full")
+        self.logger.info(f"PRODOPS storage_sweep: {mode} pass")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=STORAGE_SWEEP_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS storage_sweep TIMEOUT after {STORAGE_SWEEP_TIMEOUT}s")
+            self._log_action('storage_sweep', t0, outcome='timeout',
+                             reason=f'timed out after {STORAGE_SWEEP_TIMEOUT}s',
+                             username=username, mode=mode,
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  storage-sweep: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  storage-sweep: {line}")
+        summary = {}
+        for line in (p.stdout or "").splitlines():
+            if line.startswith('SUMMARY '):
+                try:
+                    summary = json.loads(line[len('SUMMARY '):])
+                except ValueError as e:
+                    self.logger.error(
+                        f"PRODOPS storage_sweep: bad SUMMARY line: {e}")
+        if p.returncode == 4:
+            reason = str(summary.get('skipped') or 'another pass holds the store')
+            self.logger.info(f"PRODOPS storage_sweep skipped: {reason}")
+            self._log_action('storage_sweep', t0, outcome='skipped',
+                             reason=reason, username=username, mode=mode,
+                             sublevel='low', live_default=False)
+            return
+        if p.returncode not in (0, 3):
+            reason = self._derive_reason(p)
+            self.logger.error(f"PRODOPS storage_sweep FAILED rc={p.returncode}")
+            self._log_action('storage_sweep', t0, outcome='error',
+                             reason=reason, username=username, mode=mode,
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        counts = {k: summary.get(k) for k in (
+            'pass_id', 'files_checked', 'datasets_checked', 'duration_s',
+            'errors', 'published', 'revision', 'content_changed')
+            if k in summary}
+        published = (f"published revision {summary.get('revision')}"
+                     if summary.get('published') else 'not published')
+        text = (f"{mode} pass {summary.get('pass_id')}: "
+                f"{int(summary.get('files_checked') or 0):,} files, "
+                f"{int(summary.get('datasets_checked') or 0):,} locations; "
+                f"{published}")
+        read_errors = int(summary.get('errors') or 0)
+        if read_errors:
+            self.logger.warning(
+                f"PRODOPS storage_sweep done with {read_errors} read errors")
+            self._log_action('storage_sweep', t0, outcome='warning',
+                             reason=f'{read_errors} catalog reads failed',
+                             summary=text, username=username, mode=mode,
+                             sublevel='low', live_default=False,
+                             level=logging.WARNING, **counts)
+        else:
+            self.logger.info("PRODOPS storage_sweep done")
+            self._log_action('storage_sweep', t0, outcome='ok', summary=text,
+                             username=username, mode=mode,
+                             sublevel='low', live_default=False, **counts)
 
     def _record_panda_operation_state(self, operation_id, status, *,
                                       diagnostic='', observed_status='',

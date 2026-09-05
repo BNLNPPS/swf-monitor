@@ -35,7 +35,8 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'swf_monitor_project.settings')
 import django  # noqa: E402
 django.setup()
 
-from swf_epicprod.analytics.storage import log, project_store, run_pass  # noqa: E402
+from swf_epicprod.analytics.storage import (  # noqa: E402
+    PassInProgress, log, project_store, run_pass)
 
 
 def main():
@@ -74,10 +75,17 @@ def main():
     if args.publish_only:
         summary, data = project_store()
     else:
-        summary, data = run_pass(mode_name, campaigns=campaigns,
-                                 limit_files=args.limit_files,
-                                 limit_datasets=args.limit_datasets,
-                                 resume_pass=args.resume or None)
+        try:
+            summary, data = run_pass(mode_name, campaigns=campaigns,
+                                     limit_files=args.limit_files,
+                                     limit_datasets=args.limit_datasets,
+                                     resume_pass=args.resume or None)
+        except PassInProgress as exc:
+            # Another pass holds the store, the census or a full pass still
+            # running when the hourly enqueue lands: skipped, not failed.
+            print('SUMMARY ' + json.dumps({'mode': mode_name,
+                                           'skipped': str(exc)}))
+            return 4
     if args.dump:
         with open(args.dump, 'w') as handle:
             json.dump(data, handle, indent=1, sort_keys=True)
