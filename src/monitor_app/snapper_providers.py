@@ -1720,8 +1720,8 @@ _STORAGE_ROOT_ORDER = ('RECO', 'FULL', 'EVGEN')
 _STORAGE_LENSES = ({'value': 'campaign', 'label': 'campaign'},
                    {'value': 'state', 'label': 'replica state'},
                    {'value': 'root', 'label': 'data root'})
-_STORAGE_QUANTITIES = ({'value': 'files', 'label': 'files'},
-                       {'value': 'bytes', 'label': 'bytes'})
+_STORAGE_QUANTITIES = ({'value': 'bytes', 'label': 'bytes'},
+                       {'value': 'files', 'label': 'files'})
 # The option carrying the scope-level campaign families, pinned after
 # the ranked RSE sections.
 _STORAGE_CAMPAIGNS_OPTION = 'campaigns'
@@ -2298,8 +2298,10 @@ def _storage_focus_view():
         'default': 'all',
         'activity_label': 'files held',
         'selectors': [
+            # Bytes by default: the capacity reading is TB against the
+            # limit, as Rucio states it.
             {'param': 'quantity', 'label': 'Counting',
-             'default': 'files', 'choices': list(_STORAGE_QUANTITIES)},
+             'default': 'bytes', 'choices': list(_STORAGE_QUANTITIES)},
             {'param': 'lens', 'label': 'Grouping',
              'default': 'campaign', 'choices': list(_STORAGE_LENSES)},
             # The landing is the RSE-status reading: usage against the
@@ -3849,7 +3851,7 @@ def _storage_card(data, previous_data, ctx):
     params = (ctx or {}).get('params') or {}
     since = (ctx or {}).get('since')
     since_data = (ctx or {}).get('since_data') or {}
-    quantity_code = 'b' if (params.get('quantity') or 'files') == 'bytes' else 'f'
+    quantity_code = 'f' if (params.get('quantity') or 'bytes') == 'files' else 'b'
     # The Show selector shapes the card: under the RSE capacity reading
     # the card is the capacity table across RSEs alone, docked nowhere,
     # so it sits directly beneath the capacity panels.

@@ -84,8 +84,8 @@ jump list, and the RSE's detail docked beneath its own panels.
   brackets.
   The log stores and the `none` pseudo-RSE are options like any other
   and sort by their own activity.
-- **Counting** selector: files or bytes. Bytes plot in TB; the panel
-  title states the unit.
+- **Counting** selector: bytes (default; TB, as Rucio states usage and
+  limits) or files. The panel title states the unit.
 - **Grouping** selector: by campaign, by replica state, or by data
   root. It applies to the backlog, ghost and inventory panels; the
   other panels are the same under every grouping. The campaign
