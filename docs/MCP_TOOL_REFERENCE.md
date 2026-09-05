@@ -474,7 +474,7 @@ Tools for querying the ePIC PanDA production database (`doma_panda` schema). Rea
 | `panda_list_jobs` | `days`, `status`, `username`, `site`, `taskid`, `reqid`, `limit`, `before_id` | List PanDA jobs with summary stats (default 200 jobs, 14 fields). Cursor-based pagination via before_id. |
 | `panda_diagnose_jobs` | `days`, `username`, `site`, `taskid`, `reqid`, `error_component`, `limit`, `before_id` | Diagnose failed/faulty PanDA jobs with full error details (7 error components). Cursor-based pagination via before_id. |
 | `panda_list_tasks` | `days`, `status`, `username`, `taskname`, `reqid`, `workinggroup`, `taskid`, `processingtype`, `limit`, `before_id` | List JEDI tasks with summary stats (default 500 tasks). Cursor-based pagination via before_id. |
-| `panda_error_summary` | `days`, `username`, `site`, `taskid`, `error_source`, `limit` | Aggregate error summary across failed jobs, ranked by frequency. |
+| `panda_error_summary` | `days`, `ended_after`, `ended_before`, `username`, `site`, `destinationse`, `taskid`, `error_source`, `status`, `limit` | Aggregate error summary across failed jobs, ranked by frequency; an exact end-time window when both `ended_after` and `ended_before` are given. |
 | `panda_study_job` | `pandaid` | Deep study of a single job — full record, files, errors, log URLs, harvester info, parent task. |
 | `panda_list_queues` | `vo`, `status`, `state`, `search` | List EIC PanDA queues from live schedconfig — site, status, corecount, resource type, capability flags. |
 | `panda_get_queue` | `panda_queue` (required) | Full detail for a single PanDA queue. |
@@ -528,7 +528,8 @@ Use cases:
 - Search by name pattern: `panda_list_tasks(taskname='%workflow%')`
 
 **`panda_error_summary` filters:**
-- `days`: Time window in days (default 10)
+- `days`: Time window in days (default 10), by modification time; ignored when the exact window below is given
+- `ended_after`, `ended_before`: An exact window on job end time, both required together, ISO-8601; a time without an offset is Eastern Time
 - `username`: Filter by job owner (supports SQL LIKE with %)
 - `site`: Filter by computing site (supports SQL LIKE with %)
 - `taskid`: Filter by JEDI task ID
@@ -546,6 +547,7 @@ Use cases:
 
 **Diagnostic use cases:**
 - Top errors this week: `panda_error_summary(days=7)`
+- Errors in an incident window bounded from the Snapper errors series: `panda_error_summary(ended_after='2026-09-05T03:10', ended_before='2026-09-05T03:40')`
 - Errors for a specific user: `panda_error_summary(username='Dmitrii Kalinkin')`
 - Pilot errors only: `panda_error_summary(error_source='pilot')`
 - Errors for a specific task: `panda_error_summary(taskid=33824)`

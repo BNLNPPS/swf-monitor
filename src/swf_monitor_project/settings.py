@@ -365,6 +365,7 @@ COMMON QUERIES:
 - EIC experiment tasks? → panda_list_tasks(workinggroup='EIC')
 - Production tasks? → panda_list_tasks(processingtype='epicproduction')
 - Top errors? → panda_error_summary(days=7)
+- Errors in an exact window? → panda_error_summary(ended_after='2026-09-05T03:10', ended_before='2026-09-05T03:40') — job end time, ET unless an offset is given
 - Errors for a user? → panda_error_summary(username='someone')
 - Deep dive on a failed job? → panda_study_job(pandaid=130497)
 - EIC queues? → panda_list_queues(vo='eic')

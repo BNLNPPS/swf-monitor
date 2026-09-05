@@ -183,6 +183,30 @@ def _register_ai_assessment_sync(
         report_path = f'/ai/assessments/{page_group_id}/'
     else:
         report_path = ''
+    # A salvage or quarantine registration names itself in the title and
+    # explains itself in the summary, since it carries no narration
+    # (EPICPROD_ASSESSMENTS_V1.md: marked in the title, at warning or
+    # above).
+    severity = {'attention': 'warning', 'alarm': 'alarm'}.get(verdict, 'info')
+    outcome_attrs = {}
+    harness = payload_data.get('generation_harness') or {}
+    if payload_data.get('salvaged'):
+        failed = str(payload_data.get('run_failed') or 'the run failed')
+        rerun = ('rerun submitted' if harness.get('rerun_job_id')
+                 else 'no rerun, the retry was already spent')
+        outcome_attrs = {
+            'operation': 'assessment salvage',
+            'summary': f'salvage after a failed run ({failed}); {rerun}',
+        }
+    elif payload_data.get('quarantined'):
+        count = len(payload_data.get('problems') or [])
+        outcome_attrs = {
+            'operation': 'assessment quarantine',
+            'summary': (f'quarantined after retry: {count} validation '
+                        f'problem{"s" if count != 1 else ""}'),
+        }
+    if outcome_attrs and severity == 'info':
+        severity = 'warning'
     log_epicprod_action(
         'mcp', 'assessment_register',
         subject_type=canonical_type,
@@ -199,9 +223,9 @@ def _register_ai_assessment_sync(
         narration=str(payload_data.get('narration') or '')[:600],
         # Notice-routing attributes (NOTICE_ROUTING.md): severity from
         # the verdict, url to the report page.
-        severity={'attention': 'warning', 'alarm': 'alarm'}.get(
-            verdict, 'info'),
+        severity=severity,
         url=report_path,
+        **outcome_attrs,
         **({'verdict': verdict} if verdict else {}),
     )
     return {

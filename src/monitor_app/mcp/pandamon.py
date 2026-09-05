@@ -208,9 +208,24 @@ async def panda_list_tasks(
     )
 
 
+def _window_time(text):
+    """An ISO-8601 window bound as an aware datetime; a time without an
+    offset is Eastern Time, the time the assessment prompt cites."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    if not text:
+        return None
+    value = datetime.fromisoformat(str(text).strip().replace('Z', '+00:00'))
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=ZoneInfo('America/New_York'))
+    return value
+
+
 @mcp.tool()
 async def panda_error_summary(
     days: int = 10,
+    ended_after: str = None,
+    ended_before: str = None,
     username: str = None,
     site: str = None,
     destinationse: str = None,
@@ -237,7 +252,13 @@ async def panda_error_summary(
     "What are the most common errors and who do they affect?"
 
     Args:
-        days: Time window in days (default 10).
+        days: Time window in days by modification time (default 10). Ignored
+            when the exact window below is given.
+        ended_after: With ended_before, an exact window on job end time:
+            jobs that ended after this instant. ISO-8601; a time without an
+            offset is Eastern Time. Bound an incident from the Snapper
+            errors series, then aggregate exactly that window here.
+        ended_before: The window's end, inclusive; required with ended_after.
         username: Filter by job owner (produsername). Supports SQL LIKE with %.
         site: Filter by computing site (computingsite). Supports SQL LIKE with %.
         destinationse: Filter by destination storage element — the Rucio SE where
@@ -263,11 +284,16 @@ async def panda_error_summary(
             exact pattern with panda_study_job and use its structured
             epicprod_diagnosis.
     """
+    if bool(ended_after) != bool(ended_before):
+        return {'error': 'ended_after and ended_before are given together; '
+                         'use days for a window ending now'}
     return await sync_to_async(queries.error_summary)(
         days=days, username=username, site=site,
         destinationse=destinationse,
         taskid=taskid, error_source=error_source, status=status,
         limit=limit,
+        ended_after=_window_time(ended_after),
+        ended_before=_window_time(ended_before),
     )
 
 
