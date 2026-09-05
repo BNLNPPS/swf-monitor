@@ -452,7 +452,7 @@
       {% if card.scope.reconstructed %}<span class="text-muted">reconstructed arrivals record; the state record begins at the census</span>{% else %}<span class="snapper-chip" style="background:{{ card.scope.overall_chip.color }}">{{ card.scope.overall }}</span>{% endif %}
       <span class="text-muted small">{{ card.scope.pass.mode }} pass{% if card.scope.interval.end %} · interval {{ card.scope.interval.start|fmt_dt }} – {{ card.scope.interval.end|fmt_dt }} ET{% endif %} · {{ card.scope.pass.files }} files and {{ card.scope.pass.datasets }} datasets checked in {{ card.scope.pass.duration_min }} min{% if card.scope.pass.errors %} · <span class="text-danger">{{ card.scope.pass.errors }} read errors</span>{% endif %}</span>
       · <a href="{{ card.scope.urls.ghosts }}">Storage exceptions</a></div>
-    <div class="mb-1"><strong>Capacity across RSEs</strong> <span class="text-muted small">the rows of rucio account limit list eicprod at this instant; usage is RSE-wide until the account usage is recorded</span></div>
+    <div class="mb-1"><strong>RSE capacity at this instant</strong> <span class="text-muted small">the rows of rucio account limit list eicprod; usage is RSE-wide until the account usage is recorded; click the plot at another time for the table then</span></div>
     <table class="table table-sm table-bordered w-auto mb-3">
       <thead><tr><th>RSE</th><th>Type</th><th class="text-end">Used TB</th><th class="text-end">Limit TB</th><th class="text-end">Quota left TB</th><th class="text-end">Fill</th><th class="text-end">Files</th><th>Usage as of</th></tr></thead>
       <tbody>
@@ -461,6 +461,7 @@
       {% endfor %}
       </tbody>
     </table>
+    {% if not card.scope.capacity_only %}
     {% for c in card.scope.campaigns %}
     <div class="mb-1"><strong>{{ c.name }}</strong>
       {% for v in c.verdicts %} <span title="{{ v.threshold }}"><span class="snapper-chip" style="background:{{ v.chip.color }}">{{ v.chip.value }}</span> {{ v.name }}</span>{% endfor %}
@@ -542,6 +543,7 @@
         </div>
       </div>
     </div>
+    {% endif %}
   </div>
 
 {% elif card.kind == 'delivery' %}

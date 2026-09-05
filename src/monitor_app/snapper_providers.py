@@ -1991,9 +1991,9 @@ def _storage_curve_label(curve_id):
     return _STORAGE_MEMBER_LABELS.get(member, member)
 
 
-_STORAGE_PANELS = ({'value': 'lifecycle', 'label': 'data lifecycle'},
-                   {'value': 'capacity', 'label': 'capacity only'},
-                   {'value': 'ghosts', 'label': 'ghosts only'})
+_STORAGE_PANELS = ({'value': 'capacity', 'label': 'RSE capacity'},
+                   {'value': 'ghosts', 'label': 'ghosts'},
+                   {'value': 'lifecycle', 'label': 'all panels'})
 
 
 def _storage_rse_families(rse, quantity, lens, panels='lifecycle'):
@@ -2288,12 +2288,13 @@ def _storage_focus_view():
         'components': ('storage',),
         'prewarm_series': False,
         'default_window': '7d',
-        'note': ('The data lifecycle per RSE: arrivals, transfers and '
-                 'deletions per bin from the record\'s counters; backlog, '
-                 'ghosts, inventory, rule locks and capacity as the state '
-                 'at each storage pass, held until the next pass. Bytes '
-                 'plot in TB. Click the plot for the RSE\'s standing at '
-                 'that instant and the capacity table across RSEs.'),
+        'note': ('Per RSE: usage against the eicprod limit (RSE '
+                 'capacity), ghosts, or all panels: arrivals, transfers '
+                 'and deletions per bin, copying backlog, ghosts, '
+                 'inventory, rule locks and capacity. State panels hold '
+                 'the last storage pass\'s values until the next pass; '
+                 'bytes plot in TB. Click the plot for the table at that '
+                 'instant.'),
         'default': 'all',
         'activity_label': 'files held',
         'selectors': [
@@ -2301,8 +2302,11 @@ def _storage_focus_view():
              'default': 'files', 'choices': list(_STORAGE_QUANTITIES)},
             {'param': 'lens', 'label': 'Grouping',
              'default': 'campaign', 'choices': list(_STORAGE_LENSES)},
+            # The landing is the RSE-status reading: usage against the
+            # limit per RSE over time, the capacity table beneath. The
+            # whole lifecycle is one click away.
             {'param': 'panels', 'label': 'Show',
-             'default': 'lifecycle', 'choices': list(_STORAGE_PANELS)},
+             'default': 'capacity', 'choices': list(_STORAGE_PANELS)},
         ],
         'options': options,
     }
@@ -3846,6 +3850,10 @@ def _storage_card(data, previous_data, ctx):
     since = (ctx or {}).get('since')
     since_data = (ctx or {}).get('since_data') or {}
     quantity_code = 'b' if (params.get('quantity') or 'files') == 'bytes' else 'f'
+    # The Show selector shapes the card: under the RSE capacity reading
+    # the card is the capacity table across RSEs alone, docked nowhere,
+    # so it sits directly beneath the capacity panels.
+    capacity_only = (params.get('panels') or 'capacity') == 'capacity'
     rses = {rse: block for rse, block in (data.get('rses') or {}).items()
             if isinstance(block, dict)}
     prev_rses = previous_data.get('rses') or {}
@@ -3855,7 +3863,8 @@ def _storage_card(data, previous_data, ctx):
     verdicts = assessment.get('verdicts') or {}
     selected = [value for value in (params.get('rse') or '').split(',')
                 if value]
-    shown = [rse for rse in selected if rse in rses]
+    shown = [] if capacity_only else [rse for rse in selected if rse in rses]
+    ticked = [rse for rse in selected if rse in rses]
     basis_text = (since.astimezone(ET_ZONE).strftime('%m-%d %H:%M ET')
                   if since is not None else '')
     threshold_text = {
@@ -4041,14 +4050,14 @@ def _storage_card(data, previous_data, ctx):
                          if capacity.get('fraction') is not None else None),
             'files': _fmt_count(capacity.get('files')),
             'as_of': capacity.get('as_of'),
-            'shown': rse in shown,
+            'shown': rse in ticked,
             'curve': (f'stobu_{rse}_used' if quantity_code == 'b'
                       else f'stofu_{rse}_files')})
 
     campaigns = []
     since_campaigns = since_data.get('campaigns') or {}
     for name, block in sorted((data.get('campaigns') or {}).items()):
-        if not isinstance(block, dict):
+        if capacity_only or not isinstance(block, dict):
             continue
         protection = block.get('protection') or {}
         flow = block.get('flow') or {}
@@ -4087,7 +4096,7 @@ def _storage_card(data, previous_data, ctx):
             'basis': basis_text if base else '',
         })
 
-    exceptions = data.get('exceptions') or {}
+    exceptions = {} if capacity_only else (data.get('exceptions') or {})
     ghost_rows = []
     for row in (exceptions.get('ghosts') or []):
         if not isinstance(row, (list, tuple)) or len(row) < 6:
@@ -4115,6 +4124,7 @@ def _storage_card(data, previous_data, ctx):
         'sections': sections,
         'scope': {
             'key': 'sto-scope',
+            'capacity_only': capacity_only,
             # A cut inside the arrivals backfill (STORAGE.md, Backfill)
             # reads a reconstructed publication carrying counters alone.
             'reconstructed': (pass_info.get('mode') == 'backfill'),
