@@ -25,9 +25,10 @@ record for implementation.
 
 The `storage` component is published by the storage pass after every
 run: a census once, a full pass nightly in the `catalog_sync` chain,
-an incremental pass hourly. A pass in which nothing moved is affirmed
-unchanged, so the component's snaps are the passes that changed
-something, at most hourly. The view derives nothing from the pass's
+an incremental pass every four hours. A pass in which nothing moved is
+affirmed unchanged, so the component's snaps are the passes that
+changed something, at most one per pass, four-hourly between the
+nightly full passes. The view derives nothing from the pass's
 store or from Rucio: every plotted value is a field of the published
 projection (DESIGN.md, invariants 1 and 4). The exception listings
 beyond the component's bounded heads live on the Storage exceptions
@@ -175,7 +176,7 @@ attribution of a failure to its destination RSE is not recorded and
 is not shown.
 
 State curves hold their last recorded value to the present: the record
-is hourly and a quiet pass affirms the state unchanged, so the last
+is four-hourly and a quiet pass affirms the state unchanged, so the last
 pass's gauges are the state until the next pass; flows stay per-bin.
 Units on every panel title; house state colors where a state is
 drawn (available blue, copying the warning color, unavailable and

@@ -572,7 +572,7 @@ def _storage_series_transform(series):
             curves[f'stoxy_{rse}_yield'] = {
                 'label': _STORAGE_MEMBER_LABELS['yield'], 'points': points}
     # State curves hold their last recorded value to the present: the
-    # record is hourly and a quiet pass affirms the state unchanged, so
+    # record is four-hourly and a quiet pass affirms the state unchanged, so
     # the last pass's gauges are the state until the next pass. Flows
     # (counter projections and the yield) are per-bin and stay as they
     # are. The hold stops two minutes short of the series end so the
