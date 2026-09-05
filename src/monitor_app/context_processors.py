@@ -195,6 +195,9 @@ def _active_nav(request):
             'evgen_inputs', 'evgen_inputs_update'),
         'pcs_storage': namespace == 'pcs' and url_name in (
             'storage_listings', 'storage_listings_home'),
+        'snapper_storage': (namespace == 'snapper_ai'
+                            and url_name == 'snapper_focus'
+                            and kwargs.get('focus_slug') == 'storage'),
         'pcs_ingest': namespace == 'pcs' and url_name == 'pc_ingest',
         'pcs_configs': namespace == 'pcs' and url_name in pcs_config_names,
         'pcs_tasks': namespace == 'pcs' and url_name in pcs_task_names,
