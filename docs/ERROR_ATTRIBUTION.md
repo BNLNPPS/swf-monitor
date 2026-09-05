@@ -197,7 +197,7 @@ supported, not confirmed. Every summary states the processing lost.
   seeded rule covering the pilot 1305 bind-mount noise. The per-job
   root is wired the same way: `extract_errors` in
   `monitor_app/panda/sql.py`, through which the task page's job list,
-  the jobs list, and the job page's error entries read, attaches the
+  the diagnostics list, and the job page's error entries read, attaches the
   correction to each entry with the job's own transformation exit code
   as its profile, so a job labelled pilot 1305 with exit 78 presents as
   a payload Rucio output registration failure. Remaining from the

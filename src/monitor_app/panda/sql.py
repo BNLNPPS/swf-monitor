@@ -104,8 +104,9 @@ def row_to_dict(row, fields):
 def extract_errors(job_dict):
     """Extract non-zero error components from a job dict.
 
-    This is the per-job error root: the task page's job list, the jobs
-    list, and the job page's error entries all read through it. An entry
+    This is the per-job error root: the task page's job list, the
+    diagnostics list, and the job page's error entries all read through
+    it. An entry
     whose label a rule marks unreliable carries the correction root's
     reading under ``correction`` (docs/ERROR_ATTRIBUTION.md), refined
     from this job's own transformation exit code. Decoration never
