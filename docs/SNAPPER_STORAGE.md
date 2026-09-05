@@ -76,12 +76,12 @@ jump list, and the RSE's detail docked beneath its own panels.
 **Parameters**, in conformance with the Site and Campaign views:
 
 - focus `rse`: one option per recorded RSE, default all. With several
-  shown, presentation follows holdings, the files on the RSE over the
-  window: RSEs ordered by that peak, so an RSE with data lands open
-  whatever the window's arrivals; RSEs holding nothing are the idle
-  ones, last in alphabetical order with their sections closed; a jump
-  list under the tick row in the same order with each peak in
-  brackets.
+  shown, presentation follows the peak arrival rate over the window,
+  first copies and replicas together, since a tape RSE receives only
+  replicas: RSEs ordered by that peak, idle RSEs last in alphabetical
+  order with their sections closed, and a jump list under the tick row
+  in the same order with each peak in brackets; open all and close all
+  fold every section at once.
   The log stores and the `none` pseudo-RSE are options like any other
   and sort by their own activity.
 - **Counting** selector: bytes (default; TB, as Rucio states usage and
@@ -91,13 +91,16 @@ jump list, and the RSE's detail docked beneath its own panels.
   other panels are the same under every grouping. The campaign
   grouping shows the target campaigns with every other campaign
   folded into `other`, as the record folds them.
-- **Show** selector: RSE capacity (the default and the landing: each
-  RSE's usage against its limit over time, and directly beneath the
-  panels the capacity table across RSEs at the cut instant, the rows of
-  `rucio account limit list eicprod`; the card carries nothing else
-  under this reading), ghosts (each RSE's ghost population, flow and
-  yield, with its capacity), or the whole data lifecycle. The choice
-  rides the URL, so each reading is a bookmark.
+- **Show** selector: status (the default and the landing, the moving
+  picture per RSE: arrivals per bin, ghosts appeared and cleared per
+  bin, and usage against the limit, with the campaigns' arrivals after
+  the RSE sections and the capacity table across RSEs on the card), RSE
+  capacity alone (each RSE's usage against its limit over time, and
+  directly beneath the panels the capacity table at the cut instant,
+  the rows of `rucio account limit list eicprod`; the card carries
+  nothing else under this reading), ghosts (each RSE's ghost
+  population, flow and yield, with its capacity), or all panels. The
+  choice rides the URL, so each reading is a bookmark.
 - the window, cut, zoom and curve selection every report page
   carries. The clean page lands on the last seven days (the view's
   default window; a signed-in user's remembered window takes

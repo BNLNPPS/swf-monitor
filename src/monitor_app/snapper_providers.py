@@ -1800,6 +1800,9 @@ def _storage_curve_values(state):
         # the census.
         flow = block.get('flow') or {}
         for key, curve_id, as_tb in (
+                # All arrivals: the option's ranking curve, cached with
+                # every panel set and never displayed.
+                ('arrived_files', f'stoxa_{rse}_files', False),
                 ('first_copy_files', f'stofa_{rse}_first', False),
                 ('replica_files', f'stofa_{rse}_replica', False),
                 ('first_copy_bytes', f'stoba_{rse}_first', True),
@@ -1991,7 +1994,8 @@ def _storage_curve_label(curve_id):
     return _STORAGE_MEMBER_LABELS.get(member, member)
 
 
-_STORAGE_PANELS = ({'value': 'capacity', 'label': 'RSE capacity'},
+_STORAGE_PANELS = ({'value': 'status', 'label': 'status'},
+                   {'value': 'capacity', 'label': 'RSE capacity'},
                    {'value': 'ghosts', 'label': 'ghosts'},
                    {'value': 'lifecycle', 'label': 'all panels'})
 
@@ -2001,6 +2005,11 @@ def _storage_rse_families(rse, quantity, lens, panels='lifecycle'):
     in panel order (docs/SNAPPER_STORAGE.md, Families per RSE). The
     capacity and ghosts sets are the RSE-status and ghost-history
     readings alone, one click from the whole lifecycle."""
+    if panels == 'status':
+        # The moving picture: what lands, what fails, how full.
+        return [f'Storage arrivals {rse} {quantity}',
+                f'Storage ghost flow {rse}',
+                f'Storage capacity {rse} {quantity}']
     if panels == 'capacity':
         return [f'Storage capacity {rse} {quantity}']
     if panels == 'ghosts':
@@ -2023,9 +2032,12 @@ def _storage_rse_families(rse, quantity, lens, panels='lifecycle'):
 
 
 def _storage_campaign_families(campaigns, quantity, panels='lifecycle'):
-    """The scope-level families, per target campaign, in panel order;
-    none under the capacity and ghosts panel sets."""
+    """The scope-level families, per target campaign, in panel order:
+    the campaigns' arrivals under status, everything under all panels,
+    none under the capacity and ghosts sets."""
     names = []
+    if panels == 'status':
+        return [f'Storage arrived {name} {quantity}' for name in campaigns]
     if panels != 'lifecycle':
         return names
     for name in campaigns:
@@ -2059,11 +2071,13 @@ def _storage_groups():
                 'title': f'Arrivals · {rse}',
                 'prefixes': [f'sto{q}a_{rse}_'], 'ids': [],
                 'order': [f'sto{q}a_{rse}_first', f'sto{q}a_{rse}_replica'],
-                # Under bytes counting the files first-copy flow, which
-                # the ghost yield divides by, rides the cached series
-                # without joining the display.
+                # The ranking curve (all arrivals) and, under bytes
+                # counting, the files first-copy flow the ghost yield
+                # divides by ride the cached series without joining the
+                # display.
                 'extra_cache_prefixes': (
-                    [f'stofa_{rse}_'] if quantity == 'bytes' else []),
+                    [f'stoxa_{rse}_', f'stofa_{rse}_']
+                    if quantity == 'bytes' else [f'stoxa_{rse}_']),
                 'counter_flow': True, 'end_stamped': True, 'stacked': True,
                 'panel_px': 150, 'units': units,
                 'empty_note': 'No arrivals in this window'})
@@ -2141,9 +2155,8 @@ def _storage_groups():
                     # The limit is a threshold, not a quantity of data:
                     # a foreground line over the usage band.
                     'overlay_ids': [f'stobu_{rse}_limit'],
-                    # The option's ranking curve (files held) rides the
-                    # cached series under bytes counting too.
-                    'extra_cache_prefixes': [f'stofu_{rse}_'],
+                    # The ranking curve rides the capacity-only reading.
+                    'extra_cache_prefixes': [f'stoxa_{rse}_'],
                     'stacked': True, 'panel_px': 150, 'units': 'TB',
                     'detail_key': f'sto-{rse}'})
             else:
@@ -2151,8 +2164,17 @@ def _storage_groups():
                     'name': f'Storage capacity {rse} files',
                     'title': f'Capacity · {rse} (files on the RSE)',
                     'prefixes': [], 'ids': [f'stofu_{rse}_files'],
+                    'extra_cache_prefixes': [f'stoxa_{rse}_'],
                     'stacked': True, 'panel_px': 150, 'units': 'files',
                     'detail_key': f'sto-{rse}'})
+        # The ranking family is never listed by an option: it exists so
+        # the series projects the arrivals counter to per-bin flows.
+        groups.append({
+            'name': f'Storage arrival activity {rse}',
+            'title': f'Arrivals · {rse}',
+            'prefixes': [f'stoxa_{rse}_'], 'ids': [],
+            'counter_flow': True, 'end_stamped': True,
+            'panel_px': 110, 'units': 'files'})
         groups.append({
             'name': f'Storage backlog age {rse}',
             'title': f'Copying age · {rse}',
@@ -2256,10 +2278,10 @@ def _storage_focus_view():
     floor = None
     options = [
         {'value': rse, 'label': rse,
-         # Presentation follows holdings, the files on the RSE, so an
-         # RSE with data lands open whatever the window's arrivals; an
-         # RSE holding nothing is the idle one.
-         'activity': f'stofu_{rse}_files',
+         # Presentation follows arrivals per bin, first copies and
+         # replicas together (a tape RSE receives only replicas); an
+         # RSE with no arrivals in the window is idle and closed.
+         'activity': f'stoxa_{rse}_files',
          'families_by': {
              f"{quantity['value']}|{lens['value']}|{panels['value']}":
                  _storage_rse_families(rse, quantity['value'],
@@ -2286,20 +2308,20 @@ def _storage_focus_view():
         'param': 'rse',
         'label': 'Storage',
         'selector_label': 'RSE display',
-        'jump_label': 'RSEs by files held',
+        'jump_label': 'RSEs by peak arrivals',
         'cache_series': True,
         'components': ('storage',),
         'prewarm_series': False,
         'default_window': '7d',
-        'note': ('Per RSE: usage against the eicprod limit (RSE '
-                 'capacity), ghosts, or all panels: arrivals, transfers '
-                 'and deletions per bin, copying backlog, ghosts, '
-                 'inventory, rule locks and capacity. State panels hold '
-                 'the last storage pass\'s values until the next pass; '
-                 'bytes plot in TB. Click the plot for the table at that '
-                 'instant.'),
+        'note': ('Per RSE: status (arrivals and ghosts per bin, with '
+                 'usage against the eicprod limit), RSE capacity alone, '
+                 'ghosts, or all panels: arrivals, transfers and '
+                 'deletions, copying backlog, ghosts, inventory, rule '
+                 'locks, capacity. State panels hold the last storage '
+                 'pass\'s values until the next pass; bytes plot in TB. '
+                 'Click the plot for the RSE table at that instant.'),
         'default': 'all',
-        'activity_label': 'files held',
+        'activity_label': 'arrivals per bin',
         'selectors': [
             # Bytes by default: the capacity reading is TB against the
             # limit, as Rucio states it.
@@ -2307,11 +2329,11 @@ def _storage_focus_view():
              'default': 'bytes', 'choices': list(_STORAGE_QUANTITIES)},
             {'param': 'lens', 'label': 'Grouping',
              'default': 'campaign', 'choices': list(_STORAGE_LENSES)},
-            # The landing is the RSE-status reading: usage against the
-            # limit per RSE over time, the capacity table beneath. The
-            # whole lifecycle is one click away.
+            # The landing is status, the moving picture per RSE:
+            # arrivals and ghost flow per bin with capacity, the
+            # capacity table beneath. The other readings are one click.
             {'param': 'panels', 'label': 'Show',
-             'default': 'capacity', 'choices': list(_STORAGE_PANELS)},
+             'default': 'status', 'choices': list(_STORAGE_PANELS)},
         ],
         'options': options,
     }
@@ -3858,7 +3880,7 @@ def _storage_card(data, previous_data, ctx):
     # The Show selector shapes the card: under the RSE capacity reading
     # the card is the capacity table across RSEs alone, docked nowhere,
     # so it sits directly beneath the capacity panels.
-    capacity_only = (params.get('panels') or 'capacity') == 'capacity'
+    capacity_only = (params.get('panels') or 'status') == 'capacity'
     rses = {rse: block for rse, block in (data.get('rses') or {}).items()
             if isinstance(block, dict)}
     prev_rses = previous_data.get('rses') or {}
