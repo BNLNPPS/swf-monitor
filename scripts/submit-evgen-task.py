@@ -59,6 +59,29 @@ KERNEL_SCRIPT = os.path.join(HERE, "evgen_panda_submit.py")
 DISPATCHER_SCRIPT = os.path.join(HERE, "evgen_job_dispatcher.py")
 MANAGE_PY = os.path.join(os.path.dirname(HERE), "src", "manage.py")
 
+
+def _payload_dir():
+    """The epicprod payload as installed in this interpreter's swf_epicprod
+    package (frozen into the deployed venv at deploy), shipped whole in the
+    sandbox as payload/ (swf-epicprod docs/EPICPROD_PAYLOAD.md). Located
+    without importing the package, which needs no Django here."""
+    import importlib.util
+    spec = importlib.util.find_spec("swf_epicprod")
+    if spec is None or not spec.origin:
+        raise RuntimeError("swf_epicprod is not installed in this interpreter")
+    path = os.path.join(os.path.dirname(spec.origin), "payload")
+    if not os.path.isfile(os.path.join(path, "run.sh")):
+        raise RuntimeError(f"epicprod payload not found at {path}")
+    return path
+
+
+def _payload_version(payload_dir):
+    try:
+        with open(os.path.join(payload_dir, "VERSION")) as f:
+            return f.readline().strip()
+    except OSError:
+        return ""
+
 JEDITASKID_RE = re.compile(r"jediTaskID=(\d+)")
 
 
@@ -142,6 +165,15 @@ def _assemble_sandbox(spec, proxy_path, root):
     # In-job dispatcher (named to match spec['exec']) and the proxy.
     shutil.copy(DISPATCHER_SCRIPT, os.path.join(sandbox, "evgen_job_dispatcher.py"))
     shutil.copy(proxy_path, os.path.join(sandbox, proxy_base))
+
+    # The epicprod payload, whole, from the frozen package: the dispatcher
+    # runs sandbox/payload/run.sh. Its version rides on the submission
+    # record.
+    payload_dir = _payload_dir()
+    shutil.copytree(payload_dir, os.path.join(sandbox, "payload"),
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    spec['payload_version'] = _payload_version(payload_dir)
+    _log(f"payload {spec['payload_version'] or '(no VERSION)'} from {payload_dir}")
 
     with open(os.path.join(workdir, "spec.json"), "w") as f:
         json.dump(spec, f, indent=2)
@@ -311,6 +343,8 @@ def main():
                 body["panda_task_name"] = spec["outDS"]
             if spec.get("residual"):
                 body["residual"] = spec["residual"]
+            if spec.get("payload_version"):
+                body["payload_version"] = spec["payload_version"]
             _api_post_json(args.swf_monitor_url, "/pcs/api/prod-tasks/record-submission/",
                            {"name": args.task_name}, body,
                            args.token, owner=args.owner)

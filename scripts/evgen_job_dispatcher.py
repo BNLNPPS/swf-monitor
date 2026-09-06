@@ -32,12 +32,25 @@ import subprocess
 import sys
 from itertools import islice
 
-# Payload entry point inside the eic_xl container (campaigns checkout at
-# /opt/campaigns/hepmc3). Fixed by the container layout.
-PAYLOAD_RUN = "/opt/campaigns/hepmc3/scripts/run.sh"
+# The payload travels in the sandbox as payload/ (the epicprod payload,
+# swf-epicprod swf_epicprod/payload, shipped by the submit doer from the
+# frozen release; docs/EPICPROD_PAYLOAD.md). The container supplies the
+# software stack only; no script the job runs comes from it.
+PAYLOAD_SUBDIR = "payload"
 
 # run.sh's coded exits (its explicit `exit N` failure sites).
-EXIT_MSGS = {65: "output validation failed", 78: "Rucio registration failed"}
+EXIT_MSGS = {65: "output validation failed", 78: "Rucio registration failed",
+             79: "output name held by a failed earlier attempt; rerun the "
+                 "residual as a new try"}
+
+
+def payload_version(workdir):
+    """The first line of the sandbox payload's VERSION file, or ''."""
+    try:
+        with open(os.path.join(workdir, PAYLOAD_SUBDIR, "VERSION")) as f:
+            return f.readline().strip()
+    except OSError:
+        return ""
 
 
 def write_job_report(rc, workdir, extra=None):
@@ -151,14 +164,19 @@ def main():
     # The pilot runs this dispatcher in the job workdir; capture it before
     # the payload runs so the report lands where the pilot looks.
     workdir = os.getcwd()
+    payload_run = os.path.join(workdir, PAYLOAD_SUBDIR, "run.sh")
+    version = payload_version(workdir)
+    print(f"epicprod payload {version or '(no VERSION)'}: {payload_run}")
     # The payload prepends the JLab xrootd path to EVGEN/<file>; pass the
     # EVGEN-relative path, extension, event count and chunk index through.
     result = subprocess.run(
-        [PAYLOAD_RUN, f"EVGEN/{file_path}", ext, nevents, ichunk],
+        [payload_run, f"EVGEN/{file_path}", ext, nevents, ichunk],
         text=True,
     )
-    if result.returncode != 0:
-        write_job_report(result.returncode, workdir)
+    # The report carries the payload version on every job; the pilot lifts
+    # it into the job record on success, and the exit message on failure.
+    write_job_report(result.returncode, workdir,
+                     extra={"payload_version": version})
     return result.returncode
 
 
