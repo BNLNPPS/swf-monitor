@@ -2490,7 +2490,11 @@ def _storage_focus_view():
 # jobs held before failing (docs/SNAPPER_ERRORS.md, Wasted resources).
 _ERRORS_MEASURE = {
     # Both measures of the same events, down the page: the error count
-    # and the wasted core-hours, correlated by eye.
+    # and the wasted core-hours, correlated by eye. The per-interval
+    # panels open under a section band; the integrated panels open
+    # under their own (the observatory's integrated section).
+    'section': {'label': 'Per interval', 'pinned': True, 'idle': False,
+                'peak': ''},
     'measures': ['count', 'weight'],
     'units_by_measure': {'count': 'errors', 'weight': 'core-hours'},
     # Beneath each panel, its bins integrated from the left edge of
