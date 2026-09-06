@@ -315,9 +315,14 @@
         display: flex;
         gap: .8em;
       }
+      /* Its own line, right-aligned. It was floated, so every page header
+         that paints a full-width band wrapped around it: the band stopped
+         at the float and the stamp sat in the notch, over the page's own
+         chrome. */
       .main-time-info {
         color: #667085;
-        float: right;
+        display: block;
+        text-align: right;
         font-size: .75rem;
         margin: -.25rem 0 .25rem 1rem;
         white-space: nowrap;
