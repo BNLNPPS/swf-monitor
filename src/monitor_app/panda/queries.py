@@ -2136,6 +2136,89 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
     }
 
 
+def _payload_report(conn, pandaid):
+    """The epicprod payload's own report of this job, from the PanDA
+    metatable, shaped for display.
+
+    The payload writes ``payload-report.json`` on every exit path; the
+    dispatcher carries it in ``jobReport.json`` under ``payload``, and the
+    pilot ships that whole object as job metadata (the server keeps
+    metadata for finished jobs, so a failed job has none). What the
+    payload reports is what the job did stage by stage, which the job
+    record cannot express: see swf-epicprod docs/EPICPROD_PAYLOAD.md.
+
+    Returns a dict with the events, the stages in run order paired with
+    their prmon measurements, the outputs and the registration outcome,
+    or None when the job carries no payload report. Never raises: an
+    unreadable or unexpected metadata blob leaves the page without the
+    card rather than failing it.
+    """
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f'SELECT "metadata" FROM "{PANDA_SCHEMA}"."metatable" WHERE "pandaid" = %s',
+                [pandaid])
+            row = cursor.fetchone()
+    except Exception as e:
+        logger.error(f"payload report query failed for job {pandaid}: {e}")
+        return None
+    if not row or not row[0]:
+        return None
+
+    raw = row[0]
+    try:
+        metadata = json.loads(raw) if isinstance(raw, str) else raw
+    except (ValueError, TypeError) as e:
+        logger.error(f"payload report metadata unparsable for job {pandaid}: {e}")
+        return None
+    if not isinstance(metadata, dict):
+        return None
+
+    report = metadata.get('payload')
+    if not isinstance(report, dict):
+        return None
+
+    stages = report.get('stages') or {}
+    prmon = report.get('prmon') or {}
+    rows = []
+    for name, stage in stages.items():
+        if not isinstance(stage, dict):
+            continue
+        measured = prmon.get(name)
+        # The output stages are measured per output, so a stage carries
+        # whichever measurement names it.
+        if not isinstance(measured, dict):
+            measured = next(
+                (v for k, v in prmon.items()
+                 if isinstance(v, dict) and k.startswith(f'{name}_')), {})
+        trend = measured.get('trend') or {}
+        rows.append({
+            'name': name,
+            'status': stage.get('status'),
+            'wall_s': stage.get('wall_s'),
+            'detail': ', '.join(stage.get('detail') or []),
+            'cpu_s': (measured.get('cpu_user_s') or 0) + (measured.get('cpu_sys_s') or 0)
+                     if measured else None,
+            'cpu_efficiency': measured.get('cpu_efficiency'),
+            'rss_max_kb': measured.get('rss_max_kb'),
+            'read_bytes': measured.get('rchar_bytes'),
+            'write_bytes': measured.get('wchar_bytes'),
+            'memory_growth_kb_per_s': trend.get('memory_growth_kb_per_s'),
+            'samples': trend.get('samples'),
+        })
+
+    return {
+        'payload_version': report.get('payload_version') or '',
+        'exit_code': report.get('exit_code'),
+        'events': report.get('events') or {},
+        'stages': rows,
+        'outputs': [dict(v, kind=k) for k, v in (report.get('outputs') or {}).items()
+                    if isinstance(v, dict)],
+        'registration': report.get('registration') or {},
+        'note': report.get('note') or '',
+    }
+
+
 def study_job(pandaid):
     """Deep study of a single PanDA job — full record, files, harvester logs, errors."""
     conn = connections['panda']
@@ -2317,6 +2400,10 @@ def study_job(pandaid):
 
     if task_info:
         result["task"] = task_info
+
+    payload_report = _payload_report(conn, pandaid)
+    if payload_report:
+        result["payload_report"] = payload_report
 
     # Official PanDA monitoring page URL.
     result["monitor_url"] = f"https://pandamon01.sdcc.bnl.gov/job?pandaid={pandaid}"
