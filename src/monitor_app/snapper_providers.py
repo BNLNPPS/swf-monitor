@@ -3266,21 +3266,23 @@ def _errors_card(data, previous_data, ctx):
     # tile, so snaps stamped in (from, to + one capture interval]
     # cover every event in bounds; an unchanged component can repeat
     # across snaps, so intervals dedup by their end.
+    # Only the errors component's data leaves the database: a snap's
+    # full state carries every component, and an integrated range
+    # spans thousands of snaps.
     states = (SystemSnap.objects
               .filter(scope='epicprod',
                       snap_time__gt=window_from,
                       snap_time__lte=window_to + timedelta(minutes=10),
                       state__components__errors__data__has_key='entries')
               .order_by('snap_time')
-              .values_list('state', flat=True))
+              .values_list('state__components__errors__data', flat=True))
     cat_counts = {}
     cat_held = {}
     total = 0
     total_held = 0
     seen_intervals = set()
-    for state in states.iterator():
-        errors = (((state.get('components') or {}).get('errors')
-                   or {}).get('data')) or {}
+    for errors in states.iterator():
+        errors = errors if isinstance(errors, dict) else {}
         interval = errors.get('interval') or {}
         interval_key = str(interval.get('end') or '')
         if not interval_key or interval_key in seen_intervals:
