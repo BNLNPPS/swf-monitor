@@ -188,7 +188,9 @@ as bars. A Consequences selector, jobs or core-hours, picks the
 strip's measure: the count of jobs, or the core-hours those jobs held
 before failing, from the error record's held field
 ([SNAPPER_ERRORS.md](SNAPPER_ERRORS.md), Wasted resources); the chips
-and the axis follow the measure.
+and the axis follow the measure. Beneath the strip an integrated panel
+sums its bins from the left edge of the window, the two members
+stacked, so the window's total and its split read directly.
 
 State curves hold their last recorded value to the present: the record
 is four-hourly and a quiet pass affirms the state unchanged, so the last

@@ -2390,6 +2390,7 @@ def _storage_groups():
                        'queues (payload exit 78, ddm errors)')},
         'measure_param': 'consequences',
         'units_by_measure': {'count': 'jobs', 'weight': 'core-hours'},
+        'cumulative_panel': True,
         'prefixes': [], 'ids': ['psto_registration', 'psto_ddm'],
         'event_flow': True, 'end_stamped': True, 'stacked': True,
         # Bins twice the ladder rung: a handful of events a week draws
@@ -2495,6 +2496,9 @@ def _storage_focus_view():
 _ERRORS_MEASURE = {
     'measure_param': 'measure',
     'units_by_measure': {'count': 'errors', 'weight': 'core-hours'},
+    # Beneath each panel, its bins integrated from the left edge of
+    # the view: the relative contribution of each failure kind.
+    'cumulative_panel': True,
 }
 
 

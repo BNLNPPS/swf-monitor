@@ -287,6 +287,15 @@ each curve to one family, so plotting both measures at once would
 require a second set of curve ids carrying the same events, doubling
 the series walk.
 
+Beneath each panel an integrated panel draws the same bins summed
+from the left edge of the window, stacked by the same categories in
+the same measure and under the same chips, and re-based when the view
+zooms. The height of each band at the right edge is that failure
+kind's share of the window's total, so the slot deaths under running
+jobs and the registration failures compare at a glance. The page
+derives it from the panel's own bins (snapper-ai `cumulative_panel`);
+no curve is added.
+
 **Breakdown.** The cut's breakdown adds core-hours and its share per
 category beside the count, from `SUM(held)` in the same grouping
 query, and ranks the window's tasks and diagnostic patterns by
