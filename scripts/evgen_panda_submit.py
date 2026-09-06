@@ -172,8 +172,13 @@ def build_task_params(spec, archive_name):
     # -a <sandbox>
     params['jobParameters'].append({'type': 'constant', 'value': f'-a {archive_name}'})
 
-    # %RNDM=X -> ${SEQNUMBER}; add the pseudo_input template (one job per row).
-    exec_cmd = spec['exec']
+    # The job's own PanDA id, handed to the payload explicitly. The pilot
+    # sets PANDAID in its own environment, but it launches the container
+    # with --cleanenv, so nothing of the pilot's environment reaches the
+    # payload; the server substitutes $PANDAID into job parameters
+    # unconditionally, which does. The payload names the objects it
+    # reports with it (swf-epicprod docs/JOB_REPORTING.md).
+    exec_cmd = f"PANDAID=$PANDAID {spec['exec']}"
     rndm = re.search(r'%RNDM(:|=)(\d+)', exec_cmd)
     if rndm:
         offset = rndm.group(2)
