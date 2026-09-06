@@ -87,8 +87,12 @@ jump list, and the RSE's detail docked beneath its own panels.
   and sort by their own activity.
 - **Counting** selector: bytes (default; TB, as Rucio states usage and
   limits) or files. The panel title states the unit.
-- **Grouping** selector: by campaign, by replica state, or by data
-  root. It applies to the backlog, ghost and inventory panels; the
+- **Grouping** selector: by campaign, by Rucio replica state, or by
+  data tier root. The campaign is the campaign family the DID's second
+  path element names, the state is Rucio's own replica state at that
+  RSE, and the root is the DID's first path element, the data tier:
+  RECO, FULL, EVGEN, SIMU.
+  It applies to the backlog, ghost and inventory panels; the
   other panels are the same under every grouping. The campaign
   grouping shows the target campaigns with every other campaign
   folded into `other`, as the record folds them.

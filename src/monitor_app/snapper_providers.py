@@ -1781,8 +1781,8 @@ _STORAGE_STATE_ORDER = ('AVAILABLE', 'COPYING', 'TEMPORARY_UNAVAILABLE',
                         'UNAVAILABLE', 'BAD')
 _STORAGE_ROOT_ORDER = ('RECO', 'FULL', 'EVGEN')
 _STORAGE_LENSES = ({'value': 'campaign', 'label': 'campaign'},
-                   {'value': 'state', 'label': 'replica state'},
-                   {'value': 'root', 'label': 'data root'})
+                   {'value': 'state', 'label': 'Rucio replica state'},
+                   {'value': 'root', 'label': 'data tier root'})
 _STORAGE_QUANTITIES = ({'value': 'bytes', 'label': 'bytes'},
                        {'value': 'files', 'label': 'files'})
 # The option carrying the scope-level campaign families, pinned after
