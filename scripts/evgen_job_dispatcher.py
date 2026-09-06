@@ -28,6 +28,7 @@ to stdout between CANARY-REPORT markers, collectable from the job log.
 import csv
 import json
 import os
+import re
 import subprocess
 import sys
 from itertools import islice
@@ -135,49 +136,157 @@ def run_canary(payload_seconds, workdir):
     return 0
 
 
-def main():
-    if len(sys.argv) >= 2 and sys.argv[1] == "canary":
-        # Canary probe job: same runner, landing-kit payload.
-        payload_seconds = int(sys.argv[2]) if len(sys.argv) > 2 else 60
-        return run_canary(payload_seconds, os.getcwd())
-    if len(sys.argv) < 3:
-        print(f"Usage: {sys.argv[0]} <SEQNUMBER> <csv_base>", file=sys.stderr)
-        return 2
-    n = int(sys.argv[1])
-    csv_base = sys.argv[2]
-
-    # PanDA SEQNUMBER is 1-based; the CSV is 0-indexed.
+def run_row(n, csv_base, workdir, extra_env=None):
+    """Run manifest row ``n`` (1-based) through the sandbox payload.
+    Returns (payload exit code, the row) or (1, None) when the row cannot
+    be read."""
+    # PanDA SEQNUMBER is 1-based; the CSV is 0-indexed. Read only the
+    # requested row, never the whole manifest.
     csv_index = n - 1
-
-    # Read only the requested row — no need to load the whole manifest.
     with open(f"{csv_base}.csv") as f:
         reader = csv.reader(f)
         row = next(islice(reader, csv_index, csv_index + 1), None)
     if row is None:
         print(f"Error: row {n} not found in {csv_base}.csv", file=sys.stderr)
-        return 1
+        return 1, None
     if len(row) < 4:
         print(f"Error: malformed CSV row {n}: {row!r}", file=sys.stderr)
-        return 1
-
+        return 1, None
     file_path, ext, nevents, ichunk = row[0], row[1], row[2], row[3]
-    # The pilot runs this dispatcher in the job workdir; capture it before
-    # the payload runs so the report lands where the pilot looks.
-    workdir = os.getcwd()
     payload_run = os.path.join(workdir, PAYLOAD_SUBDIR, "run.sh")
-    version = payload_version(workdir)
-    print(f"epicprod payload {version or '(no VERSION)'}: {payload_run}")
+    print(f"epicprod payload {payload_version(workdir) or '(no VERSION)'}: "
+          f"{payload_run}")
+    env = dict(os.environ)
+    if extra_env:
+        env.update(extra_env)
     # The payload prepends the JLab xrootd path to EVGEN/<file>; pass the
     # EVGEN-relative path, extension, event count and chunk index through.
     result = subprocess.run(
         [payload_run, f"EVGEN/{file_path}", ext, nevents, ichunk],
-        text=True,
+        text=True, env=env,
     )
+    return result.returncode, row
+
+
+# Payload canary (site-canary IMPLEMENTATION.md, Payload canaries): the
+# production payload on one manifest row under the canary account, its
+# outputs in one flat dataset under epic:/TEST/ that removes itself.
+CANARY_DATASET_ROOT = "TEST/canary"
+CANARY_LIFETIME_S = 7 * 86400
+
+
+def _read_stages(path):
+    """The payload's stage log as [{stage, status, at, detail}], in order."""
+    stages = []
+    try:
+        with open(path) as f:
+            for line in f:
+                parts = line.strip().split(" ", 3)
+                if len(parts) >= 3:
+                    stages.append({"at": parts[0], "stage": parts[1],
+                                   "status": parts[2],
+                                   "detail": parts[3] if len(parts) > 3 else ""})
+    except OSError:
+        pass
+    return stages
+
+
+def _payload_output(workdir):
+    """The tail of the payload's captured stdout, as text."""
+    try:
+        with open(os.path.join(workdir, "payload.stdout"), "rb") as f:
+            return f.read()[-1048576:].decode(errors="replace")
+    except OSError:
+        return ""
+
+
+def _loaded_metadata(text):
+    """The last 'Loaded metadata: {...}' block the registration printed,
+    parsed, or None."""
+    idx = text.rfind("Loaded metadata: {")
+    if idx < 0:
+        return None
+    start = text.index("{", idx)
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(text[start:i + 1])
+                except ValueError:
+                    return None
+    return None
+
+
+def run_payload_canary(csv_base, stamp, workdir):
+    """Payload canary: manifest row 1 through the production payload with
+    its outputs directed to epic:/TEST/canary/<stamp>, a seven-day
+    lifetime on what it registers, and no log upload. The verdict
+    material rides in jobReport.json under ``canary``: the payload exit
+    code, the stage log, the events processed, the registration
+    metadata, the DIDs registered. Exits 0 whatever the payload did, so
+    the pilot ships the report as job metadata (kept for finished jobs
+    only); the verdict is read from the report, never from the exit."""
+    dataset = f"{CANARY_DATASET_ROOT}/{stamp}"
+    stages_log = os.path.join(workdir, "payload-stages.log")
+    rc, row = run_row(1, csv_base, workdir, extra_env={
+        "CANARY_OUTPUT_DATASET": dataset,
+        "CANARY_LIFETIME_S": str(CANARY_LIFETIME_S),
+        "PAYLOAD_STAGES_LOG": stages_log,
+    })
+    stages = _read_stages(stages_log)
+    text = _payload_output(workdir)
+    events = re.search(r"Final report: (\d+) events processed", text)
+    requested = None
+    if row and str(row[2]).strip().isdigit():
+        requested = int(row[2])
+    canary = {
+        "kind": "payload",
+        "stamp": stamp,
+        "dataset": f"epic:/{dataset}",
+        "payload_version": payload_version(workdir),
+        "payload_exit_code": rc,
+        "manifest_row": row,
+        "requested_events": requested,
+        "events_processed": int(events.group(1)) if events else None,
+        "stages": stages,
+        "dids": [s["detail"] for s in stages
+                 if s["stage"] == "registration" and s["status"] == "ok"
+                 and s["detail"]],
+        "metadata": _loaded_metadata(text),
+    }
+    write_job_report(0, workdir, extra={"payload_version": canary["payload_version"],
+                                        "canary": canary})
+    return 0
+
+
+def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "canary":
+        # Canary probe job: same runner, landing-kit payload.
+        payload_seconds = int(sys.argv[2]) if len(sys.argv) > 2 else 60
+        return run_canary(payload_seconds, os.getcwd())
+    if len(sys.argv) >= 2 and sys.argv[1] == "payload-canary":
+        # Payload canary job: same runner, production payload on row 1,
+        # outputs to the expiring canary dataset named by the stamp.
+        if len(sys.argv) < 4:
+            print(f"Usage: {sys.argv[0]} payload-canary <csv_base> <stamp>",
+                  file=sys.stderr)
+            return 2
+        return run_payload_canary(sys.argv[2], sys.argv[3], os.getcwd())
+    if len(sys.argv) < 3:
+        print(f"Usage: {sys.argv[0]} <SEQNUMBER> <csv_base>", file=sys.stderr)
+        return 2
+    # The pilot runs this dispatcher in the job workdir; capture it before
+    # the payload runs so the report lands where the pilot looks.
+    workdir = os.getcwd()
+    rc, _row = run_row(int(sys.argv[1]), sys.argv[2], workdir)
     # The report carries the payload version on every job; the pilot lifts
     # it into the job record on success, and the exit message on failure.
-    write_job_report(result.returncode, workdir,
-                     extra={"payload_version": version})
-    return result.returncode
+    write_job_report(rc, workdir, extra={"payload_version": payload_version(workdir)})
+    return rc
 
 
 if __name__ == "__main__":

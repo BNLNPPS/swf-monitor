@@ -252,7 +252,18 @@ def main():
                     help="residual .tryN: the spec covers only manifest rows "
                          "with no registered RECO output "
                          "(JEDI_INTEGRATION.md § Residual rerun)")
+    ap.add_argument("--canary-stamp", default="",
+                    help="payload canary: submit manifest row 1 alone under the "
+                         "canary account to --canary-queue, outputs to the "
+                         "expiring dataset epic:/TEST/canary/<stamp>; nothing "
+                         "is recorded on the PCS task (site-canary "
+                         "IMPLEMENTATION.md, Payload canaries)")
+    ap.add_argument("--canary-queue", default="",
+                    help="the PanDA queue a payload canary is sent to")
     args = ap.parse_args()
+    if bool(args.canary_stamp) != bool(args.canary_queue):
+        _log("ERROR: --canary-stamp and --canary-queue go together")
+        return 2
 
     if not args.swf_monitor_url:
         _log("ERROR: no --swf-monitor-url / SWF_MONITOR_URL")
@@ -289,6 +300,21 @@ def main():
         return 3
     if args.owner and not spec.get('userName'):
         spec['userName'] = args.owner
+    if args.canary_stamp:
+        # Payload canary: the configuration's first manifest row through the
+        # production payload, as a canary task (canary user, processing type
+        # canary, one job, one attempt) on the named queue, its outputs in
+        # the expiring dataset the dispatcher's payload-canary mode names.
+        qtag = args.canary_queue.lower()
+        spec['csvRows'] = list(spec['csvRows'])[:1]
+        spec['outDS'] = f"group.EIC.canary.{qtag}.{args.canary_stamp}"
+        spec['exec'] = (f"python3 evgen_job_dispatcher.py payload-canary "
+                        f"{spec['csvBase']} {args.canary_stamp}")
+        spec.update(site=args.canary_queue, processingType='canary',
+                    prodSourceLabel='test', userName='canary', nJobs=1,
+                    maxAttempt=1, skipScout=True)
+        _log(f"payload canary {spec['outDS']} on {args.canary_queue}: "
+             f"row {spec['csvRows'][0]}")
     _log(f"EVGEN spec for {args.task_name}: outDS={spec['outDS']} "
          f"nJobs={spec.get('nJobs')} skipScout={spec.get('skipScout')}")
 
@@ -331,6 +357,11 @@ def main():
         return 6
     jedi_task_id = int(m.group(1))
     _log(f"SUBMITTED {args.task_name} -> jediTaskID={jedi_task_id}")
+    if args.canary_stamp:
+        # A canary task is the canary's record, not the PCS task's: the
+        # caller (canary payload-canary) keeps it on the probe run.
+        print(f"jediTaskID={jedi_task_id}")
+        return 0
 
     # 5. Record the outcome back to PCS (idempotent; retry a transient failure).
     last_err = None

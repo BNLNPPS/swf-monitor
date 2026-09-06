@@ -71,7 +71,8 @@ EXIT_DELIBERATE = 100
 class CanaryAgent(BaseAgent):
     """Canary site-health agent — dispatches canary messages to handlers."""
 
-    KNOWN_TYPES = {"assess_refresh", "probe_dispatch", "health_ping", "shutdown"}
+    KNOWN_TYPES = {"assess_refresh", "probe_dispatch", "payload_canary",
+                   "health_ping", "shutdown"}
 
     def __init__(self):
         # System-level singleton (not a per-user testbed agent): its namespace
@@ -170,6 +171,40 @@ class CanaryAgent(BaseAgent):
         self.send_message('/topic/epictopic', {
             "msg_type": "canary_probe_dispatch_complete", "ok": ok,
             "queue": queue})
+
+    def _handle_payload_canary(self, m):
+        """Run one payload canary (site-canary IMPLEMENTATION.md, Payload
+        canaries): the named PCS task's first manifest row through the
+        production payload on the named queue, as a canary task with an
+        expiring output dataset. Deduped per task and queue."""
+        task = str(m.get("task") or "").strip()
+        queue = str(m.get("queue") or "").strip()
+        if not task or not queue:
+            self.logger.error(
+                f"CANARY payload_canary: task and queue are required; got "
+                f"task={task!r} queue={queue!r}")
+            return
+        self.run_in_background(
+            self._do_payload_canary, m,
+            dedup_key=f"payload_canary:{task}:{queue}", label="payload_canary")
+
+    def _do_payload_canary(self, m):
+        created_by = str(m.get("created_by") or "?")
+        task = str(m.get("task") or "").strip()
+        queue = str(m.get("queue") or "").strip()
+        self.logger.info(
+            f"CANARY payload_canary: {task} on {queue} (by {created_by})")
+        t0 = time.monotonic()
+        ok = self._run_doer(["payload-canary", "--task", task, "--queue", queue],
+                            PROBE_TIMEOUT)
+        self.logger.info(
+            f"CANARY payload_canary {'submitted' if ok else 'FAILED'} "
+            f"in {time.monotonic() - t0:.1f}s")
+        # The same completion event the probes page already listens for,
+        # so a Run from the page reloads on it; the kind tells them apart.
+        self.send_message('/topic/epictopic', {
+            "msg_type": "canary_probe_dispatch_complete", "ok": ok,
+            "queue": queue, "kind": "payload", "task": task})
 
     # -- doers ---------------------------------------------------------------
 
