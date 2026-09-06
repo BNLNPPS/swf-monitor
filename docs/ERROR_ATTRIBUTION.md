@@ -141,10 +141,10 @@ same episode runs only on escalation or on the daily trickle.
 
 - **Exit-code vocabulary.** The payload communicates its failure mode
   through coded exits, stored on every failed job as `transexitcode`.
-  The hepmc3 campaign `run.sh` already codes 78 (Rucio registration
-  failure) and 65 (validation failure); the vocabulary is completed so
-  every distinct failure path has a documented code, kept in a
-  registry in the production documentation.
+  The registry is
+  [EPICPROD_PAYLOAD.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/EPICPROD_PAYLOAD.md)
+  § Exit codes, which documents each distinct failure path the payload
+  can take; a new path adds a code there rather than exiting 1.
 - **Failure report.** On failure the payload writes `jobReport.json`
   (`exitCode`, `exitMsg`; extra fields welcome). In the PCS path the
   in-job dispatcher shipped in every task sandbox writes it, wrapping
