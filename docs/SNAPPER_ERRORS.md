@@ -116,12 +116,20 @@ Each publication records the error events of one interval:
   failure instant is its event time — otherwise a kill storm appears
   on the plots hours before it happened. A job reports errors once,
   upon completion, so each failed job appears in exactly one
-  interval.
+  interval. Since 2026-09-06 each row also carries the payload's
+  transformation exit code, raw as the pilot reported it and empty
+  where none was reported: the population-wide channel of
+  [ERROR_ATTRIBUTION.md](ERROR_ATTRIBUTION.md), by which a reader
+  tells a job that failed at output upload or registration (the run
+  script's coded exit 78) whatever label the pilot gave it. The
+  record stays raw; the code's reading is applied at read time. The
+  first reader is the Storage view's consequences strip
+  ([SNAPPER_STORAGE.md](SNAPPER_STORAGE.md)).
 - **Overflow** — absent normally. An interval exceeding the entry bound
   (2,000 rows) keeps the earliest rows and folds the exact remainder
-  into counts keyed `category@status`, so status-resolved aggregate
-  counts never lose a job while the per-job listing stays bounded in
-  storm floods.
+  into counts keyed `category@status@exitcode`, so status-resolved and
+  exit-resolved aggregate counts never lose a job while the per-job
+  listing stays bounded in storm floods.
 
 The publisher is stateless: each pass reads the interval's faulty jobs
 from the PanDA job records. Counts over any period are sums of entry

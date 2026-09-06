@@ -47,6 +47,7 @@ from monitor_app.snapper_errors import (  # noqa: E402
     PUBLISHER_IDENTITY,
     _category_key,
     _entry_rows,
+    _exit_key,
     _iso_utc,
 )
 from snapper_ai.models import SystemSnap  # noqa: E402
@@ -82,7 +83,7 @@ def _interval_snaps(day_start, day_end, step):
         overflow_total = 0
         overflow_categories = {}
 
-    for pandaid, taskid, comp, code, endtime, status in rows:
+    for pandaid, taskid, comp, code, endtime, status, exitcode in rows:
         stamp = endtime if endtime.tzinfo else endtime.replace(
             tzinfo=dt.timezone.utc)
         while stamp > edge:
@@ -97,10 +98,11 @@ def _interval_snaps(day_start, day_end, step):
                 category,
                 _iso_utc(endtime),
                 str(status or ''),
+                _exit_key(exitcode),
             ])
         else:
             overflow_total += 1
-            fold_key = f'{category}@{status or ""}'
+            fold_key = f'{category}@{status or ""}@{_exit_key(exitcode)}'
             overflow_categories[fold_key] = (
                 overflow_categories.get(fold_key) or 0) + 1
     close()

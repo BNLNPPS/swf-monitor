@@ -778,6 +778,24 @@ def _epicprod_event_values(state):
     return _errors_event_values(state)
 
 
+# The run script's coded exit for its output upload-and-register step
+# (swf-epicprod docs/EPICPROD_OPS.md), read from the error entries'
+# payload exit code (docs/ERROR_ATTRIBUTION.md).
+STORAGE_EXIT_CODE = '78'
+
+
+def _storage_consequence_key(comp, exitcode):
+    """The storage-consequence curve an error entry joins, or None:
+    psto_registration for a payload exit 78, the output upload or
+    registration failure, whatever label the pilot gave the job;
+    psto_ddm for the data-management component's other errors."""
+    if exitcode == STORAGE_EXIT_CODE:
+        return 'psto_registration'
+    if comp == 'ddm':
+        return 'psto_ddm'
+    return None
+
+
 def _errors_event_values(state):
     """Error events from the error-state component's interval record
     (docs/SNAPPER_ERRORS.md): one stamp per failed job at its end
@@ -785,10 +803,14 @@ def _errors_event_values(state):
     per-task (terr_, terrc_) curves. Each stamp carries the job's
     terminal state as its event qualifier (series bins per-qualifier
     breakdowns for the view's terminal-state filter); rows recorded
-    before the status column report 'unrecorded'. Overflow rows —
-    storm intervals beyond the entry bound — carry no individual
-    stamps; their exact counts land at the interval end, scope curves
-    only, keyed 'category@status' since v3."""
+    before the status column report 'unrecorded'. Rows carry the
+    payload's exit code since v4: the storage-consequence curves
+    (psto_, the Storage view's consequences strip) derive from it and
+    the component (_storage_consequence_key); older rows join them
+    by component alone. Overflow rows — storm intervals beyond the
+    entry bound — carry no individual stamps; their exact counts land
+    at the interval end, scope curves only, keyed 'category@status'
+    since v3 and 'category@status@exitcode' since v4."""
     events = {}
     errors = component_data(state, 'errors')
     entries = errors.get('entries')
@@ -803,9 +825,14 @@ def _errors_event_values(state):
             continue
         status = (str(row[4]) if len(row) > 4 and row[4]
                   else 'unrecorded')
+        exitcode = (str(row[5]).strip() if len(row) > 5 and row[5]
+                    else '')
         event = [stamp, status]
         events.setdefault(f'perr_{comp}_{code}', []).append(event)
         events.setdefault(f'perrc_{comp}', []).append(event)
+        storage_key = _storage_consequence_key(comp, exitcode)
+        if storage_key:
+            events.setdefault(storage_key, []).append(event)
         if taskid:
             events.setdefault(
                 f'terr_{taskid}_{comp}_{code}', []).append(event)
@@ -814,12 +841,19 @@ def _errors_event_values(state):
     interval_end = str((errors.get('interval') or {}).get('end') or '')
     if interval_end:
         for fold_key, count in (overflow.get('by_category') or {}).items():
-            category, at, status = str(fold_key).partition('@')
+            parts = str(fold_key).split('@')
+            category = parts[0]
+            status = (parts[1] if len(parts) > 1 and parts[1]
+                      else 'unrecorded')
+            exitcode = parts[2].strip() if len(parts) > 2 else ''
             comp, _, code = str(category).partition(':')
-            event = [interval_end, status if at and status else 'unrecorded']
+            event = [interval_end, status]
             stamps = [event] * int(count or 0)
             events.setdefault(f'perr_{comp}_{code}', []).extend(stamps)
             events.setdefault(f'perrc_{comp}', []).extend(stamps)
+            storage_key = _storage_consequence_key(comp, exitcode)
+            if storage_key:
+                events.setdefault(storage_key, []).extend(stamps)
     return events
 
 
@@ -890,6 +924,10 @@ def _epicprod_curve_color(curve_id):
             curve_id.rsplit('_', 1)[1], '#424242')
     if curve_id.startswith('perrc_'):
         return _FAILURE_CLASS_COLORS.get(curve_id[6:], '#424242')
+    if curve_id == 'psto_registration':
+        return JOB_STATE_COLORS.get('failed')
+    if curve_id == 'psto_ddm':
+        return _FAILURE_CLASS_COLORS.get('ddm')
     if curve_id.startswith('terrc_'):
         return _FAILURE_CLASS_COLORS.get(
             curve_id[6:].partition('_')[2], '#424242')
@@ -1000,6 +1038,8 @@ def _epicprod_curve_label(curve_id):
         return curve_id[5:]
     if curve_id.startswith('plmv_'):
         return '/' + curve_id[5:]
+    if curve_id in _STORAGE_CONSEQUENCE_LABELS:
+        return _STORAGE_CONSEQUENCE_LABELS[curve_id]
     if curve_id.startswith('perrc_'):
         return curve_id[6:]
     if curve_id.startswith('perr_'):
@@ -2312,14 +2352,17 @@ def _storage_groups():
             'title': 'Archival backlog · on disk and not on tape',
             'prefixes': ['stopa_'], 'ids': [],
             'panel_px': 110, 'units': 'TB'})
-    # The consequences strip (SNAPPER_STORAGE.md): the error record's
-    # data-management job failures, the ddm component's events, binned
-    # at render with the Errors view's terminal-state chips. The entries
-    # carry no RSE, so the strip is scope-level, once.
+    # The consequences strip (SNAPPER_STORAGE.md): the jobs that failed
+    # at storage — the error record's entries with payload exit 78,
+    # the output upload or registration failure whatever the pilot's
+    # label, and the ddm component's other errors — binned at render
+    # with the Errors view's terminal-state chips. The entries carry
+    # no RSE, so the strip is scope-level, once.
     groups.append({
         'name': 'Storage consequences',
-        'title': 'Data-management job failures · all queues (ddm errors)',
-        'prefixes': [], 'ids': ['perrc_ddm'],
+        'title': ('Jobs failed at upload or registration · all queues '
+                  '(payload exit 78, ddm errors)'),
+        'prefixes': [], 'ids': ['psto_registration', 'psto_ddm'],
         'event_flow': True, 'end_stamped': True, 'stacked': True,
         # Bins twice the ladder rung: a handful of events a week draws
         # as hairlines at the 15-minute rung of a 7-day window.
@@ -2328,7 +2371,8 @@ def _storage_groups():
         'panel_px': 150, 'units': 'errors',
         'qualifier_label': 'Terminal state', 'qualifier_param': 'states',
         'qualifiers_off': ['closed'],
-        'empty_note': 'No data-management job failures in this window'})
+        'empty_note': ('No jobs failed at upload or registration in '
+                       'this window')})
     return tuple(groups)
 
 
@@ -2580,6 +2624,11 @@ TESTBED_GROUPS = (
 
 
 # ── Component cards ──────────────────────────────────────────────────────
+
+_STORAGE_CONSEQUENCE_LABELS = {
+    'psto_registration': 'upload or registration failure (payload exit 78)',
+    'psto_ddm': 'data-management error (ddm)',
+}
 
 _FAILURE_CLASS_COLORS = {
     'brokerage': '#8d6e63',

@@ -3,17 +3,21 @@
 Design: docs/SNAPPER_ERRORS.md. Each publication records the error
 events of one interval: every job that ended faulty within
 (previous publication, now], as bounded entry rows of
-(pandaid, jeditaskid, category, endtime, status). The status is the
-job's terminal state (failed, cancelled, closed) — the system's own
-disposition semantics: closed marks jobs the server disposed of for
-workflow reasons, by design not actual errors. A job reports errors
-once, upon completion, so each failed job appears in exactly one
-interval. Counts over any period are sums of entry counts over the
-intervals it spans; per-task readings filter the same entries by task
-id. An interval whose entry count exceeds the bound keeps a
-representative subset and folds the exact remainder into
-per-category-and-status overflow counts, so aggregate counts never
-lose a job.
+(pandaid, jeditaskid, category, endtime, status, exitcode). The status
+is the job's terminal state (failed, cancelled, closed) — the system's
+own disposition semantics: closed marks jobs the server disposed of
+for workflow reasons, by design not actual errors. The exit code is
+the payload's transformation exit code as the pilot reported it, raw
+(docs/ERROR_ATTRIBUTION.md): its reading — 78 is the run script's
+output upload or registration failure — is applied at read time, so
+a reader tells a storage failure whatever label the pilot gave it. A
+job reports errors once, upon completion, so each failed job appears
+in exactly one interval. Counts over any period are sums of entry
+counts over the intervals it spans; per-task readings filter the same
+entries by task id. An interval whose entry count exceeds the bound
+keeps a representative subset and folds the exact remainder into
+per-category, status and exit-code overflow counts, so aggregate
+counts never lose a job.
 """
 
 import json
@@ -38,11 +42,12 @@ from .panda.constants import (
 )
 
 PUBLISHER_IDENTITY = "swf-monitor:panda-errors"
-ASSESSMENT_POLICY_VERSION = "swf-panda-errors-v3"
+ASSESSMENT_POLICY_VERSION = "swf-panda-errors-v4"
 COMPONENT_NAME = "errors"
 SCOPE = "epicprod"
 
-ENTRY_FIELDS = ["pandaid", "jeditaskid", "category", "endtime", "status"]
+ENTRY_FIELDS = ["pandaid", "jeditaskid", "category", "endtime", "status",
+                "exitcode"]
 # The event time of a faulty job: its end time, except that a
 # lost-heartbeat failure (dispatcher code 100) records the last
 # heartbeat as the end time and the failure instant as the modification
@@ -68,13 +73,17 @@ ERRORS_REGISTRATION = {
         "Per-interval PanDA job error events: each publication covers "
         "one interval and records every job that ended faulty within "
         "it, as entry rows of (pandaid, jeditaskid, category, "
-        "endtime, status). The category is 'component:code', "
+        "endtime, status, exitcode). The category is 'component:code', "
         "classified by the first nonzero error component in the "
         "standard order, so one job lands in one category. The status "
         "is the job's terminal state (failed, cancelled, closed); "
         "closed marks jobs the server disposed of for workflow "
-        "reasons, by design not actual errors. Counts over any period "
-        "are sums of entry counts over the intervals it spans."
+        "reasons, by design not actual errors. The exit code is the "
+        "payload's transformation exit code as the pilot reported it, "
+        "raw; its reading (78 is the run script's output upload or "
+        "registration failure) is applied at read time. Counts over "
+        "any period are sums of entry counts over the intervals it "
+        "spans."
     ),
     "visibility": "public",
     "owning_subsystem": "SWF PanDA production monitor",
@@ -102,8 +111,10 @@ ERRORS_REGISTRATION = {
             "description": (
                 "One row per job that ended faulty in the interval, as "
                 "arrays in ENTRY_FIELDS order: pandaid, jeditaskid, "
-                "category 'component:code', event time, and terminal "
-                "status. The event time is the job's end time, except "
+                "category 'component:code', event time, terminal "
+                "status, and the payload's transformation exit code "
+                "as a string, empty where none was reported. The event "
+                "time is the job's end time, except "
                 "for lost-heartbeat failures (dispatcher 100), whose "
                 "recorded end time is the last heartbeat: their event "
                 "time is the failure instant (the modification time). "
@@ -121,8 +132,9 @@ ERRORS_REGISTRATION = {
             "description": (
                 "Absent normally. In an interval exceeding the entry "
                 "bound: 'total' and 'by_category' counts of the rows "
-                "not listed in entries, keyed 'component:code@status' "
-                "so status-resolved aggregate counts never lose a job."
+                "not listed in entries, keyed "
+                "'component:code@status@exitcode' so status-resolved "
+                "and exit-resolved aggregate counts never lose a job."
             ),
         },
     },
@@ -174,10 +186,12 @@ def _faulty_union(mark, until, diags=False, sites=False):
     tables. diags=True adds the diagnostic text columns for pattern
     aggregation; sites=True adds the computing site."""
     err_fields = ", ".join(f'"{c["code"]}"' for c in ERROR_COMPONENTS)
+    # The payload's exit code rides every faulty row: the entry rows
+    # record it and the patterns profile by it.
+    err_fields += ', "transexitcode"'
     if diags:
         err_fields += ", " + ", ".join(
             f'"{c["diag"]}"' for c in ERROR_COMPONENTS)
-        err_fields += ', "transexitcode"'
     if sites:
         err_fields += ', "computingsite"'
     status_placeholders = ", ".join(["%s"] * len(FAULTY_STATUSES))
@@ -345,15 +359,15 @@ def error_patterns(mark, until, taskid=None, statuses=None):
 
 
 def _entry_rows(mark, until):
-    """(pandaid, jeditaskid, category, endtime, status) for faulty
-    jobs ending in (mark, until], in endtime order."""
+    """(pandaid, jeditaskid, comp, code, endtime, status, exitcode)
+    for faulty jobs ending in (mark, until], in endtime order."""
     comp_case, code_case, _ = _classify_sql()
     union, params = _faulty_union(mark, until)
     sql = f"""
         SELECT "pandaid", "jeditaskid",
                CASE {comp_case} ELSE 'other' END,
                CASE {code_case} ELSE 0 END,
-               "endtime", "jobstatus"
+               "endtime", "jobstatus", "transexitcode"
         FROM ({union}) faulty
         ORDER BY "endtime", "pandaid"
     """
@@ -386,6 +400,12 @@ def _category_key(comp, code):
     return f"{comp}:{int(code or 0)}"
 
 
+def _exit_key(exitcode):
+    """The payload exit code as the entry records it: the stored text
+    stripped, empty where the pilot reported none."""
+    return str(exitcode or '').strip()
+
+
 def errors_projection(now=None, mark=None):
     """Build the one-interval error projection without publishing.
 
@@ -403,8 +423,8 @@ def errors_projection(now=None, mark=None):
     entries = []
     overflow_total = 0
     overflow_categories = {}
-    for pandaid, taskid, comp, code, endtime, status in _entry_rows(
-            mark, observed_at):
+    for pandaid, taskid, comp, code, endtime, status, exitcode in (
+            _entry_rows(mark, observed_at)):
         category = _category_key(comp, code)
         if len(entries) < MAX_ENTRIES:
             entries.append([
@@ -413,10 +433,11 @@ def errors_projection(now=None, mark=None):
                 category,
                 _iso_utc(endtime),
                 str(status or ''),
+                _exit_key(exitcode),
             ])
         else:
             overflow_total += 1
-            fold_key = f"{category}@{status or ''}"
+            fold_key = f"{category}@{status or ''}@{_exit_key(exitcode)}"
             overflow_categories[fold_key] = (
                 overflow_categories.get(fold_key) or 0) + 1
 
@@ -436,11 +457,11 @@ def errors_projection(now=None, mark=None):
     return projection, observed_at
 
 
-def _previous_data_is_v3():
+def _previous_data_is_current_shape():
     """Whether the component's current content already has the
-    status-bearing interval-entries shape. Until it does, a quiet
-    interval still publishes, so the shape transition lands as real
-    content."""
+    current entry-row shape (every ENTRY_FIELDS column). Until it
+    does, a quiet interval still publishes, so the shape transition
+    lands as real content."""
     from snapper_ai.models import CurrentComponent
 
     row = (CurrentComponent.objects
@@ -462,7 +483,7 @@ def publish_errors_state() -> ErrorsPublication:
     """
     projection, observed_at = errors_projection()
     quiet = (not projection["entries"] and not projection.get("overflow")
-             and _previous_data_is_v3())
+             and _previous_data_is_current_shape())
     with transaction.atomic():
         # Registration first: reconciliation is idempotent, and the
         # publication validates against the registration on record —
@@ -473,7 +494,7 @@ def publish_errors_state() -> ErrorsPublication:
             name=COMPONENT_NAME,
             publisher_identity=PUBLISHER_IDENTITY,
             registration=ERRORS_REGISTRATION,
-            component_schema_version=3,
+            component_schema_version=4,
         )
         if quiet:
             update = report_component_unchanged(

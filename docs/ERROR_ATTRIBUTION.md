@@ -194,7 +194,12 @@ supported, not confirmed. Every summary states the processing lost.
   breakdown patterns — with the corrected reading refined from each
   pattern's payload exit-code profile (grade: pilot mechanical
   fields), the original label preserved beneath it, and the first
-  seeded rule covering the pilot 1305 bind-mount noise. The per-job
+  seeded rule covering the pilot 1305 bind-mount noise. The Snapper
+  errors record carries the payload exit code on every entry since
+  2026-09-06 (SNAPPER_ERRORS.md), so series readers classify by it at
+  read time; the first is the Storage view's consequences strip,
+  counting exit 78 as the output upload or registration failure it
+  is. The per-job
   root is wired the same way: `extract_errors` in
   `monitor_app/panda/sql.py`, through which the task page's job list,
   the diagnostics list, and the job page's error entries read, attaches the

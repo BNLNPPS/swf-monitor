@@ -168,12 +168,23 @@ target campaign where the record is per campaign:
 - *Arrived and archived* — the campaign's arrival and archive counters
   as per-bin flows.
 
-**Consequences**: the error-state component's data-management job
-failures (the `ddm` error component) as an event-flow strip beneath
-the panels, with the terminal-state chips of the Errors view. The
-error entries carry no RSE, so the strip is scope-level, once; the
-attribution of a failure to its destination RSE is not recorded and
-is not shown.
+**Consequences**: the jobs that failed at storage, as an event-flow
+strip beneath the panels with the terminal-state chips of the Errors
+view. Two stacked members from the error-state component's entries:
+the jobs whose payload exit code is 78, the run script's coded exit
+for the output upload-and-register step
+([EPICPROD_OPS.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/EPICPROD_OPS.md)),
+whatever component the pilot labelled them with, and the data-management
+(`ddm`) component's errors. The exit code is the population-wide
+channel of [ERROR_ATTRIBUTION.md](ERROR_ATTRIBUTION.md): the pilot's
+own label puts most upload and registration failures under pilot 1305
+beside unrelated launch failures, and only the exit code separates
+them. Entries recorded before the exit code joined the record
+(2026-09-06) carry the `ddm` member alone. The error entries carry no
+RSE, so the strip is scope-level, once; the attribution of a failure
+to its destination RSE is not recorded and is not shown. The strip's
+bins are twice the page's ladder rung, so a sparse week still draws
+as bars.
 
 State curves hold their last recorded value to the present: the record
 is four-hourly and a quiet pass affirms the state unchanged, so the last
