@@ -1,3 +1,10 @@
+/* These are state names, applied bare to the cell showing a state. Two of
+   them — `alert` and `warning` — are also Bootstrap component classes, so a
+   state colour was repainting whole alert boxes: a green Submit-ready panel
+   rendered its text firebrick, the theme's error colour. A Bootstrap alert
+   always carries a variant class alongside `.alert`, so those get their own
+   variant colour back; a bare `.alert` state cell is untouched. */
+.alert[class*="alert-"] { color: var(--bs-alert-color, inherit); }
 
 .alarm { color:red }
 .errspan {color: red}
