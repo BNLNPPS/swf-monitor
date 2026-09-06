@@ -290,7 +290,7 @@ def capcom_state(request):
             if row['status'] == 'running')
         finished = 0
         failed = 0
-        for _site, status, _cls, count in _terminal_outcome_rows(
+        for _site, status, _cls, count, _held in _terminal_outcome_rows(
                 now - timedelta(hours=12), now):
             if status == 'finished':
                 finished += int(count or 0)

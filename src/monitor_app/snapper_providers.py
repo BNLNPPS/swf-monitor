@@ -481,6 +481,16 @@ def _site_curve_values(panda):
         if 'failed' in cum:
             values[f'sjxw_{site}'] = int(cum.get('failed') or 0)
             values[f'sjfail_{site}'] = int(cum.get('failed') or 0)
+        # The allocation those jobs held, core-hours from the record's
+        # exact core-seconds: productive against wasted on one axis
+        # (docs/SNAPPER_ERRORS.md, Wasted resources).
+        held = block.get('cum_core_seconds') or {}
+        if 'finished' in held:
+            values[f'sjfh_{site}'] = round(
+                int(held.get('finished') or 0) / 3600, 1)
+        if 'failed' in held:
+            values[f'sjxh_{site}'] = round(
+                int(held.get('failed') or 0) / 3600, 1)
         for cls, count in (block.get('cum_failed_by_class')
                            or {}).items():
             values[f'sjxc_{site}_{cls}'] = int(count or 0)
@@ -690,6 +700,12 @@ def _epicprod_curve_values(state):
         if status in (jobs.get('cum') or {}):
             values[f'outcome_{status}'] = int(
                 jobs['cum'].get(status) or 0)
+        if status in (jobs.get('cum_core_seconds') or {}):
+            # The scope's productive and wasted allocation, core-hours
+            # from the record's exact core-seconds. Not an 'outcome_'
+            # id: that prefix is the job-count family's.
+            values[f'outh_{status}'] = round(
+                int(jobs['cum_core_seconds'].get(status) or 0) / 3600, 1)
     if tasks_now:
         for status, count in (tasks_now.get('by_status') or {}).items():
             if status in ('defined', 'ready'):
@@ -936,6 +952,12 @@ def _epicprod_curve_color(curve_id):
         return JOB_STATE_COLORS.get('activated')
     if curve_id.startswith('sjxw_'):
         return JOB_STATE_COLORS.get('failed')
+    # The core-hours pair wears the outcome colors of the jobs it
+    # accounts for: productive finished, wasted failed.
+    if curve_id.startswith('sjfh_') or curve_id == 'outh_finished':
+        return JOB_STATE_COLORS.get('finished')
+    if curve_id.startswith('sjxh_') or curve_id == 'outh_failed':
+        return JOB_STATE_COLORS.get('failed')
     if curve_id.startswith('sjfin_'):
         return JOB_STATE_COLORS.get('finished')
     if curve_id.startswith('sjfail_'):
@@ -1081,6 +1103,10 @@ def _epicprod_curve_label(curve_id):
         return 'finished'
     if curve_id.startswith(('sjxw_', 'sjfail_')):
         return 'failed'
+    if curve_id.startswith('sjfh_') or curve_id == 'outh_finished':
+        return 'productive'
+    if curve_id.startswith('sjxh_') or curve_id == 'outh_failed':
+        return 'wasted'
     if curve_id.startswith('sjxc_'):
         # Failure-class curves: the class is the last id segment.
         return curve_id.rsplit('_', 1)[1]
@@ -1597,6 +1623,19 @@ def _site_groups():
             'order': [f'sjfw_{site}', f'sjxw_{site}'],
             'window_relative': True, 'stacked': True,
             'panel_px': 150, 'units': 'jobs',
+            'default_off': True})
+        groups.append({
+            'name': f'Site core-hours {site}',
+            'title': f'Core-hours · {site}',
+            'prefixes': [],
+            'ids': [f'sjfh_{site}', f'sjxh_{site}'],
+            'order': [f'sjfh_{site}', f'sjxh_{site}'],
+            # The same window-relative staircases as the job outcomes
+            # above, in the allocation those jobs held: what the site
+            # produced against what it wasted (docs/SNAPPER_ERRORS.md,
+            # Wasted resources).
+            'window_relative': True, 'stacked': True,
+            'panel_px': 150, 'units': 'core-hours',
             'default_off': True})
         groups.append({
             'name': f'Site failures {site}',
@@ -2586,6 +2625,21 @@ def _errors_groups():
          'member_ticks': False,
          'panel_px': 300, 'units': 'errors', 'default_off': True,
          **qualifier},
+        # The productive baseline the wasted hours read against, in the
+        # aggregate band and the window-relative form of the integrated
+        # panels above it: what the scope's terminal jobs produced,
+        # stacked with what they wasted, from the PanDA component's
+        # core-seconds counters (docs/SNAPPER_ERRORS.md, Productive
+        # baseline and per-site reading).
+        {'name': 'Scope core-hours',
+         'title': 'Core-hours · productive and wasted',
+         'prefixes': [], 'ids': ['outh_finished', 'outh_failed'],
+         'order': ['outh_finished', 'outh_failed'],
+         'window_relative': True, 'stacked': True,
+         'section': {'label': 'Aggregate', 'display': 'Aggregate',
+                     'pinned': True, 'idle': False, 'peak': ''},
+         'panel_px': 220, 'units': 'core-hours',
+         'empty_note': 'No terminal jobs recorded in this window'},
         # Umbrella over every per-task error curve: the series build
         # resolves event_flow membership from registered families, and
         # per-task families are synthesized per request. Panels never
@@ -2657,7 +2711,9 @@ def _errors_focus_view():
         'label': 'Errors',
         'selector_label': 'Task',
         'cache_series': True,
-        'components': ('errors',),
+        # The productive baseline rides the PanDA component's counters,
+        # so the series walk reads both components' snaps.
+        'components': ('errors', 'panda'),
         'prewarm_series': False,
         'note': ('Each bin counts the jobs that ended with an error '
                  'in that interval, and beneath it the core-hours '
@@ -2678,8 +2734,10 @@ def _errors_focus_view():
         ],
         'options': [{'value': 'overall', 'label': 'Overall',
                      'families_by': {
-                         'category': ['Errors by category'],
-                         'component': ['Errors by component']},
+                         'category': ['Errors by category',
+                                      'Scope core-hours'],
+                         'component': ['Errors by component',
+                                       'Scope core-hours']},
                      'component': 'errors'}],
     }
 
@@ -2720,6 +2778,7 @@ def _site_focus_view():
              'families': [f'Site jobs {site}',
                           f'Site completions {site}',
                           f'Site outcomes {site}',
+                          f'Site core-hours {site}',
                           f'Site failures {site}',
                           f'Site tasks {site}'],
              'component': 'panda'}

@@ -78,6 +78,24 @@ PANDA_REGISTRATION = {
             "max_items": MAX_STATUSES,
             "description": "Trailing 24-hour job counts by PanDA status.",
         },
+        "jobs_cum_core_seconds": {
+            "path": "jobs.cum_core_seconds",
+            "type": "object",
+            "required": False,
+            "kind": "cumulative_counter_map",
+            "max_items": MAX_STATUSES,
+            "description": (
+                "The allocation terminal jobs held, cumulative "
+                "core-seconds by status, accumulated across "
+                "publications alongside 'cum' from the same rows: "
+                "cores times wall time from start to end, the "
+                "resource_usage rule. Finished is the productive "
+                "baseline the wasted core-hours of the error record "
+                "read against; a job that never started held nothing. "
+                "Integer seconds, so accumulation is exact; consumers "
+                "divide into core-hours at read."
+            ),
+        },
         "jobs_cum": {
             "path": "jobs.cum",
             "type": "object",
@@ -155,7 +173,9 @@ PANDA_REGISTRATION = {
                 "PanDA target sites with trailing job outcomes, current "
                 "in-flight status counts, running jobs and cores, and "
                 "cumulative terminal counters ('cum' by status; "
-                "'cum_failed_by_class' by error component). Every non-test "
+                "'cum_core_seconds', the allocation those jobs held, by "
+                "status; 'cum_failed_by_class' by error component). "
+                "Every non-test "
                 "Canary queue is retained, including explicit zero state "
                 "when inactive; remaining slots contain the highest-ranked "
                 "activity-derived sites."
@@ -304,8 +324,11 @@ def _canary_queue_names() -> set[str]:
 def _terminal_outcome_rows(mark, until, sites=None):
     """Terminal job transitions with end times in (mark, until] — or
     the full recorded history when mark is None (the counter seed) —
-    per site, by status and, for failures, by error component class.
+    per site, by status and, for failures, by error component class,
+    each with the core-seconds those jobs held (HELD_SQL, the
+    resource_usage rule: cores times wall time from start to end).
     Rows are deduplicated across the active and archived tables."""
+    from .snapper_errors import HELD_SQL
     site_names = tuple(sorted({str(site) for site in sites or ()}))
     if sites is not None and not site_names:
         return []
@@ -332,14 +355,16 @@ def _terminal_outcome_rows(mark, until, sites=None):
                CASE WHEN "jobstatus" = 'failed'
                     THEN CASE {class_case} ELSE 'other' END
                     ELSE '' END,
-               COUNT(*)
+               COUNT(*), COALESCE(SUM({HELD_SQL}), 0)
         FROM (
-            SELECT "pandaid", "endtime", "jobstatus",
-                   "computingsite", {err_fields}
+            SELECT "pandaid", "endtime", "endtime" AS "ended", "jobstatus",
+                   "computingsite", "starttime", "actualcorecount",
+                   "corecount", {err_fields}
             FROM "{PANDA_SCHEMA}"."jobsactive4" WHERE {bounds}
             UNION
-            SELECT "pandaid", "endtime", "jobstatus",
-                   "computingsite", {err_fields}
+            SELECT "pandaid", "endtime", "endtime" AS "ended", "jobstatus",
+                   "computingsite", "starttime", "actualcorecount",
+                   "corecount", {err_fields}
             FROM "{PANDA_SCHEMA}"."jobsarchived4" WHERE {bounds}
         ) completed
         GROUP BY 1, 2, 3
@@ -349,16 +374,31 @@ def _terminal_outcome_rows(mark, until, sites=None):
         return cursor.fetchall()
 
 
-def _accumulate_outcomes(scope_cum, site_cums, rows):
-    """Add terminal-outcome rows into the counter maps in place."""
-    for site, status, fclass, count in rows:
+def _accumulate_outcomes(scope_cum, site_cums, rows, scope_held=None,
+                         counts=True, held=True):
+    """Add terminal-outcome rows into the counter maps in place. The
+    core-seconds held ride the same counters under 'held', integer
+    seconds so the accumulation across cycles is exact; the view
+    divides into core-hours at render. ``counts`` and ``held`` select
+    which of the two a pass adds, so the core-seconds counters can be
+    seeded from the recorded history without re-adding counts that are
+    already accumulated."""
+    for site, status, fclass, count, held_seconds in rows:
         count = int(count or 0)
+        held_seconds = int(held_seconds or 0)
         if not count:
             continue
-        if scope_cum is not None:
+        if counts and scope_cum is not None:
             scope_cum[status] = int(scope_cum.get(status) or 0) + count
+        if held and scope_held is not None:
+            scope_held[status] = int(scope_held.get(status) or 0) + held_seconds
         entry = site_cums.setdefault(
-            str(site or "unknown"), {"cum": {}, "classes": {}})
+            str(site or "unknown"), {"cum": {}, "classes": {}, "held": {}})
+        if held:
+            entry.setdefault("held", {})[status] = (
+                int(entry["held"].get(status) or 0) + held_seconds)
+        if not counts:
+            continue
         entry["cum"][status] = (
             int(entry["cum"].get(status) or 0) + count)
         if status == "failed" and fclass:
@@ -380,12 +420,14 @@ def _previous_counters():
            .filter(scope="epicprod", name="panda")
            .values("data", "source_as_of").first())
     if not row:
-        return {}, {}, None
+        return {}, {}, {}, None
     jobs = (row["data"] or {}).get("jobs") or {}
     scope_cum = {k: int(v or 0)
                  for k, v in (jobs.get("cum") or {}).items()}
     if not scope_cum:
-        return {}, {}, None
+        return {}, {}, {}, None
+    scope_held = {k: int(v or 0)
+                  for k, v in (jobs.get("cum_core_seconds") or {}).items()}
     site_cums = {}
     for site, block in (jobs.get("sites") or {}).items():
         if block.get("cum") or block.get("cum_failed_by_class"):
@@ -395,8 +437,13 @@ def _previous_counters():
                 "classes": {k: int(v or 0) for k, v in
                             (block.get("cum_failed_by_class")
                              or {}).items()},
+                # Absent until the core-seconds counters joined the
+                # record (2026-09-06); they accrue from that point and
+                # the backfill carries the history.
+                "held": {k: int(v or 0) for k, v in
+                         (block.get("cum_core_seconds") or {}).items()},
             }
-    return scope_cum, site_cums, row["source_as_of"]
+    return scope_cum, scope_held, site_cums, row["source_as_of"]
 
 
 def _count_map(values, label, maximum):
@@ -595,22 +642,33 @@ def panda_projection(
         for name in ranked_task_sites
     }
 
-    scope_cum, site_cums, mark = _previous_counters()
+    scope_cum, scope_held, site_cums, mark = _previous_counters()
     missing_catalog_counters = catalog_site_names - set(site_cums)
+    # The core-seconds counters joined the record after the counts
+    # (2026-09-06). Seed them once from the full recorded history, as
+    # the counts were seeded, so each counter carries one origin of its
+    # own and every window difference reads across the change.
+    seeding_held = mark is not None and not scope_held
+    if seeding_held:
+        _accumulate_outcomes(None, site_cums,
+                             _terminal_outcome_rows(None, mark),
+                             scope_held=scope_held, counts=False)
     if mark is not None and missing_catalog_counters:
         historical_rows = _terminal_outcome_rows(
             None, mark, sites=missing_catalog_counters
         )
-        _accumulate_outcomes(None, site_cums, historical_rows)
+        _accumulate_outcomes(None, site_cums, historical_rows,
+                             held=not seeding_held)
     outcome_rows = (
         terminal_outcome_rows
         if terminal_outcome_rows is not None
         else _terminal_outcome_rows(mark, observed_at)
     )
-    _accumulate_outcomes(scope_cum, site_cums, outcome_rows)
+    _accumulate_outcomes(scope_cum, site_cums, outcome_rows,
+                         scope_held=scope_held)
     for name in catalog_site_names:
         counters = site_cums.setdefault(
-            name, {"cum": {}, "classes": {}}
+            name, {"cum": {}, "classes": {}, "held": {}}
         )
         for status in TERMINAL_JOB_STATUSES:
             counters["cum"].setdefault(status, 0)
@@ -642,6 +700,8 @@ def panda_projection(
         if counters:
             if counters["cum"]:
                 sites[name]["cum"] = counters["cum"]
+            if counters.get("held"):
+                sites[name]["cum_core_seconds"] = counters["held"]
             if counters["classes"]:
                 sites[name]["cum_failed_by_class"] = counters["classes"]
 
@@ -657,6 +717,11 @@ def panda_projection(
         "jobs": {
             "total_24h": int(jobs.get("total") or 0),
             "cum": scope_cum,
+            # The allocation those terminal jobs held, core-seconds by
+            # status: finished is the productive baseline the wasted
+            # core-hours read against (docs/SNAPPER_ERRORS.md, Wasted
+            # resources).
+            "cum_core_seconds": scope_held,
             "by_status_24h": jobs_by_status,
             "in_flight_now": {
                 "total": in_flight_total,
