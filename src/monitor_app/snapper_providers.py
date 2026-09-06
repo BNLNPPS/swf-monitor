@@ -784,6 +784,15 @@ def _epicprod_event_values(state):
 STORAGE_EXIT_CODE = '78'
 
 
+def _core_hours(held_seconds):
+    """An event's weight: the core-seconds a job held, in core-hours to
+    the thousandth."""
+    try:
+        return round(float(held_seconds or 0) / 3600.0, 3)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _storage_consequence_key(comp, exitcode):
     """The storage-consequence curve an error entry joins, or None:
     psto_registration for a payload exit 78, the output upload or
@@ -807,10 +816,15 @@ def _errors_event_values(state):
     payload's exit code since v4: the storage-consequence curves
     (psto_, the Storage view's consequences strip) derive from it and
     the component (_storage_consequence_key); older rows join them
-    by component alone. Overflow rows — storm intervals beyond the
-    entry bound — carry no individual stamps; their exact counts land
-    at the interval end, scope curves only, keyed 'category@status'
-    since v3 and 'category@status@exitcode' since v4."""
+    by component alone. Rows carry the held core-seconds since v5:
+    each event carries the job's core-hours as its weight, the bin's
+    second measure (docs/SNAPPER_ERRORS.md, Wasted resources), and a
+    row without the field carries none. Overflow rows — storm
+    intervals beyond the entry bound — carry no individual stamps;
+    their exact counts land at the interval end, scope curves only,
+    keyed 'category@status' since v3 and 'category@status@exitcode'
+    since v4, with the fold's summed core-hours spread evenly over its
+    events since v5."""
     events = {}
     errors = component_data(state, 'errors')
     entries = errors.get('entries')
@@ -828,6 +842,8 @@ def _errors_event_values(state):
         exitcode = (str(row[5]).strip() if len(row) > 5 and row[5]
                     else '')
         event = [stamp, status]
+        if len(row) > 6 and row[6] is not None:
+            event.append(_core_hours(row[6]))
         events.setdefault(f'perr_{comp}_{code}', []).append(event)
         events.setdefault(f'perrc_{comp}', []).append(event)
         storage_key = _storage_consequence_key(comp, exitcode)
@@ -840,6 +856,7 @@ def _errors_event_values(state):
     overflow = errors.get('overflow') or {}
     interval_end = str((errors.get('interval') or {}).get('end') or '')
     if interval_end:
+        held_folds = overflow.get('held_by_category')
         for fold_key, count in (overflow.get('by_category') or {}).items():
             parts = str(fold_key).split('@')
             category = parts[0]
@@ -848,7 +865,11 @@ def _errors_event_values(state):
             exitcode = parts[2].strip() if len(parts) > 2 else ''
             comp, _, code = str(category).partition(':')
             event = [interval_end, status]
-            stamps = [event] * int(count or 0)
+            count = int(count or 0)
+            if held_folds is not None and count:
+                event.append(_core_hours(
+                    (held_folds.get(fold_key) or 0) / count))
+            stamps = [event] * count
             events.setdefault(f'perr_{comp}_{code}', []).extend(stamps)
             events.setdefault(f'perrc_{comp}', []).extend(stamps)
             storage_key = _storage_consequence_key(comp, exitcode)
