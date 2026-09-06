@@ -4,7 +4,10 @@ body {
     padding: 0;
 }
 
-nav {
+/* The site menu bar. Scoped to its sticky-header wrapper: a bare `nav`
+   selector also claimed every breadcrumb and pagination `<nav>` in the
+   app, painting each one as a second black menu bar. */
+.sticky-header > nav {
     background-color: #333;
     color: white;
     padding: 1em;
@@ -12,7 +15,7 @@ nav {
     align-items: center;
 }
 
-nav a {
+.sticky-header > nav a {
     color: white;
     margin-right: 1em;
     text-decoration: none;
