@@ -396,7 +396,10 @@ def main():
             f"TRIAL_OUTPUT_ROOT={args.trial_root} "
             f"TRIAL_LIFETIME_S={lifetime_s} "
             f"TRIAL_EVENTS={int(args.trial_events)} "
-            f"python3 evgen_job_dispatcher.py ${{SEQNUMBER}} {spec['csvBase']}"
+            # %RNDM=0 is the token JEDI substitutes when it makes job
+            # parameters, and is what the production exec uses; a shell
+            # ${SEQNUMBER} is not resolved and job generation crashes.
+            f"python3 evgen_job_dispatcher.py %RNDM=0 {spec['csvBase']}"
         )
         spec.update(nJobs=1, maxAttempt=1, skipScout=True)
         if args.trial_queue:
