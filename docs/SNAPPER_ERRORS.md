@@ -124,7 +124,9 @@ Each publication records the error events of one interval:
   script's coded exit 78) whatever label the pilot gave it. The
   record stays raw; the code's reading is applied at read time. The
   first reader is the Storage view's consequences strip
-  ([SNAPPER_STORAGE.md](SNAPPER_STORAGE.md)).
+  ([SNAPPER_STORAGE.md](SNAPPER_STORAGE.md)). At schema version 5 each
+  row also carries the core-seconds the job held (Wasted resources
+  below).
 - **Overflow** — absent normally. An interval exceeding the entry bound
   (2,000 rows) keeps the earliest rows and folds the exact remainder
   into counts keyed `category@status@exitcode`, so status-resolved and
@@ -154,15 +156,17 @@ interval across the seam. The script is idempotent — a re-run
 replaces prior backfill — and dry-run by default. The deployment
 order is maintainer first, backfill after the first live publication.
 
-The payload exit code joined the entry rows on 2026-09-06. The
-backfill was re-run that day, so the synthetic snaps carry it, and the
-live snaps recorded before the change (2026-08-21 to 2026-09-06) were
-rewritten in place by `scripts/rewrite-errors-exitcodes.py`: the code
-looked up by job id and added to each row, every other field left as
-recorded, the snap's component and state hashes recomputed by the
-capture contract, and the component document marked `augmented` with
-what was added and when. Overflow fold keys from before the change
-name no job and keep their two-part form.
+When a field joins the entry rows, the backfill is re-run so the
+synthetic snaps carry it, and the live snaps recorded before the
+change are augmented in place by `scripts/augment-errors-entries.py`:
+every trailing field a row lacks is looked up by job id from the job
+records and added, every other field is left as recorded, the snap's
+component and state hashes are recomputed by the capture contract,
+and the component document is marked `augmented` with each field
+added, when, and how many rows had no job record left. The payload
+exit code was added this way on 2026-09-06 over the live snaps from
+2026-08-21. Overflow fold keys from before a change name no job and
+keep their recorded form.
 
 ## The errors view
 

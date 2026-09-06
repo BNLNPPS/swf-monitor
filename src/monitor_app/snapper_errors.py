@@ -3,21 +3,25 @@
 Design: docs/SNAPPER_ERRORS.md. Each publication records the error
 events of one interval: every job that ended faulty within
 (previous publication, now], as bounded entry rows of
-(pandaid, jeditaskid, category, endtime, status, exitcode). The status
-is the job's terminal state (failed, cancelled, closed) — the system's
-own disposition semantics: closed marks jobs the server disposed of
-for workflow reasons, by design not actual errors. The exit code is
-the payload's transformation exit code as the pilot reported it, raw
-(docs/ERROR_ATTRIBUTION.md): its reading — 78 is the run script's
-output upload or registration failure — is applied at read time, so
-a reader tells a storage failure whatever label the pilot gave it. A
-job reports errors once, upon completion, so each failed job appears
-in exactly one interval. Counts over any period are sums of entry
-counts over the intervals it spans; per-task readings filter the same
-entries by task id. An interval whose entry count exceeds the bound
-keeps a representative subset and folds the exact remainder into
-per-category, status and exit-code overflow counts, so aggregate
-counts never lose a job.
+(pandaid, jeditaskid, category, endtime, status, exitcode, held). The
+status is the job's terminal state (failed, cancelled, closed) — the
+system's own disposition semantics: closed marks jobs the server
+disposed of for workflow reasons, by design not actual errors. The
+exit code is the payload's transformation exit code as the pilot
+reported it, raw (docs/ERROR_ATTRIBUTION.md): its reading — 78 is the
+run script's output upload or registration failure — is applied at
+read time, so a reader tells a storage failure whatever label the
+pilot gave it. Held is the core-seconds the job held, cores times wall
+time from its start to its recorded end by the resource_usage rule
+(panda/queries.py), the allocation a faulty job wasted; a job that
+never started held nothing. A job reports errors once, upon
+completion, so each failed job appears in exactly one interval.
+Counts over any period are sums of entry counts over the intervals it
+spans; per-task readings filter the same entries by task id. An
+interval whose entry count exceeds the bound keeps a representative
+subset and folds the exact remainder into per-category, status and
+exit-code overflow counts, with the held core-seconds summed under
+the same keys, so aggregate counts never lose a job.
 """
 
 import json
@@ -42,15 +46,25 @@ from .panda.constants import (
 )
 
 PUBLISHER_IDENTITY = "swf-monitor:panda-errors"
-ASSESSMENT_POLICY_VERSION = "swf-panda-errors-v4"
+ASSESSMENT_POLICY_VERSION = "swf-panda-errors-v5"
 # The entry-row shape: v3 added the terminal status, v4 the payload
-# exit code. The backfill stamps its snaps with the same version.
-COMPONENT_SCHEMA_VERSION = 4
+# exit code, v5 the core-seconds held. The backfill stamps its snaps
+# with the same version.
+COMPONENT_SCHEMA_VERSION = 5
 COMPONENT_NAME = "errors"
 SCOPE = "epicprod"
 
 ENTRY_FIELDS = ["pandaid", "jeditaskid", "category", "endtime", "status",
-                "exitcode"]
+                "exitcode", "held"]
+# The core-seconds a job held: cores times wall time from its start to
+# its recorded end (for a lost-heartbeat job the last heartbeat), by
+# the resource_usage rule (panda/queries.py); nothing before it
+# started, never negative.
+HELD_SQL = (
+    'CASE WHEN "starttime" IS NOT NULL AND "ended" IS NOT NULL '
+    'THEN GREATEST(0, ROUND(EXTRACT(EPOCH FROM ("ended" - "starttime")) '
+    '* COALESCE("actualcorecount", "corecount", 1))) ELSE 0 END'
+)
 # The event time of a faulty job: its end time, except that a
 # lost-heartbeat failure (dispatcher code 100) records the last
 # heartbeat as the end time and the failure instant as the modification
@@ -68,7 +82,8 @@ PATTERN_DIAG_CHARS = 160
 # interval this far back rather than swallowing all recorded history
 # into one interval; earlier history is the backfill's to write.
 FIRST_INTERVAL_MINUTES = 5
-MAX_SERIALIZED_BYTES = 160 * 1024
+# A full interval of MAX_ENTRIES rows serializes near 150 KB.
+MAX_SERIALIZED_BYTES = 256 * 1024
 
 ERRORS_REGISTRATION = {
     "title": "Curated epicprod PanDA error state",
@@ -76,17 +91,19 @@ ERRORS_REGISTRATION = {
         "Per-interval PanDA job error events: each publication covers "
         "one interval and records every job that ended faulty within "
         "it, as entry rows of (pandaid, jeditaskid, category, "
-        "endtime, status, exitcode). The category is 'component:code', "
-        "classified by the first nonzero error component in the "
-        "standard order, so one job lands in one category. The status "
-        "is the job's terminal state (failed, cancelled, closed); "
-        "closed marks jobs the server disposed of for workflow "
-        "reasons, by design not actual errors. The exit code is the "
-        "payload's transformation exit code as the pilot reported it, "
-        "raw; its reading (78 is the run script's output upload or "
-        "registration failure) is applied at read time. Counts over "
-        "any period are sums of entry counts over the intervals it "
-        "spans."
+        "endtime, status, exitcode, held). The category is "
+        "'component:code', classified by the first nonzero error "
+        "component in the standard order, so one job lands in one "
+        "category. The status is the job's terminal state (failed, "
+        "cancelled, closed); closed marks jobs the server disposed of "
+        "for workflow reasons, by design not actual errors. The exit "
+        "code is the payload's transformation exit code as the pilot "
+        "reported it, raw; its reading (78 is the run script's output "
+        "upload or registration failure) is applied at read time. "
+        "Held is the core-seconds the job held, cores times wall time "
+        "from start to recorded end, the allocation a faulty job "
+        "wasted. Counts and held sums over any period are sums over "
+        "the intervals it spans."
     ),
     "visibility": "public",
     "owning_subsystem": "SWF PanDA production monitor",
@@ -115,9 +132,11 @@ ERRORS_REGISTRATION = {
                 "One row per job that ended faulty in the interval, as "
                 "arrays in ENTRY_FIELDS order: pandaid, jeditaskid, "
                 "category 'component:code', event time, terminal "
-                "status, and the payload's transformation exit code "
-                "as a string, empty where none was reported. The event "
-                "time is the job's end time, except "
+                "status, the payload's transformation exit code as a "
+                "string, empty where none was reported, and the "
+                "core-seconds held (cores times wall time from start "
+                "to recorded end; zero for a job that never started). "
+                "The event time is the job's end time, except "
                 "for lost-heartbeat failures (dispatcher 100), whose "
                 "recorded end time is the last heartbeat: their event "
                 "time is the failure instant (the modification time). "
@@ -137,7 +156,9 @@ ERRORS_REGISTRATION = {
                 "bound: 'total' and 'by_category' counts of the rows "
                 "not listed in entries, keyed "
                 "'component:code@status@exitcode' so status-resolved "
-                "and exit-resolved aggregate counts never lose a job."
+                "and exit-resolved aggregate counts never lose a job, "
+                "and 'held_by_category', the summed core-seconds "
+                "under the same keys."
             ),
         },
     },
@@ -190,8 +211,10 @@ def _faulty_union(mark, until, diags=False, sites=False):
     aggregation; sites=True adds the computing site."""
     err_fields = ", ".join(f'"{c["code"]}"' for c in ERROR_COMPONENTS)
     # The payload's exit code rides every faulty row: the entry rows
-    # record it and the patterns profile by it.
-    err_fields += ', "transexitcode"'
+    # record it and the patterns profile by it. The start, the recorded
+    # end and the core counts give the held core-seconds (HELD_SQL).
+    err_fields += (', "transexitcode", "starttime", "endtime" AS "ended", '
+                   '"actualcorecount", "corecount"')
     if diags:
         err_fields += ", " + ", ".join(
             f'"{c["diag"]}"' for c in ERROR_COMPONENTS)
@@ -362,15 +385,15 @@ def error_patterns(mark, until, taskid=None, statuses=None):
 
 
 def _entry_rows(mark, until):
-    """(pandaid, jeditaskid, comp, code, endtime, status, exitcode)
-    for faulty jobs ending in (mark, until], in endtime order."""
+    """(pandaid, jeditaskid, comp, code, endtime, status, exitcode,
+    held) for faulty jobs ending in (mark, until], in endtime order."""
     comp_case, code_case, _ = _classify_sql()
     union, params = _faulty_union(mark, until)
     sql = f"""
         SELECT "pandaid", "jeditaskid",
                CASE {comp_case} ELSE 'other' END,
                CASE {code_case} ELSE 0 END,
-               "endtime", "jobstatus", "transexitcode"
+               "endtime", "jobstatus", "transexitcode", {HELD_SQL}
         FROM ({union}) faulty
         ORDER BY "endtime", "pandaid"
     """
@@ -426,7 +449,8 @@ def errors_projection(now=None, mark=None):
     entries = []
     overflow_total = 0
     overflow_categories = {}
-    for pandaid, taskid, comp, code, endtime, status, exitcode in (
+    overflow_held = {}
+    for pandaid, taskid, comp, code, endtime, status, exitcode, held in (
             _entry_rows(mark, observed_at)):
         category = _category_key(comp, code)
         if len(entries) < MAX_ENTRIES:
@@ -437,12 +461,15 @@ def errors_projection(now=None, mark=None):
                 _iso_utc(endtime),
                 str(status or ''),
                 _exit_key(exitcode),
+                int(held or 0),
             ])
         else:
             overflow_total += 1
             fold_key = f"{category}@{status or ''}@{_exit_key(exitcode)}"
             overflow_categories[fold_key] = (
                 overflow_categories.get(fold_key) or 0) + 1
+            overflow_held[fold_key] = (
+                overflow_held.get(fold_key) or 0) + int(held or 0)
 
     projection = {
         "interval": {"start": _iso_utc(mark), "end": _iso_utc(observed_at)},
@@ -450,7 +477,8 @@ def errors_projection(now=None, mark=None):
     }
     if overflow_total:
         projection["overflow"] = {
-            "total": overflow_total, "by_category": overflow_categories}
+            "total": overflow_total, "by_category": overflow_categories,
+            "held_by_category": overflow_held}
     serialized = len(json.dumps(projection, separators=(",", ":")))
     if serialized > MAX_SERIALIZED_BYTES:
         raise ValueError(

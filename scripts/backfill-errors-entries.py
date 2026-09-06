@@ -3,7 +3,7 @@
 Reconstructs the errors component's interval entries at the current
 schema version — every job that ended faulty within each grid
 interval, as rows of (pandaid, jeditaskid, category, endtime, status,
-exitcode) — from the recorded
+exitcode, held) — from the recorded
 job history in the PanDA database, on a regular grid at the live
 capture cadence. One synthetic snap per non-empty interval is written with
 capture policy ``backfill-errors-v1`` — reconstructed evidence,
@@ -71,21 +71,25 @@ def _interval_snaps(day_start, day_end, step):
     entries = []
     overflow_total = 0
     overflow_categories = {}
+    overflow_held = {}
 
     def close():
-        nonlocal entries, overflow_total, overflow_categories
+        nonlocal entries, overflow_total, overflow_categories, overflow_held
         if entries:
             overflow = (
                 {'total': overflow_total,
-                 'by_category': overflow_categories}
+                 'by_category': overflow_categories,
+                 'held_by_category': overflow_held}
                 if overflow_total else None
             )
             intervals.append((lead, edge, list(entries), overflow))
         entries = []
         overflow_total = 0
         overflow_categories = {}
+        overflow_held = {}
 
-    for pandaid, taskid, comp, code, endtime, status, exitcode in rows:
+    for (pandaid, taskid, comp, code, endtime, status, exitcode,
+         held) in rows:
         stamp = endtime if endtime.tzinfo else endtime.replace(
             tzinfo=dt.timezone.utc)
         while stamp > edge:
@@ -101,12 +105,15 @@ def _interval_snaps(day_start, day_end, step):
                 _iso_utc(endtime),
                 str(status or ''),
                 _exit_key(exitcode),
+                int(held or 0),
             ])
         else:
             overflow_total += 1
             fold_key = f'{category}@{status or ""}@{_exit_key(exitcode)}'
             overflow_categories[fold_key] = (
                 overflow_categories.get(fold_key) or 0) + 1
+            overflow_held[fold_key] = (
+                overflow_held.get(fold_key) or 0) + int(held or 0)
     close()
     return intervals
 
