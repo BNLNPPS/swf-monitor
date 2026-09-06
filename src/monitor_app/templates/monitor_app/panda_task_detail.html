@@ -216,6 +216,54 @@
     </div>
     {% endif %}
 
+    <!-- What the payload reported across this task's jobs. One job's report
+         says what that job did; the task's say what the work costs and how
+         much it varies (swf-epicprod EPICPROD_PAYLOAD.md). Only finished
+         jobs carry a report, so the contributing count is stated. -->
+    {% if payload_rollup %}
+    <div class="card mb-3">
+        <div class="card-header"><strong>Payload Report across jobs</strong>
+            <span class="text-muted ms-2">{{ payload_rollup.jobs }} job{{ payload_rollup.jobs|pluralize }} reporting</span>
+            {% if payload_rollup.events_total %}<span class="ms-2">{{ payload_rollup.events_total }} events reconstructed</span>{% endif %}
+            {% if payload_rollup.limited %}<span class="text-muted ms-2">(first reports only)</span>{% endif %}
+        </div>
+        <div class="card-body">
+            <table class="table table-striped table-bordered table-sm align-middle w-auto">
+                <thead>
+                    <tr>
+                        <th>Stage</th><th>Jobs</th><th>Failed</th>
+                        <th>Wall, median</th><th>Wall, 90th</th>
+                        <th>CPU, median</th><th>CPU efficiency, median</th><th>Peak memory, median</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for stage in payload_rollup.stages %}
+                    <tr>
+                        <td>{{ stage.name }}</td>
+                        <td>{{ stage.jobs }}</td>
+                        <td>{% if stage.failed %}<span class="text-danger">{{ stage.failed }}</span>{% endif %}</td>
+                        <td>{% if stage.wall_median is not None %}{{ stage.wall_median }} s{% endif %}</td>
+                        <td>{% if stage.wall_p90 is not None %}{{ stage.wall_p90 }} s{% endif %}</td>
+                        <td>{% if stage.cpu_median %}{{ stage.cpu_median }} s{% endif %}</td>
+                        <td>{% if stage.efficiency_median is not None %}{{ stage.efficiency_median }}{% endif %}</td>
+                        <td>{% if stage.memory_median_kb %}{{ stage.memory_median_kb }} KB{% endif %}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            <table class="table table-striped table-bordered table-sm align-middle w-auto">
+                {% if payload_rollup.events_median %}
+                <tr><td><strong>Events per job, median</strong></td><td>{{ payload_rollup.events_median }}</td></tr>
+                {% endif %}
+                <tr><td><strong>Registration</strong></td>
+                    <td>{% for outcome, count in payload_rollup.registrations %}{{ outcome }}: {{ count }}{% if not forloop.last %} · {% endif %}{% endfor %}</td></tr>
+                <tr><td><strong>Payload version</strong></td>
+                    <td>{% for version, count in payload_rollup.versions %}{{ version }}: {{ count }}{% if not forloop.last %} · {% endif %}{% endfor %}</td></tr>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Jobs for this task -->
     <div class="card mb-3">
         <div class="card-header">

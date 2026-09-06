@@ -27,7 +27,7 @@ from ..panda.operations import BULK_OPERATION_STATUSES
 
 from ..utils import DataTablesProcessor
 from ..panda import (
-    get_activity, study_job, list_jobs,
+    get_activity, study_job, list_jobs, task_payload_rollup,
     list_jobs_dt, build_tasks_window,
     job_filter_counts, task_filter_counts,
     get_task, error_summary, diagnose_jobs, job_completion_details,
@@ -1556,6 +1556,7 @@ def panda_task_detail(request, jeditaskid):
         'jobs': jobs,
         'job_summary': summary,
         'job_count': len(jobs),
+        'payload_rollup': task_payload_rollup(int(jeditaskid)),
         'requested_resource_items': requested_resource_items,
         'task_record_items': task_record_items,
         'task_operation_controls': task_operation_controls,

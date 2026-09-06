@@ -2219,6 +2219,118 @@ def _payload_report(conn, pandaid):
     }
 
 
+def _quantile(values, fraction):
+    """The value at a fraction of the way through sorted values."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    index = min(int(fraction * (len(ordered) - 1) + 0.5), len(ordered) - 1)
+    return ordered[index]
+
+
+def task_payload_rollup(jeditaskid, limit=2000):
+    """What the payload reported across a task's jobs, as a distribution.
+
+    One job's report says what that job did; a task's worth of them says
+    what the work costs and how much it varies, which is what sizing, the
+    scout gate and the site comparison need. Per stage: how many jobs
+    reached it, the middle and the slow tail of its wall time and CPU, the
+    middle of its CPU efficiency and peak memory. Reports come from the
+    PanDA metatable, so only finished jobs contribute; the count that did
+    is reported with the numbers rather than implied.
+
+    Returns None when no job of the task carries a payload report. Never
+    raises: this is one card on a page.
+    """
+    conn = connections['panda']
+    try:
+        with conn.cursor() as cursor:
+            # The metatable is keyed by job alone, so the task's jobs come
+            # from the archive, which is also where a job with metadata
+            # always is: the server keeps metadata for finished jobs.
+            cursor.execute(
+                f'SELECT m."metadata" FROM "{PANDA_SCHEMA}"."metatable" m '
+                f'JOIN "{PANDA_SCHEMA}"."jobsarchived4" j ON j."pandaid" = m."pandaid" '
+                f'WHERE j."jeditaskid" = %s LIMIT %s', [jeditaskid, limit])
+            rows = cursor.fetchall()
+    except Exception as e:
+        logger.error(f"payload rollup query failed for task {jeditaskid}: {e}")
+        return None
+    if not rows:
+        return None
+
+    stages, events, versions, registrations = {}, [], {}, {}
+    contributing = 0
+    for (raw,) in rows:
+        if not raw:
+            continue
+        try:
+            metadata = json.loads(raw) if isinstance(raw, str) else raw
+        except (ValueError, TypeError):
+            continue
+        report = metadata.get('payload') if isinstance(metadata, dict) else None
+        if not isinstance(report, dict):
+            continue
+        contributing += 1
+        version = report.get('payload_version') or 'unknown'
+        versions[version] = versions.get(version, 0) + 1
+        outcome = (report.get('registration') or {}).get('outcome') or 'none'
+        registrations[outcome] = registrations.get(outcome, 0) + 1
+        produced = (report.get('events') or {}).get('reconstructed')
+        if isinstance(produced, int):
+            events.append(produced)
+        prmon = report.get('prmon') or {}
+        for name, stage in (report.get('stages') or {}).items():
+            if not isinstance(stage, dict):
+                continue
+            bucket = stages.setdefault(
+                name, {'jobs': 0, 'failed': 0, 'wall': [], 'cpu': [],
+                       'efficiency': [], 'memory': []})
+            bucket['jobs'] += 1
+            if stage.get('status') == 'fail':
+                bucket['failed'] += 1
+            if isinstance(stage.get('wall_s'), (int, float)):
+                bucket['wall'].append(stage['wall_s'])
+            measured = prmon.get(name)
+            if not isinstance(measured, dict):
+                measured = next(
+                    (v for k, v in prmon.items()
+                     if isinstance(v, dict) and k.startswith(f'{name}_')), {})
+            if measured:
+                cpu = (measured.get('cpu_user_s') or 0) + (measured.get('cpu_sys_s') or 0)
+                if cpu:
+                    bucket['cpu'].append(cpu)
+                if measured.get('cpu_efficiency') is not None:
+                    bucket['efficiency'].append(measured['cpu_efficiency'])
+                if measured.get('rss_max_kb'):
+                    bucket['memory'].append(measured['rss_max_kb'])
+
+    if not contributing:
+        return None
+
+    rows_out = []
+    for name, bucket in stages.items():
+        rows_out.append({
+            'name': name,
+            'jobs': bucket['jobs'],
+            'failed': bucket['failed'],
+            'wall_median': _quantile(bucket['wall'], 0.5),
+            'wall_p90': _quantile(bucket['wall'], 0.9),
+            'cpu_median': _quantile(bucket['cpu'], 0.5),
+            'efficiency_median': _quantile(bucket['efficiency'], 0.5),
+            'memory_median_kb': _quantile(bucket['memory'], 0.5),
+        })
+    return {
+        'jobs': contributing,
+        'events_total': sum(events),
+        'events_median': _quantile(events, 0.5),
+        'stages': rows_out,
+        'versions': sorted(versions.items(), key=lambda kv: -kv[1]),
+        'registrations': sorted(registrations.items(), key=lambda kv: -kv[1]),
+        'limited': len(rows) >= limit,
+    }
+
+
 def study_job(pandaid):
     """Deep study of a single PanDA job — full record, files, harvester logs, errors."""
     conn = connections['panda']
