@@ -154,6 +154,16 @@ interval across the seam. The script is idempotent — a re-run
 replaces prior backfill — and dry-run by default. The deployment
 order is maintainer first, backfill after the first live publication.
 
+The payload exit code joined the entry rows on 2026-09-06. The
+backfill was re-run that day, so the synthetic snaps carry it, and the
+live snaps recorded before the change (2026-08-21 to 2026-09-06) were
+rewritten in place by `scripts/rewrite-errors-exitcodes.py`: the code
+looked up by job id and added to each row, every other field left as
+recorded, the snap's component and state hashes recomputed by the
+capture contract, and the component document marked `augmented` with
+what was added and when. Overflow fold keys from before the change
+name no job and keep their two-part form.
+
 ## The errors view
 
 A dedicated Snapper page for error history, using the focus-view
