@@ -238,7 +238,7 @@ or move the `current` symlink.
 Use it for:
 
 - Django UI/view/template/form/helper changes under `src/monitor_app/`,
-  `src/pcs/`, `src/templates/`, or URL routing
+  `src/templates/`, swf-epicprod's `pcs/`, or URL routing
 - MCP tool changes under `src/monitor_app/mcp/` and helper modules used by MCP
 - swf-epicprod's `swf_epicprod/` package: `mcp_tools/` with `--mcp`;
   `analytics/` and `assessment/` under either flag (they serve the web views

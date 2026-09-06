@@ -51,7 +51,7 @@ src/monitor_app/tests/
 ├── test_django_dual_server_integration.py  # Live server integration tests
 └── test_sse_stream.py                       # SSE message streaming tests
 
-src/pcs/tests.py                             # PCS task-params and dataset metadata
+swf-epicprod/pcs/tests.py                    # PCS task-params and dataset metadata
 ```
 
 ## Running Tests
