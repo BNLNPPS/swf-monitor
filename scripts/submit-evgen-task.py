@@ -300,6 +300,22 @@ def main():
                          "IMPLEMENTATION.md, Payload canaries)")
     ap.add_argument("--canary-queue", default="",
                     help="the PanDA queue a payload canary is sent to")
+    ap.add_argument("--trial", action="store_true",
+                    help="trial run (docs/PCS.md, Trials): the composed "
+                         "configuration submitted small and for real — one "
+                         "job, --trial-events events, outputs under "
+                         "epic:/TEST/<root> in the production layout with a "
+                         "lifetime. Unlike a canary it keeps the production "
+                         "processing type and owner: a trial is a production "
+                         "task in everything but scale and destination.")
+    ap.add_argument("--trial-events", type=int, default=100,
+                    help="events per job in a trial run (default 100)")
+    ap.add_argument("--trial-root", default="TEST/trial",
+                    help="Rucio root for trial outputs (default TEST/trial)")
+    ap.add_argument("--trial-lifetime-days", type=int, default=14,
+                    help="lifetime on everything a trial registers")
+    ap.add_argument("--trial-queue", default="",
+                    help="the PanDA queue a trial is sent to")
     args = ap.parse_args()
     if bool(args.canary_stamp) != bool(args.canary_queue):
         _log("ERROR: --canary-stamp and --canary-queue go together")
@@ -355,6 +371,29 @@ def main():
                     maxAttempt=1, skipScout=True)
         _log(f"payload canary {spec['outDS']} on {args.canary_queue}: "
              f"row {spec['csvRows'][0]}")
+    elif args.trial:
+        # Trial: the composed configuration run small and for real. One
+        # manifest row, a hundred events of it, outputs under
+        # epic:/TEST/<root> in the production layout with a lifetime —
+        # the settings ride as an environment prefix on the dispatcher
+        # command, which passes them through to the payload. The
+        # processing type and owner stay production's, because that is
+        # what a trial proves; only PCS knows it is a trial, from the
+        # suffix in its name (docs/PCS.md, Trials).
+        lifetime_s = int(args.trial_lifetime_days) * 86400
+        spec['csvRows'] = list(spec['csvRows'])[:1]
+        spec['exec'] = (
+            f"TRIAL_OUTPUT_ROOT={args.trial_root} "
+            f"TRIAL_LIFETIME_S={lifetime_s} "
+            f"TRIAL_EVENTS={int(args.trial_events)} "
+            f"python3 evgen_job_dispatcher.py ${{SEQNUMBER}} {spec['csvBase']}"
+        )
+        spec.update(nJobs=1, maxAttempt=1, skipScout=True)
+        if args.trial_queue:
+            spec['site'] = args.trial_queue
+        _log(f"trial {spec['outDS']} on {spec.get('site') or '(brokered)'}: "
+             f"{args.trial_events} events, outputs under "
+             f"epic:/{args.trial_root}, lifetime {args.trial_lifetime_days}d")
     _log(f"EVGEN spec for {args.task_name}: outDS={spec['outDS']} "
          f"nJobs={spec.get('nJobs')} skipScout={spec.get('skipScout')}")
 

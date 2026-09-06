@@ -191,6 +191,15 @@ def run_row(n, csv_base, workdir, extra_env=None):
         print(f"Error: malformed CSV row {n}: {row!r}", file=sys.stderr)
         return 1, None
     file_path, ext, nevents, ichunk = row[0], row[1], row[2], row[3]
+    # A trial runs the manifest row for real but small (docs/PCS.md,
+    # Trials): same input, same payload, same path, a hundred events
+    # instead of ten thousand. The other trial settings — the output
+    # root and the lifetime — need no code here, since the payload
+    # reads them from the environment this passes through.
+    trial_events = os.environ.get("TRIAL_EVENTS", "").strip()
+    if trial_events:
+        print(f"trial run: {trial_events} events instead of {nevents}")
+        nevents = trial_events
     payload_run = os.path.join(workdir, PAYLOAD_SUBDIR, "run.sh")
     print(f"epicprod payload {payload_version(workdir) or '(no VERSION)'}: "
           f"{payload_run}")
