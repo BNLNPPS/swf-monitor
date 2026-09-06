@@ -13,8 +13,8 @@ and the error-state component in [SNAPPER_ERRORS.md](SNAPPER_ERRORS.md),
 whose recorded events it reuses. The server-host reporter is documented
 in [PANDA_SERVER_REPORTER.md](PANDA_SERVER_REPORTER.md).
 
-This is a design document; the sections below are the agreed plan of
-record for implementation.
+The platform component, the Platform view and the platform-health alarm
+are in production; this document remains their design of record.
 
 ## Historical questions
 

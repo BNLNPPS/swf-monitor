@@ -9,8 +9,8 @@ the same history is a filter on the view, and the PanDA task page links
 to the filtered view, answering "when did this error show up in this
 task" directly.
 
-This is a design document; the sections below are the agreed plan of
-record for implementation. It builds on the Snapper concepts and SWF
+The error-state component and the errors view are in production; this
+document remains their design of record. It builds on the Snapper concepts and SWF
 deployment in [SNAPPER.md](SNAPPER.md) and the generic package
 documentation in the snapper-ai repository
 ([INTEGRATION.md](https://github.com/BNLNPPS/snapper-ai/blob/main/docs/INTEGRATION.md)).

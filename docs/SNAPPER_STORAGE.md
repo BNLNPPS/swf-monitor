@@ -18,8 +18,8 @@ Errors and Platform views ([SNAPPER.md](SNAPPER.md),
 [INTEGRATION.md](https://github.com/BNLNPPS/snapper-ai/blob/main/docs/INTEGRATION.md),
 [TIME_HISTORY_UI.md](https://github.com/BNLNPPS/snapper-ai/blob/main/docs/TIME_HISTORY_UI.md)).
 
-This is a design document; the sections below are the agreed plan of
-record for implementation.
+The storage component and the Storage view are in production; this
+document remains their design of record.
 
 ## The record the view reads
 
