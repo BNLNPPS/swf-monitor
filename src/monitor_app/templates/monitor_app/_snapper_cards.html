@@ -558,6 +558,46 @@
     </div>
     {% endif %}
   </div>
+  {# The consequences strip's own docked details, one per plot group:  #}
+  {# the cut detail beneath the per-bin panels, the aggregate detail   #}
+  {# beneath the integrated ones — the jobs that failed at upload or   #}
+  {# registration, the core-hours they held, and the tasks they came   #}
+  {# from.                                                             #}
+  {% for c in card.consequences %}
+  <div data-snapper-detail-key="{{ c.key }}" class="snapper-cut-card mb-2">
+    <div class="mb-1 fs-5"><strong>{{ c.heading }}</strong> <span class="text-muted fs-6">{% if c.integrated %}integrated{% else %}window{% endif %} {{ c.basis }} · {{ c.jobs }} jobs failed at storage · {{ c.hours }} core-hours held · <a href="{{ c.jobs_url }}">failed jobs</a></span></div>
+    {% if c.rows %}
+    <div class="d-flex flex-wrap column-gap-4 row-gap-3 align-items-start">
+      <table class="table table-sm table-bordered table-striped w-auto mb-0 swf-latch-head swf-latch-titled-head">
+        <thead>
+          <tr class="swf-latch-title-row table-secondary"><th colspan="5">Where the jobs failed</th></tr>
+          <tr class="swf-latch-column-row"><th>Failure</th><th class="text-end">Jobs</th><th class="text-end">Core-hours</th><th class="text-end">Share</th><th>Example job</th></tr>
+        </thead>
+        <tbody>
+        {% for r in c.rows %}
+        <tr><td><span data-curve="{{ r.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>{{ r.label }}</td><td class="text-end">{{ r.jobs }}</td><td class="text-end">{{ r.hours }}</td><td class="text-end">{{ r.share }}</td><td>{% if r.rep_url %}<a href="{{ r.rep_url }}">{{ r.rep_pandaid }}</a>{% else %}—{% endif %}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% if c.tasks %}
+      <table class="table table-sm table-bordered table-striped w-auto mb-0 swf-latch-head swf-latch-titled-head">
+        <thead>
+          <tr class="swf-latch-title-row table-secondary"><th colspan="3">The tasks they came from{% if c.task_overflow %} · the largest {{ c.tasks|length }}, and {{ c.task_overflow }} more{% endif %}</th></tr>
+          <tr class="swf-latch-column-row"><th>Task</th><th class="text-end">Jobs</th><th class="text-end">Core-hours</th></tr>
+        </thead>
+        <tbody>
+        {% for t in c.tasks %}
+        <tr><td><a href="{% url 'monitor_app:panda_task_detail' jeditaskid=t.taskid %}">{{ t.taskid }}</a></td><td class="text-end">{{ t.jobs }}</td><td class="text-end">{{ t.hours }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </div>
+    {% else %}
+    <div class="text-muted mb-1">No jobs failed at upload or registration in this window.</div>
+    {% endif %}
+  </div>
+  {% endfor %}
 
 {% elif card.kind == 'delivery' %}
   {% if card.filter_note %}

@@ -2393,6 +2393,12 @@ def _storage_groups():
         'measures': ['count', 'weight'],
         'units_by_measure': {'count': 'jobs', 'weight': 'core-hours'},
         'cumulative_panel': True,
+        # One docked detail per plot group, as every focus view
+        # renders: the cut detail beneath the per-bin panels, the
+        # aggregate detail beneath the integrated ones
+        # (_storage_consequence_sections).
+        'detail_key': 'sto-consequences',
+        'aggregate_detail_key': 'sto-consequences-aggregate',
         'prefixes': [], 'ids': ['psto_registration', 'psto_ddm'],
         'event_flow': True, 'end_stamped': True, 'stacked': True,
         # Bins twice the ladder rung: a handful of events a week draws
@@ -4198,6 +4204,190 @@ def _fmt_count(value):
     return f'{value:,}'
 
 
+def _iso_instant(value):
+    """An ISO timestamp as an aware instant, or None."""
+    from datetime import datetime
+    from datetime import timezone as dt_timezone
+
+    try:
+        parsed = datetime.fromisoformat(
+            str(value or '').replace('Z', '+00:00'))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt_timezone.utc)
+    return parsed
+
+
+# The affected tasks the consequences detail lists, most core-hours
+# first, with the exact remainder stated.
+MAX_CONSEQUENCE_TASKS = 8
+
+
+def _storage_consequence_detail(key, heading, window_from, window_to,
+                                state_filter):
+    """One docked detail of the consequences strip
+    (docs/SNAPPER_STORAGE.md, Consequences) over
+    (window_from, window_to]: per member the jobs that failed at
+    storage and the core-hours they held, the tasks they came from,
+    and a representative job of each member. Read from the error
+    record's entries — the rows the strip's curves are binned from, so
+    the detail and the bands are the same jobs. Overflow folds join the
+    member totals by their component and exit code, so a storm interval
+    loses no job."""
+    import math
+    from datetime import timedelta
+    from urllib.parse import quote
+
+    from django.urls import reverse
+    from snapper_ai.models import SystemSnap
+
+    members = {curve: {'jobs': 0, 'held': 0, 'rep': 0}
+               for curve in _STORAGE_CONSEQUENCE_LABELS}
+    tasks = {}
+    states = (SystemSnap.objects
+              .filter(scope='epicprod',
+                      snap_time__gt=window_from,
+                      snap_time__lte=window_to + timedelta(minutes=10),
+                      state__components__errors__data__has_key='entries')
+              .order_by('snap_time')
+              .values_list('state__components__errors__data', flat=True))
+    seen_intervals = set()
+    for errors in states.iterator():
+        errors = errors if isinstance(errors, dict) else {}
+        interval = errors.get('interval') or {}
+        interval_key = str(interval.get('end') or '')
+        if not interval_key or interval_key in seen_intervals:
+            continue
+        seen_intervals.add(interval_key)
+        for row in errors.get('entries') or []:
+            try:
+                pandaid = int(row[0] or 0)
+                taskid = int(row[1] or 0)
+                comp = str(row[2]).partition(':')[0]
+                when = _iso_instant(row[3])
+            except (IndexError, TypeError, ValueError):
+                continue
+            if when is None or when <= window_from or when > window_to:
+                continue
+            status = (str(row[4]) if len(row) > 4 and row[4]
+                      else 'unrecorded')
+            if state_filter and status not in state_filter:
+                continue
+            exitcode = (str(row[5]).strip() if len(row) > 5 and row[5]
+                        else '')
+            curve = _storage_consequence_key(comp, exitcode)
+            if curve is None:
+                continue
+            held = int(row[6] or 0) if len(row) > 6 else 0
+            member = members[curve]
+            member['jobs'] += 1
+            member['held'] += held
+            member['rep'] = max(member['rep'], pandaid)
+            if taskid:
+                counts = tasks.setdefault(taskid, [0, 0])
+                counts[0] += 1
+                counts[1] += held
+        interval_end = _iso_instant(interval.get('end'))
+        if interval_end is None or not (
+                window_from < interval_end <= window_to):
+            continue
+        # Overflow folds key 'component:code@status@exitcode', with the
+        # held core-seconds under the same keys; they name no job, so
+        # they join the member totals alone.
+        overflow = errors.get('overflow') or {}
+        held_folds = overflow.get('held_by_category') or {}
+        for fold_key, count in (overflow.get('by_category') or {}).items():
+            parts = str(fold_key).split('@')
+            status = (parts[1] if len(parts) > 1 and parts[1]
+                      else 'unrecorded')
+            if state_filter and status not in state_filter:
+                continue
+            curve = _storage_consequence_key(
+                parts[0].partition(':')[0],
+                parts[2].strip() if len(parts) > 2 else '')
+            if curve is None:
+                continue
+            members[curve]['jobs'] += int(count or 0)
+            members[curve]['held'] += int(held_folds.get(fold_key) or 0)
+
+    total_jobs = sum(member['jobs'] for member in members.values())
+    total_held = sum(member['held'] for member in members.values())
+    from_et = window_from.astimezone(ET_ZONE)
+    to_et = window_to.astimezone(ET_ZONE)
+    rows = [
+        {'curve': curve,
+         'label': _STORAGE_CONSEQUENCE_LABELS[curve],
+         'jobs': f'{member["jobs"]:,}',
+         'hours': f'{member["held"] / 3600:,.0f}',
+         'share': (f'{member["held"] / total_held:.0%}'
+                   if total_held else ''),
+         'rep_pandaid': member['rep'],
+         'rep_url': (reverse('monitor_app:panda_job_detail',
+                             args=[member['rep']])
+                     if member['rep'] else '')}
+        for curve, member in sorted(members.items(),
+                                    key=lambda item: -item[1]['held'])
+        if member['jobs']]
+    task_rows = [
+        {'taskid': taskid, 'jobs': f'{counts[0]:,}',
+         'hours': f'{counts[1] / 3600:,.0f}'}
+        for taskid, counts in sorted(
+            tasks.items(), key=lambda item: (-item[1][1], -item[1][0]))
+        [:MAX_CONSEQUENCE_TASKS]]
+    jobs_base = reverse('monitor_app:panda_jobs_list')
+    window_days = max(1, math.ceil(
+        (window_to - window_from).total_seconds() / 86400))
+    return {
+        'key': key,
+        'heading': heading,
+        'integrated': key.endswith('aggregate'),
+        'basis': (from_et.strftime('%m-%d %H:%M') + ' – '
+                  + to_et.strftime('%H:%M ET'
+                                   if to_et.date() == from_et.date()
+                                   else '%m-%d %H:%M ET')),
+        'jobs': f'{total_jobs:,}',
+        'hours': f'{total_held / 3600:,.0f}',
+        'rows': rows,
+        'tasks': task_rows,
+        'task_overflow': max(0, len(tasks) - len(task_rows)),
+        'jobs_url': (f'{jobs_base}?status=failed&days={window_days}'
+                     '&ended_after=' + quote(window_from.isoformat())
+                     + '&ended_before=' + quote(window_to.isoformat())),
+    }
+
+
+def _storage_consequence_sections(ctx):
+    """The consequences strip's docked details: the cut detail beneath
+    the per-bin panels, the hour around the cut, and the aggregate
+    detail beneath the integrated panels, the view's left edge to the
+    cut. One docked detail per plot, as every focus view renders it;
+    both ride the one cut request, which carries the ranges as from/to
+    and agg_from/agg_to (docs/SNAPPER_ERRORS.md, Wasted resources)."""
+    from datetime import timedelta
+
+    params = (ctx or {}).get('params') or {}
+    state_filter = [value for value in (params.get('states') or '').split(',')
+                    if value]
+    ranges = []
+    cut_from = _iso_instant(params.get('from'))
+    cut_to = _iso_instant(params.get('to'))
+    if cut_from is None or cut_to is None or not cut_from < cut_to:
+        # No client bounds: the hour ending at the cut instant.
+        cut_to = (ctx or {}).get('requested_at')
+        cut_from = cut_to - timedelta(hours=1) if cut_to is not None else None
+    if cut_from is not None and cut_to is not None and cut_from < cut_to:
+        ranges.append(('sto-consequences', 'Cut detail', cut_from, cut_to))
+    agg_from = _iso_instant(params.get('agg_from'))
+    agg_to = _iso_instant(params.get('agg_to'))
+    if agg_from is not None and agg_to is not None and agg_from < agg_to:
+        ranges.append(('sto-consequences-aggregate', 'Aggregate detail',
+                       agg_from, agg_to))
+    return [_storage_consequence_detail(key, heading, start, end,
+                                        state_filter)
+            for key, heading, start, end in ranges]
+
+
 def _storage_card(data, previous_data, ctx):
     """The storage cut card (docs/SNAPPER_STORAGE.md). For each shown
     RSE its standing at the instant — verdicts, inventory by replica
@@ -4545,6 +4735,10 @@ def _storage_card(data, previous_data, ctx):
     return {
         'kind': 'storage',
         'sections': sections,
+        # The consequences strip's own docked details, one per plot
+        # group: the cut detail beneath the per-bin panels, the
+        # aggregate detail beneath the integrated ones.
+        'consequences': _storage_consequence_sections(ctx),
         'scope': {
             'key': 'sto-scope',
             'capacity_only': capacity_only,
