@@ -311,10 +311,11 @@ def error_patterns(mark, until, taskid=None, statuses=None):
     """Top diagnostic patterns among faulty jobs ending in
     (mark, until], optionally restricted to one task and/or a
     terminal-state list: category, sample diagnostic, count,
-    representative PanDA job id, affected task ids, sites, and the
-    pattern's payload exit-code profile (transexitcode counts — the
-    correction root refines unreliable labels from it), most frequent
-    first. Digit runs collapse in the pattern grouping so job-specific
+    representative PanDA job id, affected task ids, sites, the
+    pattern's payload exit-code profile (transexitcode counts and held
+    core-seconds — the correction root refines unreliable labels from
+    it), and the pattern's held core-seconds, most frequent first.
+    Digit runs collapse in the pattern grouping so job-specific
     paths, ids, and line numbers merge into one pattern; the sample
     shown is one member's raw text. Aggregated live from the job
     records — the errors view's breakdown calls this at cut time
@@ -342,7 +343,7 @@ def error_patterns(mark, until, taskid=None, statuses=None):
                    COALESCE(LEFT(CASE {diag_case} ELSE '' END,
                                  {PATTERN_DIAG_CHARS}), '') AS diag,
                    "pandaid", "jeditaskid", "computingsite",
-                   "transexitcode"
+                   "transexitcode", {HELD_SQL} AS held
             FROM ({union}) faulty
             {where}
         ),
@@ -353,7 +354,8 @@ def error_patterns(mark, until, taskid=None, statuses=None):
                    MAX("pandaid") AS representative_pandaid,
                    array_agg(DISTINCT "jeditaskid") AS taskids,
                    array_agg(DISTINCT COALESCE("computingsite", 'unknown'))
-                       AS sites
+                       AS sites,
+                   SUM(held) AS held
             FROM classified
             GROUP BY 1, 2, 3
         ),
@@ -361,7 +363,8 @@ def error_patterns(mark, until, taskid=None, statuses=None):
             SELECT comp, code, diag_pattern,
                    COALESCE("transexitcode", '') AS exitcode,
                    COUNT(*) AS n,
-                   MAX("pandaid") AS rep
+                   MAX("pandaid") AS rep,
+                   SUM(held) AS held
             FROM classified
             GROUP BY 1, 2, 3, 4
         )
@@ -370,12 +373,14 @@ def error_patterns(mark, until, taskid=None, statuses=None):
                COALESCE((
                    SELECT jsonb_object_agg(
                        x.exitcode,
-                       jsonb_build_object('n', x.n, 'rep', x.rep))
+                       jsonb_build_object('n', x.n, 'rep', x.rep,
+                                          'held', x.held))
                    FROM exits x
                    WHERE x.comp = p.comp AND x.code = p.code
                      AND x.diag_pattern = p.diag_pattern
                      AND x.exitcode != ''
-               ), '{{}}'::jsonb) AS exit_counts
+               ), '{{}}'::jsonb) AS exit_counts,
+               p.held
         FROM pat p
         ORDER BY p.count DESC, p.comp, p.code
     """

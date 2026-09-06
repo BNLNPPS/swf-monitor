@@ -105,16 +105,20 @@ def correction(rule, exit_counts=None):
     for exitcode, value in exit_counts_of(exit_counts).items():
         if isinstance(value, dict):
             n, rep = int(value.get('n') or 0), value.get('rep')
+            held = value.get('held')
         else:
-            n, rep = int(value or 0), None
-        profile.append((str(exitcode), n, rep))
+            n, rep, held = int(value or 0), None, None
+        profile.append((str(exitcode), n, rep, held))
     profile.sort(key=lambda t: (-t[1], t[0]))
     modes = []
-    for exitcode, n, rep in profile:
+    for exitcode, n, rep, held in profile:
         reading = exit_reading(exitcode)
         if reading:
+            # held: the mode's core-seconds when the profile carries
+            # them (the Snapper breakdown's patterns do), else None.
             modes.append({'reading': reading, 'exit_code': exitcode,
-                          'count': n, 'rep_pandaid': rep})
+                          'count': n, 'rep_pandaid': rep,
+                          'held': held})
     label = (modes[0]['reading'] if modes
              else (rule.corrected_label
                    or 'unreliable label; payload failure of '

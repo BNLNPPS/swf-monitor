@@ -296,10 +296,12 @@ jobs and the registration failures compare at a glance. The page
 derives it from the panel's own bins (snapper-ai `cumulative_panel`);
 no curve is added.
 
-**Breakdown.** The cut's breakdown adds core-hours and its share per
-category beside the count, from `SUM(held)` in the same grouping
-query, and ranks the window's tasks and diagnostic patterns by
-core-hours beside their counts.
+**Breakdown.** The cut's breakdown adds core-hours and its share of
+the window's wasted core-hours per category beside the count, from
+the same recorded entries, states the window's total held beside its
+error count, and gives each diagnostic pattern its core-hours from
+the job records, per failure mode where the correction root splits a
+pattern by payload exit code.
 
 **Storage view.** The consequences strip follows a Consequences
 selector, jobs or core-hours, on the same mechanism

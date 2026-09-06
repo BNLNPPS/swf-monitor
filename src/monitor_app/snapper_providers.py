@@ -3271,7 +3271,9 @@ def _errors_card(data, previous_data, ctx):
               .order_by('snap_time')
               .values_list('state', flat=True))
     cat_counts = {}
+    cat_held = {}
     total = 0
+    total_held = 0
     seen_intervals = set()
     for state in states.iterator():
         errors = (((state.get('components') or {}).get('errors')
@@ -3298,22 +3300,35 @@ def _errors_card(data, previous_data, ctx):
                 continue
             cat_counts[category] = (cat_counts.get(category) or 0) + 1
             total += 1
+            # The core-seconds held, on rows since schema v5.
+            held = int(row[6] or 0) if len(row) > 6 else 0
+            cat_held[category] = (cat_held.get(category) or 0) + held
+            total_held += held
         if not selected:
             interval_end = _parse(interval.get('end'))
             if (interval_end is not None
                     and window_from < interval_end <= window_to):
-                # Overflow folds key 'component:code@status' since v3;
-                # earlier keys carry no status and read 'unrecorded'.
-                for fold_key, count in ((errors.get('overflow') or {})
-                                        .get('by_category') or {}).items():
-                    category, at, status = str(fold_key).partition('@')
-                    if not (at and status):
-                        status = 'unrecorded'
+                # Overflow folds key 'component:code@status' since v3
+                # and 'component:code@status@exitcode' since v4; earlier
+                # keys carry no status and read 'unrecorded'. The held
+                # core-seconds fold under the same keys since v5.
+                overflow = errors.get('overflow') or {}
+                held_folds = overflow.get('held_by_category') or {}
+                for fold_key, count in (overflow.get('by_category')
+                                        or {}).items():
+                    parts = str(fold_key).split('@')
+                    category = parts[0]
+                    status = (parts[1] if len(parts) > 1 and parts[1]
+                              else 'unrecorded')
                     if state_filter and status not in state_filter:
                         continue
                     cat_counts[category] = (
                         cat_counts.get(category) or 0) + int(count or 0)
                     total += int(count or 0)
+                    held = int(held_folds.get(fold_key) or 0)
+                    cat_held[category] = (
+                        cat_held.get(category) or 0) + held
+                    total_held += held
 
     eastern = ZoneInfo('America/New_York')
     from_et = window_from.astimezone(eastern)
@@ -3357,14 +3372,22 @@ def _errors_card(data, previous_data, ctx):
         comp_counts[comp] = comp_counts.get(comp, 0) + count
         curve = (f'terr_{single_task}_{comp}_{code}' if single_task
                  else f'perr_{comp}_{code}')
+        held = cat_held.get(key) or 0
         rows.append({
             'label': category_label(comp, code),
             'curve': curve,
             'url': _errors_url(comp),
             'window': str(count),
             'delta': '',
+            # The core-hours the category's jobs held, and its share of
+            # the window's wasted core-hours (docs/SNAPPER_ERRORS.md,
+            # Wasted resources).
+            'hours': f'{held / 3600:,.0f}',
+            'hours_share': (f'{held / total_held:.0%}' if total_held
+                            else ''),
         })
     rows = rows[:24]
+    window_hours = f'{total_held / 3600:,.0f}'
 
     # The donut follows the active lens and wears the plot's own
     # colors — the same data-curve painting as the table swatches, so
@@ -3434,7 +3457,7 @@ def _errors_card(data, previous_data, ctx):
     patterns = []
     window_patterns = 0
     for (comp, code, _pattern, diag, count, rep, taskids,
-         pattern_sites, exit_counts) in error_patterns(
+         pattern_sites, exit_counts, pattern_held) in error_patterns(
             window_from, window_to,
             taskid=int(single_task) if single_task else None,
             statuses=state_filter or None):
@@ -3453,9 +3476,10 @@ def _errors_card(data, previous_data, ctx):
             'site_overflow': max(0, len(site_list) - MAX_PATTERN_SITES),
         }
 
-        def _row(diag_text, row_count, row_rep):
+        def _row(diag_text, row_count, row_rep, row_held):
             row_rep = int(row_rep or 0)
             return dict(base, diag=diag_text, count=int(row_count or 0),
+                        hours=f'{float(row_held or 0) / 3600:,.0f}',
                         rep_pandaid=row_rep,
                         rep_url=(reverse('monitor_app:panda_job_detail',
                                          args=[row_rep])
@@ -3463,8 +3487,8 @@ def _errors_card(data, previous_data, ctx):
 
         # The correction root (docs/ERROR_ATTRIBUTION.md): a pattern
         # whose label a rule marks unreliable presents as its real
-        # failure modes — one row per mode, each with its own count
-        # and a representative job of that mode.
+        # failure modes — one row per mode, each with its own count,
+        # core-hours and a representative job of that mode.
         rule = _match(comp, code, diag)
         corr = (_correction(rule, exit_counts or {})
                 if rule is not None else None)
@@ -3472,10 +3496,11 @@ def _errors_card(data, previous_data, ctx):
             for m in corr['modes']:
                 if len(patterns) < MAX_PATTERNS:
                     patterns.append(_row(m['reading'], m['count'],
-                                         m.get('rep_pandaid') or rep))
+                                         m.get('rep_pandaid') or rep,
+                                         m.get('held')))
         elif len(patterns) < MAX_PATTERNS:
             patterns.append(_row(corr['label'] if corr else str(diag or ''),
-                                 count, rep))
+                                 count, rep, pattern_held))
     patterns.sort(key=lambda p: -p['count'])
 
     # The attribution reading: where the window's errors concentrate,
@@ -3549,6 +3574,7 @@ def _errors_card(data, previous_data, ctx):
         'detail_window_minutes': int(
             (window_to - window_from).total_seconds() // 60),
         'window_errors': total,
+        'window_hours': window_hours,
         'window_patterns': window_patterns,
         'patterns': patterns,
         'errors_url': _errors_url(''),

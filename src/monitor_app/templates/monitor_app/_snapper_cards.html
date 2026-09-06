@@ -177,7 +177,7 @@
   {# the error summary, the failed-jobs list, or a representative job. #}
   <section class="snapper-cut-card">
     <div class="mb-1"><strong>Errors{% if card.task_selection %} · task {{ card.task_selection }}{% endif %}</strong>
-      {% if card.basis %} <span class="text-muted small">window {{ card.basis }} · {{ card.window_errors }} errors</span>{% endif %}
+      {% if card.basis %} <span class="text-muted small">window {{ card.basis }} · {{ card.window_errors }} errors · {{ card.window_hours }} core-hours held</span>{% endif %}
       · <a href="{{ card.errors_url }}">error summary</a>
       · <a href="{{ card.jobs_url }}">failed jobs</a></div>
     {% if card.reading %}
@@ -189,12 +189,14 @@
     <div class="d-flex flex-wrap column-gap-4 align-items-start">
       <div>
         <table class="table table-sm table-bordered w-auto mb-1">
-          <thead><tr><th>Category</th><th class="text-end">Errors</th></tr></thead>
+          <thead><tr><th>Category</th><th class="text-end">Errors</th><th class="text-end">Core-hours</th><th class="text-end">Share</th></tr></thead>
           <tbody>
           {% for r in card.rows %}
           <tr>
             <td><span data-curve="{{ r.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span><a href="{{ r.url }}">{{ r.label }}</a></td>
             <td class="text-end">{{ r.window }}</td>
+            <td class="text-end">{{ r.hours }}</td>
+            <td class="text-end">{{ r.hours_share }}</td>
           </tr>
           {% endfor %}
           </tbody>
@@ -226,13 +228,14 @@
     {% if card.patterns %}
     <div class="mb-1 mt-2"><strong>Top diagnostic patterns</strong> <span class="text-muted small">{{ card.window_patterns }} pattern{{ card.window_patterns|pluralize }} in the window, from live job records</span></div>
     <table class="table table-sm table-bordered w-automb-1">
-      <thead><tr><th>Category</th><th>Diagnostic</th><th class="text-end">Count</th><th>Example job</th><th>Tasks</th><th>Queues</th></tr></thead>
+      <thead><tr><th>Category</th><th>Diagnostic</th><th class="text-end">Count</th><th class="text-end">Core-hours</th><th>Example job</th><th>Tasks</th><th>Queues</th></tr></thead>
       <tbody>
       {% for p in card.patterns %}
       <tr>
         <td class="text-nowrap"><span data-curve="{{ p.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>{{ p.category }}</td>
         <td class="small" style="word-break:break-word;">{{ p.diag }}</td>
         <td class="text-end">{{ p.count }}</td>
+        <td class="text-end">{{ p.hours }}</td>
         <td>{% if p.rep_url %}<a href="{{ p.rep_url }}">{{ p.rep_pandaid }}</a>{% else %}—{% endif %}</td>
         <td>{% for t in p.tasks %}<a href="{% url 'monitor_app:panda_task_detail' jeditaskid=t %}">{{ t }}</a>{% if not forloop.last %} {% endif %}{% endfor %}</td>
         <td class="small">{% for s in p.sites %}{{ s }}{% if not forloop.last %} {% endif %}{% endfor %}{% if p.site_overflow %} (+{{ p.site_overflow }}){% endif %}</td>
