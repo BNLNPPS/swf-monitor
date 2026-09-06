@@ -95,6 +95,13 @@ def write_job_report(rc, workdir, extra=None):
         reco = (payload.get("events") or {}).get("reconstructed")
         if isinstance(reco, int):
             body["nEvents"] = reco
+        # The payload refreshes this file as it runs, so the metrics it
+        # declares ride the pilot's heartbeats; this final write is the
+        # authoritative one and must carry them forward rather than erase
+        # what the heartbeats were reporting.
+        metrics = payload.get("jobMetrics")
+        if isinstance(metrics, dict):
+            body["jobMetrics"] = metrics
     if extra:
         body.update(extra)
     try:
