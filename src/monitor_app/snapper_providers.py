@@ -2383,13 +2383,20 @@ def _storage_groups():
         'name': 'Storage consequences',
         'title': ('Jobs failed at upload or registration · all queues '
                   '(payload exit 78, ddm errors)'),
+        'title_by_measure': {
+            'count': ('Jobs failed at upload or registration · all '
+                      'queues (payload exit 78, ddm errors)'),
+            'weight': ('Core-hours lost at upload or registration · all '
+                       'queues (payload exit 78, ddm errors)')},
+        'measure_param': 'consequences',
+        'units_by_measure': {'count': 'jobs', 'weight': 'core-hours'},
         'prefixes': [], 'ids': ['psto_registration', 'psto_ddm'],
         'event_flow': True, 'end_stamped': True, 'stacked': True,
         # Bins twice the ladder rung: a handful of events a week draws
         # as hairlines at the 15-minute rung of a 7-day window.
         'event_flow_bin_scale': 2,
         'member_ticks': False,
-        'panel_px': 150, 'units': 'errors',
+        'panel_px': 150, 'units': 'jobs',
         'qualifier_label': 'Terminal state', 'qualifier_param': 'states',
         'qualifiers_off': ['closed'],
         'empty_note': ('No jobs failed at upload or registration in '
@@ -2470,9 +2477,25 @@ def _storage_focus_view():
             # capacity table beneath. The other readings are one click.
             {'param': 'panels', 'label': 'Show',
              'default': 'status', 'choices': list(_STORAGE_PANELS)},
+            # The consequences strip's measure: the jobs that failed at
+            # storage, or the core-hours they held. It switches what the
+            # strip plots, so it stays out of the families key.
+            {'param': 'consequences', 'label': 'Consequences',
+             'families': False, 'default': 'count',
+             'choices': [{'value': 'count', 'label': 'jobs'},
+                         {'value': 'weight', 'label': 'core-hours'}]},
         ],
         'options': options,
     }
+
+
+# The error families plot either measure of their events under the
+# Errors view's Measure selector: the count, or the core-hours the
+# jobs held before failing (docs/SNAPPER_ERRORS.md, Wasted resources).
+_ERRORS_MEASURE = {
+    'measure_param': 'measure',
+    'units_by_measure': {'count': 'errors', 'weight': 'core-hours'},
+}
 
 
 def _errors_groups():
@@ -2491,15 +2514,22 @@ def _errors_groups():
     # reasons, by design not actual errors (docs/SNAPPER_ERRORS.md).
     qualifier = {'qualifier_label': 'Terminal state',
                  'qualifier_param': 'states',
-                 'qualifiers_off': ['closed']}
+                 'qualifiers_off': ['closed'],
+                 **_ERRORS_MEASURE}
     return (
         {'name': 'Errors by category', 'title': 'Errors by category',
+         'title_by_measure': {
+             'count': 'Errors by category',
+             'weight': 'Wasted core-hours by category'},
          'prefixes': ['perr_'], 'ids': [],
          'event_flow': True, 'end_stamped': True, 'stacked': True,
          'member_ticks': False,
          'panel_px': 300, 'units': 'errors', 'default_off': True,
          **qualifier},
         {'name': 'Errors by component', 'title': 'Errors by component',
+         'title_by_measure': {
+             'count': 'Errors by component',
+             'weight': 'Wasted core-hours by component'},
          'prefixes': ['perrc_'], 'ids': [],
          'event_flow': True, 'end_stamped': True, 'stacked': True,
          'member_ticks': False,
@@ -2522,17 +2552,20 @@ def _errors_task_groups(taskid):
     """The synthesized per-task error families for one requested task."""
     qualifier = {'qualifier_label': 'Terminal state',
                  'qualifier_param': 'states',
-                 'qualifiers_off': ['closed']}
+                 'qualifiers_off': ['closed'],
+                 **_ERRORS_MEASURE}
+    titles = {'count': f'Errors · task {taskid}',
+              'weight': f'Wasted core-hours · task {taskid}'}
     return (
         {'name': f'Task errors {taskid} category',
-         'title': f'Errors · task {taskid}',
+         'title': f'Errors · task {taskid}', 'title_by_measure': titles,
          'prefixes': [f'terr_{taskid}_'], 'ids': [],
          'event_flow': True, 'end_stamped': True, 'stacked': True,
          'member_ticks': False,
          'panel_px': 300, 'units': 'errors', 'default_off': True,
          **qualifier},
         {'name': f'Task errors {taskid} component',
-         'title': f'Errors · task {taskid}',
+         'title': f'Errors · task {taskid}', 'title_by_measure': titles,
          'prefixes': [f'terrc_{taskid}_'], 'ids': [],
          'event_flow': True, 'end_stamped': True, 'stacked': True,
          'member_ticks': False,
@@ -2576,9 +2609,11 @@ def _errors_focus_view():
         'components': ('errors',),
         'prewarm_series': False,
         'note': ('Each bin counts the jobs that ended with an error '
-                 'in that interval; zooming in refines the bins down '
-                 'to the recorded 5-minute quantum. The breakdown '
-                 'below the plot reads at the clicked moment.'),
+                 'in that interval, or under Measure core-hours the '
+                 'core-hours those jobs held before failing; zooming '
+                 'in refines the bins down to the recorded 5-minute '
+                 'quantum. The breakdown below the plot reads at the '
+                 'clicked moment.'),
         'default': 'overall',
         'open_option': _errors_open_task,
         'selectors': [
@@ -2586,6 +2621,12 @@ def _errors_focus_view():
              'default': 'category',
              'choices': [{'value': 'category', 'label': 'error category'},
                          {'value': 'component', 'label': 'error component'}]},
+            # The measure switches what the same families plot, so it
+            # stays out of the families key.
+            {'param': 'measure', 'label': 'Measure', 'families': False,
+             'default': 'count',
+             'choices': [{'value': 'count', 'label': 'errors'},
+                         {'value': 'weight', 'label': 'core-hours'}]},
         ],
         'options': [{'value': 'overall', 'label': 'Overall',
                      'families_by': {
