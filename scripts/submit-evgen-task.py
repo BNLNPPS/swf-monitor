@@ -111,6 +111,45 @@ def _api_post_json(base, path, query, body, token, owner=None):
         return r.read().decode()
 
 
+REPORTING_ENV_FILE = os.environ.get(
+    "JOB_REPORTING_ENV", os.path.expanduser("~/.epic-job-reporter.env"))
+REPORTING_KEYS = ("REPORT_OUT_BUCKET", "REPORT_OUT_REGION",
+                  "REPORT_OUT_ACCESS_KEY_ID", "REPORT_OUT_SECRET_ACCESS_KEY",
+                  "REPORT_OUT_ENDPOINT")
+
+
+def _reporting_env():
+    """The settings a job needs to send its report out of the worker
+    (swf-epicprod docs/JOB_REPORTING.md).
+
+    They are read from a file held by the operating account, never from
+    the task specification, so the web tier and the specification carry
+    no credential; this doer is the only place they enter a sandbox. A
+    missing file is not an error: jobs then run without this channel,
+    which is how it is turned off.
+    """
+    values = {}
+    try:
+        with open(REPORTING_ENV_FILE) as f:
+            for line in f:
+                line = line.strip().removeprefix("export ").strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                if key in REPORTING_KEYS:
+                    values[key] = value.strip().strip('"').strip("'")
+    except OSError as e:
+        _log(f"job reporting not configured ({REPORTING_ENV_FILE}): {e}")
+        return {}
+    if "REPORT_OUT_BUCKET" not in values:
+        _log(f"job reporting not configured: no bucket in {REPORTING_ENV_FILE}")
+        return {}
+    _log(f"job reporting to {values['REPORT_OUT_BUCKET']} "
+         f"({len(values)} settings from {REPORTING_ENV_FILE})")
+    return values
+
+
 def _stage_bg_files(env, sandbox):
     """Copy or fetch BG_FILES into the worker sandbox when background mixing uses it."""
     bg_files = (env.get('BG_FILES') or '').strip()
@@ -158,6 +197,7 @@ def _assemble_sandbox(spec, proxy_path, root):
     env = dict(spec.get('env') or {})
     env['X509_USER_PROXY'] = proxy_base
     _stage_bg_files(env, sandbox)
+    env.update(_reporting_env())
     with open(os.path.join(sandbox, f"environment-{csv_base}.sh"), "w") as f:
         for k, v in env.items():
             f.write(f'export {k}={v}\n')
