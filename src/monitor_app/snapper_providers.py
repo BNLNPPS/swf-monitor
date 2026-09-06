@@ -3198,6 +3198,76 @@ def _panda_card(data, previous_data, ctx):
             'site_only': site_only, 'split_panels': not site_only}
 
 
+def _errors_counts_from_series(params, window_from, window_to,
+                               single_task, state_filter):
+    """The integrated breakdown's category counts and held core-seconds
+    from the page's own series product: the error curves' native bins
+    with their terminal-state breakdowns, summed over the bins whose
+    trailing edge lies in (from, to] — the rule the integrated panel
+    draws by, so the card matches the bands at the cut. Returns
+    (cat_counts, cat_held, total, total_held), or None when the page
+    named no window key or the product cannot be built (the caller
+    then reads the recorded snaps)."""
+    from datetime import datetime
+    from datetime import timezone as dt_timezone
+
+    from snapper_ai.products import series_product
+
+    window_key = str(params.get('window') or '').strip()
+    if not window_key:
+        return None
+    try:
+        product = series_product(
+            'epicprod', 'errors', window_key,
+            selection=single_task or '', selectors={'lens': 'category'})
+    except Exception as e:  # noqa: BLE001
+        logger.error('errors breakdown: series product %r failed: %s',
+                     window_key, e)
+        return None
+    prefix = f'terr_{single_task}_' if single_task else 'perr_'
+    cat_counts, cat_held = {}, {}
+    total = 0
+    total_held = 0
+    wanted = set(state_filter or [])
+    for curve_id, curve in (product.get('curves') or {}).items():
+        if not curve_id.startswith(prefix):
+            continue
+        comp, _, code = curve_id[len(prefix):].rpartition('_')
+        category = f'{comp}:{code}'
+        for point in curve.get('points') or []:
+            try:
+                edge = datetime.fromisoformat(str(point[0]))
+            except ValueError:
+                continue
+            if edge.tzinfo is None:
+                edge = edge.replace(tzinfo=dt_timezone.utc)
+            if not window_from < edge <= window_to:
+                continue
+            count = float(point[1] or 0)
+            held = float(point[3] or 0) * 3600 if len(point) > 3 else 0.0
+            if wanted:
+                per = point[2] if len(point) > 2 and point[2] else {}
+                per_held = (point[4] if len(point) > 4 and point[4]
+                            else {})
+                kept = sum(float(v) for q, v in per.items() if q in wanted)
+                kept_held = sum(float(v) * 3600 for q, v in per_held.items()
+                                if q in wanted)
+                if 'unrecorded' in wanted:
+                    kept += count - sum(float(v) for v in per.values())
+                    kept_held += held - sum(
+                        float(v) * 3600 for v in per_held.values())
+                count, held = kept, kept_held
+            if count <= 0 and held <= 0:
+                continue
+            cat_counts[category] = (cat_counts.get(category) or 0) + int(
+                round(count))
+            cat_held[category] = (cat_held.get(category) or 0) + int(
+                round(held))
+            total += int(round(count))
+            total_held += int(round(held))
+    return cat_counts, cat_held, total, total_held
+
+
 def _errors_card(data, previous_data, ctx):
     """The error-state cut card: the breakdown over the detail window
     around the cut — the clicked display bin when it is an hour or
@@ -3266,6 +3336,15 @@ def _errors_card(data, previous_data, ctx):
     # tile, so snaps stamped in (from, to + one capture interval]
     # cover every event in bounds; an unchanged component can repeat
     # across snaps, so intervals dedup by their end.
+    cat_counts = {}
+    cat_held = {}
+    total = 0
+    total_held = 0
+    from_series = (_errors_counts_from_series(
+        params, window_from, window_to, single_task, state_filter)
+        if integrated and not (selected and not single_task) else None)
+    if from_series is not None:
+        cat_counts, cat_held, total, total_held = from_series
     # Only the errors component's data leaves the database: a snap's
     # full state carries every component, and an integrated range
     # spans thousands of snaps.
@@ -3275,13 +3354,10 @@ def _errors_card(data, previous_data, ctx):
                       snap_time__lte=window_to + timedelta(minutes=10),
                       state__components__errors__data__has_key='entries')
               .order_by('snap_time')
-              .values_list('state__components__errors__data', flat=True))
-    cat_counts = {}
-    cat_held = {}
-    total = 0
-    total_held = 0
+              .values_list('state__components__errors__data', flat=True)
+              ) if from_series is None else []
     seen_intervals = set()
-    for errors in states.iterator():
+    for errors in (states.iterator() if from_series is None else ()):
         errors = errors if isinstance(errors, dict) else {}
         interval = errors.get('interval') or {}
         interval_key = str(interval.get('end') or '')
