@@ -371,7 +371,17 @@ def main():
                     maxAttempt=1, skipScout=True)
         _log(f"payload canary {spec['outDS']} on {args.canary_queue}: "
              f"row {spec['csvRows'][0]}")
-    elif args.trial:
+    elif args.trial or spec.get('trial'):
+        # The spec carries the trial's own settings when the task is a
+        # trial, so submitting one needs no flag; --trial with explicit
+        # options remains for a submission driven from the command line.
+        t = spec.get('trial') or {}
+        if t:
+            args.trial_events = int(t.get('events') or args.trial_events)
+            args.trial_root = str(t.get('outputRoot') or args.trial_root)
+            args.trial_lifetime_days = int(
+                t.get('lifetimeDays') or args.trial_lifetime_days)
+            args.trial_queue = args.trial_queue or str(t.get('site') or '')
         # Trial: the composed configuration run small and for real. One
         # manifest row, a hundred events of it, outputs under
         # epic:/TEST/<root> in the production layout with a lifetime —
