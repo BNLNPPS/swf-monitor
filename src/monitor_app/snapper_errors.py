@@ -43,6 +43,9 @@ from .panda.constants import (
 
 PUBLISHER_IDENTITY = "swf-monitor:panda-errors"
 ASSESSMENT_POLICY_VERSION = "swf-panda-errors-v4"
+# The entry-row shape: v3 added the terminal status, v4 the payload
+# exit code. The backfill stamps its snaps with the same version.
+COMPONENT_SCHEMA_VERSION = 4
 COMPONENT_NAME = "errors"
 SCOPE = "epicprod"
 
@@ -494,7 +497,7 @@ def publish_errors_state() -> ErrorsPublication:
             name=COMPONENT_NAME,
             publisher_identity=PUBLISHER_IDENTITY,
             registration=ERRORS_REGISTRATION,
-            component_schema_version=4,
+            component_schema_version=COMPONENT_SCHEMA_VERSION,
         )
         if quiet:
             update = report_component_unchanged(

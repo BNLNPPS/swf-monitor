@@ -1,8 +1,9 @@
 """Backfill per-interval error-event snaps into snap history.
 
-Reconstructs the errors component's version-3 interval entries — every
-job that ended faulty within each grid interval, as rows of
-(pandaid, jeditaskid, category, endtime, status) — from the recorded
+Reconstructs the errors component's interval entries at the current
+schema version — every job that ended faulty within each grid
+interval, as rows of (pandaid, jeditaskid, category, endtime, status,
+exitcode) — from the recorded
 job history in the PanDA database, on a regular grid at the live
 capture cadence. One synthetic snap per non-empty interval is written with
 capture policy ``backfill-errors-v1`` — reconstructed evidence,
@@ -42,6 +43,7 @@ from django.utils import timezone  # noqa: E402
 
 from monitor_app.snapper_errors import (  # noqa: E402
     ASSESSMENT_POLICY_VERSION,
+    COMPONENT_SCHEMA_VERSION,
     ERRORS_REGISTRATION,
     MAX_ENTRIES,
     PUBLISHER_IDENTITY,
@@ -181,8 +183,8 @@ def main():
               + (f' + {overflow["total"]} overflow' if overflow else ''))
     for _, end_stamp, entries, overflow in snaps[-3:]:
         categories = {}
-        for _, _, category, _, _ in entries:
-            categories[category] = (categories.get(category) or 0) + 1
+        for row in entries:
+            categories[row[2]] = (categories.get(row[2]) or 0) + 1
         top = sorted(categories.items(), key=lambda kv: -kv[1])[:3]
         print(f'  {end_stamp.isoformat()}: {len(entries)} entries, top {top}')
 
@@ -210,11 +212,11 @@ def main():
             reasons=['backfill'],
             changed_components=[COMPONENT],
             component_revisions={COMPONENT: 0},
-            registration_versions={COMPONENT: 3},
+            registration_versions={COMPONENT: COMPONENT_SCHEMA_VERSION},
             component_hashes={},
             state_hash='',
             state={'components': {COMPONENT: {
-                'v': 3,
+                'v': COMPONENT_SCHEMA_VERSION,
                 'data': dict(
                     {'interval': {'start': _iso_utc(lead),
                                   'end': _iso_utc(end_stamp)},
@@ -222,7 +224,7 @@ def main():
                     **({'overflow': overflow} if overflow else {})),
                 'registration': ERRORS_REGISTRATION,
                 'revision': 0,
-                'registration_version': 3,
+                'registration_version': COMPONENT_SCHEMA_VERSION,
                 'assessed_at': end_stamp.isoformat(),
                 'source_as_of': end_stamp.isoformat(),
                 'accepted_at': now.isoformat(),
