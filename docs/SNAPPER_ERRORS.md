@@ -294,7 +294,11 @@ zooms. The height of each band at the right edge is that failure
 kind's share of the window's total, so the slot deaths under running
 jobs and the registration failures compare at a glance. The page
 derives it from the panel's own bins (snapper-ai `cumulative_panel`);
-no curve is added.
+no curve is added. A click in the integrated panel reads its detail
+over the integration range, the view's left edge to the cut, so the
+breakdown's categories, shares and core-hours match the bands at
+that x; the URL carries the choice as `detail=integrated`. A click in
+the panel above keeps the hour around the cut.
 
 **Breakdown.** The cut's breakdown adds core-hours and its share of
 the window's wasted core-hours per category beside the count, from

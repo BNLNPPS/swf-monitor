@@ -177,7 +177,7 @@
   {# the error summary, the failed-jobs list, or a representative job. #}
   <section class="snapper-cut-card">
     <div class="mb-1"><strong>Errors{% if card.task_selection %} · task {{ card.task_selection }}{% endif %}</strong>
-      {% if card.basis %} <span class="text-muted small">window {{ card.basis }} · {{ card.window_errors }} errors · {{ card.window_hours }} core-hours held</span>{% endif %}
+      {% if card.basis %} <span class="text-muted small">{% if card.integrated %}integrated{% else %}window{% endif %} {{ card.basis }} · {{ card.window_errors }} errors · {{ card.window_hours }} core-hours held</span>{% endif %}
       · <a href="{{ card.errors_url }}">error summary</a>
       · <a href="{{ card.jobs_url }}">failed jobs</a></div>
     {% if card.reading %}

@@ -3238,6 +3238,9 @@ def _errors_card(data, previous_data, ctx):
     # real statuses among it. Absent means unrestricted.
     state_filter = [v for v in (params.get('states') or '').split(',')
                     if v]
+    # A cut taken in the integrated panel: the bounds are the
+    # integration range, the view's left edge to the cut.
+    integrated = str(params.get('integrated') or '') == '1'
 
     def _parse(iso):
         try:
@@ -3562,6 +3565,7 @@ def _errors_card(data, previous_data, ctx):
         'kind': 'errors',
         'task_selection': ', '.join(selected),
         'basis': basis_text,
+        'integrated': integrated,
         'reading': reading,
         'rows': rows,
         'row_overflow': max(0, len(cat_counts) - len(rows)),
