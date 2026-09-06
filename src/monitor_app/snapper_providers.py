@@ -2388,7 +2388,9 @@ def _storage_groups():
                       'queues (payload exit 78, ddm errors)'),
             'weight': ('Core-hours lost at upload or registration · all '
                        'queues (payload exit 78, ddm errors)')},
-        'measure_param': 'consequences',
+        # Both measures down the page: the jobs that failed at storage
+        # and the core-hours they held, each with its integrated panel.
+        'measures': ['count', 'weight'],
         'units_by_measure': {'count': 'jobs', 'weight': 'core-hours'},
         'cumulative_panel': True,
         'prefixes': [], 'ids': ['psto_registration', 'psto_ddm'],
@@ -2478,13 +2480,6 @@ def _storage_focus_view():
             # capacity table beneath. The other readings are one click.
             {'param': 'panels', 'label': 'Show',
              'default': 'status', 'choices': list(_STORAGE_PANELS)},
-            # The consequences strip's measure: the jobs that failed at
-            # storage, or the core-hours they held. It switches what the
-            # strip plots, so it stays out of the families key.
-            {'param': 'consequences', 'label': 'Consequences',
-             'families': False, 'default': 'count',
-             'choices': [{'value': 'count', 'label': 'jobs'},
-                         {'value': 'weight', 'label': 'core-hours'}]},
         ],
         'options': options,
     }
@@ -2494,7 +2489,9 @@ def _storage_focus_view():
 # Errors view's Measure selector: the count, or the core-hours the
 # jobs held before failing (docs/SNAPPER_ERRORS.md, Wasted resources).
 _ERRORS_MEASURE = {
-    'measure_param': 'measure',
+    # Both measures of the same events, down the page: the error count
+    # and the wasted core-hours, correlated by eye.
+    'measures': ['count', 'weight'],
     'units_by_measure': {'count': 'errors', 'weight': 'core-hours'},
     # Beneath each panel, its bins integrated from the left edge of
     # the view: the relative contribution of each failure kind.
@@ -2617,11 +2614,14 @@ def _errors_focus_view():
         'components': ('errors',),
         'prewarm_series': False,
         'note': ('Each bin counts the jobs that ended with an error '
-                 'in that interval, or under Measure core-hours the '
-                 'core-hours those jobs held before failing; zooming '
-                 'in refines the bins down to the recorded 5-minute '
-                 'quantum. The breakdown below the plot reads at the '
-                 'clicked moment.'),
+                 'in that interval, and beneath it the core-hours '
+                 'those jobs held before failing; the integrated '
+                 'panels sum each from the left edge of the view. '
+                 'Zooming in refines the bins down to the recorded '
+                 '5-minute quantum. A click cuts every panel: the '
+                 'detail beneath the per-bin panels reads the hour '
+                 'around the cut, the detail beneath the integrated '
+                 'panels the whole span to the cut.'),
         'default': 'overall',
         'open_option': _errors_open_task,
         'selectors': [
@@ -2629,12 +2629,6 @@ def _errors_focus_view():
              'default': 'category',
              'choices': [{'value': 'category', 'label': 'error category'},
                          {'value': 'component', 'label': 'error component'}]},
-            # The measure switches what the same families plot, so it
-            # stays out of the families key.
-            {'param': 'measure', 'label': 'Measure', 'families': False,
-             'default': 'count',
-             'choices': [{'value': 'count', 'label': 'errors'},
-                         {'value': 'weight', 'label': 'core-hours'}]},
         ],
         'options': [{'value': 'overall', 'label': 'Overall',
                      'families_by': {

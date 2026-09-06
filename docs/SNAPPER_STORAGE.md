@@ -184,13 +184,12 @@ them. Entries recorded before the exit code joined the record
 RSE, so the strip is scope-level, once; the attribution of a failure
 to its destination RSE is not recorded and is not shown. The strip's
 bins are twice the page's ladder rung, so a sparse week still draws
-as bars. A Consequences selector, jobs or core-hours, picks the
-strip's measure: the count of jobs, or the core-hours those jobs held
-before failing, from the error record's held field
-([SNAPPER_ERRORS.md](SNAPPER_ERRORS.md), Wasted resources); the chips
-and the axis follow the measure. Beneath the strip an integrated panel
-sums its bins from the left edge of the window, the two members
-stacked, so the window's total and its split read directly.
+as bars. The strip plots both measures down the page: the count of
+jobs, then the core-hours those jobs held before failing, from the
+error record's held field ([SNAPPER_ERRORS.md](SNAPPER_ERRORS.md),
+Wasted resources), each with an integrated panel beneath it summing
+its bins from the left edge of the window, the two members stacked,
+so the window's totals and their split read directly.
 
 State curves hold their last recorded value to the present: the record
 is four-hourly and a quiet pass affirms the state unchanged, so the last

@@ -271,36 +271,29 @@ cost. Overflow folds land at the interval end with their
 summed weight spread evenly over the folded events, so the bin sum is
 exact.
 
-**View.** A Measure selector, errors or core-hours, beside the
-grouping selector. It picks which bin measure the panels plot, the
-chips count and the axis names; the panel title follows (errors by
-category, wasted core-hours by category). A family declares the
-selector parameter it follows and its units per measure
-(`measure_param`, `units_by_measure`, `title_by_measure`; snapper-ai
-INTEGRATION.md). The client's display re-binning sums whichever
-measure is active. Under core-hours, cancelled jobs that ran count
-and closed jobs hold nothing; the terminal-state default is
-unchanged. The task filter applies as it does to counts, so a task's
-waste history is the same page filtered. One measure at a time on
-one panel is the form the display model supports: the page assigns
-each curve to one family, so plotting both measures at once would
-require a second set of curve ids carrying the same events, doubling
-the series walk.
+**View.** Both measures of the same events, down the page: errors by
+category, then wasted core-hours by category, then the integrated
+panel of each. A family declares the measures it plots and its units
+and title per measure (`measures`, `units_by_measure`,
+`title_by_measure`; snapper-ai INTEGRATION.md); the page draws one
+panel per measure from the same curves, so no curve is duplicated and
+the series walk is unchanged. The chips count errors and filter every
+panel; under core-hours, cancelled jobs that ran count and closed
+jobs hold nothing. The task filter applies to every panel, so a task's
+waste history is the same page filtered.
 
-Beneath each panel an integrated panel draws the same bins summed
-from the left edge of the window, stacked by the same categories in
-the same measure and under the same chips, and re-based when the view
+The integrated panels draw the same bins summed from the left edge of
+the window, stacked by the same categories and re-based when the view
 zooms. The height of each band at the right edge is that failure
 kind's share of the window's total, so the slot deaths under running
 jobs and the registration failures compare at a glance. The page
-derives it from the panel's own bins (snapper-ai `cumulative_panel`);
-no curve is added. Each plot docks its own detail, as every focus
-view does: the cut detail beneath the error panel, the hour around
-the cut, and the aggregate detail beneath the integrated panel, the
-same breakdown over the integrated panels' range, the view's left
-edge to the cut, so its categories, shares and core-hours are what the
-integrated bands show at the cut. Both sections ride one cut request
-and refresh with every cut.
+derives them from the panels' own bins (snapper-ai `cumulative_panel`).
+Each group of plots docks its detail, as every focus view does: the
+cut detail beneath the per-bin panels, the hour around the cut, and
+the aggregate detail beneath the integrated panels, the same
+breakdown over the view's left edge to the cut, so its categories,
+shares and core-hours are what the integrated bands show at the cut.
+Both sections ride one cut request and refresh with every cut.
 
 **Breakdown.** The cut's breakdown adds core-hours and its share of
 the window's wasted core-hours per category beside the count, from
