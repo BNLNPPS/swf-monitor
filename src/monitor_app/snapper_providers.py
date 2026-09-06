@@ -1780,9 +1780,21 @@ _STORAGE_CACHE = {'at': None, 'inventory': None}
 _STORAGE_STATE_ORDER = ('AVAILABLE', 'COPYING', 'TEMPORARY_UNAVAILABLE',
                         'UNAVAILABLE', 'BAD')
 _STORAGE_ROOT_ORDER = ('RECO', 'FULL', 'EVGEN')
-_STORAGE_LENSES = ({'value': 'state', 'label': 'Rucio replica state'},
-                   {'value': 'root', 'label': 'data tier root'},
-                   {'value': 'campaign', 'label': 'campaign'})
+_STORAGE_LENS_LABEL = {'state': 'Rucio replica state',
+                       'root': 'data tier root',
+                       'campaign': 'campaign'}
+# Each panel offers the groupings its record supports, on its own
+# control row (docs/SNAPPER_STORAGE.md, Grouping): the copying backlog
+# is all COPYING by definition, so state says nothing there; the record
+# carries no ghosts by root; the inventory answers to all three.
+_STORAGE_PANEL_LENSES = (
+    {'param': 'backlog', 'family': 'backlog', 'default': 'root',
+     'values': ('root', 'campaign')},
+    {'param': 'ghosts', 'family': 'ghosts', 'default': 'state',
+     'values': ('state', 'campaign')},
+    {'param': 'inventory', 'family': 'inventory', 'default': 'state',
+     'values': ('state', 'root', 'campaign')},
+)
 _STORAGE_QUANTITIES = ({'value': 'bytes', 'label': 'bytes'},
                        {'value': 'files', 'label': 'files'})
 # The option carrying the scope-level campaign families, pinned after
@@ -2078,11 +2090,16 @@ _STORAGE_PANELS = ({'value': 'status', 'label': 'status'},
                    {'value': 'lifecycle', 'label': 'all panels'})
 
 
-def _storage_rse_families(rse, quantity, lens, panels='lifecycle'):
-    """The per-RSE families for one quantity, grouping and panel set,
-    in panel order (docs/SNAPPER_STORAGE.md, Families per RSE). The
+def _storage_rse_families(rse, quantity, lenses, panels='lifecycle'):
+    """The per-RSE families for one quantity, panel set and grouping
+    per panel, in panel order (docs/SNAPPER_STORAGE.md, Families per
+    RSE). ``lenses`` maps a panel — backlog, ghosts, inventory — to its
+    grouping, each panel carrying its own on its control row. The
     capacity and ghosts sets are the RSE-status and ghost-history
     readings alone, one click from the whole lifecycle."""
+    backlog_lens = lenses.get('backlog') or 'root'
+    ghost_lens = lenses.get('ghosts') or 'state'
+    inventory_lens = lenses.get('inventory') or 'state'
     if panels == 'status':
         # The moving picture: what lands, what fails, how full.
         return [f'Storage arrivals {rse} {quantity}',
@@ -2091,20 +2108,20 @@ def _storage_rse_families(rse, quantity, lens, panels='lifecycle'):
     if panels == 'capacity':
         return [f'Storage capacity {rse} {quantity}']
     if panels == 'ghosts':
-        return [(f'Storage ghosts {rse} files {lens}' if quantity == 'files'
-                 else f'Storage ghosts {rse} bytes'),
+        return [(f'Storage ghosts {rse} files {ghost_lens}'
+                 if quantity == 'files' else f'Storage ghosts {rse} bytes'),
                 f'Storage ghost flow {rse}',
                 f'Storage ghost yield {rse}',
                 f'Storage capacity {rse} {quantity}']
     return [f'Storage arrivals {rse} {quantity}',
             f'Storage transfers {rse} {quantity}',
-            f'Storage backlog {rse} {quantity} {lens}',
+            f'Storage backlog {rse} {quantity} {backlog_lens}',
             f'Storage backlog age {rse}',
-            (f'Storage ghosts {rse} files {lens}' if quantity == 'files'
-             else f'Storage ghosts {rse} bytes'),
+            (f'Storage ghosts {rse} files {ghost_lens}'
+             if quantity == 'files' else f'Storage ghosts {rse} bytes'),
             f'Storage ghost flow {rse}',
             f'Storage ghost yield {rse}',
-            f'Storage inventory {rse} {quantity} {lens}',
+            f'Storage inventory {rse} {quantity} {inventory_lens}',
             f'Storage locks {rse}',
             f'Storage capacity {rse} {quantity}']
 
@@ -2182,6 +2199,8 @@ def _storage_groups():
                                  if lens != 'state' else []),
                     'ids': ([f'sto{q}s_{rse}_copying']
                             if lens == 'state' else []),
+                    # The panel's own grouping axis attaches here.
+                    'selector_group': 'backlog',
                     'stacked': True, 'panel_px': 200, 'units': units}
                 if lens == 'root':
                     backlog['order'] = [f'sto{q}r_{rse}_{root}'
@@ -2197,6 +2216,10 @@ def _storage_groups():
                         'name': f'Storage ghosts {rse} files {lens}',
                         'title': f'Ghosts · {rse}',
                         'prefixes': [], 'ids': [],
+                        # Only the files variants carry the grouping
+                        # axis: under bytes the record holds the ghost
+                        # total alone, so there is nothing to choose.
+                        'selector_group': 'ghosts',
                         'stacked': True, 'panel_px': 200, 'units': 'files'}
                     if lens == 'state':
                         ghosts['prefixes'] = [f'stofg_{rse}_']
@@ -2216,6 +2239,8 @@ def _storage_groups():
                     'title': f'Inventory · {rse}',
                     'prefixes': [f'sto{q}{inventory_code[lens]}_{rse}_'],
                     'ids': [],
+                    # All three groupings are real here.
+                    'selector_group': 'inventory',
                     'stacked': True, 'panel_px': 220, 'units': units}
                 if lens == 'state':
                     inventory_group['order'] = [
@@ -2433,27 +2458,26 @@ def _storage_focus_view():
          # replicas together (a tape RSE receives only replicas); an
          # RSE with no arrivals in the window is idle and closed.
          'activity': f'stoxa_{rse}_files',
-         'families_by': {
-             f"{quantity['value']}|{lens['value']}|{panels['value']}":
-                 _storage_rse_families(rse, quantity['value'],
-                                       lens['value'], panels['value'])
-             for quantity in _STORAGE_QUANTITIES
-             for lens in _STORAGE_LENSES
-             for panels in _STORAGE_PANELS},
+         # Five axes — counting, panel set, and a grouping per panel —
+         # so the families resolve from the selected values rather than
+         # from a precomputed combination of them (snapper-ai
+         # INTEGRATION.md, callable families_by).
+         'families_by': (lambda values, rse=rse: _storage_rse_families(
+             rse, values.get('quantity') or 'bytes',
+             {axis['param']: values.get(axis['param']) or axis['default']
+              for axis in _STORAGE_PANEL_LENSES},
+             values.get('panels') or 'status')),
          'component': 'storage', 'start': floor}
         for rse in inventory['rses']]
     if inventory['campaigns']:
         options.append({
             'value': _STORAGE_CAMPAIGNS_OPTION, 'label': 'Campaign totals',
             'pin': 'last',
-            'families_by': {
-                f"{quantity['value']}|{lens['value']}|{panels['value']}":
-                    _storage_campaign_families(inventory['campaigns'],
-                                               quantity['value'],
-                                               panels['value'])
-                for quantity in _STORAGE_QUANTITIES
-                for lens in _STORAGE_LENSES
-                for panels in _STORAGE_PANELS},
+            'families_by': (
+                lambda values, names=inventory['campaigns']:
+                    _storage_campaign_families(
+                        names, values.get('quantity') or 'bytes',
+                        values.get('panels') or 'status')),
             'component': 'storage', 'start': floor})
     return {
         'param': 'rse',
@@ -2479,14 +2503,20 @@ def _storage_focus_view():
             # limit, as Rucio states it.
             {'param': 'quantity', 'label': 'Counting',
              'default': 'bytes', 'choices': list(_STORAGE_QUANTITIES)},
-            # Replica state is the landing: its members are the
-            # operational reading — a growing copying band is uploads
-            # that never finished, unavailable is replicas lost after
-            # arrival — and it never collapses into one 'other' slab
-            # the way campaign does while the target list covers a
-            # fraction of what is on disk.
-            {'param': 'lens', 'label': 'Grouping',
-             'default': 'state', 'choices': list(_STORAGE_LENSES)},
+            # A grouping per panel, each on the panel's own control
+            # row, offering only what that panel's record supports.
+            # Replica state leads where it is offered: its members are
+            # the operational reading — a growing copying band is
+            # uploads that never finished, unavailable is replicas lost
+            # after arrival — where campaign collapses into one 'other'
+            # slab while the target list covers a fraction of what is
+            # on disk.
+            *[{'param': axis['param'], 'label': 'Grouping',
+               'family': axis['family'], 'default': axis['default'],
+               'choices': [{'value': value,
+                            'label': _STORAGE_LENS_LABEL[value]}
+                           for value in axis['values']]}
+              for axis in _STORAGE_PANEL_LENSES],
             # The landing is status, the moving picture per RSE:
             # arrivals and ghost flow per bin with capacity, the
             # capacity table beneath. The other readings are one click.

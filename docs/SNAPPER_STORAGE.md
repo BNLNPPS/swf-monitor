@@ -87,21 +87,23 @@ jump list, and the RSE's detail docked beneath its own panels.
   and sort by their own activity.
 - **Counting** selector: bytes (default; TB, as Rucio states usage and
   limits) or files. The panel title states the unit.
-- **Grouping** selector: by Rucio replica state (default), by data
-  tier root, or by campaign. The state is Rucio's own replica state at
-  that RSE, the root is the DID's first path element, the data tier
-  (RECO, FULL, EVGEN, SIMU), and the campaign is the campaign family
-  the DID's second path element names. State is the landing because
-  its members are the operational reading — a growing copying band is
-  uploads that never finished, unavailable is replicas lost after
-  arrival — and because it is the only grouping under which the ghost
-  panel splits, the record carrying ghosts by state and by campaign
-  but not by root. Under the state grouping the copying backlog panel
-  is the copying total, everything in it being of that one state.
-  It applies to the backlog, ghost and inventory panels; the
-  other panels are the same under every grouping. The campaign
-  grouping shows the target campaigns with every other campaign
-  folded into `other`, as the record folds them.
+- **Grouping**: a grouping per panel, on the panel's own control row
+  (snapper-ai INTEGRATION.md, a selector axis declaring `family`), each
+  offering what that panel's record supports and nothing else. The
+  copying backlog groups by data tier root (default) or campaign —
+  never by replica state, everything in it being COPYING. Ghosts group
+  by Rucio replica state (default) or campaign — never by root, which
+  the record does not carry; under bytes counting the record holds the
+  ghost total alone and the panel carries no control. The inventory
+  groups by replica state (default), root or campaign, all three being
+  real there. Replica state leads where it is offered: its members are
+  the operational reading, a growing copying band being uploads that
+  never finished and unavailable being replicas lost after arrival.
+  The state is Rucio's own replica state at that RSE, the root is the
+  DID's first path element, the data tier (RECO, FULL, EVGEN, SIMU),
+  and the campaign is the campaign family the DID's second path
+  element names, the target campaigns with every other campaign folded
+  into `other` as the record folds them. No other panel is grouped.
 - **Show** selector: status (the default and the landing, the moving
   picture per RSE: arrivals per bin, ghosts appeared and cleared per
   bin, and usage against the limit, with the campaigns' arrivals after
