@@ -2499,6 +2499,10 @@ _ERRORS_MEASURE = {
     # Beneath each panel, its bins integrated from the left edge of
     # the view: the relative contribution of each failure kind.
     'cumulative_panel': True,
+    # One docked detail per plot: the cut detail beneath the panel,
+    # the aggregate detail beneath the integrated panel (_errors_card).
+    'detail_key': 'errors',
+    'aggregate_detail_key': 'errors-aggregate',
 }
 
 
@@ -3269,14 +3273,65 @@ def _errors_counts_from_series(params, window_from, window_to,
 
 
 def _errors_card(data, previous_data, ctx):
-    """The error-state cut card: the breakdown over the detail window
-    around the cut — the clicked display bin when it is an hour or
-    wider, else the hour around the cut (docs/SNAPPER_ERRORS.md).
-    Category counts and the component-share donut aggregate the
-    recorded interval entries over the window; the diagnostic
-    patterns aggregate live from the job records over the same
-    bounds. A task selection (?task=) narrows everything to that
-    task's events."""
+    """The error-state cut card: one docked section per plot
+    (docs/SNAPPER_ERRORS.md). The cut detail, docked beneath the error
+    panel, is the breakdown over the detail window around the cut —
+    the clicked display bin when it is an hour or wider, else the hour
+    around the cut. The aggregate detail, docked beneath the integrated
+    panel when the request carries the integration range (agg_from,
+    agg_to: the view's left edge to the cut), is the same breakdown
+    over that range, what the integrated bands show at the cut."""
+    from datetime import datetime
+    from datetime import timezone as dt_timezone
+
+    if data.get('entries') is None:
+        # A counter-era snap holds no interval record to read.
+        return None
+    params = ctx.get('params') or {}
+    selected = [v for v in (params.get('task') or '').split(',')
+                if v and v != 'overall']
+
+    def _parse(iso):
+        try:
+            parsed = datetime.fromisoformat(
+                str(iso or '').replace('Z', '+00:00'))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt_timezone.utc)
+        return parsed
+
+    cut = _errors_breakdown(data, ctx)
+    if cut is None:
+        return None
+    sections = [dict(cut, detail_key='errors', heading='Errors')]
+    agg_from = _parse(params.get('agg_from'))
+    agg_to = _parse(params.get('agg_to'))
+    if agg_from is not None and agg_to is not None and agg_from < agg_to:
+        aggregate = _errors_breakdown(data, ctx, window_from=agg_from,
+                                      window_to=agg_to, integrated=True)
+        if aggregate is not None:
+            sections.append(dict(aggregate, detail_key='errors-aggregate',
+                                 heading='Aggregate detail'))
+    return {
+        'kind': 'errors',
+        'task_selection': ', '.join(selected),
+        'sections': sections,
+    }
+
+
+def _errors_breakdown(data, ctx, window_from=None, window_to=None,
+                      integrated=None):
+    """One error breakdown over (window_from, window_to]: category
+    counts, held core-hours and shares, the share donut, the attribution
+    reading, and the diagnostic patterns. Bounds absent take the
+    request's from/to, else the hour ending at the cut snap's interval.
+    Category counts and the donut aggregate the recorded interval
+    entries over the window (an integrated breakdown reads the page's
+    series product); the diagnostic patterns aggregate live from the
+    job records over the same bounds, each with its held core-seconds.
+    A task selection (?task=) narrows everything to that task's
+    events."""
     import math
     from datetime import datetime, timedelta
     from datetime import timezone as dt_timezone
@@ -3296,9 +3351,6 @@ def _errors_card(data, previous_data, ctx):
         error_patterns,
     )
 
-    if data.get('entries') is None:
-        # A counter-era snap holds no interval record to read.
-        return None
     params = ctx.get('params') or {}
     selected = [v for v in (params.get('task') or '').split(',')
                 if v and v != 'overall']
@@ -3308,9 +3360,8 @@ def _errors_card(data, previous_data, ctx):
     # real statuses among it. Absent means unrestricted.
     state_filter = [v for v in (params.get('states') or '').split(',')
                     if v]
-    # A cut taken in the integrated panel: the bounds are the
-    # integration range, the view's left edge to the cut.
-    integrated = str(params.get('integrated') or '') == '1'
+    if integrated is None:
+        integrated = str(params.get('integrated') or '') == '1'
 
     def _parse(iso):
         try:
@@ -3322,8 +3373,9 @@ def _errors_card(data, previous_data, ctx):
             parsed = parsed.replace(tzinfo=dt_timezone.utc)
         return parsed
 
-    window_from = _parse(params.get('from'))
-    window_to = _parse(params.get('to'))
+    if window_from is None or window_to is None:
+        window_from = _parse(params.get('from'))
+        window_to = _parse(params.get('to'))
     if (window_from is None or window_to is None
             or not window_from < window_to):
         # No client bounds: the hour ending at the cut snap's interval.
@@ -3640,8 +3692,6 @@ def _errors_card(data, previous_data, ctx):
         reading.append(item)
 
     return {
-        'kind': 'errors',
-        'task_selection': ', '.join(selected),
         'basis': basis_text,
         'integrated': integrated,
         'reading': reading,

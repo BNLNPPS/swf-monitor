@@ -175,23 +175,26 @@
   {# catalog labels, the component-share donut, and the trailing       #}
   {# window's top diagnostic patterns — every fact a drill-down into   #}
   {# the error summary, the failed-jobs list, or a representative job. #}
-  <section class="snapper-cut-card">
-    <div class="mb-1"><strong>Errors{% if card.task_selection %} · task {{ card.task_selection }}{% endif %}</strong>
-      {% if card.basis %} <span class="text-muted small">{% if card.integrated %}integrated{% else %}window{% endif %} {{ card.basis }} · {{ card.window_errors }} errors · {{ card.window_hours }} core-hours held</span>{% endif %}
-      · <a href="{{ card.errors_url }}">error summary</a>
-      · <a href="{{ card.jobs_url }}">failed jobs</a></div>
-    {% if card.reading %}
+  {# One docked section per plot: the cut detail beneath the error     #}
+  {# panel, the aggregate detail beneath the integrated panel.         #}
+  {% for c in card.sections %}
+  <section data-snapper-detail-key="{{ c.detail_key }}" class="snapper-cut-card mb-2">
+    <div class="mb-1"><strong>{{ c.heading }}{% if card.task_selection %} · task {{ card.task_selection }}{% endif %}</strong>
+      {% if c.basis %} <span class="text-muted small">{% if c.integrated %}integrated{% else %}window{% endif %} {{ c.basis }} · {{ c.window_errors }} errors · {{ c.window_hours }} core-hours held</span>{% endif %}
+      · <a href="{{ c.errors_url }}">error summary</a>
+      · <a href="{{ c.jobs_url }}">failed jobs</a></div>
+    {% if c.reading %}
     <div class="mb-2"><strong>Reading:</strong>
-      {% for r in card.reading %}{% if not forloop.first %} · {% endif %}{{ r.pre }}{% if r.url %}<a href="{{ r.url }}">{{ r.label }}</a>{% else %}{{ r.label }}{% endif %}{{ r.post }}{% endfor %}
+      {% for r in c.reading %}{% if not forloop.first %} · {% endif %}{{ r.pre }}{% if r.url %}<a href="{{ r.url }}">{{ r.label }}</a>{% else %}{{ r.label }}{% endif %}{{ r.post }}{% endfor %}
     </div>
     {% endif %}
-    {% if card.rows %}
+    {% if c.rows %}
     <div class="d-flex flex-wrap column-gap-4 align-items-start">
       <div>
         <table class="table table-sm table-bordered w-auto mb-1">
           <thead><tr><th>Category</th><th class="text-end">Errors</th><th class="text-end">Core-hours</th><th class="text-end">Share</th></tr></thead>
           <tbody>
-          {% for r in card.rows %}
+          {% for r in c.rows %}
           <tr>
             <td><span data-curve="{{ r.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span><a href="{{ r.url }}">{{ r.label }}</a></td>
             <td class="text-end">{{ r.window }}</td>
@@ -201,18 +204,18 @@
           {% endfor %}
           </tbody>
         </table>
-        {% if card.row_overflow %}
-        <div class="text-muted small mb-1">{{ card.row_overflow }} {{ card.row_overflow_note }}.</div>
+        {% if c.row_overflow %}
+        <div class="text-muted small mb-1">{{ c.row_overflow }} {{ c.row_overflow_note }}.</div>
         {% endif %}
       </div>
-      {% if card.pie %}
+      {% if c.pie %}
       <div>
-        <div class="mb-1 text-center"><strong>{{ card.pie_label|default:"Shares" }}</strong></div>
-        <svg width="{{ card.pie_size }}" height="{{ card.pie_size }}"
+        <div class="mb-1 text-center"><strong>{{ c.pie_label|default:"Shares" }}</strong></div>
+        <svg width="{{ c.pie_size }}" height="{{ c.pie_size }}"
              viewBox="0 0 120 120"
              style="display:block; max-width:100%; height:auto;"
              role="img" aria-label="Error shares by component">
-          {% for seg in card.pie %}
+          {% for seg in c.pie %}
           <a href="{{ seg.url }}"><path d="{{ seg.path }}"
             data-curve="{{ seg.curve }}"
             {% if seg.color %}fill="{{ seg.color }}"{% endif %}
@@ -225,12 +228,12 @@
     {% else %}
     <div class="text-muted mb-1">No errors accrued in this window{% if card.task_selection %} for this task{% endif %}.</div>
     {% endif %}
-    {% if card.patterns %}
-    <div class="mb-1 mt-2"><strong>Top diagnostic patterns</strong> <span class="text-muted small">{{ card.window_patterns }} pattern{{ card.window_patterns|pluralize }} in the window, from live job records</span></div>
+    {% if c.patterns %}
+    <div class="mb-1 mt-2"><strong>Top diagnostic patterns</strong> <span class="text-muted small">{{ c.window_patterns }} pattern{{ c.window_patterns|pluralize }} in the window, from live job records</span></div>
     <table class="table table-sm table-bordered w-automb-1">
       <thead><tr><th>Category</th><th>Diagnostic</th><th class="text-end">Count</th><th class="text-end">Core-hours</th><th>Example job</th><th>Tasks</th><th>Queues</th></tr></thead>
       <tbody>
-      {% for p in card.patterns %}
+      {% for p in c.patterns %}
       <tr>
         <td class="text-nowrap"><span data-curve="{{ p.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>{{ p.category }}</td>
         <td class="small" style="word-break:break-word;">{{ p.diag }}</td>
@@ -244,13 +247,14 @@
       </tbody>
     </table>
     {% endif %}
-    {% if card.payload_json %}
+    {% if forloop.first and card.payload_json %}
     <details class="mt-1">
       <summary class="text-muted small">component document (audit)</summary>
       <pre class="p-2 border rounded snapper-scrollpane" style="max-height:22em; overflow:auto; font-size:.9em;">{{ card.payload_json }}</pre>
     </details>
     {% endif %}
   </section>
+  {% endfor %}
 
 {% elif card.kind == 'platform' %}
   {# The platform cut: assessment, then the detail tables, and last the #}
