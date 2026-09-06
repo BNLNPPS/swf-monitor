@@ -271,9 +271,11 @@ cost. Overflow folds land at the interval end with their
 summed weight spread evenly over the folded events, so the bin sum is
 exact.
 
-**View.** Both measures of the same events, down the page: errors by
-category, then wasted core-hours by category, then the integrated
-panel of each. A family declares the measures it plots and its units
+**View.** Two banded sections down the page, Cut time and Aggregate.
+Cut time holds both measures of the same events, errors by category
+and wasted core-hours by category, with the cut detail beneath;
+Aggregate holds the aggregate panel of each with the aggregate detail
+beneath. A family declares the measures it plots and its units
 and title per measure (`measures`, `units_by_measure`,
 `title_by_measure`; snapper-ai INTEGRATION.md); the page draws one
 panel per measure from the same curves, so no curve is duplicated and

@@ -2493,7 +2493,7 @@ _ERRORS_MEASURE = {
     # and the wasted core-hours, correlated by eye. The per-interval
     # panels open under a section band; the integrated panels open
     # under their own (the observatory's integrated section).
-    'section': {'label': 'Per interval', 'pinned': True, 'idle': False,
+    'section': {'label': 'Cut time', 'pinned': True, 'idle': False,
                 'peak': ''},
     'measures': ['count', 'weight'],
     'units_by_measure': {'count': 'errors', 'weight': 'core-hours'},
@@ -3302,7 +3302,7 @@ def _errors_card(data, previous_data, ctx):
     cut = _errors_breakdown(data, ctx)
     if cut is None:
         return None
-    sections = [dict(cut, detail_key='errors', heading='Errors')]
+    sections = [dict(cut, detail_key='errors', heading='Cut detail')]
     agg_from = _parse(params.get('agg_from'))
     agg_to = _parse(params.get('agg_to'))
     if agg_from is not None and agg_to is not None and agg_from < agg_to:
