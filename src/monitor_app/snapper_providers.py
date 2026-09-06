@@ -1780,9 +1780,9 @@ _STORAGE_CACHE = {'at': None, 'inventory': None}
 _STORAGE_STATE_ORDER = ('AVAILABLE', 'COPYING', 'TEMPORARY_UNAVAILABLE',
                         'UNAVAILABLE', 'BAD')
 _STORAGE_ROOT_ORDER = ('RECO', 'FULL', 'EVGEN')
-_STORAGE_LENSES = ({'value': 'campaign', 'label': 'campaign'},
-                   {'value': 'state', 'label': 'Rucio replica state'},
-                   {'value': 'root', 'label': 'data tier root'})
+_STORAGE_LENSES = ({'value': 'state', 'label': 'Rucio replica state'},
+                   {'value': 'root', 'label': 'data tier root'},
+                   {'value': 'campaign', 'label': 'campaign'})
 _STORAGE_QUANTITIES = ({'value': 'bytes', 'label': 'bytes'},
                        {'value': 'files', 'label': 'files'})
 # The option carrying the scope-level campaign families, pinned after
@@ -2479,8 +2479,14 @@ def _storage_focus_view():
             # limit, as Rucio states it.
             {'param': 'quantity', 'label': 'Counting',
              'default': 'bytes', 'choices': list(_STORAGE_QUANTITIES)},
+            # Replica state is the landing: its members are the
+            # operational reading — a growing copying band is uploads
+            # that never finished, unavailable is replicas lost after
+            # arrival — and it never collapses into one 'other' slab
+            # the way campaign does while the target list covers a
+            # fraction of what is on disk.
             {'param': 'lens', 'label': 'Grouping',
-             'default': 'campaign', 'choices': list(_STORAGE_LENSES)},
+             'default': 'state', 'choices': list(_STORAGE_LENSES)},
             # The landing is status, the moving picture per RSE:
             # arrivals and ghost flow per bin with capacity, the
             # capacity table beneath. The other readings are one click.

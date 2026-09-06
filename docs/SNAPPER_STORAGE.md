@@ -87,11 +87,17 @@ jump list, and the RSE's detail docked beneath its own panels.
   and sort by their own activity.
 - **Counting** selector: bytes (default; TB, as Rucio states usage and
   limits) or files. The panel title states the unit.
-- **Grouping** selector: by campaign, by Rucio replica state, or by
-  data tier root. The campaign is the campaign family the DID's second
-  path element names, the state is Rucio's own replica state at that
-  RSE, and the root is the DID's first path element, the data tier:
-  RECO, FULL, EVGEN, SIMU.
+- **Grouping** selector: by Rucio replica state (default), by data
+  tier root, or by campaign. The state is Rucio's own replica state at
+  that RSE, the root is the DID's first path element, the data tier
+  (RECO, FULL, EVGEN, SIMU), and the campaign is the campaign family
+  the DID's second path element names. State is the landing because
+  its members are the operational reading — a growing copying band is
+  uploads that never finished, unavailable is replicas lost after
+  arrival — and because it is the only grouping under which the ghost
+  panel splits, the record carrying ghosts by state and by campaign
+  but not by root. Under the state grouping the copying backlog panel
+  is the copying total, everything in it being of that one state.
   It applies to the backlog, ghost and inventory panels; the
   other panels are the same under every grouping. The campaign
   grouping shows the target campaigns with every other campaign
