@@ -28,7 +28,6 @@ to stdout between CANARY-REPORT markers, collectable from the job log.
 import csv
 import json
 import os
-import re
 import subprocess
 import sys
 from itertools import islice
@@ -84,14 +83,46 @@ def write_job_report(rc, workdir, extra=None):
             except OSError:
                 continue
     body = {"exitCode": rc, "exitMsg": msg[:500]}
+    # The payload's own report (payload-report.json, written by the
+    # payload's EXIT trap on every run: events requested, simulated and
+    # reconstructed, per-stage wall and prmon CPU and memory, output
+    # sizes, the registration outcome) rides under ``payload``, and the
+    # reconstructed count as ``nEvents`` for the job record
+    # (swf-epicprod docs/EPICPROD_PAYLOAD.md, payload reporting).
+    payload = read_payload_report(workdir)
+    if payload is not None:
+        body["payload"] = payload
+        reco = (payload.get("events") or {}).get("reconstructed")
+        if isinstance(reco, int):
+            body["nEvents"] = reco
     if extra:
         body.update(extra)
     try:
         with open(os.path.join(workdir, "jobReport.json"), "w") as f:
             json.dump(body, f)
-        print(f"jobReport.json written: exitCode={rc} exitMsg={msg[:500]}")
+        print(f"jobReport.json written: exitCode={rc} exitMsg={msg[:500]}"
+              + (f" nEvents={body['nEvents']}" if "nEvents" in body else ""))
     except OSError as e:
         print(f"jobReport.json not written: {e}", file=sys.stderr)
+
+
+def read_payload_report(workdir):
+    """The payload report the run left in the work directory, or None;
+    an unreadable report is said on stderr, never raised."""
+    path = os.path.join(workdir, "payload-report.json")
+    if not os.path.exists(path):
+        print("no payload report found", file=sys.stderr)
+        return None
+    try:
+        with open(path) as f:
+            report = json.load(f)
+    except (OSError, ValueError) as e:
+        print(f"payload report not readable: {e}", file=sys.stderr)
+        return None
+    if not isinstance(report, dict):
+        print("payload report is not a JSON object", file=sys.stderr)
+        return None
+    return report
 
 
 def run_canary(payload_seconds, workdir):
@@ -239,10 +270,13 @@ def run_payload_canary(csv_base, stamp, workdir):
     })
     stages = _read_stages(stages_log)
     text = _payload_output(workdir)
-    events = re.search(r"Final report: (\d+) events processed", text)
     requested = None
     if row and str(row[2]).strip().isdigit():
         requested = int(row[2])
+    # The events processed are the reconstructed count of the payload's
+    # report (write_job_report carries the whole report as well).
+    payload = read_payload_report(workdir) or {}
+    produced = (payload.get("events") or {}).get("reconstructed")
     canary = {
         "kind": "payload",
         "stamp": stamp,
@@ -251,7 +285,7 @@ def run_payload_canary(csv_base, stamp, workdir):
         "payload_exit_code": rc,
         "manifest_row": row,
         "requested_events": requested,
-        "events_processed": int(events.group(1)) if events else None,
+        "events_processed": produced if isinstance(produced, int) else None,
         "stages": stages,
         "dids": [s["detail"] for s in stages
                  if s["stage"] == "registration" and s["status"] == "ok"
