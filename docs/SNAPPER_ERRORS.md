@@ -229,6 +229,88 @@ itself. The PanDA task page (`panda/tasks/<jeditaskid>/`) links to
 its filtered errors view. Refinements specific to the per-task
 reading come later; the filter is the mechanism from the start.
 
+## Wasted resources
+
+The error record carries what each failed job cost, and the errors
+view shows that cost on the same time axis as the error counts. The
+unit and the rule are those of `resource_usage`
+(`monitor_app/panda/queries.py`, the `panda_resource_usage` MCP tool):
+a job holds cores times wall time from its start to its end, cores as
+the actual core count, else the declared count, else one; the
+allocation held by a job that ended faulty is wasted; a job that never
+started holds nothing. Core-hours is the unit. In the fourteen days to
+2026-09-06, failed epicprod jobs held 87,970 of 217,479 core-hours,
+40 percent, and 48 percent at NERSC Perlmutter; cancelled jobs that
+ran held under a hundred, and closed jobs none.
+
+**Record.** Each entry row carries `held`, the core-seconds the job
+held, computed in the same scan as the other fields and clamped at
+zero. For a lost-heartbeat failure the hold ends at the recorded end
+time, the last heartbeat, as `resource_usage` reads it; the batch
+slot's further hold to its walltime is not in the job record. The
+overflow fold carries `held_by_category` beside `by_category`, the
+summed core-seconds under the same keys. This is entry-row schema
+version 5. The projection bound rises to 256 KB: a full interval of
+2,000 rows serializes near 150 KB with the field. History: the
+backfill re-run writes the synthetic snaps with the field, and the
+live snaps recorded before it are augmented in place by
+`scripts/augment-errors-entries.py`, the generalized form of the
+exit-code rewrite, which adds any trailing entry field a snap lacks
+by job id and recomputes the snap hashes.
+
+**Series.** An event carries its weight as a third element, [stamp,
+qualifier, weight], and a bin carries both measures: the count and
+its per-qualifier breakdown, then the summed weight and its
+breakdown. No curve is added: the category, component and per-task
+curves each carry both numbers, and the series walk is unchanged in
+cost. Overflow folds land at the interval end with their
+summed weight spread evenly over the folded events, so the bin sum is
+exact.
+
+**View.** A Measure selector, errors or core-hours, beside the
+grouping selector. It picks which bin measure the panels plot, the
+chips count and the axis names; the panel title follows (errors by
+category, wasted core-hours by category). A family declares the
+selector parameter it follows and its units per measure
+(`measure_param`, `units_by_measure`, `title_by_measure`; snapper-ai
+INTEGRATION.md). The client's display re-binning sums whichever
+measure is active. Under core-hours, cancelled jobs that ran count
+and closed jobs hold nothing; the terminal-state default is
+unchanged. The task filter applies as it does to counts, so a task's
+waste history is the same page filtered. One measure at a time on
+one panel is the form the display model supports: the page assigns
+each curve to one family, so plotting both measures at once would
+require a second set of curve ids carrying the same events, doubling
+the series walk.
+
+**Breakdown.** The cut's breakdown adds core-hours and its share per
+category beside the count, from `SUM(held)` in the same grouping
+query, and ranks the window's tasks and diagnostic patterns by
+core-hours beside their counts.
+
+**Storage view.** The consequences strip follows a Consequences
+selector, jobs or core-hours, on the same mechanism
+([SNAPPER_STORAGE.md](SNAPPER_STORAGE.md)), so the hours lost to
+upload and registration failures read on the storage time axis.
+
+**Productive baseline and per-site reading.** The error entries carry
+no site and no finished jobs. The waste fraction and the site reading
+come from the PanDA component (`monitor_app/snapper_panda.py`): the
+scope and per-site cumulative outcome counters gain `cum_core_hours`
+with finished and failed members, summed in the outcomes query from
+the same rows. The Site view gains a core-hours panel of
+window-relative staircases, productive and wasted, in the form of its
+finished and failed job staircases, and the errors view shows the
+scope total the same way beneath its panels. The counters backfill
+gains the sums. Thresholds and verdicts on the waste fraction are a
+later round.
+
+Delivery order, each stage usable on its own: the record field with
+the backfill and augmentation; the weighted bins in the series; the
+Measure selector on the errors view and the Consequences selector on
+the Storage view; the breakdown sums; the PanDA counters with the
+Site panel.
+
 ## Proactive storm response
 
 Planned, the next stage of this design: the recorded error stream is
