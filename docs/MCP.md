@@ -8,7 +8,7 @@ The service is the Echelon 1 anchor of the MCP-based AI backplane spanning
 the machine, the DAQ, and global computing — the E0 side per the DAQ
 AI-readiness plan (J. Landgraf, July 2026). The figure is maintained here;
 the source extracts behind it are in the swf-testbed
-[E0-E1 interface source notes](https://github.com/BNLNPPS/swf-testbed/blob/infra/baseline-v39/docs/e0-e1-interface-source-notes.md):
+[E0-E1 interface source notes](https://github.com/BNLNPPS/swf-testbed/blob/main/docs/e0-e1-interface-source-notes.md):
 
 [![The MCP-based AI backplane](mcp-ai-backplane-v1.svg)](mcp-ai-backplane-v1.svg)
 

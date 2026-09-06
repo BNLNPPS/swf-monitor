@@ -72,6 +72,7 @@ the old paths here. This repo's docs cover the platform services:
 - `MCP.md`, `MCP_TOOL_REFERENCE.md`, `MCP_CLIENTS.md`, `PANDA_BOT.md` — MCP server overview, tool catalog, client setup, and the DISpatcher Mattermost bot (MCP client).
 - `alarms.md`, `ALARM_QUEUE.md` — the alarm engine; the alarm queue design: lifecycle transitions, per-subscriber feeds with read state, automated response (design).
 - `PINGS.md` — pings: dated obligations at severity ping in the alarm system, entered by hand or by AI proposal, overdue becomes alarm, cleared on fulfilment (design).
+- `NOTICE_ROUTING.md` — notice routing: named incidents matched to self-registered subscribers and delivered per subscriber, so emitting code declares the incident and never names a recipient.
 - `WRANGLER_AGENT.md` — the wrangler agent: BaseAgent identity with a wrangle-ai work loop (durable bullpen, Postgres bell), the LLM-doer executor beside the production ops agent; first handler is the alarm responder (design).
 - `SETUP_GUIDE.md`, `TEST_SYSTEM.md`, `POSTGRES_MCP.md` — setup, tests, Postgres MCP.
 - `FASTMON_FILES.md`, `TFSLICE.md` — testbed fast-monitoring docs.

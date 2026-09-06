@@ -494,7 +494,7 @@ Returns:
 Use cases:
 - What's PanDA doing right now? `panda_get_activity()`
 - EIC activity this week? `panda_get_activity(days=7, workinggroup='EIC')`
-- Activity for a user? `panda_get_activity(username='Dmitrii Kalinkin')`
+- Activity for a user? `panda_get_activity(username='<full name as PanDA records it>')`
 
 **`panda_list_tasks` filters:**
 - `days`: Time window in days (default 7)
@@ -523,7 +523,7 @@ Use cases:
 **Diagnostic use cases:**
 - Task overview: `panda_list_tasks(days=7)`
 - Failed tasks: `panda_list_tasks(status='failed')`
-- Tasks for a user: `panda_list_tasks(username='Dmitrii Kalinkin')`
+- Tasks for a user: `panda_list_tasks(username='<full name as PanDA records it>')`
 - EIC experiment tasks: `panda_list_tasks(workinggroup='EIC')`
 - Search by name pattern: `panda_list_tasks(taskname='%workflow%')`
 
@@ -548,7 +548,7 @@ Use cases:
 **Diagnostic use cases:**
 - Top errors this week: `panda_error_summary(days=7)`
 - Errors in an incident window bounded from the Snapper errors series: `panda_error_summary(ended_after='2026-09-05T03:10', ended_before='2026-09-05T03:40')`
-- Errors for a specific user: `panda_error_summary(username='Dmitrii Kalinkin')`
+- Errors for a specific user: `panda_error_summary(username='<full name as PanDA records it>')`
 - Pilot errors only: `panda_error_summary(error_source='pilot')`
 - Errors for a specific task: `panda_error_summary(taskid=33824)`
 

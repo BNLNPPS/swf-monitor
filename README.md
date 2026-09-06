@@ -45,7 +45,9 @@ The application is built on Django with a PostgreSQL backend and real-time messa
 
 ## Documentation
 
-📚 **Complete technical documentation in [`docs/`](docs/) directory:**
+📚 **Technical documentation in [`docs/`](docs/).** The table below is the
+getting-started selection; the complete index of the `docs/` set is the doc
+index in [`CLAUDE.md`](CLAUDE.md).
 
 | Guide | Description | Use Case |
 |-------|-------------|----------|
