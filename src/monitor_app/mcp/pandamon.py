@@ -45,7 +45,9 @@ def _study_job_sync(pandaid):
     # Batch-layer reasons are stored cut to a length, so this surface —
     # the one used to assess a failure — reads the condor event log and
     # reports them whole (queries.condor_log_events).
-    result = queries.study_job(pandaid=pandaid, include_batch_reason=True)
+    result = queries.study_job(pandaid=pandaid, include_batch_reason='fetch')
+    # 'fetch' rather than True: a tool call may reach the harvester's log
+    # host for a job captured before the store existed. A page may not.
     if result.get('error'):
         return result
     from monitor_app.models import EpicProdJob

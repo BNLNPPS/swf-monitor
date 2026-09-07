@@ -2878,9 +2878,18 @@ def study_job(pandaid, include_batch_reason=False, include_log_analysis=True):
         elif record:
             events = {'source': record['path'],
                       'error': f"capture failed: {record['body'].strip()}"}
-        else:
+        elif include_batch_reason == 'fetch':
+            # Only ever on an explicit ask, never in a render: this reaches
+            # the harvester's log host over the network. A page shows what
+            # the capture holds and offers the fetch as an action.
             events = condor_log_events(
                 (harvester or {}).get('batchlog') or log_urls.get('batch_log'))
+        else:
+            events = {'source': (harvester or {}).get('batchlog')
+                      or log_urls.get('batch_log') or '',
+                      'error': 'not captured; the harvester keeps the source '
+                               'about eighteen days and this job predates the '
+                               'capture'}
         if events:
             result['batch_record'] = events
 
