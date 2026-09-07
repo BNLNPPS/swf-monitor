@@ -41,7 +41,10 @@ PAYLOAD_SUBDIR = "payload"
 # run.sh's coded exits (its explicit `exit N` failure sites).
 EXIT_MSGS = {65: "output validation failed", 78: "Rucio registration failed",
              79: "output name held by a failed earlier attempt; rerun the "
-                 "residual as a new try"}
+                 "residual as a new try",
+             80: "landing declined: the catalog or the input door could not "
+                 "be reached from this worker",
+             82: "event generation failed; nothing downstream ran"}
 
 
 def payload_version(workdir):
