@@ -49,6 +49,9 @@ Capabilities:
   panda_sandbox_keepalive — touch the sandbox tarballs of retryable tasks in
                        the PanDA server cache so the 7-day purge passes them
                        by (nightly catalog_sync chain step).
+  outputs_ingest     — write the production record of what tasks produced,
+                       and the registrar's worklist, from the payload reports
+                       (hourly; docs/RUCIO_RESILIENCE.md, Measure 3).
   registrar          — complete the registrations the payload left pending
                        when the catalog could not be reached (hourly;
                        swf-epicprod docs/RUCIO_RESILIENCE.md, Measure 2).
@@ -158,6 +161,9 @@ BATCH_LOG_LEARN_TIMEOUT = int(os.environ.get("EPICPROD_BATCH_LOG_LEARN_TIMEOUT",
 # The registrar (swf-epicprod docs/RUCIO_RESILIENCE.md, Measure 2): completes
 # the registrations the payload left pending, hourly, and holds the only
 # retry — one gentle attempt per job, then bounded attempts from one process.
+OUTPUTS_INGEST_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "outputs-ingest.py"
+OUTPUTS_INGEST_TIMEOUT = int(os.environ.get("EPICPROD_OUTPUTS_INGEST_TIMEOUT", "900"))
+OUTPUTS_INGEST_HOURS = os.environ.get("EPICPROD_OUTPUTS_INGEST_HOURS", "48")
 REGISTRAR_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "registrar.py"
 REGISTRAR_TIMEOUT = int(os.environ.get("EPICPROD_REGISTRAR_TIMEOUT", "1800"))
 REGISTRAR_HOURS = os.environ.get("EPICPROD_REGISTRAR_HOURS", "48")
@@ -267,7 +273,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "rucio_arrivals_sweep", "epic_prod_past_import",
                    "file_events_measure", "delivery_daily_rebuild",
                    "batch_log_capture", "batch_log_learn",
-                   "report_sweep", "registrar",
+                   "report_sweep", "outputs_ingest", "registrar",
                    "storage_sweep", "campaign_config_propose",
                    "assessment_completed",
                    "health_ping", "shutdown"}
@@ -1736,6 +1742,66 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              sublevel='low', live_default=False,
                              summary=((p.stdout or '').splitlines() or [''])[-1])
+
+    def _handle_outputs_ingest(self, m):
+        """Write the production record of what tasks produced, off the
+        receiver thread — hourly before the registrar, also invokable."""
+        self.run_in_background(
+            self._do_outputs_ingest, m,
+            dedup_key="outputs_ingest", label="outputs_ingest")
+
+    def _do_outputs_ingest(self, m):
+        """One pass over recent PCS tasks' jobs: what each delivered goes to
+        the production record, and what it owes becomes the registrar's
+        worklist. Rucio holds the bytes, the record holds the truth
+        (swf-epicprod docs/RUCIO_RESILIENCE.md, Measure 3)."""
+        hours = str(m.get('hours') or OUTPUTS_INGEST_HOURS)
+        cmd = [sys.executable, str(OUTPUTS_INGEST_SCRIPT), '--hours', hours]
+        if m.get('dry_run'):
+            cmd.append('--dry-run')
+        self.logger.info(f"PRODOPS outputs_ingest: last {hours} hours")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=OUTPUTS_INGEST_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS outputs_ingest TIMEOUT after {OUTPUTS_INGEST_TIMEOUT}s")
+            self._log_action('outputs_ingest', t0, outcome='timeout',
+                             reason=f'timed out after {OUTPUTS_INGEST_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  outputs-ingest: {line}")
+        summary_line = ((p.stdout or '').strip().splitlines() or [''])[-1]
+        try:
+            summary = json.loads(summary_line)
+        except (ValueError, TypeError):
+            summary = {}
+        refused = summary.get('refused') or []
+        # Exit 2 is "nothing to write", which is an ordinary quiet pass.
+        if p.returncode not in (0, 2):
+            self.logger.error(f"PRODOPS outputs_ingest FAILED rc={p.returncode}")
+            self._log_action('outputs_ingest', t0, outcome='error',
+                             reason=summary.get('error') or self._derive_reason(p),
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        self.logger.info(f"PRODOPS outputs_ingest done: {summary_line}")
+        self._log_action(
+            'outputs_ingest', t0,
+            outcome='ok' if not refused else 'partial',
+            reason='; '.join(str(r) for r in refused[:5]),
+            username=str(m.get('created_by') or ''),
+            sublevel='low', live_default=bool(summary.get('written')),
+            summary=(f"tasks={summary.get('tasks', 0)} "
+                     f"rows={summary.get('rows', 0)} "
+                     f"written={summary.get('written', 0)} "
+                     f"pending={summary.get('pending', 0)} "
+                     f"lost={summary.get('lost', 0)}"))
 
     def _handle_registrar(self, m):
         """Complete pending registrations off the receiver thread — hourly by
