@@ -264,6 +264,14 @@ ACTION_DEFAULTS = {
         'description': "Operator change to an action's live-stream override "
                        "on the live-policy page.",
     },
+    'host_reporter_install': {
+        'sublevel': 'high', 'live': True,
+        'description': "A host reporter installed on a service host it "
+                       "observes (docs/PANDA_SERVER_REPORTER.md, "
+                       "docs/OSG_SUBMIT_REPORTER.md): token, environment "
+                       "file, and schedule, recorded before the install "
+                       "is taken.",
+    },
     'workflow_execution_completed': {
         'sublevel': 'low', 'live': False,
         'description': "A testbed workflow execution reached a terminal "

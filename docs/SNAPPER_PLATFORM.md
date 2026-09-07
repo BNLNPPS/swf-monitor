@@ -91,14 +91,15 @@ its latency is both a symptom and a cause. Question: was pandamon
 answering, at the cost its consumers pay.
 
 **Server host (delivered by the reporter).** Web-tier request counts
-per endpoint class and status class for the interval (updateJob,
-getJob, harvester, other; 2xx, 4xx, 5xx), error-log marker counts,
-per-daemon liveness and seconds since last log line, Watcher kills per
-interval; the WSGI tier as process count, total resident memory, and
-restarts in the interval; host load average, memory used and
-available, swap, and root and /var volume use; busy and idle web
-workers when mod_status is enabled. These fields are absent until the
-reporter runs and carry a `reported_at`; the maintainer publishes
+per endpoint class and status class for the interval (update_job,
+acquire_jobs, harvester, other; 2xx, 4xx, 5xx) with the web tier's
+declared capacity, error-log marker counts, seconds since the last
+write of every daemon log, the four PanDA units with their restart
+counts, the httpd and pandaserver processes as counts and resident
+memory, database reachability from the host; host load average,
+memory used and available, swap, and root and /var volume use; busy
+and idle web workers when mod_status is enabled. These fields are
+absent until the reporter runs; the maintainer publishes
 `reporter_status` as `fresh`, `stale`, or `absent` against a SysConfig
 threshold, and crossing that threshold is a semantic change that
 publishes (DESIGN.md, Maintained assessments). Question: what the
@@ -171,12 +172,11 @@ reporting host and posts on its next run. The reporter never publishes
 to Snapper directly: the maintainer remains the single owner of the
 component.
 
-The endpoint is keyed by host because there is more than one reporter.
-The first built is the OSG submit host's
-([OSG_SUBMIT_REPORTER.md](OSG_SUBMIT_REPORTER.md)), in production since
-2026-09-07 on a five-minute cadence; the pandaserver01 reporter this
-section was written for posts to the same ingest and its group reads
-`absent` until it runs.
+The endpoint is keyed by host because there is more than one reporter:
+the OSG submit host's ([OSG_SUBMIT_REPORTER.md](OSG_SUBMIT_REPORTER.md))
+and the PanDA server host's
+([PANDA_SERVER_REPORTER.md](PANDA_SERVER_REPORTER.md)), both in
+production since 2026-09-07 on a five-minute cadence.
 
 ## The Platform view
 
