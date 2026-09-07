@@ -213,6 +213,89 @@ def schedd():
     return out_rec
 
 
+HARVESTER_LOG_DIR = '/var/log/harvester'
+
+
+def _proc_present(pattern):
+    """Whether any process matches, without requiring pgrep to exist."""
+    out, err = run(['pgrep', '-f', pattern], timeout=15)
+    if err and 'exit 1' in err:          # pgrep exits 1 when nothing matches
+        return False
+    if err:
+        return None
+    return bool((out or '').strip())
+
+
+def health():
+    """The submit host's own state, for the platform component.
+
+    Daemon liveness and log freshness on the idiom the PanDA server host
+    reporter uses (docs/SNAPPER_PLATFORM.md, Server host): a daemon is
+    named by its log, and the age of that log's last write is what says
+    whether it is working. Held workers with their reasons are the
+    signal this host alone carries: a site refusing every submission
+    shows here and nowhere else.
+    """
+    out = {}
+
+    daemons = {}
+    try:
+        names = [n for n in os.listdir(HARVESTER_LOG_DIR)
+                 if n.startswith('panda-') and n.endswith('.log')]
+    except OSError as exc:
+        daemons = {'error': 'cannot list {}: {}'.format(HARVESTER_LOG_DIR, exc)}
+        names = []
+    now = time.time()
+    for name in sorted(names):
+        label = name[len('panda-'):-len('.log')]
+        path = os.path.join(HARVESTER_LOG_DIR, name)
+        try:
+            daemons[label] = {
+                'log_age_seconds': int(now - os.path.getmtime(path)),
+                'log_bytes': os.path.getsize(path),
+            }
+        except OSError as exc:
+            daemons[label] = {'error': str(exc)}
+    out['harvester_daemons'] = daemons
+    out['harvester_process'] = _proc_present('panda_harvester-uwsgi')
+    out['schedd_process'] = _proc_present('condor_schedd')
+
+    try:
+        with open('/proc/loadavg') as handle:
+            parts = handle.read().split()
+        out['load'] = {'1m': float(parts[0]), '5m': float(parts[1]),
+                       '15m': float(parts[2])}
+    except (OSError, ValueError, IndexError) as exc:
+        out['load_error'] = str(exc)
+
+    mem = {}
+    try:
+        with open('/proc/meminfo') as handle:
+            for line in handle:
+                key, _, rest = line.partition(':')
+                if key in ('MemTotal', 'MemAvailable', 'SwapTotal',
+                           'SwapFree'):
+                    mem[key] = int(rest.split()[0])
+        out['memory_kb'] = mem
+    except (OSError, ValueError, IndexError) as exc:
+        out['memory_error'] = str(exc)
+
+    volumes = {}
+    for mount in ('/', '/var'):
+        try:
+            st = os.statvfs(mount)
+            total = st.f_blocks * st.f_frsize
+            free = st.f_bavail * st.f_frsize
+            volumes[mount] = {
+                'total_bytes': total, 'free_bytes': free,
+                'used_percent': round(100.0 * (total - free) / total, 1)
+                if total else None}
+        except OSError as exc:
+            volumes[mount] = {'error': str(exc)}
+    out['volumes'] = volumes
+    return out
+
+
 def collect(with_pool=True):
     """The record this run delivers."""
     record = {'host': HOST, 'collected_at': now_iso(),
@@ -235,6 +318,7 @@ def collect(with_pool=True):
                          and v.get('submit_description')
                          == 'submit_pilot2_push_bnl_osg.sdf'),
     }
+    record['health'] = health()
     if with_pool:
         record['pool'] = pool(prod.get('requirements'),
                               prod.get('excluded_site_nodes') or [])
