@@ -2067,8 +2067,25 @@ def epic_queues_list(request):
         if value:
             queues = [q for q in queues if (q.get(key) or '') == value]
 
+    # What the OSG submission excludes, and what the payload declined.
+    # The exclusions are operative in a submit description on the submit
+    # host, which cannot be read from here on a schedule, so they are
+    # rendered from the declared list and reconciled by
+    # swf-epicprod scripts/check-osg-exclusions.py.
+    from swf_epicprod import osg_exclusions
+    declines_rows = sorted(
+        ({'queue': q, **d} for q, d in declines.items()),
+        key=lambda r: r['count'], reverse=True)
+
     return render(request, 'monitor_app/epic_queues_list.html', {
         'queues': queues,
+        'excluded_sites': osg_exclusions.EXCLUDED_SITES,
+        'excluded_nodes': osg_exclusions.EXCLUDED_SITE_NODES,
+        'exclusion_totals': osg_exclusions.totals(),
+        'exclusion_as_of': osg_exclusions.AS_OF,
+        'exclusion_queues': ', '.join(osg_exclusions.QUEUES),
+        'declines_rows': declines_rows,
+        'declines_days': SPARK_SPAN_DAYS,
         'filters': filters,
         'active_filters': [
             {'label': f['label'], 'value': f['selected']}

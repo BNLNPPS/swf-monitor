@@ -86,5 +86,81 @@
             {% endfor %}
             </tbody>
         </table>
+
+    <h2 class="mt-4">Exclusions</h2>
+    <p class="mb-2 fw-bold text-danger">Interim: declared, not live. The exclusions below are
+       operative in a submit description on the submit host, which the monitor cannot read on a
+       schedule, so this is a copy that can be wrong. It is reconciled by hand with
+       check-osg-exclusions.py, last in agreement on {{ exclusion_as_of }}. A reporter on the
+       submit host replaces this with the live state.</p>
+
+    <h3 class="mt-3">Blacklist &middot; sites</h3>
+    <p class="mb-2">Excluded whole from the OSG pool, in the submit description
+       {{ exclusion_queues }} share. Counts are the thirty days to {{ exclusion_as_of }}.</p>
+    <table class="table table-striped table-bordered table-sm align-middle w-auto mb-0 swf-sortable">
+        <thead><tr>
+            <th>Site</th><th class="text-end">Failed</th><th class="text-end">Finished</th>
+            <th class="text-end">Core-hours</th><th class="text-end">Nodes</th>
+            <th>Applied</th><th>Why</th>
+        </tr></thead>
+        <tbody>
+        {% for s in excluded_sites %}
+            <tr>
+                <td>{{ s.site }}</td>
+                <td class="text-end">{% if s.failed %}{{ s.failed }}{% endif %}</td>
+                <td class="text-end">{% if s.failed %}{{ s.finished }}{% endif %}</td>
+                <td class="text-end">{% if s.core_hours %}{{ s.core_hours }}{% endif %}</td>
+                <td class="text-end">{% if s.nodes %}{{ s.nodes }}{% endif %}</td>
+                <td>{{ s.applied|default:"—" }}</td>
+                <td>{{ s.reason }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <h3 class="mt-4">Blacklist &middot; site-nodes</h3>
+    <p class="mb-2">Individual worker nodes at sites that otherwise deliver. A node is
+       identified by site and node together, because node names recur across sites.
+       {{ exclusion_totals.node_count }} node{{ exclusion_totals.node_count|pluralize }},
+       counts over the thirty days to {{ exclusion_as_of }}.</p>
+    <table class="table table-striped table-bordered table-sm align-middle w-auto mb-0 swf-sortable">
+        <thead><tr>
+            <th>Site</th><th>Node</th><th class="text-end">Failed</th>
+            <th class="text-end">Finished</th><th class="text-end">Core-hours</th>
+        </tr></thead>
+        <tbody>
+        {% for n in excluded_nodes %}
+            <tr>
+                <td>{{ n.site }}</td>
+                <td>{{ n.node }}</td>
+                <td class="text-end">{{ n.failed }}</td>
+                <td class="text-end">{{ n.finished }}</td>
+                <td class="text-end">{{ n.core_hours }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <h2 class="mt-4">Declines</h2>
+    <p class="mb-2">Live from the job record. Jobs whose payload could not reach the Rucio
+       catalog or the input door from the worker and started no work, in the last
+       {{ declines_days }} days. A decline costs seconds where the same landing once cost
+       the whole job.</p>
+    {% if declines_rows %}
+    <table class="table table-striped table-bordered table-sm align-middle w-auto mb-0 swf-sortable">
+        <thead><tr><th>Queue</th><th class="text-end">Declines</th><th>Last</th></tr></thead>
+        <tbody>
+        {% for d in declines_rows %}
+            <tr>
+                <td><a href="{% url 'monitor_app:epic_queue_detail' d.queue %}">{{ d.queue }}</a></td>
+                <td class="text-end">{{ d.count }}</td>
+                <td>{{ d.last|fmt_dt }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="mb-0">No declines recorded in the window.</p>
+    {% endif %}
 </div>
 {% endblock %}
