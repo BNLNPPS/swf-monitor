@@ -273,7 +273,7 @@
        per shape is kept permanently, and the exemplar is linked.</p>
     <table class="table table-striped table-bordered table-sm align-middle w-auto mb-3 swf-sortable" data-swf-order="2,desc">
         <thead><tr><th>Reason</th><th>Event</th><th class="text-end">Count</th>
-            <th>First seen</th><th>Last seen</th><th>Condor log</th><th>Job</th></tr></thead>
+            <th>First seen</th><th>Last seen</th><th>Exemplar</th><th>Job</th></tr></thead>
         <tbody>
         {% for pattern in batch_knowledge.patterns %}
             <tr>
@@ -282,7 +282,7 @@
                 <td class="text-end">{{ pattern.count }}</td>
                 <td class="text-nowrap">{{ pattern.first_seen }}</td>
                 <td class="text-nowrap">{{ pattern.last_seen }}</td>
-                <td><a href="{% url 'monitor_app:panda_batch_record' pandaid=pattern.exemplar %}">the log</a></td>
+                <td><a href="{% url 'monitor_app:panda_batch_record' pandaid=pattern.exemplar %}">condor log</a></td>
                 <td><a href="{% url 'monitor_app:panda_job_detail' pandaid=pattern.exemplar %}">{{ pattern.exemplar }}</a></td>
             </tr>
         {% endfor %}
