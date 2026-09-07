@@ -642,7 +642,7 @@
         <div class="dropdown">
             <button class="dropbtn{% if active_nav.ai_content %} nav-active{% endif %}">AI</button>
             <div class="dropdown-content">
-                <a href="{% url 'monitor_app:ai_content_list' %}" class="{% if active_nav.ai_content %}nav-active{% endif %}">AI Assessments</a>
+                <a href="{% url 'monitor_app:ai_content_list' %}" class="{% if active_nav.ai_content %}nav-active{% endif %}">Campaign Assessments</a>
                 <a href="{% url 'ai:ai_proposals' %}">Proposals</a>
                 <a href="{% url 'ai:ai_narratives' %}">Campaign Narratives</a>
                 <a href="{% url 'snapper_ai:snapper_report' scope='epicprod' %}">Snapper report</a>
