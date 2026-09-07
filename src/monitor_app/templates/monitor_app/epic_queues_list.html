@@ -4,6 +4,18 @@
 {% block title %}ePIC Compute Queues{% endblock %}
 
 {% block content %}
+<style>
+  /* The house section bar: the light blue of style.css, so the sections of a
+     long page read as sections instead of running together. Scoped here, never
+     as a bare element selector in the shared stylesheet. */
+  .queue-section {
+      background-color: #e7f1fb;
+      padding: 0.4rem 0.6rem;
+      border-radius: 0.25rem;
+      margin-top: 1.8rem;
+      margin-bottom: 0.8rem;
+  }
+</style>
 <div class="container-fluid">
     <p class="mb-2">On this page:
         <a href="#queue-table" class="ms-2">Queues</a>
@@ -101,7 +113,7 @@
             </tbody>
         </table>
 
-    <h2 id="exclusions" class="mt-4">Exclusions</h2>
+    <h2 id="exclusions" class="queue-section">Exclusions</h2>
     {% if exclusion_source == 'reported' %}
     <p class="mb-2">Reported by the submit host
        <span data-relative-time="{{ exclusion_reported_at|date:'c' }}"></span>,
@@ -123,7 +135,7 @@
        submit host replaces this with the live state.</p>
     {% endif %}
 
-    <h3 id="blacklist-sites" class="mt-3">Blacklist &middot; sites</h3>
+    <h3 id="blacklist-sites" class="queue-section">Blacklist &middot; sites</h3>
     <p class="mb-2">Excluded whole from the OSG pool, in the submit description
        {{ exclusion_queues }} share. Counts are the thirty days to {{ exclusion_as_of }}.</p>
     <table class="table table-striped table-bordered table-sm align-middle w-auto mb-0 swf-sortable">
@@ -147,7 +159,7 @@
         </tbody>
     </table>
 
-    <h3 id="blacklist-site-nodes" class="mt-4">Blacklist &middot; site-nodes</h3>
+    <h3 id="blacklist-site-nodes" class="queue-section">Blacklist &middot; site-nodes</h3>
     <p class="mb-2">Individual worker nodes at sites that otherwise deliver. A node is
        identified by site and node together, because node names recur across sites.
        {{ exclusion_totals.node_count }} node{{ exclusion_totals.node_count|pluralize }},
@@ -170,7 +182,7 @@
         </tbody>
     </table>
 
-    <h2 id="declines" class="mt-4">Declines</h2>
+    <h2 id="declines" class="queue-section">Declines</h2>
     <p class="mb-2">Live from the job record. Jobs whose payload could not reach the Rucio
        catalog or the input door from the worker and started no work, in the last
        {{ declines_days }} days. A decline costs seconds where the same landing once cost
@@ -192,7 +204,7 @@
     <p class="mb-0">No declines recorded in the window.</p>
     {% endif %}
 
-    <h3 id="node-declines" class="mt-4">By node</h3>
+    <h3 id="node-declines" class="queue-section">By node</h3>
     <p class="mb-2">The same declines per worker node, with what each node finished in the
        same window so a busy node is not read as a bad one, and with the node's own account
        of what it could not reach where the job's report has been filed. Nothing here bans a
@@ -222,7 +234,7 @@
        payload 0.4.0 on 2026-09-07, so this record begins there.</p>
     {% endif %}
 
-    <h2 id="batch-knowledge" class="mt-4">Batch record knowledge</h2>
+    <h2 id="batch-knowledge" class="queue-section">Batch record knowledge</h2>
     {% if batch_knowledge.logs %}
     <p class="mb-2">What the captured condor event logs contain, mined from
        {{ batch_knowledge.logs }} log{{ batch_knowledge.logs|pluralize }} by the nightly
@@ -232,7 +244,7 @@
        from the captured copy, and the parser is derived from what the corpus holds rather
        than from an expectation of it.</p>
 
-    <h3 class="mt-3">Event codes</h3>
+    <h3 class="queue-section">Event codes</h3>
     <p class="mb-2">Every code that occurs, with what the parser calls it. A code the
        parser does not name is still captured and still counted; naming it is a parser
        change, not a capture change.</p>
@@ -255,19 +267,19 @@
         </tbody>
     </table>
 
-    <h3>Reasons that recur</h3>
+    <h3 class="queue-section">Reasons that recur</h3>
     <p class="mb-2">Each shape is a reason with its hosts, paths, identifiers and numbers
        removed, so two failures are the same kind when what remains matches. One raw log
        per shape is kept permanently, and the exemplar is linked.</p>
-    <table class="table table-striped table-bordered table-sm align-middle w-auto mb-3 swf-sortable">
-        <thead><tr><th class="text-end">Count</th><th>Event</th><th>Reason</th>
+    <table class="table table-striped table-bordered table-sm align-middle w-auto mb-3 swf-sortable" data-swf-order="2,desc">
+        <thead><tr><th>Reason</th><th>Event</th><th class="text-end">Count</th>
             <th>First seen</th><th>Last seen</th><th>Exemplar</th></tr></thead>
         <tbody>
         {% for pattern in batch_knowledge.patterns %}
             <tr>
-                <td class="text-end">{{ pattern.count }}</td>
-                <td>{{ pattern.event }}</td>
                 <td>{{ pattern.example|truncatechars:200 }}</td>
+                <td>{{ pattern.event }}</td>
+                <td class="text-end">{{ pattern.count }}</td>
                 <td class="text-nowrap">{{ pattern.first_seen }}</td>
                 <td class="text-nowrap">{{ pattern.last_seen }}</td>
                 <td><a href="{% url 'monitor_app:panda_batch_record' pandaid=pattern.exemplar %}">{{ pattern.exemplar }}</a></td>
