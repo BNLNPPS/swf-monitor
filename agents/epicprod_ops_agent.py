@@ -148,6 +148,11 @@ DELIVERY_DAILY_TIMEOUT = int(os.environ.get("EPICPROD_DELIVERY_DAILY_TIMEOUT", "
 BATCH_LOG_CAPTURE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "batch-log-capture.py"
 BATCH_LOG_CAPTURE_TIMEOUT = int(os.environ.get("EPICPROD_BATCH_LOG_CAPTURE_TIMEOUT", "1800"))
 BATCH_LOG_CAPTURE_HOURS = os.environ.get("EPICPROD_BATCH_LOG_CAPTURE_HOURS", "26")
+# The payload report sweep (swf-epicprod docs/JOB_REPORTING.md): hourly by
+# design, a window with overlap, and never in a request path.
+REPORT_SWEEP_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "report-sweep.py"
+REPORT_SWEEP_TIMEOUT = int(os.environ.get("EPICPROD_REPORT_SWEEP_TIMEOUT", "900"))
+REPORT_SWEEP_HOURS = os.environ.get("EPICPROD_REPORT_SWEEP_HOURS", "6")
 STORAGE_SWEEP_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "storage-sweep.py"
 STORAGE_SWEEP_TIMEOUT = int(os.environ.get("EPICPROD_STORAGE_SWEEP_TIMEOUT", "3600"))
 # The campaign configuration proposer (swf-monitor docs/PINGS.md, Pings
@@ -247,7 +252,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "capture_system_snap",
                    "rucio_arrivals_sweep", "epic_prod_past_import",
                    "file_events_measure", "delivery_daily_rebuild",
-                   "batch_log_capture",
+                   "batch_log_capture", "report_sweep",
                    "storage_sweep", "campaign_config_propose",
                    "assessment_completed",
                    "health_ping", "shutdown"}
@@ -1699,6 +1704,57 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              sublevel='low', live_default=False,
                              summary=((p.stdout or '').splitlines() or [''])[-1])
+
+    def _handle_report_sweep(self, m):
+        """Run the payload report sweep off the receiver thread — hourly by
+        schedule, also directly invokable."""
+        self.run_in_background(
+            self._do_report_sweep, m,
+            dedup_key="report_sweep", label="report_sweep")
+
+    def _do_report_sweep(self, m):
+        """Sweep failed jobs' payload reports: a bounded sample per failure
+        signature read and filed beside the job record, the rest of that
+        signature deleted unread, and a pass record posted to the gateway
+        whatever the outcome. The store belongs to the gateway, so the sweep
+        deletes only what it reports (swf-epicprod docs/JOB_REPORTING.md)."""
+        hours = str(m.get('hours') or REPORT_SWEEP_HOURS)
+        cmd = [sys.executable, str(REPORT_SWEEP_SCRIPT), '--hours', hours]
+        if m.get('dry_run'):
+            cmd.append('--dry-run')
+        self.logger.info(f"PRODOPS report_sweep: sweeping the last {hours} hours")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=REPORT_SWEEP_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS report_sweep TIMEOUT after {REPORT_SWEEP_TIMEOUT}s")
+            self._log_action('report_sweep', t0, outcome='timeout',
+                             reason=f'timed out after {REPORT_SWEEP_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  report-sweep: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  report-sweep: {line}")
+        summary = next((ln for ln in (p.stdout or '').splitlines()
+                        if ln.startswith('outcome=')), '')
+        if p.returncode != 0:
+            reason = self._derive_reason(p)
+            self.logger.error(f"PRODOPS report_sweep FAILED rc={p.returncode}")
+            self._log_action('report_sweep', t0, outcome='error', reason=reason,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+        else:
+            self.logger.info("PRODOPS report_sweep done")
+            self._log_action('report_sweep', t0,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             summary=summary or 'sweep complete')
 
     def _handle_batch_log_capture(self, m):
         """Run the batch-record capture off the receiver thread — normally a
