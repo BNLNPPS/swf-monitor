@@ -2376,8 +2376,162 @@ def task_payload_rollup(jeditaskid, limit=2000):
     }
 
 
-def study_job(pandaid):
-    """Deep study of a single PanDA job — full record, files, harvester logs, errors."""
+# Every failure reason that reaches PanDA from the batch layer arrives
+# as a fixed-width column value, so any reason longer than its column is
+# stored cut off with no marker that anything was removed. Measured on
+# job 2721305: superrordiag 250 characters, harvester diagmessage 256,
+# taskbuffererrordiag 300, each ending mid-word, and nothing in this
+# codebase does the cutting. The cut falls at a character count, not at
+# a clause, so what survives is the front of the message — which is
+# where batch systems put warnings and preamble — and what is removed is
+# the end, which is where they put the error. That job's stored text
+# ended "sbatch: error: Batch job submission failed:" after two surviving
+# sbatch WARNING and INFO lines about the default account and the
+# selected partitions, and was read as a queue misconfiguration; the
+# removed clause was "I/O error writing script/environment to file", a
+# site submit host that could not write to disk. The condor event log
+# the harvester keeps holds every reason whole and is served without
+# credentials from inside SCDF, so it is the authority whenever a
+# batch-layer reason is being assessed.
+BATCH_LOG_TIMEOUT_S = 8
+BATCH_LOG_MAX_BYTES = 512 * 1024
+
+# Condor event types that carry a human reason in their indented detail.
+# Anything else in the log is bookkeeping.
+CONDOR_REASON_EVENTS = {
+    '004': 'evicted',
+    '005': 'terminated',
+    '007': 'shadow exception',
+    '009': 'aborted',
+    '012': 'held',
+    '021': 'remote error',
+    '022': 'disconnected',
+    '024': 'grid submit failed',
+}
+# Condor's own trailers inside a reason block, and the usage statistics
+# that follow a termination event: not part of any reason.
+_CONDOR_NOISE_RE = re.compile(
+    r'^(Code \d+ Subcode \d+|Total \w+|Partitionable Resources.*|'
+    r'\s*(Cpus|Disk|Memory|Ioheavy)\s*:.*|.*Run Bytes (Sent|Received).*)$')
+# Prefixes PanDA and harvester put in front of a batch reason before
+# storing it. Stripping them is what lets a stored value be compared
+# with the log text it came from.
+_DIAG_PREFIX_RE = re.compile(
+    r'^(Diag from worker\s*:\s*|'
+    r'The worker was cancelled while the job was starting\s*:\s*|'
+    r'Condor HoldReason:\s*|pilot:\s*)', re.IGNORECASE)
+
+
+def _diag_core(text):
+    """A stored diag reduced to the batch text inside it, for comparison."""
+    if not text:
+        return ''
+    core = text.strip()
+    while True:
+        stripped = _DIAG_PREFIX_RE.sub('', core)
+        if stripped == core:
+            break
+        core = stripped
+    return ' '.join(core.split())
+
+
+def condor_log_reasons(batchlog_url, timeout_s=BATCH_LOG_TIMEOUT_S):
+    """Every reason-bearing event in a harvester condor event log.
+
+    Returns ``{source, events: [{event, at, text}]}`` oldest first, or
+    ``{source, error}`` when the log cannot be read or parsed. A failure
+    is reported rather than swallowed: a caller that silently falls back
+    to PanDA's stored value would present a truncation as the whole
+    reason, which is the thing this exists to prevent.
+    """
+    if not batchlog_url:
+        return None
+    import ssl
+    import urllib.request
+
+    # The SCDF log hosts serve these over TLS with a chain this host's
+    # trust store does not carry. The content is an operational log
+    # inside the facility and no credential travels either way.
+    context = ssl._create_unverified_context()
+    try:
+        request = urllib.request.Request(
+            batchlog_url, headers={'User-Agent': 'swf-monitor/study_job'})
+        with urllib.request.urlopen(request, timeout=timeout_s,
+                                    context=context) as response:
+            body = response.read(BATCH_LOG_MAX_BYTES).decode(
+                'utf-8', errors='replace')
+    except Exception as e:                                   # noqa: BLE001
+        logger.error('condor log fetch failed for %s: %s', batchlog_url, e)
+        return {'source': batchlog_url,
+                'error': f'{e.__class__.__name__}: {e}'}
+
+    # Format: an event header line "NNN (cluster.proc.sub) DATE TIME
+    # description", then tab-indented detail lines, closed by a line of
+    # "...". The detail of a reason-bearing event is the reason.
+    events = []
+    lines = body.splitlines()
+    for i, line in enumerate(lines):
+        code = line[:3]
+        if code not in CONDOR_REASON_EVENTS or not line[3:4] == ' ':
+            continue
+        parts = line.split()
+        at = ' '.join(parts[2:4]) if len(parts) >= 4 else None
+        detail = []
+        for follow in lines[i + 1:]:
+            if follow.startswith('...'):
+                break
+            text = follow.strip()
+            if not text or _CONDOR_NOISE_RE.match(text):
+                continue
+            detail.append(text)
+        if detail:
+            events.append({'event': CONDOR_REASON_EVENTS[code],
+                           'at': at, 'text': ' '.join(detail)})
+    if not events:
+        return {'source': batchlog_url,
+                'error': 'no reason-bearing event in the condor log'}
+    return {'source': batchlog_url, 'events': events}
+
+
+def restore_truncated_diags(job, harvester, reasons):
+    """Which stored diags were cut, and the full text of each.
+
+    Compares every diag PanDA and harvester stored against the condor
+    log's own reasons: a stored value whose batch text is a proper
+    prefix of a logged reason was truncated, and the logged reason is
+    what it should have said. Returns ``{field: {stored_chars, full}}``
+    for the fields that were cut, empty when none were.
+    """
+    if not reasons or not reasons.get('events'):
+        return {}
+    logged = [' '.join(e['text'].split()) for e in reasons['events']]
+    restored = {}
+    candidates = [(f, (job or {}).get(f)) for f in (
+        'superrordiag', 'taskbuffererrordiag', 'piloterrordiag',
+        'ddmerrordiag', 'exeerrordiag', 'brokerageerrordiag',
+        'jobdispatchererrordiag')]
+    candidates.append(('harvester.diagmessage',
+                       (harvester or {}).get('diagmessage')))
+    for field, stored in candidates:
+        core = _diag_core(stored)
+        if not core:
+            continue
+        for full in logged:
+            if len(full) > len(core) and full.startswith(core):
+                restored[field] = {'stored_chars': len(stored),
+                                   'full': full}
+                break
+    return restored
+
+
+def study_job(pandaid, include_batch_reason=False):
+    """Deep study of a single PanDA job — full record, files, harvester logs, errors.
+
+    ``include_batch_reason`` fetches the harvester's condor event log for
+    a job that never started, so the batch system's hold reason is
+    reported whole rather than as PanDA's truncation of it. It makes one
+    bounded remote call, so callers in a request path leave it off.
+    """
     conn = connections['panda']
 
     # 1. Full job record from both tables
@@ -2554,6 +2708,21 @@ def study_job(pandaid):
 
     if harvester:
         result["harvester"] = harvester
+
+    # Batch-layer reasons reach us cut to a length by the layers above
+    # (harvester to 256 of its own accord, then PanDA's 250- and
+    # 300-character columns), so a stored diag routinely ends mid-clause
+    # with the operative cause gone. When asked, read the condor event
+    # log the harvester keeps — the authority, and open inside SCDF —
+    # and report the reasons whole, naming each stored field that was cut.
+    if include_batch_reason:
+        reasons = condor_log_reasons(
+            (harvester or {}).get('batchlog') or log_urls.get('batch_log'))
+        if reasons:
+            restored = restore_truncated_diags(job, harvester, reasons)
+            if restored:
+                reasons['restored_truncated'] = restored
+            result['batch_reasons'] = reasons
 
     if task_info:
         result["task"] = task_info

@@ -42,7 +42,10 @@ def _get_queue_sync(panda_queue):
 
 
 def _study_job_sync(pandaid):
-    result = queries.study_job(pandaid=pandaid)
+    # Batch-layer reasons are stored cut to a length, so this surface —
+    # the one used to assess a failure — reads the condor event log and
+    # reports them whole (queries.condor_log_reasons).
+    result = queries.study_job(pandaid=pandaid, include_batch_reason=True)
     if result.get('error'):
         return result
     from monitor_app.models import EpicProdJob
@@ -473,6 +476,17 @@ async def panda_study_job(
         log_urls: URLs for pilot stdout, stderr, batch log (require CILogon auth).
         log_file: Log tarball metadata if registered (lfn, guid, scope for rucio retrieval).
         harvester: Condor worker details if available.
+        batch_reasons: {source, events, restored_truncated} — the batch
+            layer's own failure reasons read whole from the harvester's
+            condor event log. Every reason PanDA stores is cut to a
+            column width (harvester to 256, superrordiag 250,
+            taskbuffererrordiag 300) and the cut falls at a character
+            count, so the end of the message is what is lost and the end
+            is where batch systems put the error. `restored_truncated`
+            names each stored diag that was cut and gives its full text.
+            Prefer these over the diag fields for any batch-layer claim;
+            an `error` here means the log could not be read, so the
+            stored text is all there is and is known to be incomplete.
         task: Parent JEDI task context.
         monitor_url: Link to PanDA monitoring page.
         epicprod_diagnosis: {available, phase, failure_summary, timeline,
