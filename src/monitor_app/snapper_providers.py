@@ -1721,6 +1721,7 @@ _PLATFORM_FAMILIES_COMMON_TAIL = (
     # panels, because held pilots and a shrinking admitted-slot count
     # are causes of what those panels show.
     'Platform submit workers', 'Platform submit pool',
+    'Platform submit excluded',
     'Platform submit daemons', 'Platform submit host',
     'Platform submit storage',
     'Platform jobs', 'Platform kills', 'Platform outcomes')
@@ -1811,8 +1812,15 @@ def _platform_groups():
          'order': ['plsw_running', 'plsw_idle', 'plsw_held'],
          'panel_px': 110, 'units': 'pilots'},
         {'name': 'Platform submit pool', 'title': 'OSG pool as the submitter sees it',
-         'prefixes': ['plsp_'], 'ids': [],
-         'order': ['plsp_total', 'plsp_admitted', 'plsp_excluded'],
+         'prefixes': [], 'ids': ['plsp_total', 'plsp_admitted'],
+         'order': ['plsp_total', 'plsp_admitted'],
+         'panel_px': 110, 'units': 'slots'},
+        # On the pool's own axis the exclusions are a hairline — tens of
+        # slots against twelve thousand — so they get their own panel,
+        # as the connection pool's idle base does on the DB panels.
+        {'name': 'Platform submit excluded',
+         'title': 'Slots removed by the exclusions',
+         'prefixes': [], 'ids': ['plsp_excluded'],
          'panel_px': 110, 'units': 'slots'},
         {'name': 'Platform submit daemons',
          'title': 'Submit host daemon silence',
