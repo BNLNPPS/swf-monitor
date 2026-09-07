@@ -2411,38 +2411,13 @@ CONDOR_EVENT_NAMES = {
 }
 
 
-def condor_log_events(batchlog_url, timeout_s=BATCH_LOG_TIMEOUT_S):
-    """What the condor event log says, for a batch-layer failure.
+def parse_condor_log(body, source=''):
+    """The events a condor event log carries, from its text.
 
-    Returns ``{source, events: [{code, event, at, header, text}]}``
-    oldest first, one entry per event that carries detail, or
-    ``{source, error}`` when the log cannot be read. Every event with
-    detail is included and its text is returned as written; this
-    reports the authority rather than interpreting it, because the
-    stored diags it exists to replace are already an interpretation
-    that lost the ending.
+    Pure: no network, no store. Presentation parses the captured copy
+    through this, so improving the parser improves every job already
+    captured with no refetch and no reprocessing.
     """
-    if not batchlog_url:
-        return None
-    import ssl
-    import urllib.request
-
-    # The SCDF log hosts serve these over TLS with a chain this host's
-    # trust store does not carry. The content is an operational log
-    # inside the facility and no credential travels either way.
-    context = ssl._create_unverified_context()
-    try:
-        request = urllib.request.Request(
-            batchlog_url, headers={'User-Agent': 'swf-monitor/study_job'})
-        with urllib.request.urlopen(request, timeout=timeout_s,
-                                    context=context) as response:
-            body = response.read(BATCH_LOG_MAX_BYTES).decode(
-                'utf-8', errors='replace')
-    except Exception as e:                                   # noqa: BLE001
-        logger.error('condor log fetch failed for %s: %s', batchlog_url, e)
-        return {'source': batchlog_url,
-                'error': f'{e.__class__.__name__}: {e}'}
-
     # Format: an event header line "NNN (cluster.proc.sub) DATE TIME
     # description", then indented detail lines, closed by a line of "...".
     events = []
@@ -2469,9 +2444,39 @@ def condor_log_events(batchlog_url, timeout_s=BATCH_LOG_TIMEOUT_S):
                 'text': ' '.join(detail),
             })
     if not events:
-        return {'source': batchlog_url,
+        return {'source': source,
                 'error': 'no event with detail in the condor log'}
-    return {'source': batchlog_url, 'events': events}
+    return {'source': source, 'events': events}
+
+
+def condor_log_events(batchlog_url, timeout_s=BATCH_LOG_TIMEOUT_S):
+    """The condor event log at a URL, fetched and parsed.
+
+    The fallback for a job whose log was never captured. The captured
+    copy is preferred wherever one exists, since the source keeps only
+    about eighteen days (monitor_app.batch_records).
+    """
+    if not batchlog_url:
+        return None
+    import ssl
+    import urllib.request
+
+    # The SCDF log hosts serve these over TLS with a chain this host's
+    # trust store does not carry. The content is an operational log
+    # inside the facility and no credential travels either way.
+    context = ssl._create_unverified_context()
+    try:
+        request = urllib.request.Request(
+            batchlog_url, headers={'User-Agent': 'swf-monitor/study_job'})
+        with urllib.request.urlopen(request, timeout=timeout_s,
+                                    context=context) as response:
+            body = response.read(BATCH_LOG_MAX_BYTES).decode(
+                'utf-8', errors='replace')
+    except Exception as e:                                   # noqa: BLE001
+        logger.error('condor log fetch failed for %s: %s', batchlog_url, e)
+        return {'source': batchlog_url,
+                'error': f'{e.__class__.__name__}: {e}'}
+    return parse_condor_log(body, source=batchlog_url)
 
 
 def study_job(pandaid, include_batch_reason=False):
@@ -2666,8 +2671,22 @@ def study_job(pandaid, include_batch_reason=False):
     # log the harvester keeps — the authority, and open inside SCDF —
     # and report the reasons whole, naming each stored field that was cut.
     if include_batch_reason:
-        events = condor_log_events(
-            (harvester or {}).get('batchlog') or log_urls.get('batch_log'))
+        # The captured copy first: it is what a parser improvement can be
+        # re-run against, and the source keeps only about eighteen days.
+        # A job captured before this ran falls back to the live fetch.
+        from monitor_app import batch_records
+        record = batch_records.stored(pandaid)
+        if record and record['status'] == 'captured':
+            events = parse_condor_log(record['body'], source=record['path'])
+            events['captured'] = {'path': record['path'],
+                                  'bytes': record['bytes'],
+                                  'day': record['day']}
+        elif record:
+            events = {'source': record['path'],
+                      'error': f"capture failed: {record['body'].strip()}"}
+        else:
+            events = condor_log_events(
+                (harvester or {}).get('batchlog') or log_urls.get('batch_log'))
         if events:
             result['batch_record'] = events
 

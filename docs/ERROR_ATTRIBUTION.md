@@ -180,11 +180,21 @@ authority for a batch-layer claim, and it is transient: the dated
 directories hold about eighteen days.
 
 **Capture.** The condor event log of every failed and never-started job
-is fetched whole and stored beside the job record, verbatim, with its
-source URL, fetch time and byte count. Capture applies no filter and no
-classification. A fetch that fails is recorded with its reason, and the
-truncated job-record diagnostic is never presented as though it were
-complete. The event log measures 1 to 3 KB, so against 365,477 failed
+is fetched whole and written verbatim to a file store, under a header
+carrying its source URL, fetch time and byte count. Capture applies no
+filter and no classification. A fetch that fails leaves a marker
+carrying its reason, so a failure is visible rather than an absence,
+and the truncated job-record diagnostic is never presented as though it
+were complete.
+
+The store is a filesystem tree under `/data/wenauseic/swf-monitor/`,
+not a database table: `<root>/YYYY-MM-DD/<pandaid>.log` for bodies,
+`.error` for failed fetches, and `<root>/keep/` for the permanent set.
+A rolling month is comparable in size to the whole of swfdb, which is
+1.4 GB, and would become its largest table while turning over
+completely every month; the bodies are write-once, read-rarely and
+never queried by content, so they would carry that vacuum and backup
+load for nothing. The date directory is also the unit of deletion. The event log measures 1 to 3 KB, so against 365,477 failed
 ePIC jobs per thirty days unconditional capture costs about 700 MB a
 month, and the largest failure storm on record, 8,789 jobs in seven
 hours, costs 18 MB. Pilot stdout is two orders larger, 200 KB for a job
