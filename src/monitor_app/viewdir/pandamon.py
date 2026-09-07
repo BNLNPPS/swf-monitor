@@ -31,7 +31,7 @@ from ..panda import (
     list_jobs_dt, build_tasks_window,
     job_filter_counts, task_filter_counts,
     get_task, error_summary, diagnose_jobs, job_completion_details,
-    list_queues, get_queue, queue_last_use, landing_declines,
+    list_queues, get_queue, queue_last_use, landing_declines, node_declines,
     resource_usage, job_outcomes,
 )
 from ..panda.constants import (
@@ -1425,6 +1425,23 @@ def panda_payload_log(request, pandaid):
         f"Payload log for job {pandaid} is not cached yet. "
         f"Requested retrieval from Rucio.",
         pandaid, script_name)
+
+
+def panda_node_declines(request):
+    """Landing declines per worker node: what a node says it cannot do.
+
+    The ban list is a human decision on accumulated evidence, so this page
+    is the evidence: how often each node refused a landing, against what it
+    produced in the same window, with the node's own reason where the
+    payload's report has been filed (swf-epicprod docs/JOB_REPORTING.md).
+    """
+    try:
+        days = max(1, min(int(request.GET.get('days', 14)), 90))
+    except (TypeError, ValueError):
+        days = 14
+    data = node_declines(days=days)
+    data['days'] = days
+    return render(request, 'monitor_app/panda_node_declines.html', data)
 
 
 def panda_payload_report(request, pandaid):

@@ -1649,6 +1649,108 @@ def landing_declines(days=14):
     }
 
 
+def node_declines(days=14):
+    """Landing declines per worker node, against what that node did produce.
+
+    A decline is the payload refusing a bad landing in its first seconds
+    (exit ``LANDING_DECLINE_EXIT``), so a node that declines is telling the
+    system what it cannot do. What survives in the job record is the exit
+    code, the queue and the node; what names the endpoint that refused and
+    why is the payload's own report, filed per job by the sweep
+    (swf-epicprod docs/JOB_REPORTING.md). This joins the two.
+
+    Every node is reported with the jobs it finished in the same window, so
+    a busy node is not read as a bad one, and with its decline reasons in
+    the node's own words. Sorted by declines, most first.
+    """
+    conn = connections['panda']
+    since = timezone.now() - timedelta(days=days)
+    host_expr = 'regexp_replace(COALESCE("modificationhost", \'\'), \'^.*@\', \'\')'
+    sql = f"""
+        SELECT {host_expr} AS node, "computingsite",
+               COUNT(*) FILTER (WHERE "transexitcode" = %s) AS declines,
+               COUNT(*) FILTER (WHERE "jobstatus" = 'finished') AS finished,
+               COUNT(*) AS jobs,
+               MAX("endtime") FILTER (WHERE "transexitcode" = %s) AS last_decline
+        FROM (
+            SELECT "pandaid", "computingsite", "modificationhost", "endtime",
+                   "transexitcode", "jobstatus"
+            FROM "{PANDA_SCHEMA}"."jobsactive4"
+            WHERE "modificationtime" >= %s
+            UNION
+            SELECT "pandaid", "computingsite", "modificationhost", "endtime",
+                   "transexitcode", "jobstatus"
+            FROM "{PANDA_SCHEMA}"."jobsarchived4"
+            WHERE "modificationtime" >= %s
+        ) j
+        GROUP BY node, "computingsite"
+        HAVING COUNT(*) FILTER (WHERE "transexitcode" = %s) > 0
+        ORDER BY declines DESC
+    """
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(sql, [LANDING_DECLINE_EXIT, LANDING_DECLINE_EXIT,
+                                 since, since, LANDING_DECLINE_EXIT])
+            rows = cursor.fetchall()
+    except Exception as e:                                   # noqa: BLE001
+        logger.error(f"node_declines failed: {e}")
+        return {'error': str(e), 'nodes': [], 'days': days}
+
+    nodes = []
+    for node, site, declines, finished, jobs, last in rows:
+        nodes.append({
+            'node': node or 'unknown',
+            'site': site or 'unknown',
+            'declines': declines,
+            'finished': finished,
+            'jobs': jobs,
+            'decline_rate': round(declines / jobs, 3) if jobs else None,
+            'last_decline': (last.replace(tzinfo=dt_timezone.utc).isoformat()
+                             if last is not None else None),
+            'reasons': [],
+        })
+    _attach_decline_reasons(nodes, since)
+    return {'nodes': nodes, 'days': days,
+            'declines_total': sum(n['declines'] for n in nodes)}
+
+
+def _attach_decline_reasons(nodes, since):
+    """The nodes' own account of why they declined, from the filed reports.
+
+    The report is the only place the refused endpoint and the reason exist;
+    the sweep files it with the node it ran on. A node with no filed report
+    yet keeps an empty reason list rather than a guess.
+    """
+    if not nodes:
+        return
+    by_node = {n['node']: n for n in nodes}
+    try:
+        from monitor_app.models import EpicProdJob
+        rows = (EpicProdJob.objects
+                .filter(updated_at__gte=since)
+                .only('pandaid', 'data')[:5000])
+        for job in rows:
+            filed = (job.data or {}).get('payload_report') or {}
+            report = filed.get('report')
+            if not isinstance(report, dict):
+                continue
+            if report.get('exit_code') != LANDING_DECLINE_EXIT:
+                continue
+            node = (filed.get('node') or '').split('@')[-1]
+            entry = by_node.get(node)
+            if entry is None:
+                continue
+            reason = (report.get('note')
+                      or (report.get('landing') or {}).get('reason')
+                      or '')
+            endpoint = (report.get('landing') or {}).get('endpoint') or ''
+            said = ' — '.join(part for part in (endpoint, reason) if part)
+            if said and said not in entry['reasons']:
+                entry['reasons'].append(said)
+    except Exception as e:                                   # noqa: BLE001
+        logger.error(f"decline reasons unavailable: {e}")
+
+
 def get_queue(panda_queue):
     """Get full configuration for a single PanDA queue."""
     conn = connections['panda']
