@@ -134,7 +134,13 @@ def build_task_params(spec, archive_name):
         'log': {
             'type': 'template',
             'param_type': 'log',
-            'value': f"{spec['outDS']}.$JEDITASKID.${{SN}}.log.tgz",
+            # ${SN} only. JEDI substitutes $JEDITASKID here for a task carrying
+            # the test label, and not for a production one: job 2721298 staged
+            # out against the literal name and died on pilot error 1165 with
+            # its physics already made and registered, while the canary an hour
+            # earlier got its task id substituted from this same template. The
+            # log dataset is per-task, so the serial alone names the file.
+            'value': f"{spec['outDS']}.${{SN}}.log.tgz",
             'dataset': spec['outDS'] + '_log/',
             'hidden': True,
         },
