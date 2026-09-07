@@ -2940,6 +2940,9 @@ def _site_focus_view():
         # The delivery rebuild prewarms campaign products. It must not turn
         # that one job into a 30-day build for every PanDA queue.
         'prewarm_series': False,
+        # A clean landing is a week: a 14-day build of one queue costs about
+        # 30 s cold, a week about 8 s (measured 2026-09-07).
+        'default_window': '7d',
         'note': ('In-flight counts are the recorded queue state through '
                  'time; finished and failed accumulate from the left '
                  'edge of the shown window — the window is the '

@@ -85,7 +85,7 @@
                     <td data-order="{{ q.canary_njobs|default_if_none:0 }}" class="text-end">{% if q.canary_njobs is not None %}{{ q.canary_njobs }}{% endif %}</td>
                     <td data-order="{% if q.spark %}{{ q.spark.total }}{% else %}0{% endif %}">
                         {% if q.spark %}
-                        <a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='site' %}?site={{ q.panda_queue|urlencode }}&amp;window=14d" style="display:block;width:fit-content">
+                        <a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='site' %}?site={{ q.panda_queue|urlencode }}&amp;window=7d" style="display:block;width:fit-content">
                         <svg width="{{ q.spark.w }}" height="{{ q.spark.h }}" viewBox="0 0 {{ q.spark.w }} {{ q.spark.h }}" role="img" style="display:block">
                             <title>Last 2 weeks (8-hour bins): {{ q.spark.fin_total }} finished, {{ q.spark.fail_total }} failed — open the snapper site view</title>
                             <path d="{{ q.spark.green }}" fill="#207f20" stroke="none"/>
