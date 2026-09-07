@@ -265,8 +265,44 @@ def main():
     if not summary['jlab_reachable']:
         _log('JLab is not answering; the stash keeps its entries for a later pass')
 
+    if not args.dry_run:
+        store_state(summary, entries, client, proxy)
     print(json.dumps(summary))
     return 0
+
+
+def store_state(summary, entries, client, proxy):
+    """Keep the pass and what is stashed where a page can read it.
+
+    The page shows what the stash holds and what it owes; reading the
+    catalog to render that would be a remote call in a render, so the
+    drain leaves its own account behind instead.
+    """
+    from monitor_app.cached_product import get_product
+    rows = []
+    for pandaid, entry in entries:
+        rows.append({
+            'pandaid': pandaid,
+            'stashed_as': entry.get('stashed_as', ''),
+            'path': entry.get('path', ''),
+            'owes': entry.get('owes', ''),
+            'reason': entry.get('reason', ''),
+        })
+    payload = {
+        'built_at': datetime.now(dt_timezone.utc).isoformat(),
+        'rse': STASH_RSE,
+        'door': STASH_DOOR,
+        'jlab_reachable': summary.get('jlab_reachable'),
+        'entries': rows,
+        'catalogued': summary.get('catalogued', 0),
+        'missing_at_stash': summary.get('missing_at_stash', 0),
+        'failed': summary.get('failed', []),
+    }
+    try:
+        get_product('stash_state', lambda: payload,
+                    ttl_seconds=24 * 3600, refresh=True)
+    except Exception as e:                                    # noqa: BLE001
+        _log(f'WARNING: the stash state was not stored: {e}')
 
 
 if __name__ == '__main__':
