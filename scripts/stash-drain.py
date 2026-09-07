@@ -225,6 +225,13 @@ def main():
     entries = stashed_entries(since, limit=args.limit)
     summary['entries'] = len(entries)
     if not entries:
+        # An empty stash is the good state and still worth recording: the
+        # page must be able to say "nothing is waiting, as of this pass"
+        # rather than "the drain has never run", which is what an early
+        # return left it saying.
+        summary['jlab_reachable'] = jlab_reachable()
+        if not args.dry_run:
+            store_state(summary, [], None, '')
         print(json.dumps(summary))
         return 0
 
