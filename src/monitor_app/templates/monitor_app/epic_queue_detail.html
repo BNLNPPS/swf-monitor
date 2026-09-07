@@ -49,6 +49,62 @@
         </div>
     </div>
 
+    {% if submission %}
+    <div class="card mb-3">
+        <div class="card-header">
+            <strong>Submission</strong>
+            <span class="ms-2">reported by the submit host
+                <span data-relative-time="{{ submission.reported_at|date:'c' }}"></span></span>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-sm table-striped mb-0">
+                <tr><td class="fw-bold" style="width:24%">Submit description</td>
+                    <td>{{ submission.submit_description }}
+                        <span class="text-muted ms-2">last changed {{ submission.modified }}</span></td></tr>
+                <tr><td class="fw-bold">Pilots may land on</td>
+                    <td>
+                        {% if submission.excluded_sites %}
+                        Excluded sites: {{ submission.excluded_sites|join:", " }}<br>
+                        {% endif %}
+                        {% if submission.excluded_site_nodes %}
+                        Excluded nodes:
+                        {% for n in submission.excluded_site_nodes %}{% if not forloop.first %}, {% endif %}{{ n.node }} at {{ n.site }}{% endfor %}
+                        {% endif %}
+                        {% if not submission.excluded_sites and not submission.excluded_site_nodes %}
+                        Nothing excluded.
+                        {% endif %}
+                    </td></tr>
+                {% if submission.pool.slots_total %}
+                <tr><td class="fw-bold">Pool</td>
+                    <td>{{ submission.pool.slots_total }} slots,
+                        {{ submission.pool.slots_admitted }} admitted by these requirements,
+                        {{ submission.pool.slots_excluded_now|default:"0" }} removed by the exclusions</td></tr>
+                {% endif %}
+                <tr><td class="fw-bold">Requirements</td>
+                    <td style="word-break: break-word">{{ submission.requirements|default:"—" }}</td></tr>
+                <tr><td class="fw-bold">Pilot wrapper</td>
+                    <td>{{ submission.executable|default:"—" }}</td></tr>
+                <tr><td class="fw-bold">Requests</td>
+                    <td>{{ submission.request_cpus|default:"—" }} cpu,
+                        {{ submission.request_memory|default:"—" }} memory,
+                        {{ submission.request_disk|default:"—" }} disk,
+                        duration category {{ submission.job_duration_category|default:"—" }}</td></tr>
+                <tr><td class="fw-bold">Worker limits</td>
+                    <td>ceiling {{ submission.max_workers|default:"—" }},
+                        {{ submission.max_new_workers_per_cycle|default:"—" }} new per cycle,
+                        {{ submission.workflow|default:"—" }} mode</td></tr>
+                {% if submission.schedd.workers %}
+                <tr><td class="fw-bold">Submit host workers</td>
+                    <td>{{ submission.schedd.workers.running }} running,
+                        {{ submission.schedd.workers.idle }} idle,
+                        {{ submission.schedd.workers.held }} held
+                        <span class="text-muted ms-2">all queues on that host, not this queue alone</span></td></tr>
+                {% endif %}
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
     {% ai_assessment_panel panda_queue_metadata %}
 
     {% if snapper_embed %}

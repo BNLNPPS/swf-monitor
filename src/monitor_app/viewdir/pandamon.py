@@ -2081,6 +2081,45 @@ def _exclusions_context():
     return context
 
 
+def _reported_submission(queue_name):
+    """How one queue's pilots are submitted, as the submit host reports it.
+
+    Only the queues the submit host serves have this; everything else
+    returns None and the page shows nothing rather than an empty card.
+    The facts are the ones that decide where a pilot may land and what
+    it asks for, which live in the submit description and the harvester
+    queue configuration and are invisible from here
+    (docs/OSG_SUBMIT_REPORTER.md).
+    """
+    from ..host_reports import latest
+    report = latest('osgsub01') or {}
+    record = report.get('record') or {}
+    queues = record.get('queues') or {}
+    entry = queues.get(queue_name)
+    if not isinstance(entry, dict):
+        return None
+    sdf_name = entry.get('submit_description')
+    sdf = (record.get('submit_descriptions') or {}).get(sdf_name) or {}
+    return {
+        'reported_at': report.get('reported_at'),
+        'submit_description': sdf_name,
+        'modified': sdf.get('modified'),
+        'requirements': sdf.get('requirements'),
+        'executable': sdf.get('executable'),
+        'job_duration_category': sdf.get('job_duration_category'),
+        'request_cpus': sdf.get('request_cpus'),
+        'request_memory': sdf.get('request_memory'),
+        'request_disk': sdf.get('request_disk'),
+        'max_workers': entry.get('max_workers'),
+        'max_new_workers_per_cycle': entry.get('max_new_workers_per_cycle'),
+        'workflow': entry.get('workflow'),
+        'excluded_sites': sdf.get('excluded_sites') or [],
+        'excluded_site_nodes': sdf.get('excluded_site_nodes') or [],
+        'pool': record.get('pool') or {},
+        'schedd': record.get('schedd') or {},
+    }
+
+
 def epic_queues_list(request):
     """ePIC compute queues from live PanDA schedconfig."""
     result = list_queues(vo='eic')
@@ -2292,6 +2331,7 @@ def epic_queue_detail(request, queue_name):
         'site_no_activity': site_no_activity,
         'declines': _landing_declines_product().get(queue_name),
         'declines_days': SPARK_SPAN_DAYS,
+        'submission': _reported_submission(queue_name),
     })
 
 
