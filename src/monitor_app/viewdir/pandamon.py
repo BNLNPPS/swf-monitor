@@ -1055,7 +1055,10 @@ def panda_tasks_filter_counts(request):
 # ── Job detail ───────────────────────────────────────────────────────────────
 
 def panda_job_detail(request, pandaid):
-    data = study_job(int(pandaid))
+    # The batch record is read from the captured copy on disk, so asking for
+    # it costs a file read rather than a fetch, and it is the only whole
+    # account of a job that never started (docs/ERROR_ATTRIBUTION.md).
+    data = study_job(int(pandaid), include_batch_reason=True)
     if 'error' in data:
         return render(request, 'monitor_app/panda_job_detail.html',
                       {'error': data['error'], 'pandaid': pandaid})
@@ -1422,6 +1425,61 @@ def panda_payload_log(request, pandaid):
         f"Payload log for job {pandaid} is not cached yet. "
         f"Requested retrieval from Rucio.",
         pandaid, script_name)
+
+
+def panda_payload_report(request, pandaid):
+    """A job's payload report as the payload wrote it, verbatim JSON.
+
+    The card presents the report shaped for reading; this is the record
+    behind it, from the PanDA metatable for a finished job or from the copy
+    the sweep filed for a failed one (swf-epicprod docs/JOB_REPORTING.md).
+    """
+    from monitor_app.models import EpicProdJob
+    pandaid = int(pandaid)
+    job = EpicProdJob.objects.filter(pandaid=pandaid).only('data').first()
+    filed = ((job.data if job else None) or {}).get('payload_report') or {}
+    if filed.get('report'):
+        body = json.dumps(
+            {'source': 'swept from the object store',
+             'source_key': filed.get('source_key', ''),
+             'filed_at': filed.get('filed_at', ''),
+             'report': filed['report']},
+            indent=2, default=str)
+        return HttpResponse(body, content_type='application/json')
+
+    data = study_job(pandaid)
+    report = (data or {}).get('payload_report')
+    if not report:
+        return HttpResponse(
+            f'{{"error": "job {pandaid} carries no payload report"}}',
+            status=404, content_type='application/json')
+    return HttpResponse(json.dumps({'source': report.get('source', ''),
+                                    'report': report}, indent=2, default=str),
+                        content_type='application/json')
+
+
+def panda_batch_record(request, pandaid):
+    """The condor event log captured for a job, verbatim.
+
+    The batch layer's own account of a hold, an eviction or an abort, and
+    the only account of a job that never started. What PanDA stores of it
+    is cut to a column width; this is the whole of it
+    (docs/ERROR_ATTRIBUTION.md, Batch-layer records).
+    """
+    from monitor_app import batch_records
+    record = batch_records.stored(int(pandaid))
+    if not record:
+        return HttpResponse(
+            f"job {pandaid}: no batch record captured. The harvester keeps the "
+            f"source about eighteen days; a job older than the capture's start "
+            f"has none.\n",
+            status=404, content_type='text/plain; charset=utf-8')
+    if record['status'] != 'captured':
+        return HttpResponse(
+            f"job {pandaid}: capture failed: {record['body']}\n",
+            status=404, content_type='text/plain; charset=utf-8')
+    return HttpResponse(record['body'],
+                        content_type='text/plain; charset=utf-8')
 
 
 # ── Task detail ──────────────────────────────────────────────────────────────

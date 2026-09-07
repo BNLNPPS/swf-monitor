@@ -2181,6 +2181,15 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
     }
 
 
+# The order the epicprod payload runs its stages in (swf-epicprod
+# docs/EPICPROD_PAYLOAD.md). The report carries them as an object, and a
+# filed copy has lost the writing order to jsonb, so presentation restores it.
+PAYLOAD_STAGE_ORDER = [
+    'input', 'simulation', 'events', 'reconstruction', 'metadata',
+    'logs', 'validation', 'registration',
+]
+
+
 def _payload_report(conn, pandaid):
     """The epicprod payload's own report of this job, from the PanDA
     metatable, shaped for display.
@@ -2232,7 +2241,19 @@ def _payload_report(conn, pandaid):
     stages = report.get('stages') or {}
     prmon = report.get('prmon') or {}
     rows = []
-    for name, stage in stages.items():
+    # Run order, not key order: a report filed by the sweep has been through
+    # a jsonb column, which does not preserve the order the payload wrote its
+    # keys in. The payload's own sequence names the order; a stage it does not
+    # name falls to the end, in the order its timestamps give.
+    def _run_order(item):
+        name, stage = item
+        stage = stage if isinstance(stage, dict) else {}
+        known = (PAYLOAD_STAGE_ORDER.index(name)
+                 if name in PAYLOAD_STAGE_ORDER else len(PAYLOAD_STAGE_ORDER))
+        return (known, str(stage.get('started_at') or stage.get('ended_at') or ''),
+                name)
+
+    for name, stage in sorted(stages.items(), key=_run_order):
         if not isinstance(stage, dict):
             continue
         measured = prmon.get(name)

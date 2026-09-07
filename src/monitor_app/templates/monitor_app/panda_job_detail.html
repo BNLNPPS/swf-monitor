@@ -103,6 +103,7 @@
             <span class="text-muted ms-2">{{ payload_report.payload_version }}</span>
             {% if payload_report.events.reconstructed %}<span class="ms-2">{{ payload_report.events.reconstructed }} events reconstructed{% if payload_report.events.requested %} of {{ payload_report.events.requested }} requested{% endif %}</span>{% endif %}
             {% if payload_report.source == "swept" %}<span class="ms-2 badge bg-secondary">from the job's own report, swept from the store</span>{% endif %}
+            <a class="ms-2" href="{% url 'monitor_app:panda_payload_report' pandaid=job.pandaid %}">report as written</a>
         </div>
         <div class="card-body">
             {% if payload_report.note %}<p class="mb-2">{{ payload_report.note }}</p>{% endif %}
@@ -307,6 +308,42 @@
                 {% endfor %}
                 </tbody>
             </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Batch record: the batch layer's own account, whole. What PanDA
+         stores of it is cut at a character count, and the cut removes the
+         end of the message, where the error is (docs/ERROR_ATTRIBUTION.md,
+         Batch-layer records). This is the captured condor event log. -->
+    {% if batch_record %}
+    <div class="card mb-3">
+        <div class="card-header"><strong>Batch record</strong>
+            {% if batch_record.captured %}<span class="text-muted ms-2">captured {{ batch_record.captured.day }}, {{ batch_record.captured.bytes }} bytes</span>{% else %}<span class="text-muted ms-2">read from the harvester, not captured</span>{% endif %}
+            <a class="ms-2" href="{% url 'monitor_app:panda_batch_record' pandaid=job.pandaid %}">condor log as captured</a>
+        </div>
+        <div class="card-body">
+            {% if batch_record.error %}
+            <p class="mb-0">{{ batch_record.error }}</p>
+            {% else %}
+            <table class="table table-striped table-bordered table-sm align-middle mb-2">
+                <thead><tr><th>Event</th><th>When</th><th>Reason, whole</th></tr></thead>
+                <tbody>
+                {% for event in batch_record.events %}
+                <tr>
+                    <td>{{ event.event }}</td>
+                    <td class="text-nowrap">{{ event.at }}</td>
+                    <td>{{ event.text }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+            {% if job.superrordiag or job.taskbuffererrordiag %}
+            <p class="mb-1"><strong>What the job record kept of it</strong></p>
+            {% if job.superrordiag %}<p class="mb-1">supervisor, {{ job.superrordiag|length }} characters: {{ job.superrordiag }}</p>{% endif %}
+            {% if job.taskbuffererrordiag %}<p class="mb-0">taskbuffer, {{ job.taskbuffererrordiag|length }} characters: {{ job.taskbuffererrordiag }}</p>{% endif %}
+            {% endif %}
         </div>
     </div>
     {% endif %}
