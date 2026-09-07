@@ -2673,7 +2673,7 @@ def condor_log_events(batchlog_url, timeout_s=BATCH_LOG_TIMEOUT_S):
     return parse_condor_log(body, source=batchlog_url)
 
 
-def study_job(pandaid, include_batch_reason=False):
+def study_job(pandaid, include_batch_reason=False, include_log_analysis=True):
     """Deep study of a single PanDA job — full record, files, harvester logs, errors.
 
     ``include_batch_reason`` fetches the harvester's condor event log for
@@ -2897,8 +2897,12 @@ def study_job(pandaid, include_batch_reason=False):
     # 5. Log analysis for failure-adjacent statuses. 'closed' covers
     # lost-heartbeat (pilot killed at slot boundary before reporting back);
     # its pilot log on NERSC CFS is the only window into what happened.
+    # Two live fetches with thirty-second timeouts, so never in a page
+    # render: a page that waits on another host is a page that hangs when
+    # that host is slow, and no template reads this. The MCP study tool and
+    # the inventory sync, which are not renders, keep it.
     jobstatus = job.get('jobstatus', '')
-    if jobstatus in ('failed', 'holding', 'cancelled', 'closed'):
+    if include_log_analysis and jobstatus in ('failed', 'holding', 'cancelled', 'closed'):
         try:
             from askpanda_atlas.log_analysis_impl import (
                 _select_log_filename, _fetch_log_text,

@@ -1058,7 +1058,8 @@ def panda_job_detail(request, pandaid):
     # The batch record is read from the captured copy on disk, so asking for
     # it costs a file read rather than a fetch, and it is the only whole
     # account of a job that never started (docs/ERROR_ATTRIBUTION.md).
-    data = study_job(int(pandaid), include_batch_reason=True)
+    data = study_job(int(pandaid), include_batch_reason=True,
+                     include_log_analysis=False)
     if 'error' in data:
         return render(request, 'monitor_app/panda_job_detail.html',
                       {'error': data['error'], 'pandaid': pandaid})
@@ -1346,7 +1347,7 @@ def panda_payload_log(request, pandaid):
     refresh. The web tier never touches the proxy or xrootd; it only reads the
     world-readable cache. See docs/EPICPROD_OPS.md.
     """
-    data = study_job(int(pandaid))
+    data = study_job(int(pandaid), include_log_analysis=False)
     if 'error' in data:
         return HttpResponse(f"job {pandaid}: {data['error']}\n",
                             status=404, content_type='text/plain; charset=utf-8')
@@ -1464,7 +1465,7 @@ def panda_payload_report(request, pandaid):
             indent=2, default=str)
         return HttpResponse(body, content_type='application/json')
 
-    data = study_job(pandaid)
+    data = study_job(pandaid, include_log_analysis=False)
     report = (data or {}).get('payload_report')
     if not report:
         return HttpResponse(
