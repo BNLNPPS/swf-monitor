@@ -55,6 +55,9 @@ Capabilities:
   content_validate   — reconcile each sample's dataset against the production
                        record and store the finding; proposes, never acts
                        (docs/EPICPROD_VALIDATION.md).
+  content_accept     — the operator's acceptance of one dataset's content:
+                       detach what does not belong, affirm the record, count
+                       the recorded events (docs/EPICPROD_VALIDATION.md).
   outputs_ingest     — write the production record of what tasks produced,
                        and the registrar's worklist, from the payload reports
                        (hourly; docs/RUCIO_RESILIENCE.md, Measure 3).
@@ -171,6 +174,11 @@ STASH_DRAIN_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "stash
 STASH_DRAIN_TIMEOUT = int(os.environ.get("EPICPROD_STASH_DRAIN_TIMEOUT", "1800"))
 CONTENT_VALIDATE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "content-validate.py"
 CONTENT_VALIDATE_TIMEOUT = int(os.environ.get("EPICPROD_CONTENT_VALIDATE_TIMEOUT", "1800"))
+# Acceptance of a dataset's content (swf-epicprod docs/EPICPROD_VALIDATION.md,
+# Content validation): the operator's one action, executed here because it
+# detaches files in the JLab catalog.
+CONTENT_ACCEPT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "content-accept.py"
+CONTENT_ACCEPT_TIMEOUT = int(os.environ.get("EPICPROD_CONTENT_ACCEPT_TIMEOUT", "900"))
 OUTPUTS_INGEST_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "outputs-ingest.py"
 OUTPUTS_INGEST_TIMEOUT = int(os.environ.get("EPICPROD_OUTPUTS_INGEST_TIMEOUT", "900"))
 OUTPUTS_INGEST_HOURS = os.environ.get("EPICPROD_OUTPUTS_INGEST_HOURS", "48")
@@ -284,7 +292,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "file_events_measure", "delivery_daily_rebuild",
                    "batch_log_capture", "batch_log_learn",
                    "report_sweep", "outputs_ingest", "registrar",
-                   "content_validate", "stash_drain",
+                   "content_validate", "content_accept", "stash_drain",
                    "storage_sweep", "campaign_config_propose",
                    "assessment_completed",
                    "health_ping", "shutdown"}
@@ -1876,6 +1884,94 @@ class EpicProdOpsAgent(BaseAgent):
                      f"datasets={summary.get('datasets', 0)} "
                      f"sound={summary.get('sound', 0)} unsound={unsound} "
                      f"events={summary.get('delivered_events', 0)}"))
+        # The page that asked for one task's check holds an EventSource for
+        # this; a scheduled pass over many tasks names no task.
+        self.send_message('/topic/epictopic', {
+            'msg_type': 'content_validated',
+            'task_name': str(m.get('task') or ''),
+            'datasets': summary.get('datasets', 0),
+            'unsound': unsound})
+
+    def _handle_content_accept(self, m):
+        """Accept one dataset's content off the receiver thread: the
+        operator's action from the compose page (swf-epicprod
+        docs/EPICPROD_VALIDATION.md, Content validation)."""
+        task_name = m.get('task_name') or m.get('task')
+        dataset = m.get('dataset')
+        if not task_name or not dataset:
+            self.logger.error("PRODOPS content_accept: task_name and dataset are required")
+            return
+        self.run_in_background(
+            self._do_content_accept, m,
+            dedup_key=f"content_accept:{dataset}", label=f"content_accept {task_name}")
+
+    def _do_content_accept(self, m):
+        """Detach what does not belong, affirm the record, count the recorded
+        events — through the doer, which reconciles live before it acts and
+        refuses the cases that are a person's to decide. Every outcome
+        reaches the waiting page over the SSE relay."""
+        task_name = str(m.get('task_name') or m.get('task'))
+        dataset = str(m.get('dataset'))
+        owner = str(m.get('owner') or m.get('created_by') or '')
+        cmd = [sys.executable, str(CONTENT_ACCEPT_SCRIPT),
+               '--task', task_name, '--dataset', dataset]
+        if owner:
+            cmd += ['--owner', owner]
+        self.logger.info(f"PRODOPS content_accept: {task_name} {dataset}")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=CONTENT_ACCEPT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            reason = f'timed out after {CONTENT_ACCEPT_TIMEOUT}s'
+            self.logger.error(f"PRODOPS content_accept TIMEOUT: {task_name} {dataset}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'content_accept_failed', 'task_name': task_name,
+                'dataset': dataset, 'reason': reason})
+            self._log_action('content_accept', t0, outcome='timeout', reason=reason,
+                             subject_type='campaign_task', subject_key=task_name,
+                             username=owner, sublevel='normal', live_default=True,
+                             level=logging.ERROR)
+            return
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  content-accept: {line}")
+        summary_line = ((p.stdout or '').strip().splitlines() or [''])[-1]
+        try:
+            summary = json.loads(summary_line)
+        except (ValueError, TypeError):
+            summary = {}
+        if p.returncode != 0:
+            reason = (summary.get('error')
+                      or '; '.join(summary.get('refusals') or [])
+                      or self._derive_reason(p))
+            outcome = 'refused' if p.returncode == 3 else 'error'
+            self.logger.error(f"PRODOPS content_accept {outcome} rc={p.returncode}: {reason}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'content_accept_failed', 'task_name': task_name,
+                'dataset': dataset, 'reason': reason, 'refused': p.returncode == 3,
+                'detached': summary.get('detached') or []})
+            self._log_action('content_accept', t0, outcome='error', reason=reason,
+                             subject_type='campaign_task', subject_key=task_name,
+                             username=owner, sublevel='normal', live_default=True,
+                             level=logging.ERROR, dataset=dataset)
+            return
+        detached = len(summary.get('detached') or [])
+        self.logger.info(
+            f"PRODOPS content_accept done: {task_name} {dataset} "
+            f"{summary.get('affirmed', 0)} affirmed, {detached} detached, "
+            f"{summary.get('delivered_events', 0)} events")
+        self.send_message('/topic/epictopic', {
+            'msg_type': 'content_accepted', 'task_name': task_name,
+            'dataset': dataset, 'delivered_events': summary.get('delivered_events', 0),
+            'affirmed': summary.get('affirmed', 0), 'detached': detached})
+        self._log_action(
+            'content_accept', t0, outcome='ok',
+            subject_type='campaign_task', subject_key=task_name,
+            username=owner, sublevel='normal', live_default=True,
+            summary=(f"dataset={dataset} affirmed={summary.get('affirmed', 0)} "
+                     f"detached={detached} events={summary.get('delivered_events', 0)}"),
+            dataset=dataset, detached=detached,
+            delivered_events=summary.get('delivered_events', 0))
 
     def _handle_outputs_ingest(self, m):
         """Write the production record of what tasks produced, off the
