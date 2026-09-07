@@ -577,11 +577,11 @@
             <div class="dropdown-content">
                 <a href="{% url 'monitor_app:panda_hub' %}" class="{% if active_nav.panda_hub %}nav-active{% endif %}">PanDA/Rucio Hub</a>
                 <a href="{% url 'monitor_app:panda_activity' %}" class="{% if active_nav.panda_activity %}nav-active{% endif %}">Activity</a>
-                <a href="{% url 'monitor_app:panda_jobs_list' %}" class="{% if active_nav.panda_jobs %}nav-active{% endif %}">Jobs</a>
                 <a href="{% url 'monitor_app:panda_tasks_list' %}" class="{% if active_nav.panda_tasks %}nav-active{% endif %}">Tasks</a>
+                <a href="{% url 'monitor_app:panda_jobs_list' %}" class="{% if active_nav.panda_jobs %}nav-active{% endif %}">Jobs</a>
                 <a href="{% url 'monitor_app:panda_errors_list' %}" class="{% if active_nav.panda_errors %}nav-active{% endif %}">Errors</a>
-                <a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="{% if active_nav.panda_diagnostics %}nav-active{% endif %}">Diagnostics</a>
-                <a href="{% url 'monitor_app:epic_queues_list' %}" class="{% if active_nav.panda_queues %}nav-active{% endif %}">EIC PanDA Queues</a>
+                <a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="{% if active_nav.panda_diagnostics %}nav-active{% endif %}">Job diagnostics</a>
+                <a href="{% url 'monitor_app:epic_queues_list' %}" class="{% if active_nav.panda_queues %}nav-active{% endif %}">PanDA queues</a>
                 <a href="{% url 'monitor_app:panda_database_tables_list' %}" class="{% if active_nav.panda_database %}nav-active{% endif %}">PanDA Database</a>
                 <a href="{% url 'monitor_app:idds_database_tables_list' %}" class="{% if active_nav.idds_database %}nav-active{% endif %}">iDDS Database</a>
                 <a href="{% url 'monitor_app:rucio_endpoints_list' %}" class="{% if active_nav.rucio_endpoints %}nav-active{% endif %}">Rucio Endpoints</a>
@@ -595,9 +595,9 @@
         <div class="dropdown">
             <button class="dropbtn{% if active_nav.requests %} nav-active{% endif %}">Requests</button>
             <div class="dropdown-content">
-                <a href="https://docs.google.com/forms/d/e/1FAIpQLScDqiEaHayAcwBDGAWa4W6k-6yUFzS-XiWuhLolpy64mLk5FA/viewform" target="_blank" rel="noopener">Google request form</a>
                 <a href="{% url 'pcs:pcs_request_composer' %}">Request Production</a>
-                <a href="{% url 'pcs:questionnaires_list' %}">Request list</a>
+                <a href="https://docs.google.com/forms/d/e/1FAIpQLScDqiEaHayAcwBDGAWa4W6k-6yUFzS-XiWuhLolpy64mLk5FA/viewform" target="_blank" rel="noopener">Google request form</a>
+                <a href="{% url 'pcs:questionnaires_list' %}">Production Requests</a>
             </div>
         </div>
         <div class="dropdown">
@@ -633,9 +633,9 @@
             <div class="dropdown-content">
                 <a href="{% url 'pcs:find_data' %}" class="{% if active_nav.find_data %}nav-active{% endif %}">Find data</a>
                 <a href="{% url 'pcs:evgen_inputs' %}" class="{% if active_nav.pcs_evgen_inputs %}nav-active{% endif %}">EVGEN Inputs</a>
+                <a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='storage' %}" class="{% if active_nav.snapper_storage %}nav-active{% endif %}">Snapper storage view</a>
                 <a href="{% url 'pcs:storage_listings' listing='ghosts' %}" class="{% if active_nav.pcs_storage %}nav-active{% endif %}">Storage exceptions</a>
                 <a href="{% url 'pcs:stash_page' %}">Failover stash</a>
-                <a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='storage' %}" class="{% if active_nav.snapper_storage %}nav-active{% endif %}">Snapper storage view</a>
                 <a href="{% url 'pcs:validation_v1_index' %}">Validation API</a>
             </div>
         </div>
@@ -658,19 +658,19 @@
         <div class="dropdown">
             <button class="dropbtn{% if active_nav.panda_errors or active_nav.alarms or active_nav.panda_diagnostics %} nav-active{% endif %}">Diagnostics</button>
             <div class="dropdown-content">
-                <a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='errors' %}">Snapper error view</a>
                 <a href="{% url 'monitor_app:panda_errors_list' %}" class="{% if active_nav.panda_errors %}nav-active{% endif %}">Error summary</a>
+                <a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='errors' %}">Snapper error view</a>
                 <a href="{% url 'monitor_app:alarms_dashboard' %}" class="{% if active_nav.alarms %}nav-active{% endif %}">Alarms</a>
-                <a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="{% if active_nav.panda_diagnostics %}nav-active{% endif %}">Diagnostics</a>
+                <a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="{% if active_nav.panda_diagnostics %}nav-active{% endif %}">Job diagnostics</a>
             </div>
         </div>
         <div class="dropdown">
             <button class="dropbtn{% if active_nav.sites %} nav-active{% endif %}">Sites</button>
             <div class="dropdown-content">
+                <a href="{% url 'monitor_app:epic_queues_list' %}" class="{% if active_nav.panda_queues %}nav-active{% endif %}">PanDA queues</a>
                 <a href="{% url 'monitor_app:compute_usage' %}" class="{% if active_nav.compute_usage %}nav-active{% endif %}">Site compute usage</a>
                 <a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='site' %}">Snapper site view</a>
-                <a href="{% url 'monitor_app:epic_queues_list' %}" class="{% if active_nav.panda_queues %}nav-active{% endif %}">PanDA queues</a>
-                <a href="{% url 'canary:probes_page' %}">Canary probes</a>
+                <a href="{% url 'canary:probes_page' %}" class="{% if active_nav.canary %}nav-active{% endif %}">Canary probes</a>
             </div>
         </div>
         <a href="{% url 'monitor_app:analysis' %}" class="nav-analysis{% if active_nav.analysis %} nav-active{% endif %}">Analysis</a>
@@ -678,7 +678,7 @@
         </span>
         <span class="nav-spacer"></span>
         <div class="dropdown">
-            <button class="dropbtn{% if system_status_overall == 'error' %} nav-system-error{% endif %}{% if active_nav.system or active_nav.snapper or active_nav.canary or active_nav.about %} nav-active{% endif %}"
+            <button class="dropbtn{% if system_status_overall == 'error' %} nav-system-error{% endif %}{% if active_nav.system or active_nav.snapper or active_nav.about %} nav-active{% endif %}"
                     id="system-status-nav-link"
                     data-system-status="{{ system_status_overall|default:'unknown' }}"
                     data-system-status-url="{% url 'monitor_app:system_status_json' %}"
@@ -689,10 +689,8 @@
                    id="system-status-dropdown-link"
                    class="{% if system_status_overall == 'error' %}nav-system-error{% endif %}{% if active_nav.system %} nav-active{% endif %}">System Status</a>
                 <a href="{% url 'snapper_ai:snapper_report' scope='epicprod' %}"
-                   class="{% if active_nav.snapper %}nav-active{% endif %}">Snapper</a>
+                   class="{% if active_nav.snapper %}nav-active{% endif %}">Snapper report</a>
                 <a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='platform' %}">Platform status</a>
-                <a href="{% url 'canary:probes_page' %}"
-                   class="{% if active_nav.canary %}nav-active{% endif %}">Canary probes</a>
                 {% if user.is_authenticated and user.is_staff %}
                     <a href="{% url 'admin:index' %}">Admin</a>
                 {% endif %}
