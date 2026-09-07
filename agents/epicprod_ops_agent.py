@@ -1912,11 +1912,16 @@ class EpicProdOpsAgent(BaseAgent):
         reaches the waiting page over the SSE relay."""
         task_name = str(m.get('task_name') or m.get('task'))
         dataset = str(m.get('dataset'))
-        owner = str(m.get('owner') or m.get('created_by') or '')
+        # The record write is owner-gated, so it is made as the task's owner;
+        # the operator who accepted is recorded as such on the acceptance.
+        owner = str(m.get('owner') or '')
+        requested_by = str(m.get('requested_by') or m.get('created_by') or owner)
         cmd = [sys.executable, str(CONTENT_ACCEPT_SCRIPT),
                '--task', task_name, '--dataset', dataset]
         if owner:
             cmd += ['--owner', owner]
+        if requested_by:
+            cmd += ['--requested-by', requested_by]
         self.logger.info(f"PRODOPS content_accept: {task_name} {dataset}")
         t0 = time.monotonic()
         try:
@@ -1930,7 +1935,7 @@ class EpicProdOpsAgent(BaseAgent):
                 'dataset': dataset, 'reason': reason})
             self._log_action('content_accept', t0, outcome='timeout', reason=reason,
                              subject_type='campaign_task', subject_key=task_name,
-                             username=owner, sublevel='normal', live_default=True,
+                             username=requested_by, sublevel='normal', live_default=True,
                              level=logging.ERROR)
             return
         for line in (p.stderr or "").splitlines():
@@ -1952,7 +1957,7 @@ class EpicProdOpsAgent(BaseAgent):
                 'detached': summary.get('detached') or []})
             self._log_action('content_accept', t0, outcome='error', reason=reason,
                              subject_type='campaign_task', subject_key=task_name,
-                             username=owner, sublevel='normal', live_default=True,
+                             username=requested_by, sublevel='normal', live_default=True,
                              level=logging.ERROR, dataset=dataset)
             return
         detached = len(summary.get('detached') or [])
@@ -1967,7 +1972,7 @@ class EpicProdOpsAgent(BaseAgent):
         self._log_action(
             'content_accept', t0, outcome='ok',
             subject_type='campaign_task', subject_key=task_name,
-            username=owner, sublevel='normal', live_default=True,
+            username=requested_by, sublevel='normal', live_default=True,
             summary=(f"dataset={dataset} affirmed={summary.get('affirmed', 0)} "
                      f"detached={detached} events={summary.get('delivered_events', 0)}"),
             dataset=dataset, detached=detached,

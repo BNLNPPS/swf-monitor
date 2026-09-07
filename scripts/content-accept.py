@@ -91,7 +91,10 @@ def main():
     parser.add_argument('--dataset', required=True,
                         help='the dataset name the finding named (scope optional)')
     parser.add_argument('--owner', default='',
-                        help='the operator accepting; sent as X-Remote-User')
+                        help="the task's owner; sent as X-Remote-User for the "
+                             "owner-gated record write")
+    parser.add_argument('--requested-by', default='',
+                        help='the operator who accepted, recorded as such')
     parser.add_argument('--swf-monitor-url',
                         default=os.environ.get('SWF_MONITOR_URL', '').rstrip('/'))
     parser.add_argument('--token',
@@ -182,6 +185,7 @@ def main():
         'affirmed': plan['affirm'],
         'detached': summary['detached'],
         'checked_at': finding.get('checked_at', ''),
+        'accepted_by': args.requested_by or args.owner,
     }
     try:
         _record_acceptance(args.swf_monitor_url, args.owner, args.token,
