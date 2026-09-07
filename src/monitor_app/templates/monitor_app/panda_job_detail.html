@@ -200,6 +200,14 @@
                     <td><a href="{{ url }}" target="_blank" rel="noopener">{{ url }}</a></td>
                 </tr>
                 {% endfor %}
+                {# The harvester's own copy expires in about eighteen days; ours does not. #}
+                {% if batch_record.captured %}
+                <tr>
+                    <td><strong>condor_log</strong></td>
+                    <td><a href="{% url 'monitor_app:panda_batch_record' pandaid=job.pandaid %}">the captured copy, whole</a>
+                        <span class="text-muted ms-2">captured {{ batch_record.captured.day }}, {{ batch_record.captured.bytes }} bytes</span></td>
+                </tr>
+                {% endif %}
             </table>
         </div>
     </div>
