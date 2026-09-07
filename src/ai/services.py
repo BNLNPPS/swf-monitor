@@ -1102,17 +1102,24 @@ def proposal_delete(proposal_ids, *, deleted_by=''):
     return {'deleted': deleted}
 
 
-def proposal_withdraw(*, batch_id=None, created_by=''):
+def proposal_withdraw(*, batch_id=None, action='propagation', created_by=''):
     """Withdraw pending proposals — the recurring proposer's heartbeat
     (withdraw, then re-derive and re-propose from current inputs) or an
     operator clear. Counted and logged (``proposal_expired``),
-    never silent."""
+    never silent.
+
+    ``action`` names the kind to withdraw and defaults to propagation,
+    which is what this served when it was written. A campaign-assembly
+    batch is ``campaign_plan``: its proposals go stale as the record moves
+    under them, and re-proposing does not clear them, since an unchanged
+    recommendation is a no-op that keeps its ref.
+    """
     from monitor_app.epicprod_logging import log_epicprod_action
 
     now = _timezone.now()
     withdrawn = 0
     with transaction.atomic():
-        qs = Proposal.objects.filter(action='propagation', status='proposed')
+        qs = Proposal.objects.filter(action=action, status='proposed')
         if batch_id:
             qs = qs.filter(batch_id=batch_id)
         for row in qs:
@@ -1125,9 +1132,9 @@ def proposal_withdraw(*, batch_id=None, created_by=''):
         'web', 'proposal_expired',
         username=created_by,
         sublevel='normal', live_default=True,
-        message=f'{withdrawn} pending AI proposal(s) withdrawn'
+        message=f'{withdrawn} pending {action} proposal(s) withdrawn'
                 + (f' [batch {batch_id}]' if batch_id else ''),
-        withdrawn=withdrawn, batch_id=batch_id or '',
+        withdrawn=withdrawn, batch_id=batch_id or '', kind=action,
     )
     result = {'withdrawn': withdrawn}
     if withdrawn:
