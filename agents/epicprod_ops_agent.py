@@ -49,6 +49,9 @@ Capabilities:
   panda_sandbox_keepalive — touch the sandbox tarballs of retryable tasks in
                        the PanDA server cache so the 7-day purge passes them
                        by (nightly catalog_sync chain step).
+  content_validate   — reconcile each sample's dataset against the production
+                       record and store the finding; proposes, never acts
+                       (docs/EPICPROD_VALIDATION.md).
   outputs_ingest     — write the production record of what tasks produced,
                        and the registrar's worklist, from the payload reports
                        (hourly; docs/RUCIO_RESILIENCE.md, Measure 3).
@@ -161,6 +164,8 @@ BATCH_LOG_LEARN_TIMEOUT = int(os.environ.get("EPICPROD_BATCH_LOG_LEARN_TIMEOUT",
 # The registrar (swf-epicprod docs/RUCIO_RESILIENCE.md, Measure 2): completes
 # the registrations the payload left pending, hourly, and holds the only
 # retry — one gentle attempt per job, then bounded attempts from one process.
+CONTENT_VALIDATE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "content-validate.py"
+CONTENT_VALIDATE_TIMEOUT = int(os.environ.get("EPICPROD_CONTENT_VALIDATE_TIMEOUT", "1800"))
 OUTPUTS_INGEST_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "outputs-ingest.py"
 OUTPUTS_INGEST_TIMEOUT = int(os.environ.get("EPICPROD_OUTPUTS_INGEST_TIMEOUT", "900"))
 OUTPUTS_INGEST_HOURS = os.environ.get("EPICPROD_OUTPUTS_INGEST_HOURS", "48")
@@ -274,6 +279,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "file_events_measure", "delivery_daily_rebuild",
                    "batch_log_capture", "batch_log_learn",
                    "report_sweep", "outputs_ingest", "registrar",
+                   "content_validate",
                    "storage_sweep", "campaign_config_propose",
                    "assessment_completed",
                    "health_ping", "shutdown"}
@@ -1742,6 +1748,67 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              sublevel='low', live_default=False,
                              summary=((p.stdout or '').splitlines() or [''])[-1])
+
+    def _handle_content_validate(self, m):
+        """Reconcile samples against their datasets off the receiver thread —
+        after the record is written, also directly invokable."""
+        self.run_in_background(
+            self._do_content_validate, m,
+            dedup_key="content_validate", label="content_validate")
+
+    def _do_content_validate(self, m):
+        """What the dataset holds against what the record says was delivered,
+        stored for pages to read. Proposes and never acts: nothing is
+        detached and nothing is written to Rucio (swf-epicprod
+        docs/EPICPROD_VALIDATION.md, Content validation)."""
+        cmd = [sys.executable, str(CONTENT_VALIDATE_SCRIPT)]
+        if m.get('task'):
+            cmd += ['--task', str(m['task'])]
+        if m.get('hours'):
+            cmd += ['--hours', str(m['hours'])]
+        self.logger.info("PRODOPS content_validate: reconciling samples")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=CONTENT_VALIDATE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS content_validate TIMEOUT after {CONTENT_VALIDATE_TIMEOUT}s")
+            self._log_action('content_validate', t0, outcome='timeout',
+                             reason=f'timed out after {CONTENT_VALIDATE_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  content-validate: {line}")
+        summary_line = ((p.stdout or '').strip().splitlines() or [''])[-1]
+        try:
+            summary = json.loads(summary_line)
+        except (ValueError, TypeError):
+            summary = {}
+        unsound = int(summary.get('unsound') or 0)
+        unreadable = int(summary.get('unreadable') or 0)
+        if p.returncode != 0:
+            self.logger.error(f"PRODOPS content_validate FAILED rc={p.returncode}")
+            self._log_action('content_validate', t0, outcome='error',
+                             reason=self._derive_reason(p),
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        self.logger.info(f"PRODOPS content_validate done: {summary_line}")
+        self._log_action(
+            'content_validate', t0,
+            outcome='ok' if not (unsound or unreadable) else 'partial',
+            reason=(f'{unsound} dataset(s) not sound, {unreadable} unreadable'
+                    if (unsound or unreadable) else ''),
+            username=str(m.get('created_by') or ''),
+            sublevel='low', live_default=bool(unsound),
+            summary=(f"tasks={summary.get('tasks', 0)} "
+                     f"datasets={summary.get('datasets', 0)} "
+                     f"sound={summary.get('sound', 0)} unsound={unsound} "
+                     f"events={summary.get('delivered_events', 0)}"))
 
     def _handle_outputs_ingest(self, m):
         """Write the production record of what tasks produced, off the
