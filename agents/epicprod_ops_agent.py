@@ -49,6 +49,10 @@ Capabilities:
   panda_sandbox_keepalive — touch the sandbox tarballs of retryable tasks in
                        the PanDA server cache so the 7-day purge passes them
                        by (nightly catalog_sync chain step).
+  batch_log_capture  — fetch the condor event log of every failed and
+                       never-started job whole into the file store, and prune
+                       date directories past retention (nightly catalog_sync
+                       chain step; docs/ERROR_ATTRIBUTION.md).
   sync_epicprod_inventory — refresh the monitor's ePIC production job/file
                        inventory and parsed failure diagnosis for a PanDA job.
   refresh_system_status — refresh cached System status rows for services,
@@ -137,6 +141,13 @@ FILE_EVENTS_TIMEOUT = int(os.environ.get("EPICPROD_FILE_EVENTS_TIMEOUT", "3600")
 
 DELIVERY_DAILY_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "delivery-daily-rebuild.py"
 DELIVERY_DAILY_TIMEOUT = int(os.environ.get("EPICPROD_DELIVERY_DAILY_TIMEOUT", "3600"))
+# The condor event log of a failed job is the only whole account of a
+# batch-layer failure, and the harvester keeps it about eighteen days
+# (docs/ERROR_ATTRIBUTION.md, Batch-layer records). The window covers the
+# chain's own day with two hours of overlap.
+BATCH_LOG_CAPTURE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "batch-log-capture.py"
+BATCH_LOG_CAPTURE_TIMEOUT = int(os.environ.get("EPICPROD_BATCH_LOG_CAPTURE_TIMEOUT", "1800"))
+BATCH_LOG_CAPTURE_HOURS = os.environ.get("EPICPROD_BATCH_LOG_CAPTURE_HOURS", "26")
 STORAGE_SWEEP_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "storage-sweep.py"
 STORAGE_SWEEP_TIMEOUT = int(os.environ.get("EPICPROD_STORAGE_SWEEP_TIMEOUT", "3600"))
 # The campaign configuration proposer (swf-monitor docs/PINGS.md, Pings
@@ -236,6 +247,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "capture_system_snap",
                    "rucio_arrivals_sweep", "epic_prod_past_import",
                    "file_events_measure", "delivery_daily_rebuild",
+                   "batch_log_capture",
                    "storage_sweep", "campaign_config_propose",
                    "assessment_completed",
                    "health_ping", "shutdown"}
@@ -1305,6 +1317,10 @@ class EpicProdOpsAgent(BaseAgent):
         steps = [
             ('credential_expiry_check', self._do_credential_expiry_check),
             ('panda_sandbox_keepalive', self._do_panda_sandbox_keepalive),
+            # Early, and before anything that talks to Rucio: the source
+            # expires, so a stall later in the chain must not cost a day of
+            # batch-layer evidence.
+            ('batch_log_capture', self._do_batch_log_capture),
             ('catalog_import_csv',
              lambda msg: self._do_catalog_import(dict(msg, source='csv'))),
             ('epic_prod_past_import', self._do_epic_prod_past_import),
@@ -1683,6 +1699,60 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              sublevel='low', live_default=False,
                              summary=((p.stdout or '').splitlines() or [''])[-1])
+
+    def _handle_batch_log_capture(self, m):
+        """Run the batch-record capture off the receiver thread — normally a
+        catalog_sync chain step, also directly invokable."""
+        self.run_in_background(
+            self._do_batch_log_capture, m,
+            dedup_key="batch_log_capture", label="batch_log_capture")
+
+    def _do_batch_log_capture(self, m):
+        """Capture the condor event log of every failed and never-started job
+        in the window, verbatim, and prune date directories past retention.
+        The log is the only whole account of a batch-layer failure and of a
+        job that never started, and the harvester keeps it about eighteen
+        days (docs/ERROR_ATTRIBUTION.md, Batch-layer records)."""
+        hours = str(m.get('hours') or BATCH_LOG_CAPTURE_HOURS)
+        cmd = [sys.executable, str(BATCH_LOG_CAPTURE_SCRIPT),
+               '--hours', hours, '--prune']
+        self.logger.info(
+            f"PRODOPS batch_log_capture: capturing the last {hours} hours")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=BATCH_LOG_CAPTURE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS batch_log_capture TIMEOUT after "
+                f"{BATCH_LOG_CAPTURE_TIMEOUT}s")
+            self._log_action('batch_log_capture', t0, outcome='timeout',
+                             reason=f'timed out after {BATCH_LOG_CAPTURE_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  batch-log-capture: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  batch-log-capture: {line}")
+        if p.returncode != 0:
+            reason = self._derive_reason(p)
+            self.logger.error(
+                f"PRODOPS batch_log_capture FAILED rc={p.returncode}")
+            self._log_action('batch_log_capture', t0, outcome='error',
+                             reason=reason,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+        else:
+            self.logger.info("PRODOPS batch_log_capture done")
+            counts = next((ln for ln in (p.stdout or '').splitlines()
+                           if ln.startswith('candidates=')), '')
+            self._log_action('batch_log_capture', t0,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             summary=counts or 'capture complete')
 
     def _handle_delivery_daily_rebuild(self, m):
         """Run the daily delivery-record rebuild off the receiver thread —
