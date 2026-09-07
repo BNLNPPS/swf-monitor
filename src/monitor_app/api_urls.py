@@ -11,6 +11,7 @@ from .views import (
     ai_memory_record, ai_memory_load, dpid_verify, panda_slash_command,
     users_list,
 )
+from .host_reports import host_report
 from .sse_views import sse_message_stream, sse_status
 from .panda import api as panda_api
 from .panda.corun_callback import corun_callback
@@ -57,6 +58,9 @@ urlpatterns = [
     path('dpid/verify/', dpid_verify, name='dpid-verify'),
     path('slash/panda/', panda_slash_command, name='panda-slash-command'),
     path('corun-callback/', corun_callback, name='corun-callback'),
+    # Host reporters push what only their own host can see
+    # (docs/OSG_SUBMIT_REPORTER.md).
+    path('host-reports/<str:host>/', host_report, name='host-report'),
     # PanDA REST API — read-only JSON for external consumers.
     # See monitor_app/panda/api.py.
     path('panda/tasks/', panda_api.tasks_list, name='panda-api-tasks-list'),
