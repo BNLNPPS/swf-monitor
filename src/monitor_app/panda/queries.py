@@ -2396,53 +2396,31 @@ def task_payload_rollup(jeditaskid, limit=2000):
 BATCH_LOG_TIMEOUT_S = 8
 BATCH_LOG_MAX_BYTES = 512 * 1024
 
-# Condor event types that carry a human reason in their indented detail.
-# Anything else in the log is bookkeeping.
-CONDOR_REASON_EVENTS = {
-    '004': 'evicted',
-    '005': 'terminated',
-    '007': 'shadow exception',
-    '009': 'aborted',
-    '012': 'held',
-    '021': 'remote error',
-    '022': 'disconnected',
-    '024': 'grid submit failed',
+# Condor's own trailer inside an event's detail. This is the only line
+# that is certainly not part of a reason; everything else indented under
+# an event is kept, because a filter built on a guess about the format
+# drops real text and says nothing about having done so.
+_CONDOR_TRAILER_RE = re.compile(r'^Code \d+ Subcode \d+$')
+# Event descriptions worth a plain word in the output. A code that is not
+# here is still reported, labelled by its number: the log is the
+# authority and nothing it says is dropped for not being recognised.
+CONDOR_EVENT_NAMES = {
+    '004': 'evicted', '005': 'terminated', '007': 'shadow exception',
+    '009': 'aborted', '012': 'held', '021': 'remote error',
+    '022': 'disconnected', '024': 'grid submit failed',
 }
-# Condor's own trailers inside a reason block, and the usage statistics
-# that follow a termination event: not part of any reason.
-_CONDOR_NOISE_RE = re.compile(
-    r'^(Code \d+ Subcode \d+|Total \w+|Partitionable Resources.*|'
-    r'\s*(Cpus|Disk|Memory|Ioheavy)\s*:.*|.*Run Bytes (Sent|Received).*)$')
-# Prefixes PanDA and harvester put in front of a batch reason before
-# storing it. Stripping them is what lets a stored value be compared
-# with the log text it came from.
-_DIAG_PREFIX_RE = re.compile(
-    r'^(Diag from worker\s*:\s*|'
-    r'The worker was cancelled while the job was starting\s*:\s*|'
-    r'Condor HoldReason:\s*|pilot:\s*)', re.IGNORECASE)
 
 
-def _diag_core(text):
-    """A stored diag reduced to the batch text inside it, for comparison."""
-    if not text:
-        return ''
-    core = text.strip()
-    while True:
-        stripped = _DIAG_PREFIX_RE.sub('', core)
-        if stripped == core:
-            break
-        core = stripped
-    return ' '.join(core.split())
+def condor_log_events(batchlog_url, timeout_s=BATCH_LOG_TIMEOUT_S):
+    """What the condor event log says, for a batch-layer failure.
 
-
-def condor_log_reasons(batchlog_url, timeout_s=BATCH_LOG_TIMEOUT_S):
-    """Every reason-bearing event in a harvester condor event log.
-
-    Returns ``{source, events: [{event, at, text}]}`` oldest first, or
-    ``{source, error}`` when the log cannot be read or parsed. A failure
-    is reported rather than swallowed: a caller that silently falls back
-    to PanDA's stored value would present a truncation as the whole
-    reason, which is the thing this exists to prevent.
+    Returns ``{source, events: [{code, event, at, header, text}]}``
+    oldest first, one entry per event that carries detail, or
+    ``{source, error}`` when the log cannot be read. Every event with
+    detail is included and its text is returned as written; this
+    reports the authority rather than interpreting it, because the
+    stored diags it exists to replace are already an interpretation
+    that lost the ending.
     """
     if not batchlog_url:
         return None
@@ -2466,13 +2444,12 @@ def condor_log_reasons(batchlog_url, timeout_s=BATCH_LOG_TIMEOUT_S):
                 'error': f'{e.__class__.__name__}: {e}'}
 
     # Format: an event header line "NNN (cluster.proc.sub) DATE TIME
-    # description", then tab-indented detail lines, closed by a line of
-    # "...". The detail of a reason-bearing event is the reason.
+    # description", then indented detail lines, closed by a line of "...".
     events = []
     lines = body.splitlines()
     for i, line in enumerate(lines):
         code = line[:3]
-        if code not in CONDOR_REASON_EVENTS or not line[3:4] == ' ':
+        if not (code.isdigit() and line[3:4] == ' ' and '(' in line):
             continue
         parts = line.split()
         at = ' '.join(parts[2:4]) if len(parts) >= 4 else None
@@ -2481,47 +2458,20 @@ def condor_log_reasons(batchlog_url, timeout_s=BATCH_LOG_TIMEOUT_S):
             if follow.startswith('...'):
                 break
             text = follow.strip()
-            if not text or _CONDOR_NOISE_RE.match(text):
-                continue
-            detail.append(text)
+            if text and not _CONDOR_TRAILER_RE.match(text):
+                detail.append(text)
         if detail:
-            events.append({'event': CONDOR_REASON_EVENTS[code],
-                           'at': at, 'text': ' '.join(detail)})
+            events.append({
+                'code': code,
+                'event': CONDOR_EVENT_NAMES.get(code, f'event {code}'),
+                'at': at,
+                'header': line.strip(),
+                'text': ' '.join(detail),
+            })
     if not events:
         return {'source': batchlog_url,
-                'error': 'no reason-bearing event in the condor log'}
+                'error': 'no event with detail in the condor log'}
     return {'source': batchlog_url, 'events': events}
-
-
-def restore_truncated_diags(job, harvester, reasons):
-    """Which stored diags were cut, and the full text of each.
-
-    Compares every diag PanDA and harvester stored against the condor
-    log's own reasons: a stored value whose batch text is a proper
-    prefix of a logged reason was truncated, and the logged reason is
-    what it should have said. Returns ``{field: {stored_chars, full}}``
-    for the fields that were cut, empty when none were.
-    """
-    if not reasons or not reasons.get('events'):
-        return {}
-    logged = [' '.join(e['text'].split()) for e in reasons['events']]
-    restored = {}
-    candidates = [(f, (job or {}).get(f)) for f in (
-        'superrordiag', 'taskbuffererrordiag', 'piloterrordiag',
-        'ddmerrordiag', 'exeerrordiag', 'brokerageerrordiag',
-        'jobdispatchererrordiag')]
-    candidates.append(('harvester.diagmessage',
-                       (harvester or {}).get('diagmessage')))
-    for field, stored in candidates:
-        core = _diag_core(stored)
-        if not core:
-            continue
-        for full in logged:
-            if len(full) > len(core) and full.startswith(core):
-                restored[field] = {'stored_chars': len(stored),
-                                   'full': full}
-                break
-    return restored
 
 
 def study_job(pandaid, include_batch_reason=False):
@@ -2716,13 +2666,10 @@ def study_job(pandaid, include_batch_reason=False):
     # log the harvester keeps — the authority, and open inside SCDF —
     # and report the reasons whole, naming each stored field that was cut.
     if include_batch_reason:
-        reasons = condor_log_reasons(
+        events = condor_log_events(
             (harvester or {}).get('batchlog') or log_urls.get('batch_log'))
-        if reasons:
-            restored = restore_truncated_diags(job, harvester, reasons)
-            if restored:
-                reasons['restored_truncated'] = restored
-            result['batch_reasons'] = reasons
+        if events:
+            result['batch_record'] = events
 
     if task_info:
         result["task"] = task_info
