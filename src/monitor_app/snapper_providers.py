@@ -1820,7 +1820,11 @@ def _platform_groups():
          'panel_px': 110, 'units': 'seconds since last log write'},
         {'name': 'Platform submit host', 'title': 'Submit host load',
          'prefixes': ['plsl_'], 'ids': [],
-         'order': ['plsl_1m', 'plsl_5m', 'plsl_15m'],
+         # Three load curves on one panel read as noise; 1 and 15 minutes
+         # give the instant and the trend. The 5-minute stays in the
+         # record and a tick away.
+         'order': ['plsl_1m', 'plsl_15m', 'plsl_5m'],
+         'default_off_ids': ['plsl_5m'],
          'panel_px': 110, 'units': 'load average'},
         {'name': 'Platform submit storage', 'title': 'Submit host storage',
          'prefixes': ['plsu_'], 'ids': [],
