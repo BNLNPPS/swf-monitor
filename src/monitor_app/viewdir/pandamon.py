@@ -2013,6 +2013,74 @@ def _node_declines_product():
     return value.get('nodes') or []
 
 
+def _exclusions_context():
+    """What the OSG submission excludes, reported if possible.
+
+    The submit host reports what it is actually enforcing
+    (docs/OSG_SUBMIT_REPORTER.md); the declared list in
+    ``swf_epicprod.osg_exclusions`` carries the measurement that put each
+    entry there. The reported list is the authority for *what* is
+    excluded and the declared list supplies *why*, joined by site and
+    node. An entry the host enforces that we hold no evidence for
+    therefore shows with its evidence blank, which is worth seeing: it
+    means someone excluded something without a record of the reason.
+
+    With no report the declared list stands alone and the page says so,
+    because a copy presented as live is the failure this exists to end.
+    """
+    from swf_epicprod import osg_exclusions
+    from ..host_reports import latest
+
+    context = {
+        'exclusion_as_of': osg_exclusions.AS_OF,
+        'exclusion_queues': ', '.join(osg_exclusions.QUEUES),
+        'exclusion_totals': osg_exclusions.totals(),
+    }
+    report = latest('osgsub01') or {}
+    live = ((report.get('record') or {}).get('exclusions') or {})
+
+    if live.get('sites') is None:
+        context.update({
+            'excluded_sites': osg_exclusions.EXCLUDED_SITES,
+            'excluded_nodes': osg_exclusions.EXCLUDED_SITE_NODES,
+            'exclusion_source': 'declared',
+        })
+        return context
+
+    by_site = {s['site']: s for s in osg_exclusions.EXCLUDED_SITES}
+    by_node = {(n['site'], n['node'].split('.')[0]): n
+               for n in osg_exclusions.EXCLUDED_SITE_NODES}
+
+    sites = []
+    for name in live['sites']:
+        row = dict(by_site.get(name) or {})
+        row['site'] = name
+        sites.append(row)
+
+    nodes = []
+    for pair in live.get('site_nodes') or []:
+        known = by_node.get((pair['site'], pair['node']))
+        row = dict(known or {})
+        row['site'] = pair['site']
+        # The clause carries the host's first label; show the full name
+        # where the record has one, since that is what an operator reads.
+        row['node'] = (known or {}).get('node') or pair['node']
+        nodes.append(row)
+
+    context.update({
+        'excluded_sites': sites,
+        'excluded_nodes': nodes,
+        'exclusion_source': 'reported',
+        'exclusion_reported_at': report.get('reported_at'),
+        'exclusion_age_seconds': report.get('age_seconds'),
+        'exclusion_file_modified': live.get('modified'),
+        'exclusion_queues': ', '.join(live.get('queues')
+                                      or osg_exclusions.QUEUES),
+        'exclusion_pool': (report.get('record') or {}).get('pool') or {},
+    })
+    return context
+
+
 def epic_queues_list(request):
     """ePIC compute queues from live PanDA schedconfig."""
     result = list_queues(vo='eic')
@@ -2104,22 +2172,15 @@ def epic_queues_list(request):
             queues = [q for q in queues if (q.get(key) or '') == value]
 
     # What the OSG submission excludes, and what the payload declined.
-    # The exclusions are operative in a submit description on the submit
-    # host, which cannot be read from here on a schedule, so they are
-    # rendered from the declared list and reconciled by
-    # swf-epicprod scripts/check-osg-exclusions.py.
-    from swf_epicprod import osg_exclusions
     declines_rows = sorted(
         ({'queue': q, **d} for q, d in declines.items()),
         key=lambda r: r['count'], reverse=True)
 
     return render(request, 'monitor_app/epic_queues_list.html', {
         'queues': queues,
-        'excluded_sites': osg_exclusions.EXCLUDED_SITES,
-        'excluded_nodes': osg_exclusions.EXCLUDED_SITE_NODES,
-        'exclusion_totals': osg_exclusions.totals(),
-        'exclusion_as_of': osg_exclusions.AS_OF,
-        'exclusion_queues': ', '.join(osg_exclusions.QUEUES),
+        # Reported by the submit host where it has reported, declared
+        # otherwise, and the page states which (_exclusions_context).
+        **_exclusions_context(),
         'declines_rows': declines_rows,
         'declines_days': SPARK_SPAN_DAYS,
         'node_decline_rows': _node_declines_product(),

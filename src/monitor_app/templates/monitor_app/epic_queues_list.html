@@ -100,11 +100,26 @@
         </table>
 
     <h2 id="exclusions" class="mt-4">Exclusions</h2>
+    {% if exclusion_source == 'reported' %}
+    <p class="mb-2">Reported by the submit host
+       <span data-relative-time="{{ exclusion_reported_at|date:'c' }}"></span>,
+       read from the submit description {{ exclusion_queues }} share,
+       last changed {{ exclusion_file_modified }}. Counts beside each entry are the
+       measurement that put it there, from the thirty days to {{ exclusion_as_of }};
+       an entry with no counts is enforced on the host without a recorded reason.</p>
+    {% if exclusion_pool.slots_total %}
+    <p class="mb-2">Pool at that moment: {{ exclusion_pool.slots_total }} slots,
+       {{ exclusion_pool.slots_admitted }} admitted by this queue's requirements,
+       <strong>{{ exclusion_pool.slots_excluded_now|default:"0" }}</strong> removed by these
+       exclusions.</p>
+    {% endif %}
+    {% else %}
     <p class="mb-2 fw-bold text-danger">Interim: declared, not live. The exclusions below are
        operative in a submit description on the submit host, which the monitor cannot read on a
        schedule, so this is a copy that can be wrong. It is reconciled by hand with
        check-osg-exclusions.py, last in agreement on {{ exclusion_as_of }}. A reporter on the
        submit host replaces this with the live state.</p>
+    {% endif %}
 
     <h3 id="blacklist-sites" class="mt-3">Blacklist &middot; sites</h3>
     <p class="mb-2">Excluded whole from the OSG pool, in the submit description
