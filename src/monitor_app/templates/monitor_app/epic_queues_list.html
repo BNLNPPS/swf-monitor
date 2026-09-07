@@ -13,6 +13,8 @@
         <a href="#blacklist-site-nodes">Blacklist &middot; site-nodes</a>
         <span class="text-muted mx-1">&middot;</span>
         <a href="#declines">Declines</a>
+        <span class="text-muted mx-1">&middot;</span>
+        <a href="#node-declines">Declines &middot; by node</a>
     </p>
 
     <h1>ePIC Compute Queues</h1>
@@ -171,6 +173,36 @@
     </table>
     {% else %}
     <p class="mb-0">No declines recorded in the window.</p>
+    {% endif %}
+
+    <h3 id="node-declines" class="mt-4">By node</h3>
+    <p class="mb-2">The same declines per worker node, with what each node finished in the
+       same window so a busy node is not read as a bad one, and with the node's own account
+       of what it could not reach where the job's report has been filed. Nothing here bans a
+       node; a person does that, on this evidence.
+       <a class="ms-1" href="{% url 'monitor_app:panda_node_declines' %}">the full listing</a>.</p>
+    {% if node_decline_rows %}
+    <table class="table table-striped table-bordered table-sm align-middle w-auto mb-0 swf-sortable">
+        <thead><tr><th>Node</th><th>Queue</th><th class="text-end">Declines</th>
+            <th class="text-end">Finished</th><th class="text-end">Jobs</th>
+            <th>Last</th><th>What the node said</th></tr></thead>
+        <tbody>
+        {% for n in node_decline_rows %}
+            <tr>
+                <td>{{ n.node }}</td>
+                <td><a href="{% url 'monitor_app:epic_queue_detail' n.site %}">{{ n.site }}</a></td>
+                <td class="text-end">{{ n.declines }}</td>
+                <td class="text-end">{{ n.finished }}</td>
+                <td class="text-end">{{ n.jobs }}</td>
+                <td class="text-nowrap">{{ n.last_decline|default:"—" }}</td>
+                <td>{% for reason in n.reasons %}{{ reason }}{% if not forloop.last %}<br>{% endif %}{% empty %}<span class="text-muted">no report filed yet</span>{% endfor %}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="mb-0">No node declined a landing in the window. The decline exit arrived with
+       payload 0.4.0 on 2026-09-07, so this record begins there.</p>
     {% endif %}
 </div>
 {% endblock %}

@@ -1994,6 +1994,25 @@ def _landing_declines_product():
     return value
 
 
+def _node_declines_product():
+    """Landing declines per worker node over the same standing window, from
+    the job record joined to the payload reports the sweep files. Cached
+    like the per-queue product: the query scans two weeks of jobs and reads
+    the filed reports, and a count is never the thing a decision turns on
+    within fifteen minutes."""
+    from ..cached_product import get_product
+    product = get_product(
+        'epic_queues_node_declines:v1',
+        lambda: node_declines(SPARK_SPAN_DAYS),
+        ttl_seconds=15 * 60, async_first_fill=True)
+    value = (product or {}).get('value') or {}
+    if value.get('error'):
+        logger.error('node declines product carries an error: %s',
+                     value['error'])
+        return []
+    return value.get('nodes') or []
+
+
 def epic_queues_list(request):
     """ePIC compute queues from live PanDA schedconfig."""
     result = list_queues(vo='eic')
@@ -2103,6 +2122,7 @@ def epic_queues_list(request):
         'exclusion_queues': ', '.join(osg_exclusions.QUEUES),
         'declines_rows': declines_rows,
         'declines_days': SPARK_SPAN_DAYS,
+        'node_decline_rows': _node_declines_product(),
         'filters': filters,
         'active_filters': [
             {'label': f['label'], 'value': f['selected']}
