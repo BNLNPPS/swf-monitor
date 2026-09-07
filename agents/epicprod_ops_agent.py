@@ -151,6 +151,10 @@ DELIVERY_DAILY_TIMEOUT = int(os.environ.get("EPICPROD_DELIVERY_DAILY_TIMEOUT", "
 BATCH_LOG_CAPTURE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "batch-log-capture.py"
 BATCH_LOG_CAPTURE_TIMEOUT = int(os.environ.get("EPICPROD_BATCH_LOG_CAPTURE_TIMEOUT", "1800"))
 BATCH_LOG_CAPTURE_HOURS = os.environ.get("EPICPROD_BATCH_LOG_CAPTURE_HOURS", "26")
+# The learning pass over the captured corpus, after the capture in the same
+# chain so the day's logs are in it (docs/ERROR_ATTRIBUTION.md).
+BATCH_LOG_LEARN_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "batch-log-learn.py"
+BATCH_LOG_LEARN_TIMEOUT = int(os.environ.get("EPICPROD_BATCH_LOG_LEARN_TIMEOUT", "1800"))
 # The registrar (swf-epicprod docs/RUCIO_RESILIENCE.md, Measure 2): completes
 # the registrations the payload left pending, hourly, and holds the only
 # retry — one gentle attempt per job, then bounded attempts from one process.
@@ -262,7 +266,8 @@ class EpicProdOpsAgent(BaseAgent):
                    "capture_system_snap",
                    "rucio_arrivals_sweep", "epic_prod_past_import",
                    "file_events_measure", "delivery_daily_rebuild",
-                   "batch_log_capture", "report_sweep", "registrar",
+                   "batch_log_capture", "batch_log_learn",
+                   "report_sweep", "registrar",
                    "storage_sweep", "campaign_config_propose",
                    "assessment_completed",
                    "health_ping", "shutdown"}
@@ -1352,6 +1357,7 @@ class EpicProdOpsAgent(BaseAgent):
             # expires, so a stall later in the chain must not cost a day of
             # batch-layer evidence.
             ('batch_log_capture', self._do_batch_log_capture),
+            ('batch_log_learn', self._do_batch_log_learn),
             ('catalog_import_csv',
              lambda msg: self._do_catalog_import(dict(msg, source='csv'))),
             ('epic_prod_past_import', self._do_epic_prod_past_import),
@@ -1843,6 +1849,50 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              sublevel='low', live_default=False,
                              summary=summary or 'sweep complete')
+
+    def _handle_batch_log_learn(self, m):
+        """Run the learning pass off the receiver thread — normally a
+        catalog_sync chain step, also directly invokable."""
+        self.run_in_background(
+            self._do_batch_log_learn, m,
+            dedup_key="batch_log_learn", label="batch_log_learn")
+
+    def _do_batch_log_learn(self, m):
+        """Mine the captured condor logs into the knowledge base and rescue
+        one raw log per pattern, plus every log matching no pattern, before
+        retention deletes a date directory (docs/ERROR_ATTRIBUTION.md,
+        Retention and learning)."""
+        cmd = [sys.executable, str(BATCH_LOG_LEARN_SCRIPT), '--quiet']
+        self.logger.info("PRODOPS batch_log_learn: mining the batch-record corpus")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=BATCH_LOG_LEARN_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS batch_log_learn TIMEOUT after {BATCH_LOG_LEARN_TIMEOUT}s")
+            self._log_action('batch_log_learn', t0, outcome='timeout',
+                             reason=f'timed out after {BATCH_LOG_LEARN_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  batch-log-learn: {line}")
+        summary_line = ((p.stdout or '').strip().splitlines() or [''])[-1]
+        if p.returncode != 0:
+            self.logger.error(f"PRODOPS batch_log_learn FAILED rc={p.returncode}")
+            self._log_action('batch_log_learn', t0, outcome='error',
+                             reason=self._derive_reason(p),
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        self.logger.info(f"PRODOPS batch_log_learn done: {summary_line}")
+        self._log_action('batch_log_learn', t0,
+                         username=str(m.get('created_by') or ''),
+                         sublevel='low', live_default=False,
+                         summary=summary_line)
 
     def _handle_batch_log_capture(self, m):
         """Run the batch-record capture off the receiver thread — normally a

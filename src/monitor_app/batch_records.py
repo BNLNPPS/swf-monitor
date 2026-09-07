@@ -29,8 +29,11 @@ Retention is one month, and the date directory is the unit of deletion.
 Anything the learning pass rescues moves under ``keep`` before its
 directory goes, so nothing at delete time has to decide anything.
 """
+import hashlib
+import json
 import logging
 import os
+import re
 import ssl
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -230,3 +233,178 @@ def prune(days=RETENTION_DAYS, root=None, dry_run=False):
         except OSError as e:                                  # noqa: BLE001
             logger.error('batch record prune failed for %s: %s', path, e)
     return removed
+
+
+# ── the learning pass ────────────────────────────────────────────────────
+# The corpus is the authority on what a condor event log contains. A pass
+# over it before it ages out yields the catalogue of codes that actually
+# occur, the taxonomy of reasons that recur, and the separation of
+# boilerplate from signal — and rescues one raw log per pattern, plus every
+# log matching no pattern, so the knowledge base always keeps the evidence
+# behind it (docs/ERROR_ATTRIBUTION.md, Retention and learning).
+
+KNOWLEDGE_FILE = 'knowledge.json'
+# A line present in most logs is the shape of the format, not the account of
+# a failure. Two thirds is high enough that a common failure mode does not
+# qualify and low enough to catch the ceremony.
+BOILERPLATE_SHARE = 0.66
+_NUM_RE = re.compile(r'\d+')
+_HEX_RE = re.compile(r'\b[0-9a-f]{8,}\b', re.I)
+_PATH_RE = re.compile(r'/[\w./@+-]{4,}')
+_HOST_RE = re.compile(r'\b[\w-]+(?:\.[\w-]+){2,}\b')
+
+
+def normalize(text):
+    """The shape of a line, with what varies between jobs removed.
+
+    Two failures are the same shape when their normalized text matches:
+    hosts, paths, hexadecimal ids and numbers carry the instance, not the
+    kind. Derived from the corpus rather than declared, so a pattern is
+    whatever the logs repeat.
+    """
+    out = _HOST_RE.sub('<host>', text or '')
+    out = _PATH_RE.sub('<path>', out)
+    out = _HEX_RE.sub('<hex>', out)
+    out = _NUM_RE.sub('#', out)
+    return ' '.join(out.split())[:400]
+
+
+def _iter_logs(root):
+    """(pandaid, day, path, body) for every captured body in the store."""
+    for name in sorted(os.listdir(root)):
+        if name == 'keep':
+            continue
+        day_dir = os.path.join(root, name)
+        if not os.path.isdir(day_dir):
+            continue
+        for entry in sorted(os.listdir(day_dir)):
+            if not entry.endswith('.log'):
+                continue
+            path = os.path.join(day_dir, entry)
+            try:
+                with open(path, errors='replace') as handle:
+                    body = handle.read()
+            except OSError as e:                              # noqa: BLE001
+                logger.error('batch record %s unreadable: %s', path, e)
+                continue
+            yield entry[:-4], name, path, body
+
+
+def learn(root=None, rescue=True):
+    """Mine the corpus and write the knowledge base. Returns its summary.
+
+    Nothing here classifies a log at capture time; the capture stays
+    verbatim and this is the only reader that generalizes over it, so a
+    better pass re-runs against the same bodies.
+    """
+    from .panda.queries import CONDOR_EVENT_NAMES, parse_condor_log
+    root = root or store_root()
+    codes, patterns, line_docs = {}, {}, {}
+    logs = 0
+    for pandaid, day, path, body in _iter_logs(root):
+        logs += 1
+        seen_lines = set()
+        for line in body.splitlines():
+            code = line[:3]
+            if code.isdigit() and line[3:4] == ' ' and '(' in line:
+                entry = codes.setdefault(code, {
+                    'code': code,
+                    'name': CONDOR_EVENT_NAMES.get(code, ''),
+                    'named': code in CONDOR_EVENT_NAMES,
+                    'count': 0, 'logs': 0, 'first_seen': day, 'last_seen': day,
+                    'example': line.strip()[:300]})
+                entry['count'] += 1
+                entry['last_seen'] = max(entry['last_seen'], day)
+                entry['first_seen'] = min(entry['first_seen'], day)
+                if code not in seen_lines:
+                    entry['logs'] += 1
+                    seen_lines.add(code)
+            shape = normalize(line.strip())
+            if shape:
+                line_docs.setdefault(shape, set()).add(pandaid)
+        events = parse_condor_log(body, source=path)
+        for event in events.get('events') or []:
+            shape = normalize(event['text'])
+            if not shape:
+                continue
+            pattern = patterns.setdefault(shape, {
+                'shape': shape, 'code': event['code'],
+                'event': event.get('event') or '',
+                'count': 0, 'jobs': [], 'first_seen': day, 'last_seen': day,
+                'example': event['text'][:600], 'exemplar': pandaid})
+            pattern['count'] += 1
+            pattern['last_seen'] = max(pattern['last_seen'], day)
+            pattern['first_seen'] = min(pattern['first_seen'], day)
+            if len(pattern['jobs']) < 20 and pandaid not in pattern['jobs']:
+                pattern['jobs'].append(pandaid)
+
+    boilerplate = sorted(
+        shape for shape, docs in line_docs.items()
+        if logs and len(docs) / logs >= BOILERPLATE_SHARE)
+    knowledge = {
+        'built_at': datetime.now(dt_timezone.utc).isoformat(),
+        'logs': logs,
+        'codes': sorted(codes.values(), key=lambda c: -c['count']),
+        'unnamed_codes': sorted(c['code'] for c in codes.values()
+                                if not c['named']),
+        'patterns': sorted(patterns.values(), key=lambda p: -p['count']),
+        'boilerplate': boilerplate,
+    }
+    if rescue:
+        knowledge['rescued'] = _rescue(root, knowledge)
+    _write(os.path.join(root, KNOWLEDGE_FILE),
+           json.dumps(knowledge, indent=2, sort_keys=True))
+    return knowledge
+
+
+def knowledge(root=None):
+    """The knowledge base as last built, or None."""
+    path = os.path.join(root or store_root(), KNOWLEDGE_FILE)
+    try:
+        with open(path) as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return None
+
+
+def _rescue(root, knowledge_base):
+    """Keep one raw log per pattern, and every log matching no pattern.
+
+    Retention deletes a date directory whole, so anything that must outlive
+    it moves under ``keep`` first. One exemplar per pattern bounds the
+    permanent set against a storm; an unmatched log is kept entire, because
+    a novel shape is the thing the corpus cannot reconstruct later.
+    """
+    keep_root = os.path.join(root, 'keep')
+    shapes = {p['shape'] for p in knowledge_base['patterns']}
+    exemplars = {p['exemplar']: p['shape'] for p in knowledge_base['patterns']}
+    rescued = {'exemplars': 0, 'unmatched': 0}
+    for pandaid, day, path, body in _iter_logs(root):
+        wanted, bucket = None, None
+        if pandaid in exemplars:
+            wanted, bucket = 'exemplars', _shape_dir(exemplars[pandaid])
+        else:
+            from .panda.queries import parse_condor_log
+            events = parse_condor_log(body, source=path)
+            found = {normalize(e['text']) for e in (events.get('events') or [])}
+            if not (found & shapes):
+                wanted, bucket = 'unmatched', 'unmatched'
+        if not wanted:
+            continue
+        target_dir = os.path.join(keep_root, bucket)
+        target = os.path.join(target_dir, f'{pandaid}.log')
+        if os.path.exists(target):
+            continue
+        try:
+            os.makedirs(target_dir, exist_ok=True)
+            with open(target, 'w') as handle:
+                handle.write(body)
+            rescued[wanted] += 1
+        except OSError as e:                                  # noqa: BLE001
+            logger.error('batch record %s not rescued: %s', pandaid, e)
+    return rescued
+
+
+def _shape_dir(shape):
+    """A stable directory name for a pattern, from its shape."""
+    return hashlib.sha1(shape.encode('utf-8')).hexdigest()[:12]
