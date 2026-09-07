@@ -312,8 +312,8 @@ def sweep(since, limit=None, per_signature=READ_PER_SIGNATURE, dry_run=False):
     opened = sweeper_client()
     if opened is None:
         return {'outcome': 'failed', 'reason': 'no sweeper credential',
-                'window': {'since': since.isoformat(),
-                           'until': started.isoformat()},
+                'window': {'from': since.isoformat(),
+                           'to': started.isoformat()},
                 'filed': [], 'deleted_read': [], 'deleted_unread': []}
     client, bucket, prefix = opened
 
@@ -353,7 +353,11 @@ def sweep(since, limit=None, per_signature=READ_PER_SIGNATURE, dry_run=False):
     record = {
         'outcome': 'ok' if not errors else 'partial',
         'reason': '; '.join(errors[:20]),
-        'window': {'since': since.isoformat(), 'until': started.isoformat()},
+        # 'from' and 'to', which is what the gateway's index reads
+        # (swf-remote scripts/stageout_index.py). The pass record is a
+        # contract between two hosts, so its shape is pinned in
+        # swf-epicprod docs/JOB_REPORTING.md rather than left to a reader.
+        'window': {'from': since.isoformat(), 'to': started.isoformat()},
         'signatures': len(seen),
         'candidates': len(jobs),
         'filed': filed,
