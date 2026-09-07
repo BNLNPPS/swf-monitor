@@ -65,6 +65,17 @@ def _day_dir(root, day):
     return os.path.join(root, day.isoformat())
 
 
+def _keep_paths(root, pandaid):
+    """Where a rescued copy of this job's log would be, under ``keep``."""
+    keep_root = os.path.join(root, 'keep')
+    try:
+        buckets = os.listdir(keep_root)
+    except OSError:
+        return []
+    return [os.path.join(keep_root, bucket, f'{pandaid}.log')
+            for bucket in sorted(buckets)]
+
+
 def stored(pandaid, root=None):
     """The capture of one job, or None.
 
@@ -91,6 +102,18 @@ def stored(pandaid, root=None):
                     return None
                 return {'pandaid': pandaid, 'status': status, 'path': path,
                         'body': body, 'bytes': len(body), 'day': day}
+    # A rescued exemplar outlives its date directory, and a link to it must
+    # outlive it too: the knowledge base points at these jobs by name.
+    for path in _keep_paths(root, pandaid):
+        if os.path.exists(path):
+            try:
+                with open(path, encoding='utf-8', errors='replace') as f:
+                    body = f.read()
+            except OSError as e:                              # noqa: BLE001
+                logger.error('rescued batch record unreadable at %s: %s', path, e)
+                return None
+            return {'pandaid': pandaid, 'status': 'captured', 'path': path,
+                    'body': body, 'bytes': len(body), 'day': 'kept'}
     return None
 
 

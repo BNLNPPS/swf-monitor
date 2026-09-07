@@ -2120,6 +2120,16 @@ def _reported_submission(queue_name):
     }
 
 
+def _batch_knowledge():
+    """The batch-record knowledge base as the learning pass last built it.
+
+    A file read of a product the nightly pass writes, so the page costs
+    nothing and shows exactly what the corpus said when it was last mined
+    (docs/ERROR_ATTRIBUTION.md, Retention and learning)."""
+    from monitor_app import batch_records
+    return batch_records.knowledge() or {}
+
+
 def epic_queues_list(request):
     """ePIC compute queues from live PanDA schedconfig."""
     result = list_queues(vo='eic')
@@ -2223,6 +2233,7 @@ def epic_queues_list(request):
         'declines_rows': declines_rows,
         'declines_days': SPARK_SPAN_DAYS,
         'node_decline_rows': _node_declines_product(),
+        'batch_knowledge': _batch_knowledge(),
         'filters': filters,
         'active_filters': [
             {'label': f['label'], 'value': f['selected']}
