@@ -49,6 +49,9 @@ Capabilities:
   panda_sandbox_keepalive — touch the sandbox tarballs of retryable tasks in
                        the PanDA server cache so the 7-day purge passes them
                        by (nightly catalog_sync chain step).
+  stash_drain        — catalogue what jobs stashed at BNL when JLab would not
+                       take their output, and bring it home when JLab answers
+                       (hourly; docs/RUCIO_FAILOVER_STASH.md).
   content_validate   — reconcile each sample's dataset against the production
                        record and store the finding; proposes, never acts
                        (docs/EPICPROD_VALIDATION.md).
@@ -164,6 +167,8 @@ BATCH_LOG_LEARN_TIMEOUT = int(os.environ.get("EPICPROD_BATCH_LOG_LEARN_TIMEOUT",
 # The registrar (swf-epicprod docs/RUCIO_RESILIENCE.md, Measure 2): completes
 # the registrations the payload left pending, hourly, and holds the only
 # retry — one gentle attempt per job, then bounded attempts from one process.
+STASH_DRAIN_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "stash-drain.py"
+STASH_DRAIN_TIMEOUT = int(os.environ.get("EPICPROD_STASH_DRAIN_TIMEOUT", "1800"))
 CONTENT_VALIDATE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "content-validate.py"
 CONTENT_VALIDATE_TIMEOUT = int(os.environ.get("EPICPROD_CONTENT_VALIDATE_TIMEOUT", "1800"))
 OUTPUTS_INGEST_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "outputs-ingest.py"
@@ -279,7 +284,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "file_events_measure", "delivery_daily_rebuild",
                    "batch_log_capture", "batch_log_learn",
                    "report_sweep", "outputs_ingest", "registrar",
-                   "content_validate",
+                   "content_validate", "stash_drain",
                    "storage_sweep", "campaign_config_propose",
                    "assessment_completed",
                    "health_ping", "shutdown"}
@@ -1748,6 +1753,68 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              sublevel='low', live_default=False,
                              summary=((p.stdout or '').splitlines() or [''])[-1])
+
+    def _handle_stash_drain(self, m):
+        """Drain the failover stash off the receiver thread — hourly, also
+        directly invokable."""
+        self.run_in_background(
+            self._do_stash_drain, m,
+            dedup_key="stash_drain", label="stash_drain")
+
+    def _do_stash_drain(self, m):
+        """Catalogue what jobs stashed at BNL and bring it home when JLab
+        answers. A stash that cannot be drained is a backlog, which is what
+        it is for (swf-epicprod docs/RUCIO_FAILOVER_STASH.md)."""
+        cmd = [sys.executable, str(STASH_DRAIN_SCRIPT)]
+        if m.get('hours'):
+            cmd += ['--hours', str(m['hours'])]
+        if m.get('dry_run'):
+            cmd.append('--dry-run')
+        self.logger.info("PRODOPS stash_drain: draining the failover stash")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=STASH_DRAIN_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS stash_drain TIMEOUT after {STASH_DRAIN_TIMEOUT}s")
+            self._log_action('stash_drain', t0, outcome='timeout',
+                             reason=f'timed out after {STASH_DRAIN_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  stash-drain: {line}")
+        summary_line = ((p.stdout or '').strip().splitlines() or [''])[-1]
+        try:
+            summary = json.loads(summary_line)
+        except (ValueError, TypeError):
+            summary = {}
+        entries = int(summary.get('entries') or 0)
+        failed = summary.get('failed') or []
+        if p.returncode != 0:
+            self.logger.error(f"PRODOPS stash_drain FAILED rc={p.returncode}")
+            self._log_action('stash_drain', t0, outcome='error',
+                             reason='; '.join(str(f) for f in failed[:3])
+                                    or self._derive_reason(p),
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.ERROR)
+            return
+        self.logger.info(f"PRODOPS stash_drain done: {summary_line}")
+        self._log_action(
+            'stash_drain', t0,
+            outcome='ok' if not failed else 'partial',
+            reason='; '.join(str(f) for f in failed[:3]),
+            username=str(m.get('created_by') or ''),
+            # A stash with anything in it is worth seeing live: it means
+            # jobs are meeting a catalog that will not take their output.
+            sublevel='high' if entries else 'low',
+            live_default=bool(entries),
+            summary=(f"entries={entries} catalogued={summary.get('catalogued', 0)} "
+                     f"missing={summary.get('missing_at_stash', 0)} "
+                     f"jlab={summary.get('jlab_reachable')}"))
 
     def _handle_content_validate(self, m):
         """Reconcile samples against their datasets off the receiver thread —
