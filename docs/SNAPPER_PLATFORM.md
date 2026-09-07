@@ -151,6 +151,14 @@ modification times are overwritten, so no past instant's staleness
 survives in the records. The view states the record's start rather
 than implying earlier coverage.
 
+The submit host's quantities are in the same position and cannot be
+backfilled at all. Every one of them is a reading of the present: the
+pool's composition on a past day is recorded nowhere, a daemon's log
+age is current by construction, and held workers at a past instant are
+not kept once the schedd releases them. Their panels are therefore
+empty before the reporter's first run on 2026-09-07 and accrue from
+there, which is the honest rendering rather than a gap to be filled.
+
 ## The server-host reporter
 
 Host reporters post to `POST /api/host-reports/<host>/`, authenticated
