@@ -197,6 +197,10 @@ def catalogued_entries(client, known):
         if name in known:
             continue
         meta = stash_metadata(client, name)
+        if str(meta.get('staging') or '').lower() != 'true':
+            # Brought home already: the row stays because the account may
+            # not delete replicas here, and it says so in its metadata.
+            continue
         owes = str(meta.get('owes') or '')
         if not owes:
             _log(f'{name}: catalogued with no destination; left for a person')
@@ -397,6 +401,14 @@ def move_home(entry, size, adler, events, jlab, jlab_proxy, write_base,
             _log(f'WARNING: lifetime not set on the test output {owes}: {e}')
 
     # 4. The stash entry goes: the file at the door, then the catalog row.
+    return remove_stash_entry(entry, rse, bnl, bnl_proxy)
+
+
+def remove_stash_entry(entry, rse, bnl, bnl_proxy):
+    """The stash file off the door, the catalog entry marked home and, where
+    the account may, its replica row deleted. Returns ('home', note) once
+    the file is gone and the entry marked; 'registered' with the reason
+    while the file is still at the door, so the removal is tried again."""
     env = dict(os.environ, X509_USER_PROXY=bnl_proxy)
     try:
         rm = subprocess.run(['xrdfs', STASH_DOOR, 'rm', entry['path']],
@@ -406,11 +418,23 @@ def move_home(entry, size, adler, events, jlab, jlab_proxy, write_base,
     if rm.returncode != 0 and 'no such file' not in (rm.stderr or rm.stdout).lower():
         return 'registered', (f'home at {rse}, but the stash file could not be removed: '
                               f'{(rm.stderr or rm.stdout).strip()[-200:]}')
+    # The entry says where its data went, so a later pass and a person
+    # read it as home rather than as a stash file that vanished.
+    name = entry['stashed_as']
+    for key, value in (('staging', 'false'), ('home', rse),
+                       ('home_at', datetime.now(dt_timezone.utc).isoformat())):
+        try:
+            bnl.set_metadata(BNL_SCOPE, name, key, value)
+        except Exception as e:                                # noqa: BLE001
+            return 'registered', f'home at {rse}, but the stash entry could not be marked: {e}'
     try:
-        bnl.delete_replicas(rse=STASH_RSE, files=[{'scope': BNL_SCOPE,
-                                                  'name': entry['stashed_as']}])
+        bnl.delete_replicas(rse=STASH_RSE, files=[{'scope': BNL_SCOPE, 'name': name}])
     except Exception as e:                                    # noqa: BLE001
-        return 'registered', f'home at {rse}, but the stash catalog entry could not be removed: {e}'
+        # The data is home and the file is gone; only the catalog row stays,
+        # which this account is not allowed to delete (measured 2026-09-07:
+        # "Account panda can not delete file replicas on BNL_PROD_DISK_1").
+        # An ask to BNL Rucio administration, recorded in the doc.
+        return 'home', f'the stash catalog row stays, marked home: {str(e).splitlines()[0]}'
     return 'home', ''
 
 
@@ -433,19 +457,27 @@ def bring_home(entries, present, state, rse, summary, bnl, bnl_proxy, dry_run=Fa
     now = datetime.now(dt_timezone.utc).isoformat()
     for pandaid, entry, _report in entries:
         name = entry['stashed_as']
-        if name not in present:
-            continue
-        size, adler, events = present[name]
         entry_state = state.setdefault(name, {})
-        if not due(entry_state):
-            summary['deferred'].append({'stashed_as': name, 'owes': entry['owes'],
-                                        'reason': entry_state.get('reason', '')})
-            continue
-        if dry_run:
-            summary['home'].append(entry['owes'])
-            continue
-        outcome, reason = move_home(entry, size, adler, events, jlab, jlab_proxy,
-                                    write_base, read_base, rse, bnl, bnl_proxy)
+        if name not in present:
+            # Not at the stash. If an earlier pass brought it home and only
+            # the removal of the entry remained, finish that; otherwise it
+            # is a reported file that never arrived, counted above.
+            if entry_state.get('outcome') != 'registered' or not due(entry_state):
+                continue
+            if dry_run:
+                continue
+            outcome, reason = remove_stash_entry(entry, rse, bnl, bnl_proxy)
+        else:
+            size, adler, events = present[name]
+            if not due(entry_state):
+                summary['deferred'].append({'stashed_as': name, 'owes': entry['owes'],
+                                            'reason': entry_state.get('reason', '')})
+                continue
+            if dry_run:
+                summary['home'].append(entry['owes'])
+                continue
+            outcome, reason = move_home(entry, size, adler, events, jlab, jlab_proxy,
+                                        write_base, read_base, rse, bnl, bnl_proxy)
         entry_state['attempts'] = int(entry_state.get('attempts') or 0) + 1
         entry_state['last_attempt'] = now
         entry_state['outcome'] = outcome
