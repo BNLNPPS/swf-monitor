@@ -51,6 +51,27 @@
                     </table>
                 </div>
             </div>
+
+            <!-- Task context: the PanDA task and the PCS task this job belongs to -->
+            {% if task %}
+            <div class="card mt-3">
+                <div class="card-header"><strong>Task</strong></div>
+                <div class="card-body">
+                    <table class="table table-sm mb-0">
+                        <tr><td><strong>Task ID</strong></td><td><a href="{% url 'monitor_app:panda_task_detail' task.jeditaskid %}">{{ task.jeditaskid }}</a></td></tr>
+                        {% if pcs_task %}
+                        <tr><td><strong>PCS Task</strong></td><td style="word-break:break-all;"><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ pcs_task.composed_name|urlencode }}">{{ pcs_task.composed_name }}</a></td></tr>
+                        {% endif %}
+                        {% if task.taskname %}
+                        <tr><td><strong>PanDA Name</strong></td><td style="word-break:break-all;">{{ task.taskname }}</td></tr>
+                        {% endif %}
+                        {% if task.status %}<tr><td><strong>Status</strong></td><td>{{ task.status }}</td></tr>{% endif %}
+                        {% if task.username %}<tr><td><strong>User</strong></td><td>{{ task.username }}</td></tr>{% endif %}
+                        {% if task.errordialog %}<tr><td><strong>Error</strong></td><td style="color:#dc3545;">{{ task.errordialog }}</td></tr>{% endif %}
+                    </table>
+                </div>
+            </div>
+            {% endif %}
         </div>
 
         <!-- Timing -->
@@ -352,27 +373,6 @@
             {% if job.superrordiag %}<p class="mb-1">supervisor, {{ job.superrordiag|length }} characters: {{ job.superrordiag }}</p>{% endif %}
             {% if job.taskbuffererrordiag %}<p class="mb-0">taskbuffer, {{ job.taskbuffererrordiag|length }} characters: {{ job.taskbuffererrordiag }}</p>{% endif %}
             {% endif %}
-        </div>
-    </div>
-    {% endif %}
-
-    <!-- Task context -->
-    {% if task %}
-    <div class="card mb-3">
-        <div class="card-header"><strong>Task</strong></div>
-        <div class="card-body">
-            <table class="table table-sm mb-0">
-                <tr><td><strong>Task ID</strong></td><td><a href="{% url 'monitor_app:panda_task_detail' task.jeditaskid %}">{{ task.jeditaskid }}</a></td></tr>
-                {% if pcs_task %}
-                <tr><td><strong>PCS Task</strong></td><td style="word-break:break-all;"><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ pcs_task.composed_name|urlencode }}">{{ pcs_task.composed_name }}</a></td></tr>
-                {% endif %}
-                {% if task.taskname %}
-                <tr><td><strong>PanDA Name</strong></td><td style="word-break:break-all;">{{ task.taskname }}</td></tr>
-                {% endif %}
-                {% if task.status %}<tr><td><strong>Status</strong></td><td>{{ task.status }}</td></tr>{% endif %}
-                {% if task.username %}<tr><td><strong>User</strong></td><td>{{ task.username }}</td></tr>{% endif %}
-                {% if task.errordialog %}<tr><td><strong>Error</strong></td><td style="color:#dc3545;">{{ task.errordialog }}</td></tr>{% endif %}
-            </table>
         </div>
     </div>
     {% endif %}
