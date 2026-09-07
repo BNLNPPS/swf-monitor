@@ -90,6 +90,15 @@ CONFIG_DEFAULTS = {
     # Measured cadence on that host: seconds for the busiest, a few
     # minutes for the credential manager.
     "platform_submit_daemon_warn_seconds": 900,
+    # Silence of a PanDA server daemon that ticks regardless of demand.
+    # Measured 2026-09-07: the judged set writes at least once a
+    # minute, most of it every few seconds.
+    "platform_server_daemon_warn_seconds": 900,
+    # Share of web-tier requests answered 5xx in the reporter's
+    # interval, judged only over at least this many requests: the
+    # tier's baseline is under 0.1 per cent.
+    "platform_server_5xx_warn_fraction": 0.01,
+    "platform_server_5xx_warn_min_requests": 50,
 }
 
 PLATFORM_REGISTRATION = {
@@ -201,9 +210,14 @@ PLATFORM_REGISTRATION = {
             "required": False,
             "kind": "gauge",
             "description": (
-                "The pandaserver01 reporter's latest record (web-tier "
-                "request counts, daemon liveness, WSGI tier, host "
-                "resources), present only when one has been delivered."
+                "The pandaserver01 reporter's latest record as the "
+                "component keeps it (docs/PANDA_SERVER_REPORTER.md): "
+                "web-tier requests by endpoint and status class with "
+                "the 5xx count and per-minute rates over the reporter's "
+                "interval, error-log levels and markers, the judged "
+                "daemons by log age, the PanDA units, processes, "
+                "database reachability, host load, memory and volumes; "
+                "present only when one has been delivered."
             ),
         },
         "reporter_status": {
@@ -566,6 +580,96 @@ SUBMIT_DEMAND_DAEMONS = ('submitter', 'htcondor_submitter',
 
 SUBMIT_DAEMONS = SUBMIT_HEARTBEAT_DAEMONS + SUBMIT_DEMAND_DAEMONS
 
+# The PanDA server host's daemons, named by their logs under
+# /var/log/panda (docs/PANDA_SERVER_REPORTER.md). The judged set writes
+# regardless of demand, at least once a minute on this deployment
+# (measured 2026-09-07 over five samples: 17 s at most for the first
+# group, about a minute for the JEDI task and message daemons).
+SERVER_HEARTBEAT_DAEMONS = (
+    'DBProxy', 'DBProxyPool', 'JediDBProxy', 'Entry', 'msg_bkr_utils',
+    'api_harvester', 'JobGenerator', 'GenJobThrottler', 'JobThrottler',
+    'TaskBuffer', 'TaskSetupper', 'TaskRefiner', 'ContentsFeeder',
+    'WatchDog', 'GenWatchDog', 'AsyncRequestWatchDog',
+    'async_request_processor', 'add_main', 'SiteMapper', 'daemons',
+    'panda_daemon_stdout', 'panda_jedi_stdout', 'JediTaskBuffer',
+    'JediMsgProcessor', 'PostProcessor', 'TaskCommando')
+
+# Daemons and API logs that write only when there is work: pilot calls,
+# archiving, brokerage, the adder. Recorded, not judged.
+SERVER_DEMAND_DAEMONS = (
+    'api_pilot', 'PilotRequests', 'copyArchive', 'adder', 'add_sub',
+    'JobBroker', 'GenJobBroker', 'TaskBroker', 'JobSplitter',
+    'configurator', 'Watcher', 'closer', 'setupper', 'RetrialModule',
+    'api_statistics', 'api_metaconfig', 'api_system', 'api_job',
+    'api_task', 'token_cache', 'cache_schedconfig')
+
+SERVER_DAEMONS = SERVER_HEARTBEAT_DAEMONS + SERVER_DEMAND_DAEMONS
+
+# PanDA units on the server host, in the order the card lists them.
+SERVER_UNITS = ('panda_httpd', 'panda_daemon', 'panda_jedi', 'panda_mcp')
+
+
+def _server_host_projection(record):
+    """What the component keeps from the server host's report: the
+    judged and demand daemons by log age, web-tier counts with rates
+    over the reporter's own interval, the error log's levels and
+    markers, the units, processes, database reachability and host
+    state. The full record, including every log and the top paths,
+    stays in the host-report store."""
+    daemons = record.get('daemons') or {}
+    kept = {name: daemons[name] for name in SERVER_DAEMONS
+            if isinstance(daemons.get(name), dict)}
+    stale = sorted(
+        ((name, entry.get('log_age_seconds')) for name, entry in kept.items()
+         if name in SERVER_HEARTBEAT_DAEMONS
+         and isinstance(entry.get('log_age_seconds'), int)),
+        key=lambda pair: pair[1], reverse=True)
+    web = record.get('web_tier') or {}
+    interval = record.get('interval') or {}
+    seconds = interval.get('seconds')
+    seconds = seconds if isinstance(seconds, (int, float)) and seconds > 0 else None
+    by_endpoint = web.get('by_endpoint') or {}
+    per_minute = ({cls: round(n * 60.0 / seconds, 2)
+                   for cls, n in by_endpoint.items()} if seconds else {})
+    errors = record.get('error_log') or {}
+    health = record.get('health') or {}
+    memory = health.get('memory_kb') or {}
+    used_percent = None
+    if memory.get('MemTotal') and memory.get('MemAvailable') is not None:
+        used_percent = round(100.0 * (memory['MemTotal'] - memory['MemAvailable'])
+                             / memory['MemTotal'], 1)
+    units = record.get('services') or {}
+    return {
+        'collected_at': record.get('collected_at'),
+        'interval_seconds': seconds,
+        'requests': web.get('requests'),
+        'requests_per_minute': (round(web['requests'] * 60.0 / seconds, 2)
+                                if seconds and web.get('requests') is not None
+                                else None),
+        'by_endpoint': by_endpoint,
+        'by_endpoint_per_minute': per_minute,
+        'by_status_class': web.get('by_status_class'),
+        'status_5xx': web.get('status_5xx'),
+        'clients': web.get('clients'),
+        'web_limits': web.get('limits'),
+        'web_read': web.get('read'),
+        'error_levels': errors.get('by_level'),
+        'error_markers': errors.get('markers'),
+        'error_recent': errors.get('recent'),
+        'daemons': kept,
+        'daemon_oldest_log_seconds': stale[0][1] if stale else None,
+        'daemon_oldest_name': stale[0][0] if stale else None,
+        'units': {unit: units.get(unit) for unit in SERVER_UNITS
+                  if isinstance(units.get(unit), dict)},
+        'processes': record.get('processes'),
+        'database': record.get('database'),
+        'load': health.get('load'),
+        'memory_kb': memory,
+        'memory_used_percent': used_percent,
+        'volumes': health.get('volumes'),
+        'uptime_seconds': health.get('uptime_seconds'),
+    }
+
 
 def _submit_host_projection(record):
     """What the component keeps from the submit host's report."""
@@ -722,7 +826,7 @@ def monitor_host_reading(volumes):
 
 def assess(database, heartbeats, server, reporter_status, monitor_host,
            thresholds, pandamon=None, submit_reporter_status=None,
-           submit_host=None):
+           submit_host=None, server_host=None):
     """Per-metric verdicts against the configured thresholds."""
     verdicts = {}
 
@@ -799,6 +903,41 @@ def assess(database, heartbeats, server, reporter_status, monitor_host,
                 submit.get('harvester_process') is False
                 or submit.get('schedd_process') is False,
                 known=submit.get('harvester_process') is not None)
+    if server_host:
+        srv = _server_host_projection(server_host)
+        units = srv.get('units') or {}
+        verdict("server_units",
+                any((entry or {}).get('active') != 'active'
+                    for entry in units.values()),
+                known=bool(units))
+        oldest = srv.get('daemon_oldest_log_seconds')
+        verdict("server_daemons",
+                oldest is not None and oldest > int(
+                    thresholds.get("platform_server_daemon_warn_seconds")
+                    or CONFIG_DEFAULTS["platform_server_daemon_warn_seconds"]),
+                known=oldest is not None)
+        # Judged as a share over enough requests: a handful of 5xx in a
+        # quiet minute is noise, a share of the tier's traffic is a
+        # fault pilots and harvester are paying for.
+        requests = srv.get('requests')
+        failing = srv.get('status_5xx')
+        min_requests = int(
+            thresholds.get("platform_server_5xx_warn_min_requests")
+            or CONFIG_DEFAULTS["platform_server_5xx_warn_min_requests"])
+        enough = (isinstance(requests, int) and requests >= min_requests
+                  and isinstance(failing, int))
+        verdict("server_5xx",
+                enough and failing / requests > float(
+                    thresholds.get("platform_server_5xx_warn_fraction")
+                    or CONFIG_DEFAULTS["platform_server_5xx_warn_fraction"]),
+                known=enough)
+        markers = srv.get('error_markers')
+        verdict("server_web_errors",
+                bool(markers) and any(
+                    (markers.get(name) or 0) > 0 for name in
+                    ('worker_saturation', 'wsgi_timeout', 'wsgi_truncated',
+                     'child_exit_signal', 'no_memory')),
+                known=isinstance(markers, dict))
     if any(v == "warning" for v in verdicts.values()):
         overall = "warning"
     elif all(v == "ok" for v in verdicts.values()):
@@ -908,10 +1047,14 @@ def platform_projection(now=None, mark=None):
         "monitor_host": monitor_host,
         "assessment": assess(database, heartbeats, server, reporter_status,
                              monitor_host, thresholds, pandamon,
-                             submit_reporter_status, submit_host),
+                             submit_reporter_status, submit_host,
+                             server_host),
     }
     if server_host is not None:
-        projection["server_host"] = server_host
+        # The record keeps the judged daemons, the counts and the host
+        # state; every log and the top paths stay in the host-report
+        # store, which holds the report whole.
+        projection["server_host"] = _server_host_projection(server_host)
     if submit_host is not None:
         # The submission side is bulky in its raw form; the record keeps
         # what a reader needs and drops the per-file submit-description

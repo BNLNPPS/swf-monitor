@@ -46,6 +46,18 @@ _METRIC_TEXT = {
     "submit_processes": (
         "the harvester or the submit schedd is not running on the "
         "submit host — nothing is being submitted at all"),
+    "server_units": (
+        "a PanDA unit (httpd, daemon, JEDI, MCP) is not active on the "
+        "server host"),
+    "server_daemons": (
+        "a PanDA daemon that ticks regardless of demand has stopped "
+        "writing its log on the server host"),
+    "server_5xx": (
+        "the PanDA web tier is answering a large share of requests with "
+        "5xx — pilots and harvester are failing their calls"),
+    "server_web_errors": (
+        "the PanDA web tier's error log carries saturation, timeout, or "
+        "crash markers in the interval"),
 }
 
 
@@ -207,6 +219,36 @@ def detect(client, params):
                 detail = (
                     f"harvester {'up' if submit.get('harvester_process') else 'DOWN'}, "
                     f"schedd {'up' if submit.get('schedd_process') else 'DOWN'}")
+        elif metric in ("server_units", "server_daemons", "server_5xx",
+                        "server_web_errors"):
+            srv = data.get("server_host") or {}
+            if metric == "server_units":
+                units = srv.get("units") or {}
+                facts = {"units": units}
+                detail = ", ".join(
+                    f"{unit} {(entry or {}).get('active') or 'unknown'}"
+                    for unit, entry in sorted(units.items()))
+            elif metric == "server_daemons":
+                facts = {"oldest": srv.get("daemon_oldest_name"),
+                         "oldest_log_seconds":
+                             srv.get("daemon_oldest_log_seconds"),
+                         "daemons": srv.get("daemons")}
+                detail = (f"{srv.get('daemon_oldest_name')} last wrote "
+                          f"{srv.get('daemon_oldest_log_seconds')} s ago")
+            elif metric == "server_5xx":
+                facts = {"requests": srv.get("requests"),
+                         "status_5xx": srv.get("status_5xx"),
+                         "by_status_class": srv.get("by_status_class"),
+                         "interval_seconds": srv.get("interval_seconds")}
+                detail = (f"{srv.get('status_5xx')} of {srv.get('requests')} "
+                          f"requests answered 5xx over "
+                          f"{srv.get('interval_seconds')} s")
+            else:
+                markers = {k: v for k, v in
+                           (srv.get("error_markers") or {}).items() if v}
+                facts = {"markers": markers,
+                         "recent": srv.get("error_recent")}
+                detail = ", ".join(f"{k} {v}" for k, v in sorted(markers.items()))
         else:
             facts = {"asgi": host.get("asgi"), "ops_agent": host.get("ops_agent")}
             detail = (f"ASGI {((host.get('asgi') or {}).get('state'))}, "

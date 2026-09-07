@@ -812,6 +812,33 @@ def _platform_curve_values(state):
             # plsu_, not plsv_: plsv_latency is the PanDA server's
             # liveness measurement and a shared prefix would collide.
             values[f'plsu_{_platform_volume_slug(path)}'] = float(used)
+    # The PanDA server host, delivered by its reporter
+    # (docs/PANDA_SERVER_REPORTER.md) and kept by the maintainer in the
+    # server_host group. Requests are rates over the reporter's own
+    # interval; a first-run record carries no interval and no rates.
+    srv = plat.get('server_host') or {}
+    for cls, rate in (srv.get('by_endpoint_per_minute') or {}).items():
+        values[f'plsrv_req_{cls}'] = float(rate)
+    if srv.get('status_5xx') is not None and srv.get('interval_seconds'):
+        values['plsrv_5xx'] = float(srv['status_5xx'])
+    if srv.get('daemon_oldest_log_seconds') is not None:
+        values['plsrv_daemon_oldest'] = float(srv['daemon_oldest_log_seconds'])
+    if (srv.get('database') or {}).get('connect_ms') is not None:
+        values['plsrv_db_ms'] = float(srv['database']['connect_ms'])
+    rload = srv.get('load') or {}
+    for key in ('1m', '5m', '15m'):
+        if rload.get(key) is not None:
+            values[f'plsrv_load_{key}'] = float(rload[key])
+    if srv.get('memory_used_percent') is not None:
+        values['plsrv_mem_used_pct'] = float(srv['memory_used_percent'])
+    for path, entry in (srv.get('volumes') or {}).items():
+        used = (entry or {}).get('used_percent')
+        if used is not None:
+            values[f'plsrv_vol_{_platform_volume_slug(path)}'] = float(used)
+    for key in ('httpd', 'pandaserver'):
+        rss = ((srv.get('processes') or {}).get(key) or {}).get('rss_mb')
+        if rss is not None:
+            values[f'plsrv_rss_{key}'] = float(rss)
     return values
 
 
@@ -1102,6 +1129,22 @@ _PLATFORM_LABELS = {
     'plsl_1m': '1 min',
     'plsl_5m': '5 min',
     'plsl_15m': '15 min',
+    'plsrv_req_update_job': 'update_job',
+    'plsrv_req_acquire_jobs': 'acquire_jobs',
+    'plsrv_req_pilot_other': 'other pilot calls',
+    'plsrv_req_harvester': 'harvester',
+    'plsrv_req_cache': 'schedconfig cache',
+    'plsrv_req_statistics': 'statistics',
+    'plsrv_req_other': 'other',
+    'plsrv_5xx': '5xx responses',
+    'plsrv_daemon_oldest': 'oldest daemon silence',
+    'plsrv_db_ms': 'TCP connect to the database',
+    'plsrv_load_1m': '1 min',
+    'plsrv_load_5m': '5 min',
+    'plsrv_load_15m': '15 min',
+    'plsrv_mem_used_pct': 'memory used',
+    'plsrv_rss_httpd': 'httpd (all processes)',
+    'plsrv_rss_pandaserver': 'pandaserver python',
 }
 
 
@@ -1120,6 +1163,10 @@ def _epicprod_curve_label(curve_id):
         return '/' + curve_id[5:]
     if curve_id.startswith('plsu_'):
         return '/' + curve_id[5:]
+    if curve_id.startswith('plsrv_vol_'):
+        return '/' + curve_id[len('plsrv_vol_'):]
+    if curve_id.startswith('plsrv_req_'):
+        return curve_id[len('plsrv_req_'):]
     if curve_id in _STORAGE_CONSEQUENCE_LABELS:
         return _STORAGE_CONSEQUENCE_LABELS[curve_id]
     if curve_id.startswith('perrc_'):
@@ -1714,6 +1761,14 @@ _PLATFORM_FAMILIES_COMMON_HEAD = (
 _PLATFORM_FAMILIES_COMMON_TAIL = (
     'Platform DB activity', 'Platform DB connections',
     'Platform server latency', 'Platform PanDA monitor latency',
+    # The server host's own view of its web tier and daemons, from its
+    # reporter: requests by class, failing responses, daemon silence,
+    # and the database as reached from that host.
+    'Platform server requests', 'Platform server 5xx',
+    'Platform server daemons', 'Platform server DB reach',
+    # The hosts, PanDA server first, then swf-monitor.
+    'Platform server load', 'Platform server memory',
+    'Platform server storage', 'Platform server processes',
     'Platform monitor load', 'Platform monitor memory',
     'Platform monitor storage', 'Platform monitor processes',
     # The submission side, from the submit host's own reporter. It sits
@@ -1837,6 +1892,44 @@ def _platform_groups():
         {'name': 'Platform submit storage', 'title': 'Submit host storage',
          'prefixes': ['plsu_'], 'ids': [],
          'panel_px': 110, 'units': '% used'},
+        # The PanDA server host, from its reporter
+        # (docs/PANDA_SERVER_REPORTER.md). Requests stack by endpoint
+        # class as rates over the reporter's interval; the 5xx count is
+        # its own panel because on the request axis it is a hairline.
+        {'name': 'Platform server requests', 'title': 'PanDA server requests',
+         'prefixes': ['plsrv_req_'], 'ids': [],
+         'order': ['plsrv_req_acquire_jobs', 'plsrv_req_update_job',
+                   'plsrv_req_pilot_other', 'plsrv_req_harvester',
+                   'plsrv_req_cache', 'plsrv_req_statistics',
+                   'plsrv_req_other'],
+         'stacked': True, 'panel_px': 150, 'units': 'per minute'},
+        {'name': 'Platform server 5xx', 'title': 'PanDA server 5xx responses',
+         'prefixes': [], 'ids': ['plsrv_5xx'],
+         'panel_px': 110, 'units': 'per interval'},
+        {'name': 'Platform server daemons',
+         'title': 'PanDA server daemon silence',
+         'prefixes': [], 'ids': ['plsrv_daemon_oldest'],
+         'panel_px': 110, 'units': 'seconds since last log write'},
+        {'name': 'Platform server DB reach',
+         'title': 'Database reachability from the server host',
+         'prefixes': [], 'ids': ['plsrv_db_ms'],
+         'panel_px': 110, 'units': 'ms'},
+        {'name': 'Platform server load', 'title': 'PanDA server host load',
+         'prefixes': ['plsrv_load_'], 'ids': [],
+         'order': ['plsrv_load_1m', 'plsrv_load_15m', 'plsrv_load_5m'],
+         'default_off_ids': ['plsrv_load_5m'],
+         'panel_px': 110, 'units': 'load average'},
+        {'name': 'Platform server memory', 'title': 'PanDA server host memory',
+         'prefixes': [], 'ids': ['plsrv_mem_used_pct'],
+         'panel_px': 110, 'units': '% used'},
+        {'name': 'Platform server storage', 'title': 'PanDA server host storage',
+         'prefixes': ['plsrv_vol_'], 'ids': [],
+         'panel_px': 110, 'units': '% used'},
+        {'name': 'Platform server processes',
+         'title': 'PanDA server host processes',
+         'prefixes': ['plsrv_rss_'], 'ids': [],
+         'order': ['plsrv_rss_httpd', 'plsrv_rss_pandaserver'],
+         'panel_px': 110, 'units': 'MB resident'},
         {'name': 'Platform jobs', 'title': 'Jobs in flight',
          'prefixes': ['job_'], 'ids': ['running_cores'],
          'order': lifecycle, 'default_off_ids': ['job_activated'],
@@ -3931,6 +4024,22 @@ _PLATFORM_SUMMARY_SPECS = (
      lambda p, j: ((p.get('pandamon') or {}).get('front') or {}).get('latency_ms')),
     ('pandamon worker query', 'plpm_workers', 'ms',
      lambda p, j: ((p.get('pandamon') or {}).get('workers') or {}).get('latency_ms')),
+    ('PanDA server requests', '', 'per minute',
+     lambda p, j: (p.get('server_host') or {}).get('requests_per_minute')),
+    ('PanDA server 5xx responses', 'plsrv_5xx', 'per interval',
+     lambda p, j: (p.get('server_host') or {}).get('status_5xx')
+     if (p.get('server_host') or {}).get('interval_seconds') else None),
+    ('PanDA server daemon silence', 'plsrv_daemon_oldest', 's',
+     lambda p, j: (p.get('server_host') or {}).get('daemon_oldest_log_seconds')),
+    ('database reach from the server host', 'plsrv_db_ms', 'ms',
+     lambda p, j: ((p.get('server_host') or {}).get('database') or {}).get('connect_ms')),
+    ('PanDA server load (1 min)', 'plsrv_load_1m', '',
+     lambda p, j: ((p.get('server_host') or {}).get('load') or {}).get('1m')),
+    ('PanDA server memory used', 'plsrv_mem_used_pct', '%',
+     lambda p, j: (p.get('server_host') or {}).get('memory_used_percent')),
+    ('PanDA server httpd resident', 'plsrv_rss_httpd', 'MB',
+     lambda p, j: (((p.get('server_host') or {}).get('processes') or {})
+                   .get('httpd') or {}).get('rss_mb')),
     ('swf-monitor load (1 min)', 'plml_1m', '',
      lambda p, j: ((p.get('monitor_host') or {}).get('load') or {}).get('1m')),
     ('swf-monitor memory used', 'plmm_used_pct', '%',
@@ -4091,6 +4200,10 @@ def _platform_summary(scope, requested_at, since, data, kills_total,
                           'pandamon worker query'})
     if verdict_map.get('monitor_volumes') == 'warning':
         warn_rows.add('monitor storage')
+    if verdict_map.get('server_5xx') == 'warning':
+        warn_rows.add('PanDA server 5xx responses')
+    if verdict_map.get('server_daemons') == 'warning':
+        warn_rows.add('PanDA server daemon silence')
     summary = []
     for label, curve, unit, extract in _PLATFORM_SUMMARY_SPECS:
         value = extract(at[1], at[2])
@@ -4237,6 +4350,23 @@ def _platform_card(data, previous_data, ctx):
         'monitor_volumes': f"warn above {thresholds.get('platform_volume_warn_percent')}% used",
         'monitor_services': 'warn when the ASGI or prod-ops service is not active',
         'reporter': f"stale after {thresholds.get('platform_reporter_stale_seconds')} s",
+        'submit_reporter': f"stale after {thresholds.get('platform_reporter_stale_seconds')} s",
+        'submit_daemons': (
+            f"warn when a must-tick harvester daemon is silent over "
+            f"{thresholds.get('platform_submit_daemon_warn_seconds')} s"),
+        'submit_workers_held': 'warn when any pilot is held on the submit schedd',
+        'submit_processes': 'warn when harvester or the submit schedd is not running',
+        'server_units': 'warn when a PanDA unit is not active on the server host',
+        'server_daemons': (
+            f"warn when a must-tick PanDA daemon is silent over "
+            f"{thresholds.get('platform_server_daemon_warn_seconds')} s"),
+        'server_5xx': (
+            f"warn above {thresholds.get('platform_server_5xx_warn_fraction')} of "
+            f"requests answered 5xx, over at least "
+            f"{thresholds.get('platform_server_5xx_warn_min_requests')} requests"),
+        'server_web_errors': (
+            'warn on saturation, timeout, truncation, crash or memory markers '
+            'in the web tier error log'),
     }
     verdicts = [
         {'name': name.replace('_', ' '), 'chip': cut_chip(
@@ -4276,6 +4406,7 @@ def _platform_card(data, previous_data, ctx):
                            ('wsgi', 'WSGI daemon'),
                            ('asgi', 'ASGI service (MCP)'),
                            ('ops_agent', 'prod-ops agent'))]
+    server_host_card = _server_host_card(data.get('server_host') or {})
 
     # Faulty events over the detail window (the errors card's window
     # convention: the client's from/to, else the hour ending at the
@@ -4364,11 +4495,91 @@ def _platform_card(data, previous_data, ctx):
             'db_connections': host.get('db_connections'),
             'errors': [v for k, v in host.items() if k.endswith('_error')],
         },
+        'server_host': server_host_card,
         'summary': summary,
         'summary_range': range_text,
         'summary_window': window_text,
         'summary_errors': [e for e in (walk_error, kills_error) if e],
         'errors_url': errors_url,
+    }
+
+
+def _server_host_card(srv):
+    """The server-host table of the platform card: the reporter's
+    record as the component keeps it (snapper_platform
+    _server_host_projection), shaped for the template. Empty when no
+    record has been delivered."""
+    from .snapper_platform import SERVER_HEARTBEAT_DAEMONS
+
+    if not srv:
+        return {'present': False}
+    per_minute = srv.get('by_endpoint_per_minute') or {}
+    endpoints = sorted(
+        ((cls, n, per_minute.get(cls))
+         for cls, n in (srv.get('by_endpoint') or {}).items()),
+        key=lambda row: -row[1])
+    daemons = [(name, entry.get('log_age_seconds'))
+               for name, entry in (srv.get('daemons') or {}).items()
+               if isinstance(entry, dict)
+               and isinstance(entry.get('log_age_seconds'), int)]
+    judged = [(name, age) for name, age in daemons
+              if name in SERVER_HEARTBEAT_DAEMONS]
+    # The quiet ones are the rows worth reading; a daemon writing every
+    # few seconds says nothing a count cannot.
+    quiet = sorted([(name, age) for name, age in judged if age > 60],
+                   key=lambda row: -row[1])[:10]
+    memory = srv.get('memory_kb') or {}
+    volumes = []
+    for path, entry in sorted((srv.get('volumes') or {}).items()):
+        entry = entry or {}
+        volumes.append({
+            'path': path, 'error': entry.get('error') or '',
+            'used_percent': entry.get('used_percent'),
+            'free_gb': (round(entry['free_bytes'] / 1e9, 1)
+                        if entry.get('free_bytes') is not None else None)})
+    uptime = srv.get('uptime_seconds')
+    return {
+        'present': True,
+        'collected_at': srv.get('collected_at'),
+        'interval_seconds': srv.get('interval_seconds'),
+        'requests': srv.get('requests'),
+        'requests_per_minute': srv.get('requests_per_minute'),
+        'endpoints': endpoints,
+        'status_classes': sorted((srv.get('by_status_class') or {}).items()),
+        'status_5xx': srv.get('status_5xx'),
+        'clients': srv.get('clients'),
+        'limits': srv.get('web_limits') or {},
+        'error_levels': sorted(
+            ((level, n) for level, n in (srv.get('error_levels') or {}).items()
+             if level != 'info'), key=lambda kv: -kv[1]),
+        'error_markers': sorted(
+            ((name, n) for name, n in (srv.get('error_markers') or {}).items()
+             if n), key=lambda kv: -kv[1]),
+        'error_recent': srv.get('error_recent') or [],
+        'daemon_oldest_name': srv.get('daemon_oldest_name'),
+        'daemon_oldest_log_seconds': srv.get('daemon_oldest_log_seconds'),
+        'judged_count': len(judged),
+        'quiet_daemons': quiet,
+        'units': [(unit, entry or {})
+                  for unit, entry in (srv.get('units') or {}).items()],
+        'processes': [(label, (srv.get('processes') or {}).get(key) or {})
+                      for key, label in (('httpd', 'httpd (all processes)'),
+                                         ('pandaserver', 'pandaserver python'))],
+        'database': srv.get('database') or {},
+        'load': srv.get('load') or {},
+        'memory_used_percent': srv.get('memory_used_percent'),
+        'memory_total_mb': (round(memory['MemTotal'] / 1024)
+                            if memory.get('MemTotal') else None),
+        'memory_used_mb': (
+            round((memory['MemTotal'] - memory['MemAvailable']) / 1024)
+            if memory.get('MemTotal') and memory.get('MemAvailable') is not None
+            else None),
+        'swap_used_mb': (
+            round((memory['SwapTotal'] - memory['SwapFree']) / 1024)
+            if memory.get('SwapTotal') is not None
+            and memory.get('SwapFree') is not None else None),
+        'volumes': volumes,
+        'uptime_days': round(uptime / 86400, 1) if uptime else None,
     }
 
 

@@ -102,8 +102,11 @@ and idle web workers when mod_status is enabled. These fields are
 absent until the reporter runs; the maintainer publishes
 `reporter_status` as `fresh`, `stale`, or `absent` against a SysConfig
 threshold, and crossing that threshold is a semantic change that
-publishes (DESIGN.md, Maintained assessments). Question: what the
-server host itself saw.
+publishes (DESIGN.md, Maintained assessments). Verdicts cover the four
+PanDA units, silence of the judged daemons, the 5xx share over enough
+requests, and saturation, timeout, truncation, crash and memory
+markers in the web tier's error log. Question: what the server host
+itself saw.
 
 **Submit host (delivered by the reporter).** The submission side of OSG
 production, which no PanDA record carries: harvester daemon liveness as
@@ -224,14 +227,21 @@ each family's control row docked above its panel:**
 4. *Server latency* — milliseconds; a timeout records at the timeout
    value. *pandamon latency* follows on its own panel: the front
    page and the worker-stats query, same treatment.
-5. *Web tier* — request rates by endpoint class and the 5xx count,
-   present when the reporter reports; daemon liveness renders as lanes
-   above the panels (per-daemon continuous lanes on the health-lane
-   mechanism: green alive, failure color silent), so a stalled
-   copyArchive is a red band, not a number.
-6. *Hosts* — per host, PanDA server and swf-monitor: load average; memory used;
-   volume use as percent, one line per volume; WSGI, ASGI, and agent
-   resident memory; service liveness as lanes beside the daemon lanes.
+5. *PanDA server requests* — requests per minute by endpoint class
+   (acquire_jobs, update_job, other pilot calls, harvester, the
+   schedconfig cache, statistics, other), stacked, as rates over the
+   reporter's own interval; *5xx responses* per interval on its own
+   panel, since on the request axis it is a hairline; *daemon silence*
+   as the oldest log age among the judged daemons, those that write
+   regardless of demand (the pilot API, copyArchive, the brokers and
+   the adder write only when there is work and are recorded, not
+   judged); *database reachability from the server host* as TCP
+   connect latency. All present when the reporter reports.
+6. *Hosts* — per host, PanDA server then swf-monitor: load average
+   (1 and 15 minutes ticked, 5 unticked); memory used; volume use as
+   percent, one line per volume; resident memory of the httpd and
+   pandaserver processes on the server host and of WSGI, ASGI and the
+   agent on the monitor host. Unit and service state is on the card.
 7. *Jobs in flight* — the scope's in-flight jobs family (by state,
    stacked) with running cores as the overlay line, as the Site view
    draws them.
@@ -298,8 +308,10 @@ alarm engine's job ([alarms.md](alarms.md)): the
 `panda_platform_health` alarm reads the latest published component on
 each engine tick and raises one detection per metric in warning —
 heartbeat yield, heartbeat staleness, database connections, server
-latency, pandamon latency, swf-monitor volumes, swf-monitor services —
-plus one when the
+latency, pandamon latency, swf-monitor volumes, swf-monitor services,
+the submit host's held workers, daemon silence and processes, the
+server host's units, daemon silence, 5xx share and web-tier error
+markers — plus one when the
 component itself is absent, unreadable, or silent beyond
 `stale_after_minutes`. Heartbeat verdicts are suppressed below
 `min_running` running jobs, where the rates are noise. The thresholds
@@ -422,14 +434,15 @@ query.
 - swf-monitor: `monitor_app/snapper_platform.py` (maintainer;
   registration, projection, thresholds), invoked from
   `scripts/refresh-system-status.py` after the error maintainer; the
-  server-host report model and `viewdir/snapper_platform_api.py`
-  ingest; provider additions in `snapper_providers.py` (curve
-  extraction `plat_` ids, families, the Platform focus view declaration
-  listing its three components, the platform card, daemon lanes through
-  `lane_entries`); the card kind in `_snapper_cards.html`; a
-  `panda-platform` collector in `system_status.py`; the reporter script
-  `scripts/panda-server-reporter.py` (standard library only) and its
-  unit file under `tools/`; the alarm module
+  host-report ingest `monitor_app/host_reports.py` over the
+  cached-product store; provider additions in `snapper_providers.py`
+  (curve extraction under `pl` ids, families, the Platform focus view
+  declaration listing its three components, the platform card and its
+  summary); the card kind in `_snapper_cards.html`; a
+  `panda-platform` collector in `system_status.py`; the reporter
+  scripts `scripts/panda-server-reporter.py` and
+  `scripts/osgsub-reporter.py` (standard library only, cron on their
+  hosts); the alarm module
   `alarms/swf_alarms/alarms/panda_platform_health.py` with its
   `alarm_panda_platform_health` config row; this document and the
   SNAPPER.md maintainer list.

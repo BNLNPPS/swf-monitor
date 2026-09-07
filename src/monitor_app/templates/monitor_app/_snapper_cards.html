@@ -320,6 +320,46 @@
         {% endif %}
       </div>
       <div>
+        <div class="mb-1"><strong>PanDA server host</strong> <span class="text-muted small">report {{ card.reporter_status }}{% if card.server_host.collected_at %} · collected {{ card.server_host.collected_at|fmt_dt }} ET{% endif %}{% if card.server_host.interval_seconds %} · {{ card.server_host.interval_seconds }} s interval{% endif %}</span></div>
+        {% if not card.server_host.present %}
+        <div class="text-muted mb-2">No report delivered at this instant.</div>
+        {% else %}
+        <table class="table table-sm table-bordered w-auto mb-1">
+          <tbody>
+          <tr><td>web requests</td><td class="text-end">{% if card.server_host.interval_seconds %}{{ card.server_host.requests }} · {{ card.server_host.requests_per_minute }} per min · {{ card.server_host.clients }} clients{% else %}first run, no interval yet{% endif %}</td></tr>
+          {% for cls, n, rate in card.server_host.endpoints %}
+          <tr><td class="text-muted">{{ cls }}</td><td class="text-end">{{ n }}{% if rate is not None %} · {{ rate }} per min{% endif %}</td></tr>
+          {% endfor %}
+          <tr><td>responses by status</td><td class="text-end">{% for sc, n in card.server_host.status_classes %}{{ sc }} {{ n }}{% if not forloop.last %} · {% endif %}{% empty %}—{% endfor %}{% if card.server_host.status_5xx %} · <span class="text-danger">{{ card.server_host.status_5xx }} 5xx</span>{% endif %}</td></tr>
+          <tr><td>web tier capacity</td><td class="text-end">{{ card.server_host.limits.max_request_workers|default_if_none:"—" }} request workers · {{ card.server_host.limits.wsgi_daemon_processes|default_if_none:"—" }} WSGI processes</td></tr>
+          <tr><td>error log</td><td class="text-end">{% for level, n in card.server_host.error_levels %}{{ level }} {{ n }}{% if not forloop.last %} · {% endif %}{% empty %}nothing above info{% endfor %}{% for name, n in card.server_host.error_markers %} · <span class="text-danger">{{ name }} {{ n }}</span>{% endfor %}</td></tr>
+          <tr><td>daemon silence</td><td class="text-end">{% if card.server_host.daemon_oldest_log_seconds is not None %}oldest {{ card.server_host.daemon_oldest_name }}, {{ card.server_host.daemon_oldest_log_seconds }} s · {{ card.server_host.judged_count }} judged{% else %}—{% endif %}</td></tr>
+          {% for name, age in card.server_host.quiet_daemons %}
+          <tr><td class="text-muted">{{ name }}</td><td class="text-end">{{ age }} s since last write</td></tr>
+          {% endfor %}
+          {% for unit, entry in card.server_host.units %}
+          <tr><td>{{ unit }}</td><td class="text-end"><span class="{{ entry.active|state_class }} px-1">{{ entry.active|default:"unknown" }}</span>{% if entry.restarts %} · {{ entry.restarts }} restarts{% endif %}{% if entry.active_seconds %} · up {{ entry.active_seconds }} s{% endif %}</td></tr>
+          {% endfor %}
+          {% for label, p in card.server_host.processes %}
+          <tr><td>{{ label }}</td><td class="text-end">{{ p.count|default_if_none:"—" }} proc · {{ p.rss_mb|default_if_none:"—" }} MB</td></tr>
+          {% endfor %}
+          <tr><td>database from the host</td><td class="text-end">{% if card.server_host.database.reachable %}reachable · {{ card.server_host.database.connect_ms }} ms{% elif card.server_host.database.error %}<span class="text-danger">{{ card.server_host.database.error }}</span>{% else %}—{% endif %}</td></tr>
+          <tr><td>load 1 · 5 · 15 min</td><td class="text-end">{{ card.server_host.load.1m|default:"—" }} · {{ card.server_host.load.5m|default:"—" }} · {{ card.server_host.load.15m|default:"—" }}</td></tr>
+          <tr><td>memory used</td><td class="text-end">{{ card.server_host.memory_used_mb|default:"—" }} of {{ card.server_host.memory_total_mb|default:"—" }} MB ({{ card.server_host.memory_used_percent|default:"—" }}%) · swap {{ card.server_host.swap_used_mb|default:"0" }} MB</td></tr>
+          {% for v in card.server_host.volumes %}
+          <tr><td>{{ v.path }}</td><td class="text-end">{% if v.error %}<span class="text-danger">{{ v.error }}</span>{% else %}{{ v.used_percent }}% used · {{ v.free_gb }} GB free{% endif %}</td></tr>
+          {% endfor %}
+          {% if card.server_host.uptime_days %}<tr><td>host uptime</td><td class="text-end">{{ card.server_host.uptime_days }} days</td></tr>{% endif %}
+          </tbody>
+        </table>
+        {% if card.server_host.error_recent %}
+        <details class="mb-2"><summary class="text-muted small">last error-log lines above info</summary>
+          <pre class="p-2 border rounded" style="max-height:12em; overflow:auto; font-size:.85em; white-space:pre-wrap;">{% for line in card.server_host.error_recent %}{{ line }}
+{% endfor %}</pre></details>
+        {% endif %}
+        {% endif %}
+      </div>
+      <div>
         <div class="mb-1"><strong>swf-monitor host</strong></div>
         {% for e in card.host.errors %}<div class="text-danger mb-1">{{ e }}</div>{% endfor %}
         <table class="table table-sm table-bordered w-auto mb-1">
