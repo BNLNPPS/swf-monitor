@@ -70,22 +70,27 @@ Every corrected reading carries the grade of its evidence, best first:
 1. **Directed canary probe** — ground truth about a claimed site
    condition (site-canary increment 8): a passing container/storage
    probe refutes a claimed mount or storage failure.
-2. **Payload log** — the payload's own full record; fetched per
+2. **Batch system record** — the condor event log the harvester keeps
+   for the worker, carrying the batch system's own account of a hold,
+   an eviction or an abort in full. It is the only account of a job
+   that never started, and it supersedes the reason on the job record,
+   which is stored truncated (§ Batch-layer records).
+3. **Payload log** — the payload's own full record; fetched per
    representative job (Rucio + xrootd, cached per job); the
    calibration standard.
-3. **Payload self-report** — `jobReport.json` written by the payload
+4. **Payload self-report** — `jobReport.json` written by the payload
    on failure. It travels in the job's log tarball, and the epic pilot
    plugin lifts its exitCode/exitMsg into the stored
    `exeErrorCode`/`exeErrorDiag` job fields
    ([pilot3 PR #212](https://github.com/PanDAWMS/pilot3/pull/212),
    merged and deployed on the ePIC pilot 2026-08-25).
-4. **Pilot mechanical fields** — `transexitcode`, `pilottiming`,
+5. **Pilot mechanical fields** — `transexitcode`, `pilottiming`,
    `cpuconsumptiontime`: measurements, population-wide, SQL-joinable,
    and self-cross-checking (a "launch" label on a job whose own timing
    shows hours of execution is refuted from within the pilot's
    report). Cross-field contradiction is an automatic label-unreliable
    trigger.
-5. **Pilot-extracted label** — the lowest grade; the input being
+6. **Pilot-extracted label** — the lowest grade; the input being
    corrected.
 
 The server's metatable stores pilot-shipped metadata for finished jobs
@@ -152,6 +157,62 @@ same episode runs only on escalation or on the daily trickle.
   via a small insert in `run.sh` (helper + ERR trap + explicit calls
   at coded exits, since bash suppresses the ERR trap in `||`
   branches).
+
+## Batch-layer records
+
+A failure reason originating in the batch layer reaches PanDA cut to a
+length. Harvester stores 256 characters of the condor hold reason in a
+column that holds 500; the job record then holds 250 characters in
+`superrordiag` and 300 in `taskbuffererrordiag`. The cut falls at a
+character count rather than at a clause, so what survives is the start
+of the message, where batch systems place warnings and preamble, and
+what is removed is the end, where they place the error. Job 2721305 at
+UM_GREX_PanDA_1 is the reference case: the surviving text named the
+default Slurm account and the selected partitions, and read as a queue
+misconfiguration; the removed clause was `Batch job submission failed:
+I/O error writing script/environment to file`, a submit host that could
+not write to disk. Fifteen consecutive workers failed that way over
+thirteen hours before the reason was read.
+
+The condor event log the harvester keeps carries every reason whole and
+is served without credentials inside the SCDF network. It is the
+authority for a batch-layer claim, and it is transient: the dated
+directories hold about eighteen days.
+
+**Capture.** The condor event log of every failed and never-started job
+is fetched whole and stored beside the job record, verbatim, with its
+source URL, fetch time and byte count. Capture applies no filter and no
+classification. A fetch that fails is recorded with its reason, and the
+truncated job-record diagnostic is never presented as though it were
+complete. The event log measures 1 to 3 KB, so against 365,477 failed
+ePIC jobs per thirty days unconditional capture costs about 700 MB a
+month, and the largest failure storm on record, 8,789 jobs in seven
+hours, costs 18 MB. Pilot stdout is two orders larger, 200 KB for a job
+that ran, and is fetched on demand only; it is absent for a job that
+never started.
+
+**Retention and learning.** Raw logs are kept one month. A scheduled
+pass mines the corpus before it ages out and maintains the knowledge
+base the parser reads: the catalogue of event codes that occur, with
+counts and examples; the taxonomy of recurring reasons, with the queues
+and periods each appears at; and the separation of boilerplate from
+signal, derived from which lines are stable across the corpus. The
+parser is derived from what the logs contain rather than from an
+author's expectation of them.
+
+Deletion is conditional. A log is removed at one month only once it has
+been matched to a known pattern that already holds an exemplar. One
+exemplar per pattern is kept permanently, so every entry in the
+knowledge base retains the raw evidence behind it. A log matching no
+known pattern is also kept permanently; a novel shape that then recurs
+at volume becomes a pattern with an exemplar, which bounds the
+permanent set against a storm. Exemplars and unmatched logs together
+remain in the megabytes.
+
+**Presentation.** A batch-layer reason is presented from the event log,
+with the stored diagnostic and both lengths beside it. Parsing runs
+against the stored copy rather than over the network, so a parse that
+is wrong costs a re-run and leaves the record intact.
 
 ## Canary roles
 
