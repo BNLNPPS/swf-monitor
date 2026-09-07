@@ -232,6 +232,8 @@
                     <th class="text-end">Jobs</th><th class="text-end">Finished</th>
                     <th class="text-end">Failure rate</th><th class="text-end">CPU efficiency</th>
                     <th class="text-end">Memory, median</th><th class="text-end">Memory, 90th</th>
+                    {% if observed.measured %}<th class="text-end" title="CPU seconds per simulated event, the job-weighted mean over this queue's workloads, from the payload reports">Simulation, CPU s/event</th>
+                    <th class="text-end" title="CPU seconds per reconstructed event, the job-weighted mean over this queue's workloads, from the payload reports">Reconstruction, CPU s/event</th>{% endif %}
                     <th>Reading</th></tr></thead>
                 <tbody>
                 {% for p in observed.processors %}
@@ -244,6 +246,8 @@
                         <td class="text-end">{{ p.efficiency|default_if_none:"—" }}</td>
                         <td class="text-end">{% if p.rss_median_mb %}{{ p.rss_median_mb }} MB{% else %}—{% endif %}</td>
                         <td class="text-end">{% if p.rss_p90_mb %}{{ p.rss_p90_mb }} MB{% else %}—{% endif %}</td>
+                        {% if observed.measured %}<td class="text-end"{% if p.measured_jobs %} title="{{ p.measured_jobs }} measured jobs"{% endif %}>{{ p.sim_cpu_per_event|default_if_none:"—" }}</td>
+                        <td class="text-end"{% if p.measured_jobs %} title="{{ p.measured_jobs }} measured jobs"{% endif %}>{{ p.reco_cpu_per_event|default_if_none:"—" }}</td>{% endif %}
                         <td>{% if p.failing %}<span class="text-danger">fails far more than this queue does</span>{% endif %}
                             {% if p.slow and p.failing %}<br>{% endif %}
                             {% if p.slow %}<span class="text-danger">delivers below this queue's rate</span>{% endif %}</td>

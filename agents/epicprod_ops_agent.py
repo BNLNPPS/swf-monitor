@@ -58,6 +58,9 @@ Capabilities:
   content_accept     — the operator's acceptance of one dataset's content:
                        detach what does not belong, affirm the record, count
                        the recorded events (docs/EPICPROD_VALIDATION.md).
+  node_measure_ingest — fold every finished job's per-stage measures into
+                       the node measurement store, behind a cursor (hourly;
+                       site-canary docs/MEASUREMENTS.md).
   outputs_ingest     — write the production record of what tasks produced,
                        and the registrar's worklist, from the payload reports
                        (hourly; docs/RUCIO_RESILIENCE.md, Measure 3).
@@ -179,6 +182,10 @@ CONTENT_VALIDATE_TIMEOUT = int(os.environ.get("EPICPROD_CONTENT_VALIDATE_TIMEOUT
 # detaches files in the JLab catalog.
 CONTENT_ACCEPT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "content-accept.py"
 CONTENT_ACCEPT_TIMEOUT = int(os.environ.get("EPICPROD_CONTENT_ACCEPT_TIMEOUT", "900"))
+# The node measurement fold (site-canary docs/MEASUREMENTS.md): every
+# finished job's per-stage measures into the capability record, hourly.
+NODE_MEASURE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "node-measure-ingest.py"
+NODE_MEASURE_TIMEOUT = int(os.environ.get("EPICPROD_NODE_MEASURE_TIMEOUT", "1800"))
 OUTPUTS_INGEST_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "outputs-ingest.py"
 OUTPUTS_INGEST_TIMEOUT = int(os.environ.get("EPICPROD_OUTPUTS_INGEST_TIMEOUT", "900"))
 OUTPUTS_INGEST_HOURS = os.environ.get("EPICPROD_OUTPUTS_INGEST_HOURS", "48")
@@ -293,6 +300,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "batch_log_capture", "batch_log_learn",
                    "report_sweep", "outputs_ingest", "registrar",
                    "content_validate", "content_accept", "stash_drain",
+                   "node_measure_ingest",
                    "storage_sweep", "campaign_config_propose",
                    "assessment_completed",
                    "health_ping", "shutdown"}
@@ -1980,6 +1988,63 @@ class EpicProdOpsAgent(BaseAgent):
                      f"detached={detached} events={summary.get('delivered_events', 0)}"),
             dataset=dataset, detached=detached,
             delivered_events=summary.get('delivered_events', 0))
+
+    def _handle_node_measure_ingest(self, m):
+        """Fold finished jobs' measures into the node measurement store off
+        the receiver thread — hourly by schedule, also directly invokable."""
+        self.run_in_background(
+            self._do_node_measure_ingest, m,
+            dedup_key="node_measure_ingest", label="node_measure_ingest")
+
+    def _do_node_measure_ingest(self, m):
+        """Every finished job since the cursor, its per-stage measures folded
+        into the distributions of its node environment and workload
+        (site-canary docs/MEASUREMENTS.md)."""
+        cmd = [sys.executable, str(NODE_MEASURE_SCRIPT)]
+        if m.get('hours'):
+            cmd += ['--hours', str(m['hours'])]
+        if m.get('limit'):
+            cmd += ['--limit', str(m['limit'])]
+        if m.get('dry_run'):
+            cmd.append('--dry-run')
+        self.logger.info("PRODOPS node_measure_ingest: folding finished jobs")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=NODE_MEASURE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS node_measure_ingest TIMEOUT after {NODE_MEASURE_TIMEOUT}s")
+            self._log_action('node_measure_ingest', t0, outcome='timeout',
+                             reason=f'timed out after {NODE_MEASURE_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  node-measure: {line}")
+        summary_line = ((p.stdout or '').strip().splitlines() or [''])[-1]
+        try:
+            summary = json.loads(summary_line)
+        except (ValueError, TypeError):
+            summary = {}
+        if p.returncode != 0:
+            reason = summary.get('error') or self._derive_reason(p)
+            self.logger.error(f"PRODOPS node_measure_ingest FAILED rc={p.returncode}")
+            self._log_action('node_measure_ingest', t0, outcome='error', reason=reason,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        self.logger.info(f"PRODOPS node_measure_ingest done: {summary_line}")
+        self._log_action(
+            'node_measure_ingest', t0, outcome='ok',
+            username=str(m.get('created_by') or ''),
+            sublevel='low', live_default=False,
+            summary=(f"jobs={summary.get('jobs', 0)} folded={summary.get('folded', 0)} "
+                     f"rows={summary.get('rows', 0)} no_report={summary.get('no_report', 0)} "
+                     f"no_task={summary.get('no_task', 0)} cursor={summary.get('cursor', '')}"),
+            jobs=summary.get('jobs', 0), folded=summary.get('folded', 0))
 
     def _handle_outputs_ingest(self, m):
         """Write the production record of what tasks produced, off the

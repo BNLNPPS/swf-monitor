@@ -2271,6 +2271,38 @@ def _queue_observed_product(queue_name):
     return (product or {}).get('value') or {}
 
 
+def _with_measurements(observed, queue_name):
+    """The node measurement store's CPU seconds per event, simulation and
+    reconstruction, beside each processor of the observed section: the
+    job-weighted mean over the queue's workloads (site-canary
+    docs/MEASUREMENTS.md). A database read; the product is not rebuilt."""
+    processors = list((observed or {}).get('processors') or [])
+    if not processors:
+        return observed
+    try:
+        from canary.store.measure import queue_summary
+        measured = queue_summary(queue_name)
+    except Exception as e:                                   # noqa: BLE001
+        logger.error('node measurements unreadable for %s: %s', queue_name, e)
+        return observed
+    out = dict(observed)
+    rows = []
+    for entry in processors:
+        entry = dict(entry)
+        stages = measured.get(entry.get('processor'), {})
+        sim = stages.get('simulation') or {}
+        reco = stages.get('reconstruction') or {}
+        entry['sim_cpu_per_event'] = (round(sim['mean'], 2)
+                                      if sim.get('mean') is not None else None)
+        entry['reco_cpu_per_event'] = (round(reco['mean'], 2)
+                                       if reco.get('mean') is not None else None)
+        entry['measured_jobs'] = max(sim.get('jobs', 0), reco.get('jobs', 0))
+        rows.append(entry)
+    out['processors'] = rows
+    out['measured'] = any(r['measured_jobs'] for r in rows)
+    return out
+
+
 def epic_queue_detail(request, queue_name):
     """Full schedconfig for a single ePIC queue."""
     import json as json_mod
@@ -2367,7 +2399,7 @@ def epic_queue_detail(request, queue_name):
         'site_outcomes_pie': site_outcomes_pie,
         'site_no_activity': site_no_activity,
         'declines': _landing_declines_product().get(queue_name),
-        'observed': _queue_observed_product(queue_name),
+        'observed': _with_measurements(_queue_observed_product(queue_name), queue_name),
         'declines_days': SPARK_SPAN_DAYS,
         'submission': _reported_submission(queue_name),
     })
