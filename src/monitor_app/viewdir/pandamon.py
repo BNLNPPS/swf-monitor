@@ -2254,7 +2254,7 @@ def _queue_observed_product(queue_name):
     counterpart (swf inflight swf-node-map-benchmarks)."""
     from ..cached_product import get_product
     product = get_product(
-        f'epic_queue_observed:{queue_name}:v1',
+        f'epic_queue_observed:{queue_name}:v2',
         lambda: queue_observed(queue_name, days=30),
         ttl_seconds=60 * 60, async_first_fill=True)
     return (product or {}).get('value') or {}

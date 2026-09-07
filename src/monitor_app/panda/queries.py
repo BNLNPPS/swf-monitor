@@ -3453,8 +3453,10 @@ def queue_observed(panda_queue, days=30):
             'failed': failed,
             'failure_rate': round(failed / jobs, 3) if jobs else None,
             'efficiency': round(float(efficiency), 3) if efficiency else None,
-            'rss_median_kb': int(rss_median) if rss_median else None,
-            'rss_p90_kb': int(rss_p90) if rss_p90 else None,
+            # In megabytes: the record keeps kilobytes and a seven-digit
+            # number of them reads as noise.
+            'rss_median_mb': round(int(rss_median) / 1024) if rss_median else None,
+            'rss_p90_mb': round(int(rss_p90) / 1024) if rss_p90 else None,
             'cores': cores,
         })
     # An outlier is a processor the queue itself contradicts: it carried

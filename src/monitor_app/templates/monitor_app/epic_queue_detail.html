@@ -242,8 +242,8 @@
                         <td class="text-end">{{ p.finished }}</td>
                         <td class="text-end">{{ p.failure_rate|default_if_none:"—" }}</td>
                         <td class="text-end">{{ p.efficiency|default_if_none:"—" }}</td>
-                        <td class="text-end">{% if p.rss_median_kb %}{{ p.rss_median_kb }} KB{% else %}—{% endif %}</td>
-                        <td class="text-end">{% if p.rss_p90_kb %}{{ p.rss_p90_kb }} KB{% else %}—{% endif %}</td>
+                        <td class="text-end">{% if p.rss_median_mb %}{{ p.rss_median_mb }} MB{% else %}—{% endif %}</td>
+                        <td class="text-end">{% if p.rss_p90_mb %}{{ p.rss_p90_mb }} MB{% else %}—{% endif %}</td>
                         <td>{% if p.failing %}<span class="text-danger">fails far more than this queue does</span>{% endif %}
                             {% if p.slow and p.failing %}<br>{% endif %}
                             {% if p.slow %}<span class="text-danger">delivers below this queue's rate</span>{% endif %}</td>
