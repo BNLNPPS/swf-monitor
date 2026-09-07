@@ -49,6 +49,9 @@ Capabilities:
   panda_sandbox_keepalive — touch the sandbox tarballs of retryable tasks in
                        the PanDA server cache so the 7-day purge passes them
                        by (nightly catalog_sync chain step).
+  registrar          — complete the registrations the payload left pending
+                       when the catalog could not be reached (hourly;
+                       swf-epicprod docs/RUCIO_RESILIENCE.md, Measure 2).
   batch_log_capture  — fetch the condor event log of every failed and
                        never-started job whole into the file store, and prune
                        date directories past retention (nightly catalog_sync
@@ -148,6 +151,13 @@ DELIVERY_DAILY_TIMEOUT = int(os.environ.get("EPICPROD_DELIVERY_DAILY_TIMEOUT", "
 BATCH_LOG_CAPTURE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "batch-log-capture.py"
 BATCH_LOG_CAPTURE_TIMEOUT = int(os.environ.get("EPICPROD_BATCH_LOG_CAPTURE_TIMEOUT", "1800"))
 BATCH_LOG_CAPTURE_HOURS = os.environ.get("EPICPROD_BATCH_LOG_CAPTURE_HOURS", "26")
+# The registrar (swf-epicprod docs/RUCIO_RESILIENCE.md, Measure 2): completes
+# the registrations the payload left pending, hourly, and holds the only
+# retry — one gentle attempt per job, then bounded attempts from one process.
+REGISTRAR_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "registrar.py"
+REGISTRAR_TIMEOUT = int(os.environ.get("EPICPROD_REGISTRAR_TIMEOUT", "1800"))
+REGISTRAR_HOURS = os.environ.get("EPICPROD_REGISTRAR_HOURS", "48")
+
 # The payload report sweep (swf-epicprod docs/JOB_REPORTING.md): hourly by
 # design, a window with overlap, and never in a request path.
 REPORT_SWEEP_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "report-sweep.py"
@@ -252,7 +262,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "capture_system_snap",
                    "rucio_arrivals_sweep", "epic_prod_past_import",
                    "file_events_measure", "delivery_daily_rebuild",
-                   "batch_log_capture", "report_sweep",
+                   "batch_log_capture", "report_sweep", "registrar",
                    "storage_sweep", "campaign_config_propose",
                    "assessment_completed",
                    "health_ping", "shutdown"}
@@ -1720,6 +1730,68 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              sublevel='low', live_default=False,
                              summary=((p.stdout or '').splitlines() or [''])[-1])
+
+    def _handle_registrar(self, m):
+        """Complete pending registrations off the receiver thread — hourly by
+        schedule, also directly invokable."""
+        self.run_in_background(
+            self._do_registrar, m,
+            dedup_key="registrar", label="registrar")
+
+    def _do_registrar(self, m):
+        """Finish the bookkeeping of jobs whose output was uploaded but whose
+        catalog entry could not be made. Retry lives here and nowhere else, so
+        a struggling catalog meets one process rather than the fleet
+        (swf-epicprod docs/RUCIO_RESILIENCE.md, Measure 2)."""
+        hours = str(m.get('hours') or REGISTRAR_HOURS)
+        cmd = [sys.executable, str(REGISTRAR_SCRIPT), '--hours', hours]
+        if m.get('dry_run'):
+            cmd.append('--dry-run')
+        self.logger.info(f"PRODOPS registrar: pending registrations, last {hours} hours")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=REGISTRAR_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(f"PRODOPS registrar TIMEOUT after {REGISTRAR_TIMEOUT}s")
+            self._log_action('registrar', t0, outcome='timeout',
+                             reason=f'timed out after {REGISTRAR_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  registrar: {line}")
+        summary_line = ((p.stdout or '').strip().splitlines() or [''])[-1]
+        try:
+            summary = json.loads(summary_line)
+        except (ValueError, TypeError):
+            summary = {}
+        registered = len(summary.get('registered') or [])
+        deferred = len(summary.get('deferred') or [])
+        undelivered = len(summary.get('undelivered') or [])
+        if p.returncode != 0:
+            reason = summary.get('error') or self._derive_reason(p)
+            self.logger.error(f"PRODOPS registrar FAILED rc={p.returncode}")
+            self._log_action('registrar', t0, outcome='error', reason=reason,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        self.logger.info(
+            f"PRODOPS registrar done: {registered} registered, "
+            f"{deferred} deferred, {undelivered} undelivered")
+        self._log_action(
+            'registrar', t0,
+            outcome='ok' if not undelivered else 'partial',
+            reason=('; '.join(str(u.get('reason')) for u in
+                              (summary.get('undelivered') or [])[:5])
+                    if undelivered else ''),
+            username=str(m.get('created_by') or ''),
+            sublevel='low', live_default=bool(registered or undelivered),
+            summary=(f"jobs={summary.get('jobs', 0)} registered={registered} "
+                     f"deferred={deferred} undelivered={undelivered}"),
+            registered=registered, deferred=deferred, undelivered=undelivered)
 
     def _handle_report_sweep(self, m):
         """Run the payload report sweep off the receiver thread — hourly by
