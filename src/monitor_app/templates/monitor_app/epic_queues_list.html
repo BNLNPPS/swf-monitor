@@ -36,6 +36,7 @@
                     <th>Last use</th>
                     <th title="Job count in the canary 14-day assessment window">Jobs<br>2&nbsp;wks</th>
                     <th title="Finished (green) and failed (red) jobs per 8-hour bin over the last 2 weeks">Completions<br>2&nbsp;wks</th>
+                    <th title="Landing declines in the last 2 weeks: jobs whose payload could not reach the Rucio server or the input door from the worker and started no work (payload exit 80)">Declined<br>2&nbsp;wks</th>
                     <th>Resource Type</th>
                     <th>Type</th>
                     <th>Region</th>
@@ -68,6 +69,11 @@
                         </a>
                         {% endif %}
                     </td>
+                    <td data-order="{% if q.declines %}{{ q.declines.count }}{% else %}0{% endif %}" class="text-end{% if q.declines %} text-danger fw-bold{% endif %}">
+                        {% if q.declines %}
+                        <a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ q.panda_queue|urlencode }}&amp;status=failed" style="color: inherit;" title="Last decline {{ q.declines.last|fmt_dt }}">{{ q.declines.count }}</a>
+                        {% endif %}
+                    </td>
                     <td>{{ q.resource_type|default:"—" }}</td>
                     <td>{{ q.type|default:"—" }}</td>
                     <td>{{ q.country|default:"—" }}</td>
@@ -76,7 +82,7 @@
                     <td><a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ q.panda_queue }}">View</a></td>
                 </tr>
             {% empty %}
-                <tr><td colspan="12" class="text-center text-muted">No ePIC queues found</td></tr>
+                <tr><td colspan="13" class="text-center text-muted">No ePIC queues found</td></tr>
             {% endfor %}
             </tbody>
         </table>

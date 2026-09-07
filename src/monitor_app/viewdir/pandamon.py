@@ -31,7 +31,8 @@ from ..panda import (
     list_jobs_dt, build_tasks_window,
     job_filter_counts, task_filter_counts,
     get_task, error_summary, diagnose_jobs, job_completion_details,
-    list_queues, get_queue, queue_last_use, resource_usage, job_outcomes,
+    list_queues, get_queue, queue_last_use, landing_declines,
+    resource_usage, job_outcomes,
 )
 from ..panda.constants import (
     LIST_FIELDS, TASK_LIST_FIELDS,
@@ -1898,6 +1899,26 @@ def _spark_svg(series, width=120, height=40):
     }
 
 
+def _landing_declines_product():
+    """Landing declines per queue over the standing 2-week window, from
+    the payload's decline exit code on the PanDA record (swf-epicprod
+    docs/EPICPROD_PAYLOAD.md, exit code 80): a worker that could not
+    reach the Rucio server or the input door and started no work. A
+    cached product, since the query scans two weeks of jobs; 15 minutes
+    is fresh enough for a count that a job page can always confirm."""
+    from ..cached_product import get_product
+    product = get_product(
+        'epic_queues_landing_declines:v1',
+        lambda: landing_declines(SPARK_SPAN_DAYS),
+        ttl_seconds=15 * 60, async_first_fill=True)
+    value = (product or {}).get('value') or {}
+    if 'error' in value:
+        logger.error('landing declines product carries an error: %s',
+                     value['error'])
+        return {}
+    return value
+
+
 def epic_queues_list(request):
     """ePIC compute queues from live PanDA schedconfig."""
     result = list_queues(vo='eic')
@@ -1938,9 +1959,11 @@ def epic_queues_list(request):
         ttl_seconds=6 * 3600, async_first_fill=True)
     spark_data = (spark_product or {}).get('value') or {}
     spark_sites = spark_data.get('sites') or {}
+    declines = _landing_declines_product()
     for queue in queues:
         name = queue.get('panda_queue')
         meta = local.get(name, {})
+        queue['declines'] = declines.get(name)
         queue['description'] = meta.get('description', '')
         queue['tier'] = meta.get('tier') or queue.get('tier') or ''
         queue['canary'] = canary_health.get(name, 'unknown')
@@ -2094,6 +2117,8 @@ def epic_queue_detail(request, queue_name):
         'snapper_embed': snapper_embed,
         'site_outcomes_pie': site_outcomes_pie,
         'site_no_activity': site_no_activity,
+        'declines': _landing_declines_product().get(queue_name),
+        'declines_days': SPARK_SPAN_DAYS,
     })
 
 

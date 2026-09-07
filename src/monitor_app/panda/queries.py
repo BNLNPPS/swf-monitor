@@ -1604,6 +1604,51 @@ def queue_last_use():
             for row in rows if row[1] is not None}
 
 
+# The payload's landing-decline exit code (swf-epicprod
+# docs/EPICPROD_PAYLOAD.md, Exit codes): the worker could not reach the
+# Rucio server or the input door in the job's first seconds, so the
+# payload started nothing. PanDA keeps the code on every job as
+# transexitcode, which makes declines countable per queue with no log read.
+LANDING_DECLINE_EXIT = '80'
+
+
+def landing_declines(days=14):
+    """Landing declines per queue over the window: jobs whose payload
+    exited with the decline code, counted by computingsite with the
+    latest end time. Keyed by queue name; UTC-aware datetimes."""
+    conn = connections['panda']
+    since = timezone.now() - timedelta(days=days)
+    sql = f"""
+        SELECT "computingsite", COUNT(*), MAX("endtime")
+        FROM (
+            SELECT "pandaid", "computingsite", "endtime"
+            FROM "{PANDA_SCHEMA}"."jobsactive4"
+            WHERE "transexitcode" = %s AND "modificationtime" >= %s
+            UNION
+            SELECT "pandaid", "computingsite", "endtime"
+            FROM "{PANDA_SCHEMA}"."jobsarchived4"
+            WHERE "transexitcode" = %s AND "modificationtime" >= %s
+        ) declined
+        GROUP BY "computingsite"
+    """
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(sql, [LANDING_DECLINE_EXIT, since,
+                                 LANDING_DECLINE_EXIT, since])
+            rows = cursor.fetchall()
+    except Exception as e:                                   # noqa: BLE001
+        logger.error(f"landing_declines failed: {e}")
+        return {'error': str(e)}
+    return {
+        row[0]: {
+            'count': row[1],
+            'last': (row[2].replace(tzinfo=dt_timezone.utc).isoformat()
+                     if row[2] is not None else None),
+        }
+        for row in rows
+    }
+
+
 def get_queue(panda_queue):
     """Get full configuration for a single PanDA queue."""
     conn = connections['panda']

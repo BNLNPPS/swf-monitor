@@ -7,6 +7,12 @@
 <div class="container-fluid">
     <h1>{{ queue_name }}</h1>
     <p><a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ queue_name }}" class="btn btn-primary btn-sm">View Jobs on this Queue</a></p>
+    <p class="mb-3{% if declines %} text-danger fw-bold{% endif %}" title="Jobs whose payload could not reach the Rucio server or the input door from the worker and started no work (payload exit 80)">
+        Landing declines, last {{ declines_days }} days:
+        {% if declines %}{{ declines.count }}, last {{ declines.last|fmt_dt }}
+        (<a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ queue_name|urlencode }}&amp;status=failed" style="color: inherit;">failed jobs</a>)
+        {% else %}none{% endif %}
+    </p>
     <div class="card mb-3">
         <div class="card-header d-flex align-items-center">
             <strong>Description</strong>
