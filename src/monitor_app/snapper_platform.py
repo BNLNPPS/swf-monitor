@@ -234,8 +234,12 @@ PLATFORM_REGISTRATION = {
         },
         "submit_reporter_status": {
             "path": "submit_reporter_status",
+            # Not required: the group it describes is itself optional,
+            # and a registration that demands a field the publisher may
+            # not carry fails the whole publication rather than the
+            # field.
+            "required": False,
             "type": "string",
-            "required": True,
             "kind": "assessment",
             "enum": ["fresh", "stale", "absent"],
             "description": (
