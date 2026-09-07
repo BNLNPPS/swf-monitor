@@ -3475,10 +3475,13 @@ def queue_observed(panda_queue, days=30):
         entry['slow'] = bool(
             middle and entry['efficiency'] and entry['jobs'] >= 20
             and entry['efficiency'] < middle * 0.8)
+        # Above the queue's own rate by a margin, not by a multiple: on a
+        # queue already failing 73% of its jobs, 1.5 times that is over 1.0
+        # and nothing can ever clear it, which left the column empty on the
+        # very queue that needed it.
         entry['failing'] = bool(
-            entry['jobs'] >= 20 and queue_failure
-            and entry['failure_rate'] and entry['failure_rate'] >= queue_failure * 1.5
-            and entry['failure_rate'] >= 0.3)
+            entry['jobs'] >= 20 and entry['failure_rate']
+            and entry['failure_rate'] >= max(queue_failure + 0.15, 0.3))
         entry['outlier'] = entry['slow'] or entry['failing']
     return {'processors': processors, 'days': days, 'median_efficiency': middle,
             'failure_rate': round(queue_failure, 3),
