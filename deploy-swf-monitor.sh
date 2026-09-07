@@ -297,12 +297,14 @@ if systemctl is-enabled swf-monitor-mcp-asgi.service >/dev/null 2>&1; then
 fi
 
 # Prod-ops agent launches doer subprocesses from the release tree, so it moves to
-# the new release on every deploy — without killing work in flight. Idle (READY
-# in the agent registry): restart now. Working, or state unknown: signal the
-# agent alone to step down; BaseAgent drains, exits when no work is in flight,
-# and systemd (Restart=always) starts it again from this release. The previous
-# release stays on disk meanwhile (the last five are kept). The unit's
-# KillMode=mixed keeps a plain stop from signalling the doers directly.
+# the new release on every deploy, always through a systemd restart: the stop
+# job carries the unit's stop timeout, and BaseAgent's stop is bounded (it stops
+# consuming, drains up to its limit, ends the doers still running, exits). A
+# working agent loses the doer pass in flight, which reruns on its own schedule;
+# the agent's state is logged so the loss is visible. Signalling the process
+# directly (systemctl kill) is never used: it leaves no stop job and therefore no
+# timeout, and on 2026-09-07 that left the agent wedged in a drain with no bound
+# at all. The previous release stays on disk meanwhile (the last five are kept).
 if systemctl is-enabled epicprod-ops-agent.service >/dev/null 2>&1; then
     OPS_PID=$(systemctl show -p MainPID --value epicprod-ops-agent.service 2>/dev/null || echo 0)
     OPS_STATE=$(curl -k -s "https://localhost/swf-monitor/api/systemagents/" \
@@ -314,11 +316,10 @@ print(next((a.get('operational_state') or 'UNKNOWN' for a in items
            'UNKNOWN'))" 2>/dev/null || echo UNKNOWN)
     if [ "$OPS_PID" = "0" ] || [ "$OPS_STATE" = "READY" ]; then
         log "Restarting prod-ops agent (epicprod-ops-agent, $OPS_STATE) to pick up new code/env..."
-        systemctl restart epicprod-ops-agent.service
     else
-        log "Prod-ops agent is $OPS_STATE (pid $OPS_PID): asked to step down when its work is done; systemd restarts it on this release"
-        systemctl kill --signal=SIGTERM --kill-who=main epicprod-ops-agent.service
+        log "Restarting prod-ops agent (epicprod-ops-agent, $OPS_STATE, pid $OPS_PID): its work in flight is ended by the bounded stop and reruns on its schedule"
     fi
+    systemctl restart epicprod-ops-agent.service
 fi
 
 # The canary agent runs its doers from the release tree the same way; a deploy
