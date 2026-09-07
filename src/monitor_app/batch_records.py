@@ -389,6 +389,8 @@ def learn(root=None, rescue=True):
     }
     if rescue:
         knowledge['rescued'] = _rescue(root, knowledge)
+        knowledge['retired'] = _retire(root, knowledge)
+    knowledge['permanent'] = _permanent_size(root)
     _write(os.path.join(root, KNOWLEDGE_FILE),
            json.dumps(knowledge, indent=2, sort_keys=True))
     return knowledge
@@ -414,21 +416,41 @@ def _rescue(root, knowledge_base):
     """
     keep_root = os.path.join(root, 'keep')
     shapes = {p['shape'] for p in knowledge_base['patterns']}
-    exemplars = {p['exemplar']: p['shape'] for p in knowledge_base['patterns']}
     rescued = {'exemplars': 0, 'unmatched': 0}
-    for pandaid, day, path, body in _iter_logs(root):
-        wanted, bucket = None, None
-        if pandaid in exemplars:
-            wanted, bucket = 'exemplars', _shape_dir(exemplars[pandaid])
-        else:
-            from .panda.queries import parse_condor_log
-            events = parse_condor_log(body, source=path)
-            found = {normalize(e['text']) for e in (events.get('events') or [])}
-            if not (found & shapes):
-                wanted, bucket = 'unmatched', 'unmatched'
-        if not wanted:
+
+    # One exemplar per shape, addressed by shape: a single log is often the
+    # exemplar for several shapes, so keying this by job kept only the last
+    # of them and left entries in the knowledge base with no evidence.
+    bodies = {pandaid: body for pandaid, _day, _path, body in _iter_logs(root)}
+    for pattern in knowledge_base['patterns']:
+        body = bodies.get(pattern['exemplar'])
+        if body is None:
             continue
-        target_dir = os.path.join(keep_root, bucket)
+        target_dir = os.path.join(keep_root, _shape_dir(pattern['shape']))
+        target = os.path.join(target_dir, f"{pattern['exemplar']}.log")
+        if os.path.exists(target):
+            continue
+        try:
+            os.makedirs(target_dir, exist_ok=True)
+            with open(target, 'w') as handle:
+                handle.write(body)
+            rescued['exemplars'] += 1
+        except OSError as e:                                  # noqa: BLE001
+            logger.error('exemplar %s not kept: %s', pattern['exemplar'], e)
+
+    from .panda.queries import parse_condor_log
+    for pandaid, _day, path, body in _iter_logs(root):
+        events = parse_condor_log(body, source=path)
+        found = {normalize(e['text']) for e in (events.get('events') or [])}
+        if found & shapes:
+            continue
+        if rescued['unmatched'] >= UNMATCHED_KEEP_PER_PASS:
+            # A storm of a shape the parser cannot yet read is still a storm:
+            # keep a bounded sample and count the rest, so the next pass sees
+            # the shape without the disk paying for every instance of it.
+            rescued['unmatched_over_cap'] = rescued.get('unmatched_over_cap', 0) + 1
+            continue
+        target_dir = os.path.join(keep_root, 'unmatched')
         target = os.path.join(target_dir, f'{pandaid}.log')
         if os.path.exists(target):
             continue
@@ -436,12 +458,68 @@ def _rescue(root, knowledge_base):
             os.makedirs(target_dir, exist_ok=True)
             with open(target, 'w') as handle:
                 handle.write(body)
-            rescued[wanted] += 1
+            rescued['unmatched'] += 1
         except OSError as e:                                  # noqa: BLE001
-            logger.error('batch record %s not rescued: %s', pandaid, e)
+            logger.error('unmatched log %s not kept: %s', pandaid, e)
     return rescued
 
 
 def _shape_dir(shape):
     """A stable directory name for a pattern, from its shape."""
     return hashlib.sha1(shape.encode('utf-8')).hexdigest()[:12]
+
+
+# What bounds the permanent set. One exemplar per shape already ties it to
+# the number of kinds of failure rather than the number of failures — over
+# the first corpus, 23 logs yielded 13 shapes, and the ratio falls as the
+# corpus grows. Three rules keep it that way when normalization is weak or
+# a novel storm arrives.
+UNMATCHED_KEEP_PER_PASS = 20
+
+
+def _retire(root, knowledge_base):
+    """Drop kept logs whose shape the corpus no longer holds.
+
+    An exemplar is evidence for an entry in the knowledge base. When the
+    shape vocabulary improves, the shapes it replaced are no longer
+    entries, and their exemplars are no longer evidence for anything.
+    Retiring them is what stops a better parser from costing disk.
+    """
+    keep_root = os.path.join(root, 'keep')
+    live = {_shape_dir(p['shape']) for p in knowledge_base['patterns']}
+    live.add('unmatched')
+    retired = {'buckets': 0, 'logs': 0}
+    try:
+        buckets = os.listdir(keep_root)
+    except OSError:
+        return retired
+    for bucket in sorted(buckets):
+        if bucket in live:
+            continue
+        path = os.path.join(keep_root, bucket)
+        try:
+            files = os.listdir(path)
+            for name in files:
+                os.remove(os.path.join(path, name))
+            os.rmdir(path)
+            retired['buckets'] += 1
+            retired['logs'] += len(files)
+        except OSError as e:                                  # noqa: BLE001
+            logger.error('kept bucket %s not retired: %s', path, e)
+    return retired
+
+
+def _permanent_size(root):
+    """What the permanent set costs: buckets, logs and bytes under keep."""
+    keep_root = os.path.join(root, 'keep')
+    buckets = logs = size = 0
+    for dirpath, _dirnames, filenames in os.walk(keep_root):
+        if dirpath != keep_root:
+            buckets += 1
+        for name in filenames:
+            logs += 1
+            try:
+                size += os.path.getsize(os.path.join(dirpath, name))
+            except OSError:
+                pass
+    return {'buckets': buckets, 'logs': logs, 'bytes': size}
