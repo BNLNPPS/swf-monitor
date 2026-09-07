@@ -201,6 +201,7 @@ def _active_nav(request):
         'pcs_ingest': namespace == 'pcs' and url_name == 'pc_ingest',
         'pcs_configs': namespace == 'pcs' and url_name in pcs_config_names,
         'pcs_tasks': namespace == 'pcs' and url_name in pcs_task_names,
+        'pcs_trials': namespace == 'pcs' and url_name in ('trials_list', 'trial_detail'),
         'campaigns': namespace == 'pcs' and url_name in pcs_catalog_names,
         'workflows': namespace == 'monitor_app' and url_name in workflow_names,
         'files': namespace == 'monitor_app' and url_name in file_names,
