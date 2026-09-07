@@ -117,6 +117,42 @@ def stored(pandaid, root=None):
     return None
 
 
+def first_day(root=None):
+    """The earliest day the store holds, ISO date, or None if it is empty."""
+    root = root or store_root()
+    try:
+        days = sorted(d for d in os.listdir(root) if d[:2].isdigit())
+    except OSError:
+        return None
+    return days[0] if days else None
+
+
+def why_absent(job, has_batchlog=True):
+    """Why a job has no captured batch record, as a sentence for a page.
+
+    Capture covers failed jobs the harvester holds a batch log for, once
+    nightly (``candidates``). So a job that did not fail was never a
+    candidate; a failed job with no harvester batch log has nothing to
+    capture; a failed job that ended before the store's first day
+    predates the capture; a failed job newer than that awaits the
+    nightly pass.
+    """
+    status = job.get('jobstatus') or ''
+    if status != 'failed':
+        return (f'Not captured: the capture covers failed jobs only, and '
+                f'this job is {status or "not failed"}.')
+    if not has_batchlog:
+        return 'Not captured: the harvester holds no batch log for this job.'
+    start = first_day()
+    ended = str(job.get('endtime') or job.get('modificationtime') or '')[:10]
+    if start and ended and ended < start:
+        return (f'Not captured: the store begins {start} and this job '
+                f'failed {ended}, before the capture existed; the harvester '
+                f'keeps the source about eighteen days.')
+    return ('Not yet captured: the nightly pass captures the logs of the '
+            'jobs that failed since its last run.')
+
+
 def _fetch(url):
     """The log body, or an exception. No retry: the caller runs daily."""
     # The SCDF log hosts serve these over TLS with a chain this host's

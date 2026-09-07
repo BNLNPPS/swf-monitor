@@ -348,11 +348,12 @@
     {% if batch_record %}
     <div class="card mb-3">
         <div class="card-header"><strong>Batch record</strong>
-            {% if batch_record.captured %}<span class="text-muted ms-2">captured {{ batch_record.captured.day }}, {{ batch_record.captured.bytes }} bytes</span>{% else %}<span class="text-muted ms-2">read from the harvester, not captured</span>{% endif %}
-            <a class="ms-2" href="{% url 'monitor_app:panda_batch_record' pandaid=job.pandaid %}">condor log as captured</a>
+            {% if batch_record.captured %}<span class="text-muted ms-2">captured {{ batch_record.captured.day }}, {{ batch_record.captured.bytes }} bytes</span>
+            <a class="ms-2" href="{% url 'monitor_app:panda_batch_record' pandaid=job.pandaid %}">condor log as captured</a>{% endif %}
         </div>
         <div class="card-body">
             {% if batch_record.error %}
+            <p class="mb-1">The batch system's own account of the job, whole: the condor event log the harvester keeps, captured nightly for failed jobs while the harvester still holds it. The job record keeps a hold or abort reason cut at a column width; the capture keeps the end of the message, where the error is.</p>
             <p class="mb-0">{{ batch_record.error }}</p>
             {% else %}
             <table class="table table-striped table-bordered table-sm align-middle mb-2">
@@ -377,30 +378,6 @@
     </div>
     {% endif %}
 
-    {% if job_parameter_items %}
-    <div class="card mb-3">
-        <div class="card-header"><strong>Other job parameters</strong></div>
-        <div class="card-body">
-            <table class="table table-sm mb-0">
-                <tbody>
-                {% for item in job_parameter_items %}
-                <tr>
-                    <td style="width:16rem;"><strong>{{ item.label }}</strong></td>
-                    <td style="word-break:break-word; overflow-wrap:anywhere;">
-                        {% if item.value|is_url %}
-                        <a href="{{ item.value }}" target="_blank" rel="noopener">{{ item.value }}</a>
-                        {% else %}
-                        {{ item.value|fmt_value }}
-                        {% endif %}
-                    </td>
-                </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-    {% endif %}
-
     <!-- Harvester info -->
     {% if harvester %}
     <div class="card mb-3">
@@ -419,6 +396,32 @@
                     </td>
                 </tr>
                 {% endfor %}
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if job_parameter_items %}
+    <div class="card mb-3">
+        <div class="card-header"><strong>Other job parameters</strong></div>
+        <div class="card-body">
+            <table class="table table-sm mb-0">
+                <tbody>
+                {% for item in job_parameter_items %}
+                <tr>
+                    <td style="width:16rem;"><strong>{{ item.label }}</strong></td>
+                    <td style="word-break:break-word; overflow-wrap:anywhere;">
+                        {% if item.url %}
+                        <a href="{{ item.url }}" target="_blank" rel="noopener">{{ item.url }}</a>{{ item.rest }}
+                        {% elif item.value|is_url %}
+                        <a href="{{ item.value }}" target="_blank" rel="noopener">{{ item.value }}</a>
+                        {% else %}
+                        {{ item.value|fmt_value }}
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
             </table>
         </div>
     </div>

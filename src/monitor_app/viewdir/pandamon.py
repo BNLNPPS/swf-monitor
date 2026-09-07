@@ -1090,6 +1090,14 @@ def panda_job_detail(request, pandaid):
         )
         if job.get(key) not in (None, '')
     ]
+    for item in data['job_parameter_items']:
+        # pilotid is '<stdout url>|<type>|<mode>|<version>': only the first
+        # element is a link; the rest stays as text beside it.
+        if item['label'] == 'Pilot ID' and '|' in str(item['value']):
+            url, _, rest = str(item['value']).partition('|')
+            if url.startswith(('http://', 'https://')):
+                item['url'] = url
+                item['rest'] = '|' + rest
     data.update(inventory_for_job_context(data))
     data['epicprod_diagnosis'] = diagnosis_for_study_data(
         data, epicprod_job=data.get('epicprod_job'))
@@ -1488,10 +1496,13 @@ def panda_batch_record(request, pandaid):
     from monitor_app import batch_records
     record = batch_records.stored(int(pandaid))
     if not record:
+        # The same reason the job page gives, from the job's own record.
+        data = study_job(int(pandaid), include_log_analysis=False) or {}
+        reason = batch_records.why_absent(
+            data.get('job') or {},
+            has_batchlog=bool((data.get('harvester') or {}).get('batchlog')))
         return HttpResponse(
-            f"job {pandaid}: no batch record captured. The harvester keeps the "
-            f"source about eighteen days; a job older than the capture's start "
-            f"has none.\n",
+            f"job {pandaid}: no batch record captured. {reason}\n",
             status=404, content_type='text/plain; charset=utf-8')
     if record['status'] != 'captured':
         return HttpResponse(

@@ -27,8 +27,16 @@ _UNKNOWN_STATE_COLOR = '#6c757d'  # neutral gray fallback
 
 @register.filter(name='is_url')
 def is_url(value):
-    """True for HTTP(S) URL strings."""
-    return str(value or '').strip().startswith(('http://', 'https://'))
+    """True for HTTP(S) URL strings.
+
+    A value that starts with a scheme but carries whitespace or a pipe is a
+    compound field, not a URL: the PanDA pilotid is
+    '<stdout url>|Condor|PR|<version>' and linking it whole gives a 404.
+    """
+    text = str(value or '').strip()
+    if not text.startswith(('http://', 'https://')):
+        return False
+    return not any(c in text for c in ' \t\n|')
 
 
 @register.filter(name='url_href')

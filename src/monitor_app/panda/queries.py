@@ -2877,7 +2877,7 @@ def study_job(pandaid, include_batch_reason=False, include_log_analysis=True):
                                   'day': record['day']}
         elif record:
             events = {'source': record['path'],
-                      'error': f"capture failed: {record['body'].strip()}"}
+                      'error': f"Capture failed: {record['body'].strip()}"}
         elif include_batch_reason == 'fetch':
             # Only ever on an explicit ask, never in a render: this reaches
             # the harvester's log host over the network. A page shows what
@@ -2885,11 +2885,11 @@ def study_job(pandaid, include_batch_reason=False, include_log_analysis=True):
             events = condor_log_events(
                 (harvester or {}).get('batchlog') or log_urls.get('batch_log'))
         else:
-            events = {'source': (harvester or {}).get('batchlog')
-                      or log_urls.get('batch_log') or '',
-                      'error': 'not captured; the harvester keeps the source '
-                               'about eighteen days and this job predates the '
-                               'capture'}
+            source = ((harvester or {}).get('batchlog')
+                      or log_urls.get('batch_log') or '')
+            events = {'source': source,
+                      'error': batch_records.why_absent(
+                          job, has_batchlog=bool(source))}
         if events:
             result['batch_record'] = events
 
