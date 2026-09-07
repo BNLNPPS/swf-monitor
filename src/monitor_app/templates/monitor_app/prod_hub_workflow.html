@@ -404,6 +404,12 @@
                     </div>
                     <div class="workflow-link-desc">Top error patterns across failed jobs</div>
                 </div>
+                <div class="workflow-link-row" title="The error record over time: what is failing, at what cost in core-hours">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='errors' %}" class="text-decoration-none">Snapper Errors View</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">The error record over time: what is failing, at what cost in core-hours</div>
+                </div>
                 <div class="workflow-link-row" title="Production alarm system">
                     <div class="workflow-link-line">
                         <strong><a href="{% url 'monitor_app:alarms_dashboard' %}" class="text-decoration-none">Alarms</a></strong>
@@ -415,6 +421,18 @@
                         <strong><a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="text-decoration-none">Diagnostics</a></strong>
                     </div>
                     <div class="workflow-link-desc">Failed jobs with error details</div>
+                </div>
+                <div class="workflow-link-row" title="Production by site over time: what each site delivered and wasted">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='site' %}" class="text-decoration-none">Snapper Site View</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">Production by site over time: what each site delivered and wasted</div>
+                </div>
+                <div class="workflow-link-row" title="Site health as measured by probe jobs, per queue">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'canary:probes_page' %}" class="text-decoration-none">Canary Probes</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">Site health as measured by probe jobs, per queue</div>
                 </div>
                 <div class="workflow-link-row" title="ePIC compute queues">
                     <div class="workflow-link-line">
@@ -441,6 +459,24 @@
                         <strong><a href="{% url 'pcs:evgen_inputs' %}" class="text-decoration-none">EVGEN Inputs</a></strong>
                     </div>
                     <div class="workflow-link-desc">The registered epic:/EVGEN inventory and registration coverage</div>
+                </div>
+                <div class="workflow-link-row" title="Outputs waiting at BNL because the catalog of record would not take them, and what each owes">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'pcs:stash_page' %}" class="text-decoration-none">Failover Stash</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">Outputs waiting at BNL because the catalog of record would not take them, and what each owes</div>
+                </div>
+                <div class="workflow-link-row" title="Ghosts and other placement exceptions in the science data">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'pcs:storage_listings' listing='ghosts' %}" class="text-decoration-none">Storage Exceptions</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">Ghosts and other placement exceptions in the science data</div>
+                </div>
+                <div class="workflow-link-row" title="Placement of production data over time: arrivals, transfers, backlogs and capacity">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='storage' %}" class="text-decoration-none">Snapper Storage View</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">Placement of production data over time: arrivals, transfers, backlogs and capacity</div>
                 </div>
                 <div class="workflow-link-row" title="Sample and campaign completion served to the validation team (v1)">
                     <div class="workflow-link-line">
