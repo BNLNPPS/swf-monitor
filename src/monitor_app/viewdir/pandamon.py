@@ -32,6 +32,7 @@ from ..panda import (
     job_filter_counts, task_filter_counts,
     get_task, error_summary, diagnose_jobs, job_completion_details,
     list_queues, get_queue, queue_last_use, landing_declines, node_declines,
+    queue_observed,
     resource_usage, job_outcomes,
 )
 from ..panda.constants import (
@@ -2246,6 +2247,19 @@ def epic_queues_list(request):
     })
 
 
+def _queue_observed_product(queue_name):
+    """What the queue delivered, cached: the query scans a month of jobs.
+
+    The declared schedconfig says what a queue offers; this is its observed
+    counterpart (swf inflight swf-node-map-benchmarks)."""
+    from ..cached_product import get_product
+    product = get_product(
+        f'epic_queue_observed:{queue_name}:v1',
+        lambda: queue_observed(queue_name, days=30),
+        ttl_seconds=60 * 60, async_first_fill=True)
+    return (product or {}).get('value') or {}
+
+
 def epic_queue_detail(request, queue_name):
     """Full schedconfig for a single ePIC queue."""
     import json as json_mod
@@ -2342,6 +2356,7 @@ def epic_queue_detail(request, queue_name):
         'site_outcomes_pie': site_outcomes_pie,
         'site_no_activity': site_no_activity,
         'declines': _landing_declines_product().get(queue_name),
+        'observed': _queue_observed_product(queue_name),
         'declines_days': SPARK_SPAN_DAYS,
         'submission': _reported_submission(queue_name),
     })

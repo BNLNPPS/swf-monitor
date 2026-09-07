@@ -3382,3 +3382,103 @@ def canary_probe_activity(days=30, limit_jobs=100):
         task['job_counts'] = counts.get(task['jeditaskid'], {})
     jobs.sort(key=lambda j: -(j['pandaid'] or 0))
     return {'tasks': tasks, 'jobs': jobs[:limit_jobs]}
+
+
+def queue_observed(panda_queue, days=30):
+    """What a queue actually is, from the jobs that ran on it.
+
+    The declared schedconfig says what a queue offers; this says what it
+    delivered. Per processor: how many distinct nodes carried it, how many
+    jobs ran and how they ended, the middle of their CPU efficiency, and
+    the memory they actually took. A queue is judged against its own
+    history this way rather than against another site's declaration
+    (the node map and benchmark record, swf inflight
+    swf-node-map-benchmarks).
+
+    Cost is a month of jobs, so callers cache it.
+    """
+    conn = connections['panda']
+    since = timezone.now() - timedelta(days=days)
+    host_expr = 'regexp_replace(COALESCE("modificationhost", \'\'), \'^.*@\', \'\')'
+    sql = f"""
+        SELECT COALESCE("cpuconsumptionunit", 'unknown') AS processor,
+               COUNT(DISTINCT {host_expr}) AS nodes,
+               COUNT(*) AS jobs,
+               COUNT(*) FILTER (WHERE "jobstatus" = 'finished') AS finished,
+               COUNT(*) FILTER (WHERE "jobstatus" = 'failed') AS failed,
+               -- Over finished jobs only. A job that died in its first
+               -- minute consumed no CPU, so including failures measures the
+               -- failure rate and calls it a slow processor: at
+               -- BNL_OSG_EPIC_PROD_1 that read an EPYC 7452 as 0.003.
+               PERCENTILE_DISC(0.5) WITHIN GROUP (
+                   ORDER BY CASE WHEN "wall_time" > 0 AND "jobstatus" = 'finished'
+                            THEN "cpu_seconds" / "wall_time" END) AS efficiency,
+               PERCENTILE_DISC(0.5) WITHIN GROUP (
+                   ORDER BY CASE WHEN "jobstatus" = 'finished'
+                            THEN "maxrss" END) AS rss_median,
+               PERCENTILE_DISC(0.9) WITHIN GROUP (
+                   ORDER BY CASE WHEN "jobstatus" = 'finished'
+                            THEN "maxrss" END) AS rss_p90,
+               MAX("corecount") AS cores
+        FROM (
+            SELECT "computingsite", "modificationhost", "jobstatus",
+                   "cpuconsumptionunit", "maxrss", "corecount",
+                   "cpuconsumptiontime" AS cpu_seconds,
+                   EXTRACT(EPOCH FROM ("endtime" - "starttime"))
+                       * GREATEST(COALESCE("actualcorecount", "corecount", 1), 1)
+                       AS wall_time
+            FROM "{PANDA_SCHEMA}"."jobsarchived4"
+            WHERE "computingsite" = %s AND "modificationtime" >= %s
+              AND "starttime" IS NOT NULL AND "endtime" IS NOT NULL
+        ) j
+        GROUP BY processor
+        ORDER BY jobs DESC
+    """
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(sql, [panda_queue, since])
+            rows = cursor.fetchall()
+    except Exception as e:                                   # noqa: BLE001
+        logger.error('queue_observed failed for %s: %s', panda_queue, e)
+        return {'error': str(e), 'processors': [], 'days': days}
+
+    processors = []
+    for (processor, nodes, jobs, finished, failed, efficiency,
+         rss_median, rss_p90, cores) in rows:
+        processors.append({
+            'processor': processor,
+            'nodes': nodes,
+            'jobs': jobs,
+            'finished': finished,
+            'failed': failed,
+            'failure_rate': round(failed / jobs, 3) if jobs else None,
+            'efficiency': round(float(efficiency), 3) if efficiency else None,
+            'rss_median_kb': int(rss_median) if rss_median else None,
+            'rss_p90_kb': int(rss_p90) if rss_p90 else None,
+            'cores': cores,
+        })
+    # An outlier is a processor the queue itself contradicts: it carried
+    # real work and delivered at a different rate from the queue's own
+    # middle. Named, never excluded here — exclusion is a human decision.
+    efficiencies = [p['efficiency'] for p in processors if p['efficiency']]
+    middle = _quantile(efficiencies, 0.5)
+    total_jobs = sum(p['jobs'] for p in processors)
+    total_failed = sum(p['failed'] for p in processors)
+    queue_failure = (total_failed / total_jobs) if total_jobs else 0
+    for entry in processors:
+        # Two different kinds of outlier, and conflating them hides the
+        # worse one: a processor can deliver at the queue's rate and still
+        # deliver almost nothing. At BNL_OSG_EPIC_PROD_1 a Xeon 6230R runs
+        # at 0.988 efficiency with 95% of its jobs failing.
+        entry['slow'] = bool(
+            middle and entry['efficiency'] and entry['jobs'] >= 20
+            and entry['efficiency'] < middle * 0.8)
+        entry['failing'] = bool(
+            entry['jobs'] >= 20 and queue_failure
+            and entry['failure_rate'] and entry['failure_rate'] >= queue_failure * 1.5
+            and entry['failure_rate'] >= 0.3)
+        entry['outlier'] = entry['slow'] or entry['failing']
+    return {'processors': processors, 'days': days, 'median_efficiency': middle,
+            'failure_rate': round(queue_failure, 3),
+            'nodes': sum(p['nodes'] for p in processors),
+            'jobs': sum(p['jobs'] for p in processors)}

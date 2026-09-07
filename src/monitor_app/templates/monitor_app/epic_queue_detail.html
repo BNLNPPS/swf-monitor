@@ -13,6 +13,50 @@
         (<a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ queue_name|urlencode }}&amp;status=failed" style="color: inherit;">failed jobs</a>)
         {% else %}none{% endif %}
     </p>
+    <!-- The observed counterpart to the declared schedconfig below: what the
+         queue delivered, per processor, over a month of its own jobs. Cached,
+         since the query scans that month (swf inflight
+         swf-node-map-benchmarks). -->
+    {% if observed.processors %}
+    <div class="card mb-3">
+        <div class="card-header"><strong>What this queue actually is</strong>
+            <span class="text-muted ms-2">{{ observed.nodes }} node{{ observed.nodes|pluralize }},
+            {{ observed.jobs }} jobs over {{ observed.days }} days; the queue's own middle
+            efficiency is {{ observed.median_efficiency|default:"—" }} and its failure rate
+            {{ observed.failure_rate|default:"—" }}</span>
+        </div>
+        <div class="card-body">
+            <table class="table table-striped table-bordered table-sm align-middle w-auto mb-2 swf-sortable" data-swf-order="2,desc">
+                <thead><tr><th>Processor</th><th class="text-end">Nodes</th>
+                    <th class="text-end">Jobs</th><th class="text-end">Finished</th>
+                    <th class="text-end">Failure rate</th><th class="text-end">CPU efficiency</th>
+                    <th class="text-end">Memory, median</th><th class="text-end">Memory, 90th</th>
+                    <th>Reading</th></tr></thead>
+                <tbody>
+                {% for p in observed.processors %}
+                    <tr>
+                        <td>{{ p.processor }}</td>
+                        <td class="text-end">{{ p.nodes }}</td>
+                        <td class="text-end">{{ p.jobs }}</td>
+                        <td class="text-end">{{ p.finished }}</td>
+                        <td class="text-end">{{ p.failure_rate|default_if_none:"—" }}</td>
+                        <td class="text-end">{{ p.efficiency|default_if_none:"—" }}</td>
+                        <td class="text-end">{% if p.rss_median_kb %}{{ p.rss_median_kb }} KB{% else %}—{% endif %}</td>
+                        <td class="text-end">{% if p.rss_p90_kb %}{{ p.rss_p90_kb }} KB{% else %}—{% endif %}</td>
+                        <td>{% if p.failing %}<span class="text-danger">fails far more than this queue does</span>{% endif %}
+                            {% if p.slow and p.failing %}<br>{% endif %}
+                            {% if p.slow %}<span class="text-danger">delivers below this queue's rate</span>{% endif %}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            <p class="mb-0 text-muted">CPU efficiency and memory are taken over finished jobs
+               only: a job that died in its first minute consumed no CPU, so including
+               failures would measure the failure rate and call it a slow processor.</p>
+        </div>
+    </div>
+    {% endif %}
+
     <div class="card mb-3">
         <div class="card-header d-flex align-items-center">
             <strong>Description</strong>
