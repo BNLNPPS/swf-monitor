@@ -1024,6 +1024,10 @@ class EpicProdOpsAgent(BaseAgent):
             return
         time.sleep(max(SYSTEM_STATUS_INITIAL_DELAY, 0))
         while True:
+            # Self-scheduled work stops at the stop signal, or the drain it
+            # feeds never empties; see _snapper_capture_periodic_loop.
+            if self._stopping:
+                return
             self.run_in_background(
                 self._do_refresh_system_status,
                 {'source': 'ops_agent_periodic'},
@@ -1143,8 +1147,18 @@ class EpicProdOpsAgent(BaseAgent):
             return
         time.sleep(max(SNAPPER_SCHEDULER_INITIAL_DELAY, 0))
         while True:
-            # BaseAgent drains and shuts down its pool before the daemon threads
-            # disappear. Do not let a retiring scheduler race one last enqueue.
+            # Stop scheduling the moment a stop signal arrives, not when the
+            # pool closes. BaseAgent's drain waits for in-flight work to reach
+            # zero with the queue still consumed, and closes the pool only
+            # afterwards, so a scheduler that waits for `_shutdown` keeps
+            # feeding the drain it is meant to be retiring from and the agent
+            # can never finish stopping (2026-09-07: a deploy left the agent
+            # deactivating on a 30-second capture period, against a systemd
+            # stop timeout of an hour). Work arriving from outside is still
+            # consumed and run during the drain, which is the point of it;
+            # work the agent generates for itself is not.
+            if self._stopping:
+                return
             executor = self._bg_executor
             if executor is not None and getattr(executor, '_shutdown', False):
                 return
@@ -1154,6 +1168,8 @@ class EpicProdOpsAgent(BaseAgent):
             # Wake one second past the boundary so the capture subprocess
             # sees the opportunity as due, not pending.
             time.sleep(max(boundary + 1.0 - now, 0.05))
+            if self._stopping:
+                return
             executor = self._bg_executor
             if executor is not None and getattr(executor, '_shutdown', False):
                 return
