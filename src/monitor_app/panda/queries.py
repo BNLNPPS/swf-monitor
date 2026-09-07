@@ -2340,19 +2340,21 @@ def task_payload_rollup(jeditaskid, limit=2000):
             # from the archive, which is also where a job with metadata
             # always is: the server keeps metadata for finished jobs.
             cursor.execute(
-                f'SELECT m."metadata" FROM "{PANDA_SCHEMA}"."metatable" m '
+                f'SELECT m."pandaid", m."metadata" FROM "{PANDA_SCHEMA}"."metatable" m '
                 f'JOIN "{PANDA_SCHEMA}"."jobsarchived4" j ON j."pandaid" = m."pandaid" '
                 f'WHERE j."jeditaskid" = %s LIMIT %s', [jeditaskid, limit])
             rows = cursor.fetchall()
     except Exception as e:
         logger.error(f"payload rollup query failed for task {jeditaskid}: {e}")
-        return None
-    if not rows:
-        return None
+        rows = []
 
-    stages, events, versions, registrations = {}, [], {}, {}
-    contributing = 0
-    for (raw,) in rows:
+    # Two sources, because the server keeps metadata for finished jobs only:
+    # the metatable for those, and the reports the sweep filed for the failed
+    # ones. Without the second, a task's distribution is the distribution of
+    # its successes, which is the wrong half to size a campaign on.
+    reports = []
+    have = set()
+    for pandaid, raw in rows:
         if not raw:
             continue
         try:
@@ -2360,8 +2362,28 @@ def task_payload_rollup(jeditaskid, limit=2000):
         except (ValueError, TypeError):
             continue
         report = metadata.get('payload') if isinstance(metadata, dict) else None
-        if not isinstance(report, dict):
-            continue
+        if isinstance(report, dict):
+            have.add(int(pandaid))
+            reports.append((report, 'metatable'))
+    swept_jobs = 0
+    try:
+        from monitor_app.models import EpicProdJob
+        for job in (EpicProdJob.objects.filter(jeditaskid=jeditaskid)
+                    .only('pandaid', 'data')[:limit]):
+            if int(job.pandaid) in have:
+                continue
+            filed = ((job.data or {}).get('payload_report') or {}).get('report')
+            if isinstance(filed, dict):
+                swept_jobs += 1
+                reports.append((filed, 'swept'))
+    except Exception as e:                                    # noqa: BLE001
+        logger.error(f"swept reports unavailable for task {jeditaskid}: {e}")
+    if not reports:
+        return None
+
+    stages, events, versions, registrations = {}, [], {}, {}
+    contributing = 0
+    for report, _source in reports:
         contributing += 1
         version = report.get('payload_version') or 'unknown'
         versions[version] = versions.get(version, 0) + 1
@@ -2413,12 +2435,13 @@ def task_payload_rollup(jeditaskid, limit=2000):
         })
     return {
         'jobs': contributing,
+        'swept_jobs': swept_jobs,
         'events_total': sum(events),
         'events_median': _quantile(events, 0.5),
         'stages': rows_out,
         'versions': sorted(versions.items(), key=lambda kv: -kv[1]),
         'registrations': sorted(registrations.items(), key=lambda kv: -kv[1]),
-        'limited': len(rows) >= limit,
+        'limited': len(reports) >= limit,
     }
 
 
