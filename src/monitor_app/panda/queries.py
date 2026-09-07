@@ -2367,8 +2367,24 @@ def task_payload_rollup(jeditaskid, limit=2000):
             reports.append((report, 'metatable'))
     swept_jobs = 0
     try:
+        # By the task's job ids rather than by EpicProdJob.jeditaskid: a row
+        # the sweep created for a job the inventory never synced knows its
+        # own pandaid and nothing else, and PanDA is the authority on which
+        # jobs belong to the task.
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f'SELECT "pandaid" FROM "{PANDA_SCHEMA}"."jobsarchived4" '
+                f'WHERE "jeditaskid" = %s '
+                f'UNION SELECT "pandaid" FROM "{PANDA_SCHEMA}"."jobsactive4" '
+                f'WHERE "jeditaskid" = %s LIMIT %s',
+                [jeditaskid, jeditaskid, limit])
+            task_pandaids = [int(r[0]) for r in cursor.fetchall()]
+    except Exception as e:                                    # noqa: BLE001
+        logger.error(f"task job ids unavailable for task {jeditaskid}: {e}")
+        task_pandaids = []
+    try:
         from monitor_app.models import EpicProdJob
-        for job in (EpicProdJob.objects.filter(jeditaskid=jeditaskid)
+        for job in (EpicProdJob.objects.filter(pandaid__in=task_pandaids)
                     .only('pandaid', 'data')[:limit]):
             if int(job.pandaid) in have:
                 continue

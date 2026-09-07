@@ -109,12 +109,12 @@ def candidates(since, limit=None):
     """
     sql = f"""
         SELECT "pandaid", "computingsite", "transexitcode", "piloterrorcode",
-               "jobmetrics"
+               "jobmetrics", "jeditaskid", "modificationhost"
         FROM "{PANDA_SCHEMA}"."jobsactive4"
         WHERE "jobstatus" = 'failed' AND "modificationtime" >= %s
         UNION
         SELECT "pandaid", "computingsite", "transexitcode", "piloterrorcode",
-               "jobmetrics"
+               "jobmetrics", "jeditaskid", "modificationhost"
         FROM "{PANDA_SCHEMA}"."jobsarchived4"
         WHERE "jobstatus" = 'failed' AND "modificationtime" >= %s
     """
@@ -124,13 +124,18 @@ def candidates(since, limit=None):
     try:
         with connections['panda'].cursor() as cursor:
             cursor.execute(sql, [since, since])
-            for pandaid, site, transexit, piloterr, metrics in cursor.fetchall():
+            for (pandaid, site, transexit, piloterr, metrics, jeditaskid,
+                 node) in cursor.fetchall():
                 rows.append({
                     'pandaid': int(pandaid),
                     'site': site or '',
                     'transexitcode': str(transexit or ''),
                     'piloterrorcode': int(piloterr or 0),
                     'digest': _digest(metrics),
+                    'jeditaskid': int(jeditaskid) if jeditaskid else None,
+                    # The node is what a decline is a measurement of, and it
+                    # is on the job record even when nothing else survives.
+                    'node': node or '',
                 })
     except Exception as e:                                    # noqa: BLE001
         logger.error(f'payload report sweep: candidate query failed: {e}')
@@ -193,24 +198,32 @@ def read_report(client, bucket, keys):
     return None, ''
 
 
-def file_report(pandaid, report, source_key):
+def file_report(pandaid, report, source_key, jeditaskid=None, node=''):
     """File a job's report beside its job record. Returns True when stored.
 
     The report lands under ``data['payload_report']`` with the object it
-    came from, so the filed copy names its source. Nothing else on the
-    record is touched: phase and failure_summary belong to the inventory's
-    own diagnosis.
+    came from and the node that ran the job, so the filed copy names its
+    source and can be read per node — which is what a landing decline is a
+    measurement of. Nothing else on the record is touched: phase and
+    failure_summary belong to the inventory's own diagnosis.
     """
     try:
-        job, _ = EpicProdJob.objects.get_or_create(pandaid=pandaid)
+        job, created = EpicProdJob.objects.get_or_create(pandaid=pandaid)
         data = dict(job.data or {})
         data['payload_report'] = {
             'report': report,
             'source_key': source_key,
+            'node': node or '',
             'filed_at': datetime.now(dt_timezone.utc).isoformat(),
         }
         job.data = data
-        job.save(update_fields=['data', 'updated_at'])
+        fields = ['data', 'updated_at']
+        # A row the sweep creates knows only its own job; give it the task
+        # so every task-keyed surface can reach it.
+        if jeditaskid and not job.jeditaskid:
+            job.jeditaskid = jeditaskid
+            fields.append('jeditaskid')
+        job.save(update_fields=fields)
         return True
     except Exception as e:                                    # noqa: BLE001
         logger.error(f'payload report sweep: cannot file {pandaid}: {e}')
@@ -323,7 +336,8 @@ def sweep(since, limit=None, per_signature=READ_PER_SIGNATURE, dry_run=False):
         if dry_run:
             filed.append(job['pandaid'])
             continue
-        if file_report(job['pandaid'], report, source_key):
+        if file_report(job['pandaid'], report, source_key,
+                       jeditaskid=job.get('jeditaskid'), node=job.get('node')):
             filed.append(job['pandaid'])
             deleted_read.extend(delete_keys(client, bucket, keys))
         else:
