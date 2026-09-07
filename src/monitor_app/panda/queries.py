@@ -2591,10 +2591,17 @@ _CONDOR_TRAILER_RE = re.compile(r'^Code \d+ Subcode \d+$')
 # Event descriptions worth a plain word in the output. A code that is not
 # here is still reported, labelled by its number: the log is the
 # authority and nothing it says is dropped for not being recognised.
+# Names for the codes the corpus actually contains. The unnamed six
+# were found by the learning pass over captured logs rather than
+# guessed, which is the point of keeping every event: a code with no
+# name was already in the record and only read as a number.
 CONDOR_EVENT_NAMES = {
-    '004': 'evicted', '005': 'terminated', '007': 'shadow exception',
-    '009': 'aborted', '012': 'held', '021': 'remote error',
-    '022': 'disconnected', '024': 'grid submit failed',
+    '000': 'submitted', '001': 'executing', '004': 'evicted',
+    '005': 'terminated', '006': 'image size updated',
+    '007': 'shadow exception', '009': 'aborted', '012': 'held',
+    '021': 'remote error', '022': 'disconnected',
+    '024': 'grid submit failed', '027': 'submitted to grid resource',
+    '029': 'remote status unknown', '040': 'transferring input files',
 }
 
 
