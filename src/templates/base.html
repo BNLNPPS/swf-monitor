@@ -364,8 +364,12 @@
         z-index: 1;
       }
 
-      /* Links inside the dropdown */
-      .dropdown-content a {
+      /* Links inside the dropdown. The selector carries three classes on
+         purpose: the menu-bar rule is `.sticky-header > nav a` (white on
+         #333) and outranks a bare `.dropdown-content a`, which painted
+         every menu item white on the panel's near-white background and
+         left the menus unreadable. */
+      .sticky-header .dropdown .dropdown-content a {
         color: black;
         padding: 12px 16px;
         text-decoration: none;
