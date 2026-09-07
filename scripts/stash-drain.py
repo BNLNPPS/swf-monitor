@@ -580,7 +580,9 @@ def main():
     summary['jlab_reachable'] = jlab_reachable()
     if not summary['jlab_reachable']:
         _log('JLab is not answering; the stash keeps its entries for a later pass')
-    elif present:
+    else:
+        # Every entry, present or not: one whose file is already home and
+        # off the door still owes the removal of its catalog entry.
         bring_home(entries, present, state, args.rse, summary, client, proxy,
                    dry_run=args.dry_run)
 
