@@ -17,7 +17,10 @@ import logging
 
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.authentication import (SessionAuthentication,
+                                           TokenAuthentication)
+from rest_framework.decorators import (api_view, authentication_classes,
+                                       permission_classes)
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
@@ -56,6 +59,10 @@ def latest(host):
 
 
 @api_view(['POST', 'GET'])
+# Token first and explicitly: the project declares no default
+# authenticators, so DRF would fall back to session and basic only and
+# never look at a reporter's token.
+@authentication_classes([TokenAuthentication, SessionAuthentication])
 @permission_classes([IsAuthenticated])
 def host_report(request, host):
     """Store a host reporter's record, or return the one stored.
