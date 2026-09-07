@@ -785,6 +785,33 @@ def _platform_curve_values(state):
         rss = (host.get(key) or {}).get('rss_mb')
         if rss is not None:
             values[f'plmp_{key}'] = float(rss)
+    # The OSG submit host, delivered by its reporter
+    # (docs/OSG_SUBMIT_REPORTER.md). The submission side is invisible in
+    # every PanDA record: held pilots and the slots an exclusion removes
+    # are knowable only there.
+    submit = plat.get('submit_host') or {}
+    workers = submit.get('workers') or {}
+    for key in ('running', 'idle', 'held'):
+        if workers.get(key) is not None:
+            values[f'plsw_{key}'] = float(workers[key])
+    pool = submit.get('pool') or {}
+    for key, slug in (('slots_total', 'total'),
+                      ('slots_admitted', 'admitted'),
+                      ('slots_excluded_now', 'excluded')):
+        if pool.get(key) is not None:
+            values[f'plsp_{slug}'] = float(pool[key])
+    if submit.get('daemon_oldest_log_seconds') is not None:
+        values['plsd_oldest'] = float(submit['daemon_oldest_log_seconds'])
+    sload = submit.get('load') or {}
+    for key in ('1m', '5m', '15m'):
+        if sload.get(key) is not None:
+            values[f'plsl_{key}'] = float(sload[key])
+    for path, entry in (submit.get('volumes') or {}).items():
+        used = (entry or {}).get('used_percent')
+        if used is not None:
+            # plsu_, not plsv_: plsv_latency is the PanDA server's
+            # liveness measurement and a shared prefix would collide.
+            values[f'plsu_{_platform_volume_slug(path)}'] = float(used)
     return values
 
 
@@ -1065,6 +1092,16 @@ _PLATFORM_LABELS = {
     'plmp_wsgi': 'WSGI daemon',
     'plmp_asgi': 'ASGI (MCP)',
     'plmp_ops_agent': 'prod-ops agent',
+    'plsw_running': 'running',
+    'plsw_idle': 'idle',
+    'plsw_held': 'held',
+    'plsp_total': 'slots in the pool',
+    'plsp_admitted': 'admitted by requirements',
+    'plsp_excluded': 'removed by exclusions',
+    'plsd_oldest': 'oldest daemon silence',
+    'plsl_1m': '1 min',
+    'plsl_5m': '5 min',
+    'plsl_15m': '15 min',
 }
 
 
@@ -1080,6 +1117,8 @@ def _epicprod_curve_label(curve_id):
     if curve_id.startswith('plss_'):
         return curve_id[5:]
     if curve_id.startswith('plmv_'):
+        return '/' + curve_id[5:]
+    if curve_id.startswith('plsu_'):
         return '/' + curve_id[5:]
     if curve_id in _STORAGE_CONSEQUENCE_LABELS:
         return _STORAGE_CONSEQUENCE_LABELS[curve_id]
@@ -1677,6 +1716,13 @@ _PLATFORM_FAMILIES_COMMON_TAIL = (
     'Platform server latency', 'Platform PanDA monitor latency',
     'Platform monitor load', 'Platform monitor memory',
     'Platform monitor storage', 'Platform monitor processes',
+    # The submission side, from the submit host's own reporter. It sits
+    # with the other host panels and above the load and consequence
+    # panels, because held pilots and a shrinking admitted-slot count
+    # are causes of what those panels show.
+    'Platform submit workers', 'Platform submit pool',
+    'Platform submit daemons', 'Platform submit host',
+    'Platform submit storage',
     'Platform jobs', 'Platform kills', 'Platform outcomes')
 PLATFORM_FAMILIES_BY_LENS = {
     'tiers': (_PLATFORM_FAMILIES_COMMON_HEAD
@@ -1760,6 +1806,25 @@ def _platform_groups():
          'prefixes': ['plmp_'], 'ids': [],
          'order': ['plmp_httpd', 'plmp_wsgi', 'plmp_asgi', 'plmp_ops_agent'],
          'panel_px': 110, 'units': 'MB resident'},
+        {'name': 'Platform submit workers', 'title': 'Submit host pilots',
+         'prefixes': ['plsw_'], 'ids': [],
+         'order': ['plsw_running', 'plsw_idle', 'plsw_held'],
+         'panel_px': 110, 'units': 'pilots'},
+        {'name': 'Platform submit pool', 'title': 'OSG pool as the submitter sees it',
+         'prefixes': ['plsp_'], 'ids': [],
+         'order': ['plsp_total', 'plsp_admitted', 'plsp_excluded'],
+         'panel_px': 110, 'units': 'slots'},
+        {'name': 'Platform submit daemons',
+         'title': 'Submit host daemon silence',
+         'prefixes': [], 'ids': ['plsd_oldest'],
+         'panel_px': 110, 'units': 'seconds since last log write'},
+        {'name': 'Platform submit host', 'title': 'Submit host load',
+         'prefixes': ['plsl_'], 'ids': [],
+         'order': ['plsl_1m', 'plsl_5m', 'plsl_15m'],
+         'panel_px': 110, 'units': 'load average'},
+        {'name': 'Platform submit storage', 'title': 'Submit host storage',
+         'prefixes': ['plsu_'], 'ids': [],
+         'panel_px': 110, 'units': '% used'},
         {'name': 'Platform jobs', 'title': 'Jobs in flight',
          'prefixes': ['job_'], 'ids': ['running_cores'],
          'order': lifecycle, 'default_off_ids': ['job_activated'],
