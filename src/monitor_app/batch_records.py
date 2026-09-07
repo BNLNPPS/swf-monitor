@@ -275,6 +275,17 @@ _NUM_RE = re.compile(r'\d+')
 _HEX_RE = re.compile(r'\b[0-9a-f]{8,}\b', re.I)
 _PATH_RE = re.compile(r'/[\w./@+-]{4,}')
 _HOST_RE = re.compile(r'\b[\w-]+(?:\.[\w-]+){2,}\b')
+# A condor address — the "sinful string" — carries the address, the CCB
+# ids, the alias and the session in one token, and every one of them is
+# the instance rather than the kind. Nothing inside it distinguishes two
+# failures, so the whole token goes.
+_SINFUL_RE = re.compile(r'<[^<>\s]{6,}>')
+# The slot a job landed in, and the glidein that made it: both name this
+# run only.
+_SLOT_RE = re.compile(r'\bslot\w*@[\w.@-]+', re.I)
+# A long opaque run of letters and digits — a session, a token, a
+# generated directory — with no word to it.
+_TOKEN_RE = re.compile(r'\b(?=[\w-]*\d)(?=[\w-]*[A-Za-z])[\w-]{12,}\b')
 
 
 def normalize(text):
@@ -285,9 +296,12 @@ def normalize(text):
     kind. Derived from the corpus rather than declared, so a pattern is
     whatever the logs repeat.
     """
-    out = _HOST_RE.sub('<host>', text or '')
+    out = _SINFUL_RE.sub('<addr>', text or '')
+    out = _SLOT_RE.sub('<slot>', out)
+    out = _HOST_RE.sub('<host>', out)
     out = _PATH_RE.sub('<path>', out)
     out = _HEX_RE.sub('<hex>', out)
+    out = _TOKEN_RE.sub('<token>', out)
     out = _NUM_RE.sub('#', out)
     return ' '.join(out.split())[:400]
 
