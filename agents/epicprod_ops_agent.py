@@ -1822,7 +1822,10 @@ class EpicProdOpsAgent(BaseAgent):
             live_default=bool(entries),
             summary=(f"entries={entries} catalogued={summary.get('catalogued', 0)} "
                      f"missing={summary.get('missing_at_stash', 0)} "
-                     f"jlab={summary.get('jlab_reachable')}"))
+                     f"moved={summary.get('moved', 0)} "
+                     f"deferred={len(summary.get('deferred') or [])} "
+                     f"jlab={summary.get('jlab_reachable')}"),
+            moved=summary.get('moved', 0), home=summary.get('home') or [])
 
     def _handle_content_validate(self, m):
         """Reconcile samples against their datasets off the receiver thread —
