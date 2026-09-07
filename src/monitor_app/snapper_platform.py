@@ -86,6 +86,10 @@ CONFIG_DEFAULTS = {
     "platform_stale_warn_fraction": 0.25,
     "platform_stale_warn_tier_minutes": 60,
     "platform_volume_warn_percent": 90,
+    # Silence of a submit-host daemon that ticks regardless of demand.
+    # Measured cadence on that host: seconds for the busiest, a few
+    # minutes for the credential manager.
+    "platform_submit_daemon_warn_seconds": 900,
 }
 
 PLATFORM_REGISTRATION = {
@@ -210,6 +214,32 @@ PLATFORM_REGISTRATION = {
             "enum": ["fresh", "stale", "absent"],
             "description": (
                 "Freshness of the server-host report against the "
+                "configured staleness threshold."
+            ),
+        },
+        "submit_host": {
+            "path": "submit_host",
+            "type": "object",
+            "required": False,
+            "kind": "gauge",
+            "description": (
+                "The OSG submit host reporter's latest record (harvester "
+                "daemon liveness by log age, the submit schedd and its "
+                "workers with held reasons, the pool as the submitter "
+                "sees it, host resources), present only when one has "
+                "been delivered. It is the only view of the submission "
+                "side: a site refusing every submission is visible here "
+                "and in no PanDA record."
+            ),
+        },
+        "submit_reporter_status": {
+            "path": "submit_reporter_status",
+            "type": "string",
+            "required": True,
+            "kind": "assessment",
+            "enum": ["fresh", "stale", "absent"],
+            "description": (
+                "Freshness of the submit-host report against the "
                 "configured staleness threshold."
             ),
         },
@@ -475,11 +505,95 @@ def pandamon_reading(base_url, timeout_seconds, now):
 
 # ── Server host (reporter) ──────────────────────────────────────────────
 
+def _host_reading(host, stale_seconds):
+    """One host reporter's latest record and its freshness.
+
+    Host reporters push to the shared ingest (docs/OSG_SUBMIT_REPORTER.md)
+    which keys the record by host, so each reporter has its own record
+    and no reporter can overwrite another's. Absent and stale are
+    distinct answers: a reporter that has never run and one that has
+    stopped are different faults.
+    """
+    from .host_reports import latest
+    found = latest(host)
+    if not found:
+        return None, "absent"
+    age = found.get('age_seconds')
+    if age is None or age > stale_seconds:
+        return found.get('record'), "stale"
+    return found.get('record'), "fresh"
+
+
 def server_host_reading(now, stale_seconds):
-    """The pandaserver01 reporter's latest record and its freshness.
-    Until the reporter and its ingest exist (docs/SNAPPER_PLATFORM.md,
-    delivery stage 3) there is no record: status 'absent'."""
-    return None, "absent"
+    """The pandaserver01 reporter's latest record and its freshness."""
+    return _host_reading('pandaserver01', stale_seconds)
+
+
+def submit_host_reading(now, stale_seconds):
+    """The OSG submit host reporter's latest record and its freshness."""
+    return _host_reading('osgsub01', stale_seconds)
+
+
+# Harvester runs some three dozen plugin threads, several of them
+# dormant on this deployment (a dummy preparator and stager, a file
+# syncer, untouched for months). Recording every one as a lane would
+# bury the handful that carry submission. These are the ones whose
+# silence means work has stopped; the rest stay in the host-report
+# store, which keeps the record whole.
+# A daemon that must tick and has not for this long has stopped. The
+# threshold is set from the measured cadence: on this host the busiest
+# of them write every few seconds and the quietest, the credential
+# manager, every few minutes.
+SUBMIT_DAEMON_WARN_SECONDS = CONFIG_DEFAULTS[
+    "platform_submit_daemon_warn_seconds"]
+
+# Daemons that tick regardless of demand, and are therefore the ones
+# whose silence is a fault.
+SUBMIT_HEARTBEAT_DAEMONS = ('db_proxy', 'propagator', 'job_fetcher',
+                            'monitor', 'watcher', 'sweeper', 'preparator',
+                            'stager', 'cred_manager')
+
+# Daemons that write only when there is work to submit. Their silence
+# on an idle host is correct, so they are recorded and not judged:
+# htcondor_submitter sat quiet for 47 minutes with two workers running,
+# which a freshness verdict would have called a fault.
+SUBMIT_DEMAND_DAEMONS = ('submitter', 'htcondor_submitter',
+                         'htcondor_monitor', 'htcondor_sweeper')
+
+SUBMIT_DAEMONS = SUBMIT_HEARTBEAT_DAEMONS + SUBMIT_DEMAND_DAEMONS
+
+
+def _submit_host_projection(record):
+    """What the component keeps from the submit host's report."""
+    health = record.get('health') or {}
+    daemons = health.get('harvester_daemons') or {}
+    kept = {name: daemons[name] for name in SUBMIT_DAEMONS
+            if isinstance(daemons.get(name), dict)}
+    # Only the daemons that must tick are ranked for the verdict.
+    stale = sorted(
+        ((name, entry.get('log_age_seconds')) for name, entry in kept.items()
+         if name in SUBMIT_HEARTBEAT_DAEMONS
+         and isinstance(entry.get('log_age_seconds'), int)),
+        key=lambda pair: pair[1], reverse=True)
+    pool_record = record.get('pool') or {}
+    exclusions = record.get('exclusions') or {}
+    return {
+        'collected_at': record.get('collected_at'),
+        'harvester_process': health.get('harvester_process'),
+        'schedd_process': health.get('schedd_process'),
+        'daemons': kept,
+        'daemon_oldest_log_seconds': stale[0][1] if stale else None,
+        'daemon_oldest_name': stale[0][0] if stale else None,
+        'load': health.get('load'),
+        'memory_kb': health.get('memory_kb'),
+        'volumes': health.get('volumes'),
+        'workers': (record.get('schedd') or {}).get('workers'),
+        'held_reasons': (record.get('schedd') or {}).get('held_reasons'),
+        'pool': {k: pool_record.get(k) for k in
+                 ('slots_total', 'slots_admitted', 'slots_excluded_now')},
+        'excluded_sites': len(exclusions.get('sites') or []),
+        'excluded_site_nodes': len(exclusions.get('site_nodes') or []),
+    }
 
 
 # ── Monitor host ────────────────────────────────────────────────────────
@@ -603,7 +717,8 @@ def monitor_host_reading(volumes):
 # ── Assessment ──────────────────────────────────────────────────────────
 
 def assess(database, heartbeats, server, reporter_status, monitor_host,
-           thresholds, pandamon=None):
+           thresholds, pandamon=None, submit_reporter_status=None,
+           submit_host=None):
     """Per-metric verdicts against the configured thresholds."""
     verdicts = {}
 
@@ -655,6 +770,31 @@ def assess(database, heartbeats, server, reporter_status, monitor_host,
     verdicts["reporter"] = ("ok" if reporter_status == "fresh"
                             else "warning" if reporter_status == "stale"
                             else "unknown")
+    if submit_reporter_status is not None:
+        verdicts["submit_reporter"] = (
+            "ok" if submit_reporter_status == "fresh"
+            else "warning" if submit_reporter_status == "stale"
+            else "unknown")
+    if submit_host:
+        submit = _submit_host_projection(submit_host)
+        # Held workers are the submission side's own failure signal: a
+        # site refusing every submission holds them and nothing in the
+        # PanDA record says so. GREX held fifteen over thirteen hours
+        # with nothing raised.
+        held = (submit.get('workers') or {}).get('held')
+        verdict("submit_workers_held", bool(held),
+                known=held is not None)
+        # A submission daemon that has stopped writing is stopped.
+        oldest = submit.get('daemon_oldest_log_seconds')
+        verdict("submit_daemons",
+                oldest is not None and oldest > int(
+                    thresholds.get("platform_submit_daemon_warn_seconds")
+                    or SUBMIT_DAEMON_WARN_SECONDS),
+                known=oldest is not None)
+        verdict("submit_processes",
+                submit.get('harvester_process') is False
+                or submit.get('schedd_process') is False,
+                known=submit.get('harvester_process') is not None)
     if any(v == "warning" for v in verdicts.values()):
         overall = "warning"
     elif all(v == "ok" for v in verdicts.values()):
@@ -749,6 +889,8 @@ def platform_projection(now=None, mark=None):
                                 observed_at)
     server_host, reporter_status = server_host_reading(
         observed_at, int(_config("platform_reporter_stale_seconds")))
+    submit_host, submit_reporter_status = submit_host_reading(
+        observed_at, int(_config("platform_reporter_stale_seconds")))
     monitor_host = monitor_host_reading(
         list(_config("platform_monitor_volumes") or []))
     projection = {
@@ -758,12 +900,19 @@ def platform_projection(now=None, mark=None):
         "server": server,
         "pandamon": pandamon,
         "reporter_status": reporter_status,
+        "submit_reporter_status": submit_reporter_status,
         "monitor_host": monitor_host,
         "assessment": assess(database, heartbeats, server, reporter_status,
-                             monitor_host, thresholds, pandamon),
+                             monitor_host, thresholds, pandamon,
+                             submit_reporter_status, submit_host),
     }
     if server_host is not None:
         projection["server_host"] = server_host
+    if submit_host is not None:
+        # The submission side is bulky in its raw form; the record keeps
+        # what a reader needs and drops the per-file submit-description
+        # text, which the host-report store already holds whole.
+        projection["submit_host"] = _submit_host_projection(submit_host)
     serialized = len(json.dumps(projection, separators=(",", ":"), default=str))
     if serialized > MAX_SERIALIZED_BYTES:
         raise ValueError(

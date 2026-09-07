@@ -104,6 +104,21 @@ threshold, and crossing that threshold is a semantic change that
 publishes (DESIGN.md, Maintained assessments). Question: what the
 server host itself saw.
 
+**Submit host (delivered by the reporter).** The submission side of OSG
+production, which no PanDA record carries: harvester daemon liveness as
+the age of each daemon's last log write, the submit schedd's workers
+idle, running and held with their hold reasons, the pool as the
+submitter sees it (total slots, slots the queue's requirements admit,
+slots the exclusions remove), the exclusion counts in force, and host
+load, memory and volumes. Verdicts cover held workers, daemon silence,
+and the harvester and schedd processes. The daemons are split: only
+those that tick regardless of demand are judged, because the submitters
+write only when there is work and their quiet on an idle host is
+correct. Question: was the submission side working, and where were
+pilots allowed to go. A site refusing every submission — GREX for
+thirteen hours on 2026-09-06, unnoticed — holds workers here and
+appears nowhere else.
+
 **swf-monitor host (measured locally by the maintainer).**
 swf-monitor's own tier on pandaserver02: Apache WSGI process count and
 resident memory, the ASGI service (swf-monitor-mcp-asgi) liveness and
@@ -138,17 +153,22 @@ than implying earlier coverage.
 
 ## The server-host reporter
 
-The reporter agent on pandaserver01 (PANDA_SERVER_REPORTER.md) posts
-one record per 5-minute interval to a new authenticated ingest,
-`POST /api/snapper/platform/report/`, on the pattern of the episode
-write endpoints (token or session authentication, an authorized
-reporter identity in the body). The ingest validates the record against
-a declared shape and stores it as the current server-host report (one
-row, replaced per post, with `reported_at`); the maintainer reads it at
-publication and merges it into the component. A buffered backlog posts
-as a batch and the ingest keeps the newest; the record's own interval
-stamps stay with it. The reporter never publishes to Snapper directly:
-the maintainer remains the single owner of the component.
+Host reporters post to `POST /api/host-reports/<host>/`, authenticated
+by a per-host token. The ingest stores each record in the
+cached-product store under a key naming the host, so every reporter has
+its own record with the time it was delivered and none can overwrite
+another's; the maintainer reads them at publication and merges each
+into its own group. A record the monitor cannot take is buffered on the
+reporting host and posts on its next run. The reporter never publishes
+to Snapper directly: the maintainer remains the single owner of the
+component.
+
+The endpoint is keyed by host because there is more than one reporter.
+The first built is the OSG submit host's
+([OSG_SUBMIT_REPORTER.md](OSG_SUBMIT_REPORTER.md)), in production since
+2026-09-07 on a five-minute cadence; the pandaserver01 reporter this
+section was written for posts to the same ingest and its group reads
+`absent` until it runs.
 
 ## The Platform view
 
