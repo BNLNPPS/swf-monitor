@@ -2198,6 +2198,7 @@ def _payload_report(conn, pandaid):
     unreadable or unexpected metadata blob leaves the page without the
     card rather than failing it.
     """
+    report, source = None, ''
     try:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -2206,20 +2207,25 @@ def _payload_report(conn, pandaid):
             row = cursor.fetchone()
     except Exception as e:
         logger.error(f"payload report query failed for job {pandaid}: {e}")
-        return None
-    if not row or not row[0]:
-        return None
+        row = None
 
-    raw = row[0]
-    try:
-        metadata = json.loads(raw) if isinstance(raw, str) else raw
-    except (ValueError, TypeError) as e:
-        logger.error(f"payload report metadata unparsable for job {pandaid}: {e}")
-        return None
-    if not isinstance(metadata, dict):
-        return None
+    if row and row[0]:
+        raw = row[0]
+        try:
+            metadata = json.loads(raw) if isinstance(raw, str) else raw
+        except (ValueError, TypeError) as e:
+            logger.error(
+                f"payload report metadata unparsable for job {pandaid}: {e}")
+            metadata = None
+        if isinstance(metadata, dict) and isinstance(metadata.get('payload'), dict):
+            report, source = metadata['payload'], 'metatable'
 
-    report = metadata.get('payload')
+    if report is None:
+        # The metatable holds metadata for finished jobs only, so a failed
+        # job's account is the one the sweep filed from the object store
+        # (swf-epicprod docs/JOB_REPORTING.md). That is the whole point of
+        # the channel: the jobs with no metadata are the ones worth reading.
+        report, source = _filed_payload_report(pandaid), 'swept'
     if not isinstance(report, dict):
         return None
 
@@ -2261,7 +2267,26 @@ def _payload_report(conn, pandaid):
                     if isinstance(v, dict)],
         'registration': report.get('registration') or {},
         'note': report.get('note') or '',
+        'source': source,
     }
+
+
+def _filed_payload_report(pandaid):
+    """The report the sweep filed beside the job record, or None.
+
+    Never raises: this is one card on a page.
+    """
+    try:
+        from monitor_app.models import EpicProdJob
+        job = EpicProdJob.objects.filter(pandaid=pandaid).only('data').first()
+    except Exception as e:                                    # noqa: BLE001
+        logger.error(f"filed payload report unreadable for job {pandaid}: {e}")
+        return None
+    if job is None:
+        return None
+    filed = (job.data or {}).get('payload_report') or {}
+    report = filed.get('report')
+    return report if isinstance(report, dict) else None
 
 
 def _quantile(values, fraction):

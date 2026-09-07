@@ -102,6 +102,7 @@
         <div class="card-header"><strong>Payload Report</strong>
             <span class="text-muted ms-2">{{ payload_report.payload_version }}</span>
             {% if payload_report.events.reconstructed %}<span class="ms-2">{{ payload_report.events.reconstructed }} events reconstructed{% if payload_report.events.requested %} of {{ payload_report.events.requested }} requested{% endif %}</span>{% endif %}
+            {% if payload_report.source == "swept" %}<span class="ms-2 badge bg-secondary">from the job's own report, swept from the store</span>{% endif %}
         </div>
         <div class="card-body">
             {% if payload_report.note %}<p class="mb-2">{{ payload_report.note }}</p>{% endif %}
