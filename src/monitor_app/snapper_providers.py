@@ -1867,7 +1867,14 @@ def _platform_focus_view():
         'selector_label': 'Platform',
         'cache_series': True,
         'components': ('platform', 'panda', 'errors'),
-        'prewarm_series': False,
+        # Warmed, because a cold build of this view is a timeout for
+        # whoever arrives first. Any change to its curve vocabulary
+        # invalidates every cached window at once (the product key
+        # hashes the family set), and on 2026-09-07 the cold rebuilds
+        # ran 8, 30 and 56 seconds against a 60-second gateway limit.
+        # The builds themselves are one to two seconds, so warming them
+        # costs seconds and spares a reader the 504.
+        'prewarm_series': True,
         'note': ('The platform itself on top; load and consequences '
                  'beneath it, on one time axis. Heartbeats and starts count '
                  'the 5-minute publication interval ending at each stamp; '
