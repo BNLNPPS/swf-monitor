@@ -4,8 +4,29 @@
 {% block title %}ePIC Queue: {{ queue_name }}{% endblock %}
 
 {% block content %}
+<style>
+  /* The house section bar, as on the queues list: a long page of cards
+     reads as sections rather than running together. Scoped here, never as
+     a bare element selector in the shared stylesheet. */
+  .queue-section-header {
+      background-color: #e7f1fb;
+  }
+</style>
 <div class="container-fluid">
     <h1>{{ queue_name }}</h1>
+    <p class="mb-2">On this page:
+        <a href="#description">Description</a>
+        <span class="text-muted mx-1">&middot;</span>
+        <a href="#submission">Submission</a>
+        <span class="text-muted mx-1">&middot;</span>
+        <a href="#schedconfig">Declared configuration</a>
+        <span class="text-muted mx-1">&middot;</span>
+        <a href="#other-parameters">All other parameters</a>
+        <span class="text-muted mx-1">&middot;</span>
+        <a href="#observed">What this queue actually is</a>
+        <span class="text-muted mx-1">&middot;</span>
+        <a href="#full-json">Full JSON</a>
+    </p>
     <p><a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ queue_name }}" class="btn btn-primary btn-sm">View Jobs on this Queue</a></p>
     <p class="mb-3{% if declines %} text-danger fw-bold{% endif %}" title="Jobs whose payload could not reach the Rucio server or the input door from the worker and started no work (payload exit 80)">
         Landing declines, last {{ declines_days }} days:
@@ -13,8 +34,8 @@
         (<a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ queue_name|urlencode }}&amp;status=failed" style="color: inherit;">failed jobs</a>)
         {% else %}none{% endif %}
     </p>
-    <div class="card mb-3">
-        <div class="card-header d-flex align-items-center">
+    <div class="card mb-3" id="description">
+        <div class="card-header queue-section-header d-flex align-items-center">
             <strong>Description</strong>
             {% if user.is_authenticated %}
             <button type="button" class="btn btn-dark-green btn-sm" style="margin-left:1cm;"
@@ -50,8 +71,8 @@
     </div>
 
     {% if submission %}
-    <div class="card mb-3">
-        <div class="card-header">
+    <div class="card mb-3" id="submission">
+        <div class="card-header queue-section-header">
             <strong>Submission</strong>
             <span class="ms-2">reported by the submit host
                 <span data-relative-time="{{ submission.reported_at|date:'c' }}"></span></span>
@@ -132,12 +153,12 @@
     <div class="alert alert-danger">{{ error }}</div>
     {% else %}
 
-    <div class="row">
+    <div class="row" id="schedconfig">
     {% for section_name, fields in sections %}
         {% if fields %}
         <div class="col-md-6 mb-3">
             <div class="card h-100">
-                <div class="card-header"><strong>{{ section_name }}</strong></div>
+                <div class="card-header queue-section-header"><strong>{{ section_name }}</strong></div>
                 <div class="card-body p-0">
                     <table class="table table-sm table-striped mb-0">
                     {% for key, value in fields.items %}
@@ -176,7 +197,7 @@
 
     {% if other %}
     <div class="card mb-3">
-        <div class="card-header">
+        <div class="card-header queue-section-header" id="other-parameters">
             <strong>All Other Parameters</strong>
             <span class="text-muted ms-2">({{ other|length }} fields)</span>
         </div>
@@ -198,8 +219,8 @@
          since the query scans that month (swf inflight
          swf-node-map-benchmarks). -->
     {% if observed.processors %}
-    <div class="card mb-3">
-        <div class="card-header"><strong>What this queue actually is</strong>
+    <div class="card mb-3" id="observed">
+        <div class="card-header queue-section-header"><strong>What this queue actually is</strong>
             <span class="text-muted ms-2">{{ observed.nodes }} node{{ observed.nodes|pluralize }},
             {{ observed.jobs }} jobs over {{ observed.days }} days; the queue's own middle
             efficiency is {{ observed.median_efficiency|default:"—" }} and its failure rate
@@ -238,7 +259,7 @@
     {% endif %}
 
     <div class="card mb-3">
-        <div class="card-header">
+        <div class="card-header queue-section-header" id="full-json">
             <strong>Full JSON</strong>
             <button class="btn btn-sm btn-outline-secondary float-end" onclick="
                 var el = document.getElementById('json-block');
