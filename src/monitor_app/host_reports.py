@@ -28,7 +28,10 @@ logger = logging.getLogger(__name__)
 
 # Hosts that may report. A reporter writes one key, so an unknown host
 # is refused rather than allowed to create keys in the shared store.
-REPORTING_HOSTS = {'osgsub01', 'pandaserver01'}
+# `bnl-scdf` is a pool rather than a host: the pool reporter runs here
+# and reports what its collector answers (docs/POOL_REPORTER.md), which
+# is the same kind of record from the same kind of reporter.
+REPORTING_HOSTS = {'osgsub01', 'pandaserver01', 'bnl-scdf'}
 
 # A record is a summary, not a payload. Anything larger is a reporter
 # defect and is refused with its size named, rather than stored.

@@ -40,6 +40,7 @@ from ..panda.constants import (
     TASK_STATE_COLORS, JOB_STATE_COLORS,
 )
 from ..cell_fmt import fill_cell
+from ..pools import readings_by_queue
 from ..activemq_connection import ActiveMQConnectionManager
 from ..epicprod_inventory import (
     cached_payload_log_parts,
@@ -2179,6 +2180,7 @@ def epic_queues_list(request):
         if sample.failure_rate is not None:
             canary_pct[name] = f'{sample.failure_rate * 100:.0f}%'
     last_use = queue_last_use()
+    pools = readings_by_queue([q.get('panda_queue') for q in queues])
     from ..cached_product import get_product
     spark_product = get_product(
         'epic_queues_sparklines:v3', _queue_completion_sparklines,
@@ -2197,6 +2199,15 @@ def epic_queues_list(request):
         queue['canary_njobs'] = canary_njobs.get(name)
         queue['last_use'] = last_use.get(name)
         queue['spark'] = _spark_svg(spark_sites.get(name))
+        # The pool the queue's workers wait in: what share of it is
+        # claimed, and how many jobs are idle ahead of ours.
+        pool = pools.get(name)
+        if pool:
+            fraction = pool.get('claimed_fraction')
+            queue['pool_label'] = pool.get('label')
+            queue['pool_full'] = (round(100 * fraction) if fraction is not None
+                                  else None)
+            queue['pool_idle'] = (pool.get('queue') or {}).get('idle')
         # Schedconfig mixes caps in resource_type (GRID vs cloud/gpu);
         # display lowercase throughout.
         if queue.get('resource_type'):
@@ -2404,6 +2415,10 @@ def epic_queue_detail(request, queue_name):
         'observed': _with_measurements(_queue_observed_product(queue_name), queue_name),
         'declines_days': SPARK_SPAN_DAYS,
         'submission': _reported_submission(queue_name),
+        # How full the batch pool this queue's workers wait in is, and
+        # how deep the queue ahead of them; from the pool reporter's
+        # stored record, never a collector call in the render.
+        'pool': readings_by_queue([queue_name]).get(queue_name),
     })
 
 

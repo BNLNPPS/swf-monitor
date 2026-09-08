@@ -17,6 +17,8 @@
     <p class="mb-2">On this page:
         <a href="#description">Description</a>
         <span class="text-muted mx-1">&middot;</span>
+        <a href="#pool">Batch pool</a>
+        <span class="text-muted mx-1">&middot;</span>
         <a href="#submission">Submission</a>
         <span class="text-muted mx-1">&middot;</span>
         <a href="#schedconfig">Declared configuration</a>
@@ -69,6 +71,49 @@
             {% endif %}
         </div>
     </div>
+
+    {% if pool %}
+    <div class="card mb-3" id="pool">
+        <div class="card-header queue-section-header">
+            <strong>Batch pool</strong>
+            <span class="ms-2">{{ pool.label }}, read
+                <span data-relative-time="{{ pool.reported_at|date:'c' }}"></span></span>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-sm table-striped mb-0">
+                {% if pool.error %}
+                <tr><td class="fw-bold" style="width:24%">Reading</td>
+                    <td>The pool did not answer: {{ pool.error }}</td></tr>
+                {% else %}
+                {% if pool.claimed_fraction is not None %}
+                <tr><td class="fw-bold" style="width:24%">Full</td>
+                    <td>{{ pool.claimed_fraction|floatformat:3 }} of the pool claimed</td></tr>
+                {% endif %}
+                {% if pool.slots.total %}
+                <tr><td class="fw-bold">Slots</td>
+                    <td>{{ pool.slots.total }} total{% if pool.slots.claimed is not None %},
+                        {{ pool.slots.claimed }} claimed, {{ pool.slots.unclaimed }} free{% endif %}{% if pool.slots.admitted is not None %},
+                        {{ pool.slots.admitted }} admitted by this queue's requirements{% endif %}</td></tr>
+                {% endif %}
+                {% if pool.cores.total %}
+                <tr><td class="fw-bold">Cores</td>
+                    <td>{{ pool.cores.claimed }} claimed of {{ pool.cores.total }}</td></tr>
+                {% endif %}
+                {% if pool.queue.idle is not None %}
+                <tr><td class="fw-bold">Queue ahead</td>
+                    <td>{{ pool.queue.idle }} idle{% if pool.queue.running is not None %},
+                        {{ pool.queue.running }} running{% endif %}{% if pool.queue.held %},
+                        {{ pool.queue.held }} held{% endif %}
+                        <span class="text-muted ms-2">{{ pool.queue.scope }}{% if pool.queue.schedds %}, across {{ pool.queue.schedds }} schedds{% endif %}</span></td></tr>
+                {% endif %}
+                {% endif %}
+                <tr><td class="fw-bold">Why this pool</td>
+                    <td>{{ pool.evidence }}{% if pool.collector %}
+                        <span class="text-muted ms-2">{{ pool.collector }}</span>{% endif %}</td></tr>
+            </table>
+        </div>
+    </div>
+    {% endif %}
 
     {% if submission %}
     <div class="card mb-3" id="submission">
