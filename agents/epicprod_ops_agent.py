@@ -209,6 +209,12 @@ STORAGE_SWEEP_TIMEOUT = int(os.environ.get("EPICPROD_STORAGE_SWEEP_TIMEOUT", "36
 # Production configuration.
 CONFIG_PROPOSER_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "propose-campaign-configs.py"
 CONFIG_PROPOSER_TIMEOUT = int(os.environ.get("EPICPROD_CONFIG_PROPOSER_TIMEOUT", "300"))
+# The expiry proposers (PINGS.md, Entering a ping): a ping on each
+# production credential's expiry and on each service host certificate,
+# including one served without its issuing intermediate.
+CREDENTIAL_PROPOSER_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "propose-credential-pings.py"
+CERTIFICATE_PROPOSER_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "propose-certificate-pings.py"
+EXPIRY_PROPOSER_TIMEOUT = int(os.environ.get("EPICPROD_EXPIRY_PROPOSER_TIMEOUT", "300"))
 # A catalog_sync step that fails on a JLab Rucio authentication stall is run
 # once more after this wait, one wait per chain (2026-09-04: a stall of a
 # few minutes took out five steps in a row).
@@ -306,6 +312,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "content_validate", "content_accept", "stash_drain",
                    "node_measure_ingest", "dataset_definitions_sweep",
                    "storage_sweep", "campaign_config_propose",
+                   "credential_ping_propose", "certificate_ping_propose",
                    "assessment_completed",
                    "health_ping", "shutdown"}
 
@@ -1389,6 +1396,8 @@ class EpicProdOpsAgent(BaseAgent):
         t0 = time.monotonic()
         steps = [
             ('credential_expiry_check', self._do_credential_expiry_check),
+            ('credential_ping_propose', self._do_credential_ping_propose),
+            ('certificate_ping_propose', self._do_certificate_ping_propose),
             ('panda_sandbox_keepalive', self._do_panda_sandbox_keepalive),
             # Early, and before anything that talks to Rucio: the source
             # expires, so a stall later in the chain must not cost a day of
@@ -1546,9 +1555,11 @@ class EpicProdOpsAgent(BaseAgent):
     def _do_credential_expiry_check(self, m):
         """Nightly credential-expiry check (catalog_sync chain step): runs
         the swf_epicprod checker over the PanDA OIDC token and the two x509
-        proxies. A credential inside the warning window, expired, missing,
-        or unverifiable raises the record to the live stream — automation
-        that dies with a credential must not die silently."""
+        proxies. A credential expired, missing, or unverifiable raises the
+        record to the live stream — automation that dies with a credential
+        must not die silently. A credential merely inside the warning
+        window does not: the credential proposer's ping carries that date
+        (PINGS.md), and a second live line would say it twice."""
         t0 = time.monotonic()
         cmd = [sys.executable, '-m', 'swf_epicprod.credential_check']
         try:
@@ -1576,10 +1587,15 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              days_left=days)
         elif p.returncode == 3:
+            # An expiry inside the window is the ping's to carry; only a
+            # credential the check cannot vouch for at all stays live.
+            unvouched = [c for c in creds
+                         if c.get('status') not in ('ok', 'expiring')]
             self._log_action('credential_expiry_check', t0, outcome='warning',
                              reason=reason or 'credential inside warning window',
                              username=str(m.get('created_by') or ''),
-                             sublevel='high', live_default=True,
+                             sublevel='high' if unvouched else 'low',
+                             live_default=bool(unvouched),
                              level=logging.WARNING, days_left=days)
         else:
             self._log_action('credential_expiry_check', t0, outcome='error',
@@ -2510,6 +2526,90 @@ class EpicProdOpsAgent(BaseAgent):
                          summary=text, username=username, sublevel='low',
                          live_default=False, findings=len(editions),
                          editions=editions,
+                         withdrawn=summary.get('withdrawn', 0))
+
+    def _handle_credential_ping_propose(self, m):
+        """Run the credential expiry proposer (swf-monitor docs/PINGS.md):
+        a catalog_sync chain step, also directly invokable."""
+        self.run_in_background(
+            self._do_credential_ping_propose, m,
+            dedup_key="credential_ping_propose",
+            label="credential_ping_propose")
+
+    def _handle_certificate_ping_propose(self, m):
+        """Run the host certificate proposer (swf-monitor docs/PINGS.md):
+        a catalog_sync chain step, also directly invokable."""
+        self.run_in_background(
+            self._do_certificate_ping_propose, m,
+            dedup_key="certificate_ping_propose",
+            label="certificate_ping_propose")
+
+    def _do_credential_ping_propose(self, m):
+        """Propose a ping on the expiry of every production credential whose
+        date can be read, and fulfilment of an open ping whose credential has
+        since been renewed. Nothing is entered without a person's approval."""
+        self._do_expiry_ping_propose(
+            m, 'credential_ping_propose', CREDENTIAL_PROPOSER_SCRIPT,
+            'propose-credential-pings')
+
+    def _do_certificate_ping_propose(self, m):
+        """The same over the certificates the PanDA and OSG service hosts
+        serve, including one served without its issuing intermediate."""
+        self._do_expiry_ping_propose(
+            m, 'certificate_ping_propose', CERTIFICATE_PROPOSER_SCRIPT,
+            'propose-certificate-pings')
+
+    def _do_expiry_ping_propose(self, m, action, script, label):
+        """The shared body of the two expiry proposers: run the doer with
+        --apply and log one action record carrying what it proposed."""
+        username = str(m.get('created_by') or '')
+        cmd = [sys.executable, str(script), "--apply",
+               "--created-by", str(m.get('created_by') or 'prodops_agent')]
+        self.logger.info(f"PRODOPS {action}: reading expiries")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=EXPIRY_PROPOSER_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS {action} TIMEOUT after {EXPIRY_PROPOSER_TIMEOUT}s")
+            self._log_action(action, t0, outcome='timeout',
+                             reason=f'timed out after {EXPIRY_PROPOSER_TIMEOUT}s',
+                             username=username, sublevel='low',
+                             live_default=False, level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  {label}: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  {label}: {line}")
+        if p.returncode != 0:
+            self.logger.error(f"PRODOPS {action} FAILED rc={p.returncode}")
+            self._log_action(action, t0, outcome='error',
+                             reason=self._derive_reason(p), username=username,
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        summary = {}
+        for line in (p.stdout or "").splitlines():
+            if line.startswith('SUMMARY '):
+                try:
+                    summary = json.loads(line[len('SUMMARY '):])
+                except ValueError as e:
+                    self.logger.error(f"PRODOPS {action}: bad SUMMARY: {e}")
+        proposed = summary.get('proposed') or []
+        fulfil = summary.get('fulfil_proposed') or []
+        text = (f"{summary.get('findings', 0)} expiry(s) read; "
+                f"{len(proposed)} new ping(s) proposed, "
+                f"{len(fulfil)} fulfilment(s) proposed, "
+                f"{summary.get('withdrawn', 0)} withdrawn"
+                + (f"; {len(summary['errors'])} error(s)"
+                   if summary.get('errors') else ''))
+        self.logger.info(f"PRODOPS {action} done: {text}")
+        self._log_action(action, t0, outcome='ok', summary=text,
+                         username=username, sublevel='low',
+                         live_default=False,
+                         findings=summary.get('findings', 0),
+                         proposed=proposed,
                          withdrawn=summary.get('withdrawn', 0))
 
     def _record_panda_operation_state(self, operation_id, status, *,

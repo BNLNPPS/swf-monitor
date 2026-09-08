@@ -105,10 +105,13 @@ proposers, and the expiry checks move into the ping system that way:
   intermediate, since browsers without the grid CA bundle cannot verify
   it.
 
-Both proposers run where their reads are possible: the credential
-proposer on the production ops agent, the certificate proposer in the
-alarm engine's tick or beside it. Neither writes a ping; a person accepts
-each one, with the date editable.
+Both proposers run where their reads are possible, as `catalog_sync`
+chain steps on the production operations agent: the credentials are
+readable only in that account's environment, and the certificates are an
+ordinary network read from the same host. Neither writes a ping; a
+person accepts each one, with the date editable. A credential or host
+the check cannot read at all yields no ping, since there is no date to
+carry, and stays on the check's own action record.
 
 ### Pings with a remedy
 
@@ -200,4 +203,8 @@ date; the first two pings were re-issued as proposals for acceptance.
 Step 3 began 2026-09-05 with the campaign configuration proposer in
 production: its first run proposed the pings and remedies for 26.07.1 and
 26.07.2, approved the same day. The credential and certificate proposers
-and step 4 are not started.
+were completed 2026-09-08 and run as the `credential_ping_propose` and
+`certificate_ping_propose` chain steps, with the credential check's
+warning line retired to the non-live record. The certificate check reads
+the chain served by the PanDA server, its monitor, this host's web face,
+and the OSG submit host. Step 4 is not started.

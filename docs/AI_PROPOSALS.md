@@ -154,6 +154,10 @@ propagation pilot is the worked example of each item.
   date, and deny, plus the proposals page. Propose surface: the propose
   endpoint with `action: ping` and the MCP tool `ai_propose_ping`.
   Reversibility: mitigable, a ping created in error is marked fulfilled.
+  Rule-based proposers of this category: `credential-expiry` and
+  `certificate-expiry` (swf-epicprod `swf_epicprod/credential_proposer.py`
+  and `certificate_proposer.py`), each a nightly chain step, comments
+  wholly code-filled.
 - **Ping fulfilled** (`ping_fulfil`, ref `pf`) — proposes that an open
   ping be marked fulfilled; subject the ping entry, precondition that it
   is open, executor `ping_fulfil_execute`. Reviewed on the ping's own row
