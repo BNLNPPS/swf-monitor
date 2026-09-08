@@ -1919,7 +1919,7 @@ def _platform_groups():
          'prefixes': ['plps_'], 'ids': [],
          'stacked': True, 'panel_px': 130, 'units': 'slots'},
         {'name': 'Platform submit workers', 'title': 'Submit host pilots',
-         'section': _platform_section('Submission side'),
+         'section': _platform_section('Submit hosts'),
          'prefixes': ['plsw_'], 'ids': [],
          'order': ['plsw_running', 'plsw_idle', 'plsw_held'],
          'panel_px': 110, 'units': 'pilots'},
