@@ -1842,7 +1842,7 @@ def _platform_groups():
         # received is a job that started and left running within one
         # interval — a burn-through signature, left visible.
         {'name': 'Platform heartbeats', 'title': 'Heartbeats',
-         'section': _platform_section('Heartbeats'),
+         'section': _platform_section('Pilot heartbeats'),
          'prefixes': ['plhb_'], 'ids': [],
          'order': ['plhb_received', 'plhb_started'],
          'fills': {'plhb_started': {
@@ -1873,15 +1873,16 @@ def _platform_groups():
         # the summary ('of N'); drawn on the plot it dwarfs both into a
         # sliver.
         {'name': 'Platform DB activity', 'title': 'DB activity',
-         'section': _platform_section('Database'),
+         'section': _platform_section('PanDA database'),
          'prefixes': [], 'ids': ['pldb_active', 'pldb_waiting'],
          'order': ['pldb_active', 'pldb_waiting'],
          'stacked': True, 'panel_px': 150, 'units': 'connections'},
         {'name': 'Platform DB connections', 'title': 'DB connections',
          'prefixes': [], 'ids': ['pldb_total'],
          'panel_px': 110, 'units': 'connections'},
-        {'name': 'Platform server latency', 'title': 'Server latency',
-         'section': _platform_section('Latency'),
+        {'name': 'Platform server latency',
+         'section': _platform_section('PanDA server host'),
+         'title': 'PanDA server latency, measured from swf-monitor',
          'prefixes': [], 'ids': ['plsv_latency'],
          'panel_px': 110, 'units': 'ms'},
         {'name': 'Platform PanDA monitor latency',
@@ -1890,6 +1891,7 @@ def _platform_groups():
          'order': ['plpm_front', 'plpm_workers'],
          'panel_px': 110, 'units': 'ms'},
         {'name': 'Platform monitor load',
+         'section': _platform_section('swf-monitor host'),
          'title': 'swf-monitor host load',
          'prefixes': ['plml_'], 'ids': [],
          'order': ['plml_1m', 'plml_5m', 'plml_15m'],
@@ -1954,7 +1956,7 @@ def _platform_groups():
         # class as rates over the reporter's interval; the 5xx count is
         # its own panel because on the request axis it is a hairline.
         {'name': 'Platform server requests',
-         'section': _platform_section('PanDA server host'), 'title': 'PanDA server requests',
+         'title': 'PanDA server requests',
          'prefixes': ['plsrv_req_'], 'ids': [],
          'order': ['plsrv_req_acquire_jobs', 'plsrv_req_update_job',
                    'plsrv_req_pilot_other', 'plsrv_req_harvester',
