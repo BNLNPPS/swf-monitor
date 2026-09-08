@@ -202,9 +202,14 @@ over the `platform`, `panda`, and `errors` components' snaps, and its
 own detail rendering. Its families are absent from the compact scope
 report; the scope's front door does not grow.
 
-**Panels, in order — the platform's own quantities first, then the
-load and consequence panels beneath them for correlation by eye —
-each family's control row docked above its panel:**
+**Panels, in seven sections, each under a band naming the machine or
+subject it is about — the platform's own quantities first, then the
+production activity beneath them for correlation by eye — each
+family's control row docked above its panel. The sections: Pilot
+heartbeats (1–2), PanDA database (3), PanDA server host (4–6),
+swf-monitor host (6), Batch pool (5b), Submit hosts, Production
+activity (7–9). The submit host's panels are described under The
+platform component above.**
 
 1. *Heartbeats* — received per interval and starts per interval.
    Starts are in practice a subset of the heartbeats received (a
@@ -255,11 +260,12 @@ each family's control row docked above its panel:**
    an axis: a fraction against tens of thousands of jobs draws as a
    flat line. The panels are empty before the pool reporter's first run
    on 2026-09-08 and accrue from there, as the submit host's do.
-6. *Hosts* — per host, PanDA server then swf-monitor: load average
-   (1 and 15 minutes ticked, 5 unticked); memory used; volume use as
-   percent, one line per volume; resident memory of the httpd and
-   pandaserver processes on the server host and of WSGI, ASGI and the
-   agent on the monitor host. Unit and service state is on the card.
+6. *Host resources* — for the PanDA server host, under its own band,
+   and for the swf-monitor host under its own: load average (1 and 15
+   minutes ticked, 5 unticked); memory used; volume use as percent,
+   one line per volume; resident memory of the httpd and pandaserver
+   processes on the server host and of WSGI, ASGI and the agent on the
+   monitor host. Unit and service state is on the card.
 7. *Jobs in flight* — the scope's in-flight jobs family (by state,
    stacked) with running cores as the overlay line, as the Site view
    draws them.
