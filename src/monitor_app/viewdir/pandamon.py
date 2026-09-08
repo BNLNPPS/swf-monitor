@@ -2207,7 +2207,15 @@ def epic_queues_list(request):
             queue['pool_label'] = pool.get('label')
             queue['pool_full'] = (round(100 * fraction) if fraction is not None
                                   else None)
-            queue['pool_idle'] = (pool.get('queue') or {}).get('idle')
+            pool_queue = pool.get('queue') or {}
+            queue['pool_idle'] = pool_queue.get('idle')
+            # The two pools count different things: the SCDF collector
+            # answers for the whole pool, the OSG submit host only for
+            # the workers we ourselves put there. The cell says which.
+            queue['pool_idle_scope'] = (
+                'idle jobs in {}, {}'.format(pool.get('label'),
+                                             pool_queue.get('scope'))
+                if pool_queue.get('scope') else None)
         # Schedconfig mixes caps in resource_type (GRID vs cloud/gpu);
         # display lowercase throughout.
         if queue.get('resource_type'):

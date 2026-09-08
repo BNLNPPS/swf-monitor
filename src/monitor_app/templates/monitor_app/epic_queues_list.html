@@ -86,7 +86,8 @@
                     <td data-order="{% if q.last_use %}{{ q.last_use|date:'U' }}{% else %}0{% endif %}">{{ q.last_use|fmt_dt|default:"—" }}</td>
                     <td data-order="{{ q.pool_full|default_if_none:-1 }}" class="text-end"
                         {% if q.pool_label %}title="{{ q.pool_label }}"{% endif %}>{% if q.pool_full is not None %}{{ q.pool_full }}%{% else %}—{% endif %}</td>
-                    <td data-order="{{ q.pool_idle|default_if_none:-1 }}" class="text-end">{% if q.pool_idle is not None %}{{ q.pool_idle }}{% else %}—{% endif %}</td>
+                    <td data-order="{{ q.pool_idle|default_if_none:-1 }}" class="text-end"
+                        {% if q.pool_idle_scope %}title="{{ q.pool_idle_scope }}"{% endif %}>{% if q.pool_idle is not None %}{{ q.pool_idle }}{% else %}—{% endif %}</td>
                     <td data-order="{{ q.canary_njobs|default_if_none:0 }}" class="text-end">{% if q.canary_njobs is not None %}{{ q.canary_njobs }}{% endif %}</td>
                     <td data-order="{% if q.spark %}{{ q.spark.total }}{% else %}0{% endif %}">
                         {% if q.spark %}
