@@ -61,6 +61,10 @@ Capabilities:
   node_measure_ingest — fold every finished job's per-stage measures into
                        the node measurement store, behind a cursor (hourly;
                        site-canary docs/MEASUREMENTS.md).
+  dataset_definitions_sweep — the definitions sweep on demand: pull the
+                       simulation_campaign_datasets clone, then the same
+                       sweep the nightly chain runs (the PC ingest page's
+                       Update definitions button; docs/PCS_INGEST.md).
   outputs_ingest     — write the production record of what tasks produced,
                        and the registrar's worklist, from the payload reports
                        (hourly; docs/RUCIO_RESILIENCE.md, Measure 3).
@@ -300,7 +304,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "batch_log_capture", "batch_log_learn",
                    "report_sweep", "outputs_ingest", "registrar",
                    "content_validate", "content_accept", "stash_drain",
-                   "node_measure_ingest",
+                   "node_measure_ingest", "dataset_definitions_sweep",
                    "storage_sweep", "campaign_config_propose",
                    "assessment_completed",
                    "health_ping", "shutdown"}
@@ -1584,12 +1588,42 @@ class EpicProdOpsAgent(BaseAgent):
                              sublevel='high', live_default=True,
                              level=logging.ERROR, days_left=days)
 
+    def _handle_dataset_definitions_sweep(self, m):
+        """The definitions sweep on demand, off the receiver thread: the PC
+        ingest page's Update definitions button. The clone is pulled first,
+        so the click reflects the repository as it stands, then the same
+        sweep the nightly chain runs; the page is told by
+        definitions_sweep_ready (swf-epicprod docs/PCS_INGEST.md)."""
+        self.run_in_background(
+            self._do_dataset_definitions_sweep_on_demand, m,
+            dedup_key="dataset_definitions_sweep", label="dataset_definitions_sweep")
+
+    def _do_dataset_definitions_sweep_on_demand(self, m):
+        repo = os.environ.get('SWF_DATASETS_REPO_DIR',
+                              '/data/wenauseic/github/simulation_campaign_datasets')
+        pulled = ''
+        try:
+            p = subprocess.run(['git', '-C', repo, 'pull', '--ff-only', '-q', 'origin'],
+                               capture_output=True, text=True, timeout=180)
+            if p.returncode != 0:
+                pulled = f'pull failed: {(p.stderr or p.stdout).strip()[-200:]}'
+                self.logger.error(f"PRODOPS dataset_definitions_sweep: {pulled}")
+        except subprocess.TimeoutExpired:
+            pulled = 'pull timed out after 180s'
+            self.logger.error(f"PRODOPS dataset_definitions_sweep: {pulled}")
+        ok = self._do_dataset_definitions_sweep(m)
+        self.send_message('/topic/epictopic', {
+            'msg_type': 'definitions_sweep_ready', 'ok': bool(ok),
+            'pull': pulled or 'pulled',
+            'created_by': str(m.get('created_by') or '')})
+
     def _do_dataset_definitions_sweep(self, m):
         """Assimilate the simulation_campaign_datasets definitions
-        (catalog_sync chain step): inventory, CI cost model, background
-        configs, and the defined/requested/registered completeness
-        populations. Runs after the EVGEN Rucio assimilation, whose
-        snapshot it matches against."""
+        (catalog_sync chain step, and the on-demand handler above):
+        inventory, CI cost model, background configs, and the
+        defined/requested/registered completeness populations. Runs after
+        the EVGEN Rucio assimilation, whose snapshot it matches against.
+        Returns True on success."""
         t0 = time.monotonic()
         cmd = [sys.executable, '-m', 'pcs.definitions_sweep', '--apply',
                '--created-by', str(m.get('created_by') or 'prodops_agent')]
@@ -1603,7 +1637,7 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True,
                              level=logging.ERROR)
-            return
+            return False
         summary = {}
         try:
             summary = json.loads((p.stdout or '').strip().splitlines()[-1])
@@ -1620,10 +1654,11 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True,
                              level=logging.ERROR, **counts)
-        else:
-            self._log_action('dataset_definitions_sweep', t0,
-                             username=str(m.get('created_by') or ''),
-                             **counts)
+            return False
+        self._log_action('dataset_definitions_sweep', t0,
+                         username=str(m.get('created_by') or ''),
+                         **counts)
+        return True
 
     def _handle_rucio_snapshot_update(self, m):
         """Refresh the JLab Rucio snapshot + rematch outputs, off the receiver
