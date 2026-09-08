@@ -334,7 +334,7 @@ def _ping_proposals():
             'days_left': (due - today).days if due else None,
             'lead_days': payload.get('lead_days'),
             'owner': payload.get('owner', ''), 'note': payload.get('note', ''),
-            'url': payload.get('url', ''),
+            'url': alarms_data._ping_link(payload.get('url', '')),
         })
     return proposals, fulfils, remedies
 

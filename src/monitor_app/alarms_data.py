@@ -545,6 +545,26 @@ def _today_eastern():
     return datetime.now(ZoneInfo('America/New_York')).date()
 
 
+def _ping_link(raw: str) -> str:
+    """A ping's link as the dashboard should render it: empty unless it
+    leads somewhere other than this page, so a ping with nothing to point
+    at is plain text. A site-root path is resolved against the mount
+    prefix, which differs between the internal and external faces; it is
+    read at render time, never stored."""
+    from django.urls import get_script_prefix, reverse
+    url = (raw or '').strip()
+    if not url:
+        return ''
+    if url.startswith('/') and not url.startswith('//'):
+        prefix = get_script_prefix()
+        if prefix != '/' and not url.startswith(prefix):
+            url = prefix.rstrip('/') + url
+    here = reverse('monitor_app:alarms_dashboard').rstrip('/')
+    if url.split('#', 1)[0].rstrip('/') == here:
+        return ''
+    return url
+
+
 def _ping_to_dict(e: Entry) -> dict:
     """One ping for the dashboard: its fields, days left, and the state
     word its cell takes — scheduled (not yet within lead), ping, alarm
@@ -578,7 +598,7 @@ def _ping_to_dict(e: Entry) -> dict:
         'days_left': days_left,
         'lead_days': lead,
         'owner': data.get('owner') or '',
-        'url': data.get('url') or '',
+        'url': _ping_link(data.get('url') or ''),
         'status': status,
         'state': state,
         'origin': data.get('origin') or 'manual',
