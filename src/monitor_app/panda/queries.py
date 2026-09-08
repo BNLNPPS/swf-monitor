@@ -40,6 +40,9 @@ PSEUDO_TASK_DATASETS = {'seq_number', 'pseudo_dataset'}
 # NERSC Perlmutter jobs publish their per-job pilot & slurm logs here.
 # Pattern: <base>/<queue>/<pandaid>/{pilotlog.txt, slurm-<id>-task<N>-panda<pid>.out}
 _NERSC_PORTAL_BASE = "https://portal.nersc.gov/cfs/m3763/panda/jobs"
+# A job in one of these states publishes no further logs, so its listing is
+# captured once and read from disk thereafter.
+_NERSC_PORTAL_FINAL_STATES = ('finished', 'failed', 'cancelled', 'closed')
 _PANDA_CLIENT_PROCESSING_RE = re.compile(r'^panda-client-[0-9][A-Za-z0-9._-]*-(jedi-.+)$')
 _PANDA_USER_EQUIVALENCES = {
     # Canonical monitor display name -> equivalent login/name variants.
@@ -341,13 +344,37 @@ def _get_task_parameters(jeditaskid):
     return params, items
 
 
-def _nersc_portal_log_urls(computingsite, pandaid):
-    """Build Perlmutter log URLs by scraping the NERSC portal dir listing.
+def _nersc_portal_cache_path(pandaid):
+    """Where the captured portal listing for a job lives."""
+    import os
+    from django.conf import settings
+    root = getattr(settings, 'SWF_TMP_DIR', '/data/swf-tmp')
+    return os.path.join(root, 'nersc-portal', f'{pandaid}.json')
+
+
+def _nersc_portal_log_urls(computingsite, pandaid, *, fetch=True, capture=False):
+    """Perlmutter log URLs, from the captured listing or from the portal.
 
     The slurm task filename contains a per-allocation task index not stored in
-    our DB, so we have to scrape the Apache autoindex to find it. Returns
-    ``None`` if the dir is unreachable or empty.
+    our DB, so the names come from the portal's Apache autoindex. A page render
+    never reaches the portal: it passes ``fetch=False`` and reads the copy
+    captured off the request path by the epicprod inventory sync. The listing
+    is captured only for a job in a final state, where it no longer changes.
+    Returns ``None`` when nothing is on disk and no fetch is allowed, or when
+    the fetch fails.
     """
+    import os
+    cache_path = _nersc_portal_cache_path(pandaid)
+    try:
+        with open(cache_path) as fh:
+            return json.load(fh)
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError) as e:
+        logger.warning("NERSC portal listing cache unreadable for %s: %s",
+                       pandaid, e)
+    if not fetch:
+        return None
     import requests
     log_dir = f"{_NERSC_PORTAL_BASE}/{computingsite}/{pandaid}/"
     try:
@@ -377,6 +404,16 @@ def _nersc_portal_log_urls(computingsite, pandaid):
         elif name == f'PanDA_Pilot-{pandaid}/':
             result['payload_stdout'] = log_dir + name + 'payload.stdout'
             result['payload_stderr'] = log_dir + name + 'payload.stderr'
+    if capture and len(result) > 1:
+        try:
+            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+            tmp = f'{cache_path}.tmp.{os.getpid()}'
+            with open(tmp, 'w') as fh:
+                json.dump(result, fh)
+            os.replace(tmp, cache_path)
+        except OSError as e:
+            logger.warning("NERSC portal listing not captured for %s: %s",
+                           pandaid, e)
     return result
 
 
@@ -2673,13 +2710,20 @@ def condor_log_events(batchlog_url, timeout_s=BATCH_LOG_TIMEOUT_S):
     return parse_condor_log(body, source=batchlog_url)
 
 
-def study_job(pandaid, include_batch_reason=False, include_log_analysis=True):
+def study_job(pandaid, include_batch_reason=False, include_log_analysis=True,
+              fetch_remote=True):
     """Deep study of a single PanDA job — full record, files, harvester logs, errors.
 
     ``include_batch_reason`` fetches the harvester's condor event log for
     a job that never started, so the batch system's hold reason is
     reported whole rather than as PanDA's truncation of it. It makes one
     bounded remote call, so callers in a request path leave it off.
+
+    ``fetch_remote`` governs the one remaining outbound call, the NERSC
+    portal listing that names a Perlmutter job's log files. A request path
+    passes ``False`` and is served the listing captured earlier off that
+    path; the sweeps that run outside a request leave it on, and a final
+    job's listing is captured as they go.
     """
     conn = connections['panda']
 
@@ -2754,15 +2798,26 @@ def study_job(pandaid, include_batch_reason=False, include_log_analysis=True):
     # NERSC Perlmutter pilotid ends in literal 'None' so the synthesized URLs
     # 404. The NERSC portal exposes per-job log dirs instead.
     site = job.get('computingsite') or ''
+    log_urls_note = ''
     if site.startswith('NERSC_Perlmutter'):
-        portal_urls = _nersc_portal_log_urls(site, pandaid)
+        # The synthesized pilotid-derived entries 404 on Perlmutter whether or
+        # not the listing is to hand, so they go either way.
+        log_urls.pop('pilot_stdout', None)
+        log_urls.pop('pilot_stderr', None)
+        log_urls.pop('batch_log', None)
+        portal_urls = _nersc_portal_log_urls(
+            site, pandaid, fetch=fetch_remote,
+            capture=str(job.get('jobstatus') or '') in _NERSC_PORTAL_FINAL_STATES)
         if portal_urls:
-            # The synthesized pilotid-derived entries 404 on Perlmutter;
-            # the portal listing supplies the real files.
-            log_urls.pop('pilot_stdout', None)
-            log_urls.pop('pilot_stderr', None)
-            log_urls.pop('batch_log', None)
             log_urls.update(portal_urls)
+        elif not fetch_remote:
+            log_urls_note = (
+                'Perlmutter log listing not captured yet — the file names live '
+                'only in the NERSC portal listing, which is read off the '
+                'request path. Refresh this job to fetch it now.')
+        else:
+            log_urls_note = ('The NERSC portal did not answer, so its per-job '
+                             'log file names are not known for this job.')
 
     # 2. Files from filestable4
     file_field_list = ', '.join(f'"{f}"' for f in FILE_FIELDS)
@@ -2851,6 +2906,8 @@ def study_job(pandaid, include_batch_reason=False, include_log_analysis=True):
         "files": files,
         "log_urls": log_urls,
     }
+    if log_urls_note:
+        result["log_urls_note"] = log_urls_note
 
     if log_file:
         result["log_file"] = log_file

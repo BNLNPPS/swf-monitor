@@ -210,10 +210,13 @@
     {% endif %}
 
     <!-- Log URLs -->
-    {% if log_urls %}
+    {% if log_urls or log_urls_note %}
     <div class="card mb-3">
         <div class="card-header"><strong>Log URLs</strong></div>
         <div class="card-body">
+            {% if log_urls_note %}
+            <p class="mb-2">{{ log_urls_note }}</p>
+            {% endif %}
             <table class="table table-sm mb-0">
                 {% for label, url in log_urls.items %}
                 <tr>

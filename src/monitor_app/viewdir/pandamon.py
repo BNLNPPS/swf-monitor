@@ -1059,8 +1059,10 @@ def panda_job_detail(request, pandaid):
     # The batch record is read from the captured copy on disk, so asking for
     # it costs a file read rather than a fetch, and it is the only whole
     # account of a job that never started (docs/ERROR_ATTRIBUTION.md).
+    # fetch_remote=False for the same reason: the Perlmutter log listing is
+    # read from the copy captured off the request path, never fetched here.
     data = study_job(int(pandaid), include_batch_reason=True,
-                     include_log_analysis=False)
+                     include_log_analysis=False, fetch_remote=False)
     if 'error' in data:
         return render(request, 'monitor_app/panda_job_detail.html',
                       {'error': data['error'], 'pandaid': pandaid})
