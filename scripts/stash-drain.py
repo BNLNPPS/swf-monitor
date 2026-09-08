@@ -1,51 +1,43 @@
 #!/usr/bin/env python3
-"""stash-drain.py — move stashed outputs to JLab and register them there.
+"""stash-drain.py — register stashed outputs where they lie.
 
 The registrar of the failover stash (swf-epicprod
 docs/RUCIO_FAILOVER_STASH.md). A job whose output JLab would not take
-writes it to a BNL dCache space and records what it stashed; this brings
-those files home when JLab is reachable again.
+writes it to the BNL science-data RSE, BNL-XRD, at the path Rucio's
+deterministic naming gives its logical name, and records what it
+stashed. The file is therefore already home; what the catalog of record
+is owed is the replica row. This pass supplies it when JLab answers.
 
 One pass:
 
 1. Read what the jobs stashed, from the payload reports — the PanDA
-   metatable for a finished job, the swept copy for a failed one — and
-   from the BNL catalog's own listing of stash entries, which is the
-   authority when a report is lost.
-2. Register the stash replica in the BNL catalog if it is not already
-   there, so the stash is catalogued rather than a pile of files: the
-   deterministic PFN, the size and checksum the storage reports, and the
-   destination and event count in the metadata. The name is flat,
-   because the BNL instance refuses a path-like DID.
+   metatable for a finished job, the swept copy for a failed one.
+2. Confirm each file at the door, with its size and checksum.
 3. Probe JLab. If it does not answer, the pass ends without touching
-   anything: a stash that cannot be drained is a backlog, which is the
-   point of having one.
-4. Move each file to the destination RSE at the path the catalog's
-   deterministic algorithm gives its logical name, through the RSE's
-   write door; verify size and checksum there; register it in the JLab
-   catalog by logical name with its event count; verify the replica
-   reads AVAILABLE.
-5. Delete the stash replica and its catalog entry only after that
-   verification.
+   anything: a stash that cannot be registered is a backlog, which is
+   the point of having one.
+4. Register each file in the JLab catalog by logical name at the stash
+   RSE, with its event count, through the registrar's own registration;
+   verify the replica reads AVAILABLE. Nothing is copied and nothing is
+   removed: the file stays where it is, a replica like any other, and a
+   later move is Rucio's to make.
 
-The copy is streamed through this host: third-party copy is not
-supported at the BNL-XRD write door (measured 2026-09-07), and the
-production account's credential is accepted by the stash door and the
-destination doors alike, so one credential carries the whole move.
-
-Retries live here and nowhere else. A file that will not move keeps its
-stash entry and is tried again on later passes, once an hour and a
-bounded number of times, with its reason kept in the drain's state file;
-nothing is deleted that has not been verified at JLab first.
+Retries live here and nowhere else. A file that will not register keeps
+its entry and is tried again on later passes, once an hour and a bounded
+number of times, with its reason kept in the drain's state file.
 
 Django-bootstrap standalone script — also usable by hand::
 
     cd /data/wenauseic/github/swf-monitor/src
     ../../swf-testbed/.venv/bin/python ../scripts/stash-drain.py \
-        [--hours 168] [--limit N] [--dry-run]
+        [--hours 168] [--limit N] [--entry /TEST/stash-probe/x.txt] [--dry-run]
+
+``--entry`` names a logical file already at its deterministic path on the
+stash RSE and registers it as a stash entry would be: the hand test of
+the path, and the way to register a stashed file no report names.
 
 The last stdout line is a JSON summary; progress goes to stderr.
-Exit codes: 0 ok · 5 no usable credential · 6 the BNL catalog is unreachable.
+Exit codes: 0 ok · 5 no usable credential.
 """
 import argparse
 import importlib.util
@@ -67,38 +59,20 @@ from django.db import connections  # noqa: E402
 from monitor_app.models import EpicProdJob  # noqa: E402
 from monitor_app.panda.constants import PANDA_SCHEMA  # noqa: E402
 
-BNL_RUCIO_URL = os.environ.get('RUCIO_BNL_URL', 'https://nprucio01.sdcc.bnl.gov:443')
-BNL_ACCOUNT = os.environ.get('RUCIO_BNL_ACCOUNT', 'panda')
-BNL_VO = os.environ.get('RUCIO_BNL_VO', 'eic')
-BNL_SCOPE = 'group.EIC'
-STASH_RSE = os.environ.get('STASH_RSE', 'BNL_PROD_DISK_1')
-STASH_DOOR = os.environ.get('STASH_DOOR', 'root://dcintdoor.sdcc.bnl.gov:1094')
-# The proxy the BNL catalog and door accept. A private copy at mode 0600,
-# because xrootd refuses a credential with wider rights than that.
-BNL_PROXY = os.environ.get('BNL_X509_PROXY', os.path.expanduser('~/.bnl-rucio-proxy'))
-BNL_PROXY_SOURCE = os.environ.get('BNL_X509_PROXY_SOURCE',
-                                  '/etc/swf-monitor/longproxy-for-rucio')
-# Where the payload writes a stash file (run.sh STASH_BASE), for an entry
-# known only from the catalog.
-STASH_BASE = os.environ.get('STASH_BASE',
-                            '/pnfs/sdcc.bnl.gov/eic/epic/disk/group/EIC/stash')
+# The stash: the BNL science-data RSE of the JLab catalog, its write door,
+# and its deterministic prefix, so a stashed file sits at the PFN its
+# logical name resolves to. The same values run.sh writes with
+# (STASH_DOOR, STASH_PREFIX).
+STASH_RSE = os.environ.get('STASH_RSE', 'BNL-XRD')
+STASH_DOOR = os.environ.get('STASH_DOOR', 'root://epicxrd1.sdcc.bnl.gov:1094')
+STASH_PREFIX = os.environ.get('STASH_PREFIX', '/eic/EPIC')
 DEFAULT_HOURS = 168
-
-# The move home. The destination is the RSE the payload uploads to, the
-# registrar's default; the copy is streamed through this host with the
-# production account's credential (third-party copy is not supported at the
-# BNL-XRD write door, measured 2026-09-07: "tpc not supported (destination)").
-# Bandwidth-bound and fine for a backlog of days; a week of production would
-# want the doors to support third-party copy.
-DEST_RSE = os.environ.get('REGISTRAR_RSE', 'BNL-XRD')
 STATE_PATH = os.environ.get('STASH_DRAIN_STATE',
                             '/data/wenauseic/swf-delivery/stash-drain-state.json')
-COPY_MIN_TIMEOUT_S = 600
-COPY_BYTES_PER_S = 20 * 1024 * 1024
 RETRY_INTERVAL_S = int(os.environ.get('STASH_RETRY_INTERVAL_S', 3600))
 MAX_ATTEMPTS = int(os.environ.get('STASH_MAX_ATTEMPTS', 8))
-# A test output (under /TEST/) brought home removes itself, as the payload
-# canaries' do.
+# A test output (under /TEST/) registered from the stash removes itself, as
+# the payload canaries' do.
 TEST_LIFETIME_S = 7 * 86400
 
 # The JLab catalog's registrar: its identity, client, deterministic path and
@@ -115,32 +89,10 @@ def _log(msg):
     print(msg, file=sys.stderr, flush=True)
 
 
-def resolve_proxy():
-    """The private-mode copy of the BNL proxy, refreshed from its source."""
-    try:
-        source = open(BNL_PROXY_SOURCE, 'rb').read()
-    except OSError as e:
-        _log(f'ERROR: the BNL proxy source is unreadable: {e}')
-        return ''
-    try:
-        fd = os.open(BNL_PROXY, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        try:
-            os.write(fd, source)
-        finally:
-            os.close(fd)
-        os.chmod(BNL_PROXY, 0o600)
-    except OSError as e:
-        _log(f'ERROR: the private proxy copy could not be written: {e}')
-        return ''
-    return BNL_PROXY
-
-
-def bnl_client(proxy):
-    """The BNL catalog as the production account."""
-    from rucio.client import Client
-    return Client(rucio_host=BNL_RUCIO_URL, auth_host=BNL_RUCIO_URL,
-                  account=BNL_ACCOUNT, vo=BNL_VO, auth_type='x509_proxy',
-                  creds={'client_proxy': proxy}, ca_cert=False)
+def stash_path(owes):
+    """The path at the stash door of a logical name: the RSE's deterministic
+    prefix and the name."""
+    return '/' + '/'.join(p for p in f'{STASH_PREFIX}/{owes}'.split('/') if p)
 
 
 def stashed_entries(since, limit=None):
@@ -181,41 +133,12 @@ def stashed_entries(since, limit=None):
     return found[:limit] if limit else found
 
 
-def catalogued_entries(client, known):
-    """Stash entries the BNL catalog holds that no report named: the
-    authority when a report is lost. [(pandaid, entry, None)]; the job is
-    read from the flat name, swf.stash.<pandaid>.<file>, 0 when it carries
-    none."""
-    found = []
-    try:
-        names = list(client.list_dids(BNL_SCOPE, filters=[{'name': 'swf.stash.*'}],
-                                      did_type='file'))
-    except Exception as e:                                    # noqa: BLE001
-        _log(f'ERROR: the BNL catalog listing of the stash failed: {e}')
-        return found
-    for name in names:
-        if name in known:
-            continue
-        meta = stash_metadata(client, name)
-        if str(meta.get('staging') or '').lower() != 'true':
-            # Brought home already: the row stays because the account may
-            # not delete replicas here, and it says so in its metadata.
-            continue
-        owes = str(meta.get('owes') or '')
-        if not owes:
-            _log(f'{name}: catalogued with no destination; left for a person')
-            continue
-        parts = name.split('.')
-        pandaid = int(parts[2]) if len(parts) > 3 and parts[2].isdigit() else 0
-        events = meta.get('events')
-        found.append((pandaid, {
-            'stashed_as': name,
-            'path': f'{STASH_BASE}/{name}',
-            'owes': owes,
-            'reason': str(meta.get('stash_reason') or ''),
-            'events': int(events) if isinstance(events, (int, str)) and str(events).isdigit() else None,
-        }, None))
-    return found
+def hand_entry(owes):
+    """A stash entry for a logical name given by hand: the file is expected
+    at its deterministic path on the stash RSE."""
+    owes = '/' + owes.lstrip('/')
+    return (0, {'stashed_as': owes, 'path': stash_path(owes), 'owes': owes,
+                'reason': 'registered by hand from the stash'}, None)
 
 
 def stored_at(door, path, proxy):
@@ -243,48 +166,8 @@ def stored_at(door, path, proxy):
         return None
 
 
-def catalogue_stash(client, entry, size, adler, events=None):
-    """Register the stash replica in the BNL catalog, with what it owes.
-
-    A stash nobody catalogued is a pile of files: the catalog is what lets
-    a later pass, or a person, find what is owed when a report is lost.
-    The event count rides along so the registration at JLab can be made
-    from the catalog entry alone (RUCIO_REGISTRATION_CONTRACT.md).
-    """
-    name = entry['stashed_as']
-    try:
-        client.add_replicas(rse=STASH_RSE, files=[{
-            'scope': BNL_SCOPE, 'name': name, 'bytes': size, 'adler32': adler,
-        }], ignore_availability=True)
-    except Exception as e:                                    # noqa: BLE001
-        if 'Data identifier already added' not in str(e):
-            return f'add_replicas: {e}'
-    # Custom keys live under the JSON plugin on this instance, and are read
-    # back with plugin='JSON': the default view returns none of them, which
-    # reads as metadata that did not stick.
-    for key, value in (('staging', 'true'), ('owes', entry.get('owes', '')),
-                       ('stash_reason', entry.get('reason', '')[:200]),
-                       ('events', str(events) if events is not None else '')):
-        if not value:
-            continue
-        try:
-            client.set_metadata(BNL_SCOPE, name, key, value)
-        except Exception as e:                                # noqa: BLE001
-            _log(f'WARNING: {key} not set on the stash entry {name}: {e}')
-    return ''
-
-
-def stash_metadata(client, name):
-    """What a stash entry says it owes. Custom keys are JSON-plugin keys."""
-    try:
-        return client.get_metadata(BNL_SCOPE, name, plugin='JSON') or {}
-    except Exception as e:                                    # noqa: BLE001
-        _log(f'WARNING: stash metadata unreadable for {name}: {e}')
-        return {}
-
-
 def load_state():
-    """The drain's own record of every entry it has tried to bring home:
+    """The drain's own record of every entry it has tried to register:
     attempts, last attempt, outcome, reason. A file beside the storage
     store, no table."""
     try:
@@ -324,69 +207,14 @@ def due(entry_state):
     return (datetime.now(dt_timezone.utc) - when).total_seconds() >= RETRY_INTERVAL_S
 
 
-def write_prefix(client, rse):
-    """The RSE's write door as a PFN prefix: the xrootd protocol with the
-    best wan write priority. The read door can be another port with no
-    write at all (BNL-XRD reads on 1095 and writes on 1094), so the write
-    protocol is chosen by its own domain, never inferred from the read one."""
-    best = None
-    for protocol in client.get_protocols(rse):
-        write = ((protocol.get('domains') or {}).get('wan') or {}).get('write')
-        if not write or protocol.get('scheme') != 'root':
-            continue
-        if best is None or write < best[0]:
-            best = (write, protocol)
-    if best is None:
-        raise RuntimeError(f'no xrootd write protocol on RSE {rse}')
-    protocol = best[1]
-    port = protocol.get('port')
-    netloc = f"{protocol['hostname']}:{port}" if port else protocol['hostname']
-    return f"{protocol['scheme']}://{netloc}//{(protocol.get('prefix') or '/').strip('/')}"
-
-
-def _door_and_path(prefix, did):
-    """('root://host:port', '/abs/path') for a logical name under a prefix."""
-    scheme, _, rest = prefix.partition('://')
-    host, _, base = rest.partition('/')
-    path = '/' + '/'.join(p for p in (base.strip('/') + '/' + did.lstrip('/')).split('/') if p)
-    return f'{scheme}://{host}', path
-
-
-def move_home(entry, size, adler, events, jlab, jlab_proxy, write_base,
-              read_base, rse, bnl, bnl_proxy):
-    """One stashed file to its destination RSE, registered by logical name
-    in the catalog of record, verified, then removed from the stash.
-    Returns (outcome, reason): 'home', or 'registered' when the file is
-    home but the stash entry could not be removed (retried, nothing
-    re-copied), or 'failed' with the reason."""
+def register_in_place(entry, events, jlab, proxy, rse):
+    """One stashed file registered by logical name at the RSE it lies on,
+    the registrar's way, and verified AVAILABLE. Returns ('home', '') or
+    ('failed', reason)."""
     owes = entry['owes']
-    src = f"{STASH_DOOR}/{entry['path']}"
-    write_door, write_path = _door_and_path(write_base, owes)
-    read_door, read_path = _door_and_path(read_base, owes)
-
-    # 1. The copy, unless the destination already holds these bytes.
-    there = stored_at(read_door, read_path, jlab_proxy)
-    if there != (size, adler):
-        env = dict(os.environ, X509_USER_PROXY=jlab_proxy)
-        timeout = COPY_MIN_TIMEOUT_S + size // COPY_BYTES_PER_S
-        try:
-            p = subprocess.run(['xrdcp', '-f', '--path', src, f'{write_door}/{write_path}'],
-                               capture_output=True, text=True, timeout=timeout, env=env)
-        except subprocess.TimeoutExpired:
-            return 'failed', f'copy timed out after {timeout}s'
-        if p.returncode != 0:
-            return 'failed', f'copy failed: {(p.stderr or p.stdout).strip()[-300:]}'
-        there = stored_at(read_door, read_path, jlab_proxy)
-        if there != (size, adler):
-            return 'failed', (f'the copy at {rse} does not match the stash: '
-                              f'{there} against ({size}, {adler})')
-
-    # 2. Registered by logical name, with its event count, the registrar's way.
-    outcome, reason = _reg.complete(jlab, rse, owes, events, jlab_proxy)
+    outcome, reason = _reg.complete(jlab, rse, owes, events, proxy)
     if outcome != 'registered':
         return 'failed', f'registration {outcome}: {reason}'
-
-    # 3. The replica reads AVAILABLE before anything is removed.
     try:
         replicas = list(jlab.list_replicas([{'scope': JLAB_SCOPE, 'name': owes}],
                                            all_states=True))
@@ -399,85 +227,33 @@ def move_home(entry, size, adler, events, jlab, jlab_proxy, write_base,
             jlab.set_metadata(JLAB_SCOPE, owes, 'lifetime', TEST_LIFETIME_S)
         except Exception as e:                                # noqa: BLE001
             _log(f'WARNING: lifetime not set on the test output {owes}: {e}')
-
-    # 4. The stash entry goes: the file at the door, then the catalog row.
-    return remove_stash_entry(entry, rse, bnl, bnl_proxy)
-
-
-def remove_stash_entry(entry, rse, bnl, bnl_proxy):
-    """The stash file off the door, the catalog entry marked home and, where
-    the account may, its replica row deleted. Returns ('home', note) once
-    the file is gone and the entry marked; 'registered' with the reason
-    while the file is still at the door, so the removal is tried again."""
-    env = dict(os.environ, X509_USER_PROXY=bnl_proxy)
-    try:
-        rm = subprocess.run(['xrdfs', STASH_DOOR, 'rm', entry['path']],
-                            capture_output=True, text=True, timeout=120, env=env)
-    except subprocess.TimeoutExpired:
-        return 'registered', f'home at {rse}, but the stash door did not answer the removal'
-    if rm.returncode != 0 and 'no such file' not in (rm.stderr or rm.stdout).lower():
-        return 'registered', (f'home at {rse}, but the stash file could not be removed: '
-                              f'{(rm.stderr or rm.stdout).strip()[-200:]}')
-    # The entry says where its data went, so a later pass and a person
-    # read it as home rather than as a stash file that vanished.
-    name = entry['stashed_as']
-    for key, value in (('staging', 'false'), ('home', rse),
-                       ('home_at', datetime.now(dt_timezone.utc).isoformat())):
-        try:
-            bnl.set_metadata(BNL_SCOPE, name, key, value)
-        except Exception as e:                                # noqa: BLE001
-            return 'registered', f'home at {rse}, but the stash entry could not be marked: {e}'
-    try:
-        bnl.delete_replicas(rse=STASH_RSE, files=[{'scope': BNL_SCOPE, 'name': name}])
-    except Exception as e:                                    # noqa: BLE001
-        # The data is home and the file is gone; only the catalog row stays,
-        # which this account is not allowed to delete (measured 2026-09-07:
-        # "Account panda can not delete file replicas on BNL_PROD_DISK_1").
-        # An ask to BNL Rucio administration, recorded in the doc.
-        return 'home', f'the stash catalog row stays, marked home: {str(e).splitlines()[0]}'
     return 'home', ''
 
 
-def bring_home(entries, present, state, rse, summary, bnl, bnl_proxy, dry_run=False):
-    """Every present, catalogued, due entry to its destination, a few at a
-    time through this host; each outcome kept in the drain's state."""
+def register_all(entries, present, state, rse, summary, proxy, dry_run=False):
+    """Every present, due entry registered where it lies; each outcome kept
+    in the drain's state."""
     evgen = _reg._evgen
     try:
-        jlab_proxy, _ = evgen.resolve_proxy()
-        jlab = evgen.rucio_client(jlab_proxy)
+        jlab = evgen.rucio_client(proxy)
     except evgen.DoerError as e:
         summary['failed'].append(f'the catalog of record cannot be written: {e}')
-        return
-    try:
-        write_base = write_prefix(jlab, rse)
-        read_base = _reg.rse_pfn_prefix(jlab, rse)
-    except Exception as e:                                    # noqa: BLE001
-        summary['failed'].append(f'RSE {rse} protocols: {e}')
         return
     now = datetime.now(dt_timezone.utc).isoformat()
     for pandaid, entry, _report in entries:
         name = entry['stashed_as']
-        entry_state = state.setdefault(name, {})
         if name not in present:
-            # Not at the stash. If an earlier pass brought it home and only
-            # the removal of the entry remained, finish that; otherwise it
-            # is a reported file that never arrived, counted above.
-            if entry_state.get('outcome') != 'registered' or not due(entry_state):
-                continue
-            if dry_run:
-                continue
-            outcome, reason = remove_stash_entry(entry, rse, bnl, bnl_proxy)
-        else:
-            size, adler, events = present[name]
-            if not due(entry_state):
-                summary['deferred'].append({'stashed_as': name, 'owes': entry['owes'],
-                                            'reason': entry_state.get('reason', '')})
-                continue
-            if dry_run:
-                summary['home'].append(entry['owes'])
-                continue
-            outcome, reason = move_home(entry, size, adler, events, jlab, jlab_proxy,
-                                        write_base, read_base, rse, bnl, bnl_proxy)
+            continue
+        entry_state = state.setdefault(name, {})
+        if not due(entry_state):
+            summary['deferred'].append({'stashed_as': name, 'owes': entry['owes'],
+                                        'reason': entry_state.get('reason', '')})
+            continue
+        if dry_run:
+            summary['home'].append(entry['owes'])
+            continue
+        _size, _adler, events = present[name]
+        outcome, reason = register_in_place(entry, events, jlab, proxy, rse)
         entry_state['attempts'] = int(entry_state.get('attempts') or 0) + 1
         entry_state['last_attempt'] = now
         entry_state['outcome'] = outcome
@@ -489,8 +265,7 @@ def bring_home(entries, present, state, rse, summary, bnl, bnl_proxy, dry_run=Fa
             summary['home'].append(entry['owes'])
         else:
             summary['failed'].append(f'{name}: {reason}')
-        _log(f"{pandaid} {name} -> {entry['owes']} at {rse}: {outcome}"
-             f"{' — ' + reason if reason else ''}")
+        _log(f"{pandaid} {name} at {rse}: {outcome}{' — ' + reason if reason else ''}")
 
 
 def jlab_reachable():
@@ -507,10 +282,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--hours', type=float, default=DEFAULT_HOURS)
     parser.add_argument('--limit', type=int, default=None)
-    parser.add_argument('--rse', default=DEST_RSE,
-                        help='the destination RSE, the one the payload uploads to')
+    parser.add_argument('--rse', default=STASH_RSE,
+                        help='the stash RSE, where the files lie and are registered')
+    parser.add_argument('--entry', action='append', default=[],
+                        help='a logical name already at its deterministic path '
+                             'on the stash RSE, registered as a stash entry')
     parser.add_argument('--dry-run', action='store_true',
-                        help='read and probe; catalogue nothing, move nothing')
+                        help='read and probe; register nothing')
     args = parser.parse_args()
 
     since = datetime.now(dt_timezone.utc) - timedelta(hours=args.hours)
@@ -519,37 +297,29 @@ def main():
                'deferred': [], 'failed': [], 'dry_run': bool(args.dry_run)}
     state = load_state()
 
-    reported = stashed_entries(since, limit=args.limit)
-    proxy = resolve_proxy()
-    client = None
-    if not proxy:
-        summary['failed'].append('no usable BNL credential')
-    else:
-        try:
-            client = bnl_client(proxy)
-            client.whoami()
-        except Exception as e:                                # noqa: BLE001
-            summary['failed'].append(f'BNL catalog unreachable: {e}')
-    entries = list(reported)
-    if client is not None:
-        # The catalog's own listing is the authority when a report is lost.
-        entries += catalogued_entries(client, {e['stashed_as'] for _, e, _ in reported})
+    entries = list(stashed_entries(since, limit=args.limit))
+    entries += [hand_entry(owes) for owes in args.entry]
     summary['entries'] = len(entries)
+
+    evgen = _reg._evgen
+    try:
+        proxy, _ = evgen.resolve_proxy()
+    except evgen.DoerError as e:
+        summary['failed'].append(f'no usable credential: {e}')
+        if not args.dry_run:
+            store_state(summary, entries, state)
+        print(json.dumps(summary))
+        return 5
+
     if not entries:
         # An empty stash is the good state and still worth recording: the
         # page must be able to say "nothing is waiting, as of this pass"
-        # rather than "the drain has never run", which is what an early
-        # return left it saying.
+        # rather than "the drain has never run".
         summary['jlab_reachable'] = jlab_reachable()
         if not args.dry_run:
             store_state(summary, [], state)
         print(json.dumps(summary))
-        return 0 if client is not None else (5 if not proxy else 6)
-    if client is None:
-        if not args.dry_run:
-            store_state(summary, entries, state)
-        print(json.dumps(summary))
-        return 5 if not proxy else 6
+        return 0
 
     present = {}
     for pandaid, entry, report in entries:
@@ -562,29 +332,18 @@ def main():
         if events is None and report is not None:
             events = _reg._events_for(report, entry.get('owes', ''))
         present[entry['stashed_as']] = (found[0], found[1], events)
-        if args.dry_run:
-            summary['catalogued'] += 1
-            continue
-        problem = catalogue_stash(client, entry, found[0], found[1], events)
-        if problem:
-            summary['failed'].append(f"{entry.get('stashed_as')}: {problem}")
-            _log(f"{pandaid} {entry.get('stashed_as')}: {problem}")
-            present.pop(entry['stashed_as'], None)
-            continue
         summary['catalogued'] += 1
-        _log(f"{pandaid} {entry.get('stashed_as')}: catalogued at {STASH_RSE}, "
-             f"owes {entry.get('owes')}")
+        _log(f"{pandaid} {entry.get('stashed_as')}: at {STASH_RSE}, "
+             f"{found[0]} bytes, owes {entry.get('owes')}")
 
-    # The move home. Not attempted while the catalog of record is silent:
-    # a stash that cannot be drained is a backlog, which is what it is for.
+    # Not attempted while the catalog of record is silent: a stash that
+    # cannot be registered is a backlog, which is what it is for.
     summary['jlab_reachable'] = jlab_reachable()
     if not summary['jlab_reachable']:
         _log('JLab is not answering; the stash keeps its entries for a later pass')
     else:
-        # Every entry, present or not: one whose file is already home and
-        # off the door still owes the removal of its catalog entry.
-        bring_home(entries, present, state, args.rse, summary, client, proxy,
-                   dry_run=args.dry_run)
+        register_all(entries, present, state, args.rse, summary, proxy,
+                     dry_run=args.dry_run)
 
     if not args.dry_run:
         save_state(state)
@@ -598,8 +357,7 @@ def store_state(summary, entries, state):
 
     The page shows what the stash holds, what it owes, and how far each
     entry got; reading the catalog to render that would be a remote call
-    in a render, so the drain leaves its own account behind instead. An
-    entry brought home this pass is listed as such once, then gone.
+    in a render, so the drain leaves its own account behind instead.
     """
     from monitor_app.cached_product import get_product
     rows = []
@@ -621,7 +379,7 @@ def store_state(summary, entries, state):
         'built_at': datetime.now(dt_timezone.utc).isoformat(),
         'rse': STASH_RSE,
         'door': STASH_DOOR,
-        'destination_rse': summary.get('rse', DEST_RSE),
+        'destination_rse': summary.get('rse', STASH_RSE),
         'jlab_reachable': summary.get('jlab_reachable'),
         'entries': rows,
         'catalogued': summary.get('catalogued', 0),
