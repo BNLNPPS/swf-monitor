@@ -198,6 +198,46 @@ def _touch(source_url, tarball):
     return "error", message
 
 
+# Manifests harvested per run: the sandbox of every attempt the candidates
+# cover that has no manifest record yet (pcs/manifests.py), read once from
+# the cache and kept on the PandaTasks row, so the attempt's work units
+# outlive the cache. Legacy sandboxes are about 20 KB, PCS ones about 2 MB;
+# the cap spreads the one-time catch-up over a few nights, after which
+# only attempts recorded before this existed are ever fetched.
+MANIFEST_HARVEST_PER_RUN = 100
+
+
+def _harvest_manifests(tasks, cap):
+    """Record the manifest of each candidate attempt still lacking one.
+    Returns the harvest summary."""
+    from pcs import manifests
+    from pcs.models import PandaTasks
+
+    ids = [jedi_task_id for jedi_task_id, _ in tasks]
+    harvested, absent, errors, pending = [], [], [], 0
+    rows = (PandaTasks.objects.filter(jedi_task_id__in=ids)
+            .order_by("-jedi_task_id"))
+    for row in rows:
+        if manifests.record_of(row):
+            continue
+        if len(harvested) + len(absent) + len(errors) >= cap:
+            pending += 1
+            continue
+        try:
+            manifest_rows = manifests.fetch_from_cache(row.jedi_task_id)
+            manifests.store(row, manifest_rows, "cache")
+            harvested.append({"jedi_task_id": row.jedi_task_id,
+                              "rows": len(manifest_rows)})
+        except manifests.ManifestUnavailable as e:
+            reason = str(e)
+            (absent if "no longer in the PanDA cache" in reason
+             else errors).append({"jedi_task_id": row.jedi_task_id,
+                                  "reason": reason})
+            _log(f"manifest for task {row.jedi_task_id}: {reason}")
+    return {"harvested": len(harvested), "absent": absent,
+            "errors": errors, "pending": pending}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true",
@@ -245,9 +285,12 @@ def main():
     if args.dry_run:
         lifetimes = {"checked": 0, "refreshed": 0, "errors": [],
                      "skipped": "dry run"}
+        manifests_summary = {"harvested": 0, "absent": [], "errors": [],
+                             "pending": 0, "skipped": "dry run"}
     else:
         lifetimes = _refresh_log_lifetimes(
             [jedi_task_id for jedi_task_id, _ in tasks], final_days)
+        manifests_summary = _harvest_manifests(tasks, MANIFEST_HARVEST_PER_RUN)
 
     summary = {
         "final_days": final_days,
@@ -258,8 +301,10 @@ def main():
         "missing": missing,
         "errors": errors,
         "log_lifetimes": lifetimes,
+        "manifests": manifests_summary,
         "dry_run": bool(args.dry_run),
-        "ok": not errors and not lifetimes["errors"],
+        "ok": (not errors and not lifetimes["errors"]
+               and not manifests_summary["errors"]),
     }
     print(json.dumps(summary, default=str))
     return 0 if summary["ok"] else 1

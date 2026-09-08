@@ -468,6 +468,11 @@ def main():
                 body["residual"] = spec["residual"]
             if spec.get("payload_version"):
                 body["payload_version"] = spec["payload_version"]
+            if spec.get("csvRows"):
+                # The rows this attempt runs, recorded compactly on the
+                # PandaTasks row (pcs/manifests.py): what a later residual
+                # of this attempt is computed over.
+                body["manifest_rows"] = spec["csvRows"]
             _api_post_json(args.swf_monitor_url, "/pcs/api/prod-tasks/record-submission/",
                            {"name": args.task_name}, body,
                            args.token, owner=args.owner)
