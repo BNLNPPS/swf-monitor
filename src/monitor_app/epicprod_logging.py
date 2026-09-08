@@ -447,6 +447,29 @@ ACTION_DEFAULTS = {
         'description': "Update Rucio storage endpoint records from the "
                        "GitHub source.",
     },
+    # editions: the software tags and their repair (swf-epicprod PCS.md)
+    'edition_bind': {
+        'sublevel': 'normal', 'live': False,
+        'description': "Bind the release's simulation and reconstruction "
+                       "tags to an edition at submission; rides with the "
+                       "submission's own record.",
+    },
+    'edition_rebind': {
+        'sublevel': 'low', 'live': False,
+        'description': "Rebind a campaign family's editions from the import "
+                       "and intake anchors to the tags the binding rule "
+                       "gives; the record of a repair pass, one per run.",
+    },
+    'edition_merge': {
+        'sublevel': 'low', 'live': False,
+        'description': "Fold a duplicate edition into the record that holds "
+                       "its identity; the record of a repair.",
+    },
+    'trial_cost': {
+        'sublevel': 'low', 'live': False,
+        'description': "Record a trial's measured cost on the edition it "
+                       "proves; bookkeeping, read from the edition.",
+    },
 }
 
 
