@@ -1143,7 +1143,7 @@ _PLATFORM_LABELS = {
     'plsp_admitted': 'admitted by requirements',
     'plsp_excluded': 'removed by exclusions',
     'plpf_bnl_scdf': 'SCDF shared pool',
-    'plpq_bnl_scdf_idle': 'SCDF idle',
+    'plpq_bnl_scdf_idle': 'SCDF waiting',
     'plpq_bnl_scdf_running': 'SCDF running',
     'plps_bnl_scdf_claimed': 'SCDF claimed',
     'plps_bnl_scdf_free': 'SCDF free',

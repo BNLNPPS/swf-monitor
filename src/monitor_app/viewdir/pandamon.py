@@ -2213,7 +2213,7 @@ def epic_queues_list(request):
             # answers for the whole pool, the OSG submit host only for
             # the workers we ourselves put there. The cell says which.
             queue['pool_idle_scope'] = (
-                'idle jobs in {}, {}'.format(pool.get('label'),
+                'jobs waiting in {}, {}'.format(pool.get('label'),
                                              pool_queue.get('scope'))
                 if pool_queue.get('scope') else None)
         # Schedconfig mixes caps in resource_type (GRID vs cloud/gpu);

@@ -101,7 +101,7 @@
                 {% endif %}
                 {% if pool.queue.idle is not None %}
                 <tr><td class="fw-bold">Queue ahead</td>
-                    <td>{{ pool.queue.idle }} idle{% if pool.queue.running is not None %},
+                    <td>{{ pool.queue.idle }} waiting{% if pool.queue.running is not None %},
                         {{ pool.queue.running }} running{% endif %}{% if pool.queue.held %},
                         {{ pool.queue.held }} held{% endif %}
                         <span class="text-muted ms-2">{{ pool.queue.scope }}{% if pool.queue.schedds %}, across {{ pool.queue.schedds }} schedds{% endif %}</span></td></tr>

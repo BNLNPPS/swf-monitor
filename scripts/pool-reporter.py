@@ -214,7 +214,7 @@ def main():
         return 0
     slots = reading.get('slots') or {}
     queue = reading.get('queue') or {}
-    print('reported: {} of {} slots claimed, {} idle jobs ahead'
+    print('reported: {} of {} slots claimed, {} jobs waiting ahead'
           .format(slots.get('claimed'), slots.get('total'),
                   queue.get('idle')))
     return 0

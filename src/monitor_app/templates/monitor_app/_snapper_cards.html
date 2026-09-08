@@ -267,7 +267,7 @@
       · <a href="{{ card.errors_url }}">error breakdown at this cut</a></div>
     {% if card.pools %}
     <div class="mb-2">{% for p in card.pools %}{% if not forloop.first %} · {% endif %}<span class="text-muted small">{{ p.pool }} pool:
-      {% if p.error %}{{ p.error }}{% elif p.claimed_fraction is not None %}{{ p.claimed_fraction|floatformat:3 }} claimed ({{ p.slots_claimed }} of {{ p.slots_total }} slots), {{ p.queue_idle }} jobs idle ahead{% else %}no reading{% endif %}</span>{% endfor %}</div>
+      {% if p.error %}{{ p.error }}{% elif p.claimed_fraction is not None %}{{ p.claimed_fraction|floatformat:3 }} claimed ({{ p.slots_claimed }} of {{ p.slots_total }} slots), {{ p.queue_idle }} jobs waiting ahead{% else %}no reading{% endif %}</span>{% endfor %}</div>
     {% endif %}
     <div class="d-flex flex-wrap column-gap-3 row-gap-1 mb-2">
       {% for v in card.verdicts %}
