@@ -207,14 +207,19 @@ def checksums(files, proxy):
 
 def plan_datasets(files, adlers):
     """Group files into datasets: one per directory holding files, named by
-    the DID convention (door path minus XRD_BASE)."""
+    the DID convention (door path minus XRD_BASE).
+
+    The PFN is the RSE prefix followed by the DID name, which carries its
+    own leading slash: the deterministic mapping the RSE expects yields
+    ``/volatile/eic/EPIC//EVGEN/...``, and add_replicas refuses a PFN that
+    differs from it by so much as that slash."""
     datasets = defaultdict(list)
     for door_path, size in files:
         name = door_path[len(XRD_BASE):]
         datasets[os.path.dirname(name)].append({
             'scope': RUCIO_SCOPE, 'name': name, 'bytes': size,
             'adler32': adlers[door_path] if door_path in adlers else '',
-            'pfn': f'{XRD_DOOR}/{door_path}'})
+            'pfn': f'{XRD_DOOR}/{XRD_BASE}/{name}'})
     return dict(sorted(datasets.items()))
 
 
