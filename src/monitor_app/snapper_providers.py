@@ -1793,14 +1793,14 @@ _PLATFORM_FAMILIES_COMMON_TAIL = (
     'Platform server storage', 'Platform server processes',
     'Platform monitor load', 'Platform monitor memory',
     'Platform monitor storage', 'Platform monitor processes',
-    # The submission side, from the submit host's own reporter. It sits
-    # with the other host panels and above the load and consequence
-    # panels, because held pilots and a shrinking admitted-slot count
-    # are causes of what those panels show.
     # The batch pool the queues wait in, read from its own collector:
     # how full it is and how deep the queue ahead, which is what decides
     # a worker's wait and appears in no PanDA record.
     'Platform pool fullness', 'Platform pool queue', 'Platform pool slots',
+    # The submission side, from the submit host's own reporter. It sits
+    # with the other host panels and above the load and consequence
+    # panels, because held pilots and a shrinking admitted-slot count
+    # are causes of what those panels show.
     'Platform submit workers', 'Platform submit pool',
     'Platform submit excluded',
     'Platform submit daemons', 'Platform submit host',
@@ -1812,6 +1812,18 @@ PLATFORM_FAMILIES_BY_LENS = {
     'sites': (_PLATFORM_FAMILIES_COMMON_HEAD
               + ('Platform stale by site',) + _PLATFORM_FAMILIES_COMMON_TAIL),
 }
+
+
+def _platform_section(label):
+    """A section band over the families that follow it on the Platform view.
+
+    The view carries some two dozen panels and read as one run of rows;
+    the bands are the same mechanism the per-option views use, declared
+    statically here because these sections are the page's own structure
+    rather than one section per queue or campaign.
+    """
+    return {'label': label, 'display': label,
+            'pinned': True, 'idle': False, 'peak': ''}
 
 
 def _platform_groups():
@@ -1830,6 +1842,7 @@ def _platform_groups():
         # received is a job that started and left running within one
         # interval — a burn-through signature, left visible.
         {'name': 'Platform heartbeats', 'title': 'Heartbeats',
+         'section': _platform_section('Heartbeats'),
          'prefixes': ['plhb_'], 'ids': [],
          'order': ['plhb_received', 'plhb_started'],
          'fills': {'plhb_started': {
@@ -1860,6 +1873,7 @@ def _platform_groups():
         # the summary ('of N'); drawn on the plot it dwarfs both into a
         # sliver.
         {'name': 'Platform DB activity', 'title': 'DB activity',
+         'section': _platform_section('Database'),
          'prefixes': [], 'ids': ['pldb_active', 'pldb_waiting'],
          'order': ['pldb_active', 'pldb_waiting'],
          'stacked': True, 'panel_px': 150, 'units': 'connections'},
@@ -1867,6 +1881,7 @@ def _platform_groups():
          'prefixes': [], 'ids': ['pldb_total'],
          'panel_px': 110, 'units': 'connections'},
         {'name': 'Platform server latency', 'title': 'Server latency',
+         'section': _platform_section('Latency'),
          'prefixes': [], 'ids': ['plsv_latency'],
          'panel_px': 110, 'units': 'ms'},
         {'name': 'Platform PanDA monitor latency',
@@ -1893,6 +1908,7 @@ def _platform_groups():
         # queue depth is jobs, tens of thousands of them, and would flatten
         # the fraction to a line if they shared an axis.
         {'name': 'Platform pool fullness', 'title': 'Batch pool claimed',
+         'section': _platform_section('Batch pool'),
          'prefixes': ['plpf_'], 'ids': [],
          'panel_px': 110, 'units': 'fraction of slots'},
         {'name': 'Platform pool queue', 'title': 'Batch pool queue',
@@ -1902,6 +1918,7 @@ def _platform_groups():
          'prefixes': ['plps_'], 'ids': [],
          'stacked': True, 'panel_px': 130, 'units': 'slots'},
         {'name': 'Platform submit workers', 'title': 'Submit host pilots',
+         'section': _platform_section('Submission side'),
          'prefixes': ['plsw_'], 'ids': [],
          'order': ['plsw_running', 'plsw_idle', 'plsw_held'],
          'panel_px': 110, 'units': 'pilots'},
@@ -1935,7 +1952,8 @@ def _platform_groups():
         # (docs/PANDA_SERVER_REPORTER.md). Requests stack by endpoint
         # class as rates over the reporter's interval; the 5xx count is
         # its own panel because on the request axis it is a hairline.
-        {'name': 'Platform server requests', 'title': 'PanDA server requests',
+        {'name': 'Platform server requests',
+         'section': _platform_section('PanDA server host'), 'title': 'PanDA server requests',
          'prefixes': ['plsrv_req_'], 'ids': [],
          'order': ['plsrv_req_acquire_jobs', 'plsrv_req_update_job',
                    'plsrv_req_pilot_other', 'plsrv_req_harvester',
@@ -1953,7 +1971,8 @@ def _platform_groups():
          'title': 'Database reachability from the server host',
          'prefixes': [], 'ids': ['plsrv_db_ms'],
          'panel_px': 110, 'units': 'ms'},
-        {'name': 'Platform server load', 'title': 'PanDA server host load',
+        {'name': 'Platform server load',
+         'section': _platform_section('Hosts'), 'title': 'PanDA server host load',
          'prefixes': ['plsrv_load_'], 'ids': [],
          'order': ['plsrv_load_1m', 'plsrv_load_15m', 'plsrv_load_5m'],
          'default_off_ids': ['plsrv_load_5m'],
@@ -1969,7 +1988,8 @@ def _platform_groups():
          'prefixes': ['plsrv_rss_'], 'ids': [],
          'order': ['plsrv_rss_httpd', 'plsrv_rss_pandaserver'],
          'panel_px': 110, 'units': 'MB resident'},
-        {'name': 'Platform jobs', 'title': 'Jobs in flight',
+        {'name': 'Platform jobs',
+         'section': _platform_section('Load and consequences'), 'title': 'Jobs in flight',
          'prefixes': ['job_'], 'ids': ['running_cores'],
          'order': lifecycle, 'default_off_ids': ['job_activated'],
          'overlay_ids': ['running_cores'],
