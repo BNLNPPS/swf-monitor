@@ -1990,7 +1990,7 @@ def _platform_groups():
          'order': ['plsrv_rss_httpd', 'plsrv_rss_pandaserver'],
          'panel_px': 110, 'units': 'MB resident'},
         {'name': 'Platform jobs',
-         'section': _platform_section('Load and consequences'), 'title': 'Jobs in flight',
+         'section': _platform_section('Production activity'), 'title': 'Jobs in flight',
          'prefixes': ['job_'], 'ids': ['running_cores'],
          'order': lifecycle, 'default_off_ids': ['job_activated'],
          'overlay_ids': ['running_cores'],
