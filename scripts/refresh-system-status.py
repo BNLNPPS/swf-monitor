@@ -66,6 +66,19 @@ def main(argv):
         print(compact_errors_publication_report(errors_publication))
         platform_publication = publish_platform_state()
         print(compact_platform_publication_report(platform_publication))
+        # The Platform view plots components that advance every cycle,
+        # so its series is stale as soon as this refresh publishes and
+        # the next visitor would pay the rebuild. Warm it here instead,
+        # on the cadence of the record it draws. A prewarm failure is
+        # reported and never fatal: the page still builds on demand.
+        try:
+            from snapper_ai.presentation import prewarm_focus_series
+            warmed = prewarm_focus_series('epicprod', window_keys=('24h',),
+                                          only=('platform',))
+            print(f'series prewarm: {len(warmed)} platform product(s)')
+        except Exception as exc:                              # noqa: BLE001
+            print(f'WARNING: platform series prewarm failed: {exc}',
+                  file=sys.stderr)
     return 0
 
 
