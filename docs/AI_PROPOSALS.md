@@ -331,7 +331,7 @@ Designed-for extensions, reserved now, built when their consumer arrives:
 
 | action | when |
 |---|---|
-| `proposal_created` | one per propose call, with count and batch |
+| `proposal_created` | one per propose call, with count and batch; from a rule proposer (credential-expiry, certificate-expiry, campaign-config, campaign-assembly) it is low and not live, the decision being the live event |
 | `proposal_denied` | one per deny decision, with count and quality |
 | `proposal_expired` | one per heartbeat withdrawal, with count |
 | (execution) | the executed action's own event, origin-stamped |

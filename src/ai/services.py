@@ -213,10 +213,23 @@ def propose_propagation(composed_names, state, comment, *, replaced_by='',
     return result
 
 
+def _creation_record(rule):
+    """The action-stream axes of a ``proposal_created`` record. A rule
+    proposer (a scan with no judgement in it: credential-expiry,
+    certificate-expiry, campaign-config, campaign-assembly) records low
+    and not live, since its proposal waits on the AI Proposals page and
+    the decision is the live event; a session's proposal is normal and
+    live."""
+    return {'sublevel': 'low' if rule else 'normal',
+            'live_default': not rule}
+
+
 def propose_campaign_plan(campaign_name, items, *, proposer='',
-                          scan_version=1, batch_id='', created_by=''):
+                          scan_version=1, batch_id='', created_by='',
+                          rule=False):
     """Create campaign-assembly plan proposals (CONTINUOUS_PRODUCTION.md,
     Campaign assembly) — creation subjects keyed on (campaign, PC).
+    ``rule=True`` marks a rule proposer (``_creation_record``).
 
     ``items``: [{pc, disposition, target_events, priority, evidence,
     comment}]. Validation mirrors the executor
@@ -306,8 +319,7 @@ def propose_campaign_plan(campaign_name, items, *, proposer='',
 
     log_epicprod_action(
         'web', 'proposal_created',
-        username=created_by,
-        sublevel='normal', live_default=True,
+        username=created_by, **_creation_record(rule),
         message=(f'AI proposal: campaign plan {campaign_name}, '
                  f'{len(proposed)} configuration(s) '
                  f'[{batch_id or "no batch"}]'),
@@ -433,14 +445,16 @@ def _ping_subject_key(title):
     return key[:255] or 'ping'
 
 
-def propose_pings(items, *, proposer='', batch_id='', created_by=''):
+def propose_pings(items, *, proposer='', batch_id='', created_by='',
+                  rule=False):
     """Propose pings (PINGS.md): creation subjects keyed on the obligation,
     the due date as counterpart. ``items``: [{title, due, lead_days,
     owner, note, url, comment}]. Validation mirrors the executor
     (``alarms_data.create_ping``); the precondition anchor is the open
     ping with the same obligation at proposal time (None for a true
     creation). Denial memory and identical-pending checks follow the
-    subsystem conventions; one ``proposal_created`` event per call."""
+    subsystem conventions; one ``proposal_created`` event per call,
+    low and not live from a rule proposer (``rule=True``)."""
     from datetime import date
 
     from monitor_app import alarms_data
@@ -496,7 +510,7 @@ def propose_pings(items, *, proposer='', batch_id='', created_by=''):
             proposed.append(title)
     log_epicprod_action(
         'web', 'proposal_created', username=created_by,
-        sublevel='normal', live_default=True,
+        **_creation_record(rule),
         message=(f'AI proposal: {len(proposed)} ping(s) '
                  f'[{batch_id or "no batch"}]'),
         proposed=len(proposed), noop=len(noop), denied=len(denied_skips),
@@ -507,9 +521,10 @@ def propose_pings(items, *, proposer='', batch_id='', created_by=''):
 
 
 def propose_ping_fulfil(ping_id, comment, *, proposer='', batch_id='',
-                        created_by=''):
+                        created_by='', rule=False):
     """Propose that an open ping be marked fulfilled (PINGS.md). The
-    subject is the ping entry; the precondition is that it is open."""
+    subject is the ping entry; the precondition is that it is open.
+    ``rule=True`` marks a rule proposer (``_creation_record``)."""
     from monitor_app import alarms_data
     from monitor_app.epicprod_logging import log_epicprod_action
 
@@ -536,7 +551,7 @@ def propose_ping_fulfil(ping_id, comment, *, proposer='', batch_id='',
         created_by=created_by or '')
     log_epicprod_action(
         'web', 'proposal_created', username=created_by,
-        sublevel='normal', live_default=True,
+        **_creation_record(rule),
         message=f'AI proposal: mark ping fulfilled: {ping.title}',
         proposed=1, proposer=proposer or '', batch_id=batch_id or '',
         category='ping_fulfil', url='/alarms/#pings')
@@ -544,7 +559,7 @@ def propose_ping_fulfil(ping_id, comment, *, proposer='', batch_id='',
 
 
 def propose_standard_configs(items, *, proposer='', batch_id='',
-                             created_by=''):
+                             created_by='', rule=False):
     """Propose the creation of editions' Standard Production
     configurations (AI_PROPOSALS.md, category standard_config): the
     remedy of a campaign-configuration ping (PINGS.md § Pings with a
@@ -552,7 +567,8 @@ def propose_standard_configs(items, *, proposer='', batch_id='',
     the executor's own (``standard_prodconfig_values``); a creation
     subject keyed on the configuration name; the precondition is that no
     configuration of that name exists. Denial memory and identical-pending
-    checks follow the subsystem conventions."""
+    checks follow the subsystem conventions. ``rule=True`` marks a rule
+    proposer (``_creation_record``)."""
     from pcs.models import ProdConfig
     from monitor_app.epicprod_logging import log_epicprod_action
 
@@ -605,7 +621,7 @@ def propose_standard_configs(items, *, proposer='', batch_id='',
             proposed.append(name)
     log_epicprod_action(
         'web', 'proposal_created', username=created_by,
-        sublevel='normal', live_default=True,
+        **_creation_record(rule),
         message=(f'AI proposal: {len(proposed)} standard configuration(s) '
                  f'[{batch_id or "no batch"}]'),
         proposed=len(proposed), noop=len(noop), denied=len(denied_skips),

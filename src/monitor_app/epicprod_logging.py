@@ -329,9 +329,12 @@ ACTION_DEFAULTS = {
     },
     'proposal_created': {
         'sublevel': 'normal', 'live': True,
-        'description': "AI proposal of a dataset propagation change, pending "
-                       "human review; one event per propose call with the "
-                       "proposed count and batch.",
+        'description': "AI proposal pending human review; one event per "
+                       "propose call with the proposed count and batch. A "
+                       "session's proposal is normal and live; a rule "
+                       "proposer's (credential-expiry, certificate-expiry, "
+                       "campaign-config, campaign-assembly) records low and "
+                       "not live, the decision being the live event.",
     },
     'proposal_denied': {
         'sublevel': 'normal', 'live': True,
