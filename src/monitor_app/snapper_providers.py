@@ -800,6 +800,23 @@ def _platform_curve_values(state):
                       ('slots_excluded_now', 'excluded')):
         if pool.get(key) is not None:
             values[f'plsp_{slug}'] = float(pool[key])
+    # The batch pools a collector answers for us about
+    # (docs/POOL_REPORTER.md): how full each is, and how deep the queue
+    # ahead of our workers. A pool whose reading carried an error emits
+    # no curves; the failure is stated on the card.
+    for pool, entry in (plat.get('pools') or {}).items():
+        if not isinstance(entry, dict) or entry.get('error'):
+            continue
+        slug = pool.replace('-', '_')
+        if entry.get('claimed_fraction') is not None:
+            values[f'plpf_{slug}'] = float(entry['claimed_fraction'])
+        for key, name in (('queue_idle', 'idle'), ('queue_running', 'running')):
+            if entry.get(key) is not None:
+                values[f'plpq_{slug}_{name}'] = float(entry[key])
+        for key, name in (('slots_claimed', 'claimed'),
+                          ('slots_unclaimed', 'free')):
+            if entry.get(key) is not None:
+                values[f'plps_{slug}_{name}'] = float(entry[key])
     if submit.get('daemon_oldest_log_seconds') is not None:
         values['plsd_oldest'] = float(submit['daemon_oldest_log_seconds'])
     sload = submit.get('load') or {}
@@ -1125,6 +1142,11 @@ _PLATFORM_LABELS = {
     'plsp_total': 'slots in the pool',
     'plsp_admitted': 'admitted by requirements',
     'plsp_excluded': 'removed by exclusions',
+    'plpf_bnl_scdf': 'SCDF shared pool',
+    'plpq_bnl_scdf_idle': 'SCDF idle',
+    'plpq_bnl_scdf_running': 'SCDF running',
+    'plps_bnl_scdf_claimed': 'SCDF claimed',
+    'plps_bnl_scdf_free': 'SCDF free',
     'plsd_oldest': 'oldest daemon silence',
     'plsl_1m': '1 min',
     'plsl_5m': '5 min',
@@ -1775,6 +1797,10 @@ _PLATFORM_FAMILIES_COMMON_TAIL = (
     # with the other host panels and above the load and consequence
     # panels, because held pilots and a shrinking admitted-slot count
     # are causes of what those panels show.
+    # The batch pool the queues wait in, read from its own collector:
+    # how full it is and how deep the queue ahead, which is what decides
+    # a worker's wait and appears in no PanDA record.
+    'Platform pool fullness', 'Platform pool queue', 'Platform pool slots',
     'Platform submit workers', 'Platform submit pool',
     'Platform submit excluded',
     'Platform submit daemons', 'Platform submit host',
@@ -1862,6 +1888,19 @@ def _platform_groups():
          'prefixes': ['plmp_'], 'ids': [],
          'order': ['plmp_httpd', 'plmp_wsgi', 'plmp_asgi', 'plmp_ops_agent'],
          'panel_px': 110, 'units': 'MB resident'},
+        # The pool our workers wait in, and what is ahead of them there.
+        # Fullness is the fraction claimed, on its own 0–1 scale; the
+        # queue depth is jobs, tens of thousands of them, and would flatten
+        # the fraction to a line if they shared an axis.
+        {'name': 'Platform pool fullness', 'title': 'Batch pool claimed',
+         'prefixes': ['plpf_'], 'ids': [],
+         'panel_px': 110, 'units': 'fraction of slots'},
+        {'name': 'Platform pool queue', 'title': 'Batch pool queue',
+         'prefixes': ['plpq_'], 'ids': [],
+         'panel_px': 130, 'units': 'jobs'},
+        {'name': 'Platform pool slots', 'title': 'Batch pool slots',
+         'prefixes': ['plps_'], 'ids': [],
+         'stacked': True, 'panel_px': 130, 'units': 'slots'},
         {'name': 'Platform submit workers', 'title': 'Submit host pilots',
          'prefixes': ['plsw_'], 'ids': [],
          'order': ['plsw_running', 'plsw_idle', 'plsw_held'],
@@ -4500,6 +4539,18 @@ def _platform_card(data, previous_data, ctx):
         },
         'server_host': server_host_card,
         'summary': summary,
+        # The batch pools at the cut, so the fullness a wait happened
+        # under is readable at the instant, not only on the curve.
+        'pools': [
+            {'pool': name,
+             'claimed_fraction': entry.get('claimed_fraction'),
+             'slots_claimed': entry.get('slots_claimed'),
+             'slots_total': entry.get('slots_total'),
+             'queue_idle': entry.get('queue_idle'),
+             'status': entry.get('status'),
+             'error': entry.get('error') or ''}
+            for name, entry in sorted((data.get('pools') or {}).items())
+            if isinstance(entry, dict)],
         'summary_range': range_text,
         'summary_window': window_text,
         'summary_errors': [e for e in (walk_error, kills_error) if e],

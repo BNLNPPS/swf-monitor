@@ -552,6 +552,47 @@ def submit_host_reading(now, stale_seconds):
     return _host_reading('osgsub01', stale_seconds)
 
 
+def pools_reading(stale_seconds):
+    """Each batch pool a collector answers for us about.
+
+    A queue's workers wait in a pool, and how full the pool is decides
+    the wait; the pool reporter reads it (docs/POOL_REPORTER.md) and the
+    record keeps it so the fullness at a past instant is recoverable
+    rather than only ever current. The OSG pool is not here: its
+    collector answers the submit host, not us, and what it does say is
+    already in the submit-host group.
+    """
+    from .pools import POOLS
+    out = {}
+    for pool, spec in POOLS.items():
+        if spec.get('source') != 'report':
+            continue
+        record, status = _host_reading(spec['report_key'], stale_seconds)
+        entry = {'status': status}
+        reading = (record or {}).get('reading') or {}
+        if reading.get('error'):
+            entry['error'] = reading['error']
+        else:
+            slots = reading.get('slots') or {}
+            cores = reading.get('cores') or {}
+            queue = reading.get('queue') or {}
+            entry.update({
+                'slots_total': slots.get('total'),
+                'slots_claimed': slots.get('claimed'),
+                'slots_unclaimed': slots.get('unclaimed'),
+                'claimed_fraction': reading.get('claimed_fraction'),
+                'cores_total': cores.get('total'),
+                'cores_claimed': cores.get('claimed'),
+                'queue_running': queue.get('running'),
+                'queue_idle': queue.get('idle'),
+                'queue_held': queue.get('held'),
+                'schedds': queue.get('schedds'),
+                'collected_at': (record or {}).get('collected_at'),
+            })
+        out[pool] = entry
+    return out
+
+
 # Harvester runs some three dozen plugin threads, several of them
 # dormant on this deployment (a dummy preparator and stager, a file
 # syncer, untouched for months). Recording every one as a lane would
@@ -1036,6 +1077,7 @@ def platform_projection(now=None, mark=None):
         observed_at, int(_config("platform_reporter_stale_seconds")))
     monitor_host = monitor_host_reading(
         list(_config("platform_monitor_volumes") or []))
+    pools = pools_reading(int(_config("platform_reporter_stale_seconds")))
     projection = {
         "interval": {"start": _iso_utc(mark), "end": _iso_utc(observed_at)},
         "database": database,
@@ -1045,6 +1087,7 @@ def platform_projection(now=None, mark=None):
         "reporter_status": reporter_status,
         "submit_reporter_status": submit_reporter_status,
         "monitor_host": monitor_host,
+        "pools": pools,
         "assessment": assess(database, heartbeats, server, reporter_status,
                              monitor_host, thresholds, pandamon,
                              submit_reporter_status, submit_host,

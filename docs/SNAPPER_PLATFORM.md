@@ -123,6 +123,18 @@ pilots allowed to go. A site refusing every submission — GREX for
 thirteen hours on 2026-09-06, unnoticed — holds workers here and
 appears nowhere else.
 
+**Batch pools (delivered by the pool reporter).** For each pool a
+collector answers for us about — today the SCDF shared pool, where the
+E1 and BNL queues run: slots total, claimed and free, the claimed
+fraction, cores total and claimed, and the pool's own queue, jobs
+running, idle and held across every schedd in it
+([POOL_REPORTER.md](POOL_REPORTER.md)). Question: was the wait a
+worker suffered explained by the pool it waited in. A pool is not
+inferred from PanDA records, which carry nothing about it, and the OSG
+pool is not repeated here: its collector answers the submit host rather
+than us, and what it tells the submit host is in the submit-host group
+above.
+
 **swf-monitor host (measured locally by the maintainer).**
 swf-monitor's own tier on pandaserver02: Apache WSGI process count and
 resident memory, the ASGI service (swf-monitor-mcp-asgi) liveness and
@@ -237,6 +249,12 @@ each family's control row docked above its panel:**
    the adder write only when there is work and are recorded, not
    judged); *database reachability from the server host* as TCP
    connect latency. All present when the reporter reports.
+5b. *Batch pool* — the claimed fraction on its own 0–1 scale; the
+   pool's queue, jobs idle and running, on a second panel; claimed and
+   free slots stacked on a third. Fullness and queue depth cannot share
+   an axis: a fraction against tens of thousands of jobs draws as a
+   flat line. The panels are empty before the pool reporter's first run
+   on 2026-09-08 and accrue from there, as the submit host's do.
 6. *Hosts* — per host, PanDA server then swf-monitor: load average
    (1 and 15 minutes ticked, 5 unticked); memory used; volume use as
    percent, one line per volume; resident memory of the httpd and
