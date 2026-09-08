@@ -62,6 +62,18 @@ def main():
           f"delivered={record.get('delivered')}")
     if record.get('reason'):
         print(f"reason: {record['reason']}")
+    # A finished trial's measurement lives in PanDA's metatable, which the
+    # sweep above never reads (it files failed jobs' reports); the trial
+    # cost pass records it on the edition the trial proves (PCS.md, Trials).
+    if not args.dry_run:
+        try:
+            from pcs.services import record_trial_costs_pending
+            costs = record_trial_costs_pending()
+            print(f"trial cost: examined={costs['examined']} "
+                  f"recorded={costs['recorded']} "
+                  f"unmeasured={len(costs['unmeasured'])}")
+        except Exception as e:                                # noqa: BLE001
+            print(f'WARNING: trial cost pass failed: {e}', file=sys.stderr)
     return 0 if record['outcome'] != 'failed' else 1
 
 

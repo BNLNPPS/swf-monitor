@@ -224,6 +224,14 @@ def file_report(pandaid, report, source_key, jeditaskid=None, node=''):
             job.jeditaskid = jeditaskid
             fields.append('jeditaskid')
         job.save(update_fields=fields)
+        # A trial's report is the measurement its edition was waiting for:
+        # the cost lands on the edition the trial proves (PCS.md, Trials).
+        # Reported and never fatal to the filing.
+        try:
+            from pcs.services import record_trial_cost
+            record_trial_cost(pandaid, report, jeditaskid or job.jeditaskid)
+        except Exception as e:                                # noqa: BLE001
+            logger.error(f'payload report sweep: trial cost for {pandaid}: {e}')
         return True
     except Exception as e:                                    # noqa: BLE001
         logger.error(f'payload report sweep: cannot file {pandaid}: {e}')
