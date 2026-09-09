@@ -39,9 +39,9 @@
         <th>GitHub login</th>
         <th>Origin</th>
         <th>eic</th>
-        <th>Rights</th>
-        <th>May act</th>
         <th>Last sign-in</th>
+        <th>May act</th>
+        <th>Rights</th>
         <th></th>
       </tr>
     </thead>
@@ -57,15 +57,6 @@
           {% else %}<span class="text-muted">unset</span>{% endif %}
         </td>
         <td>
-          <select class="form-select form-select-sm w-auto d-inline-block js-rights">
-            <option value=""{% if not row.rights %} selected{% endif %}>unset</option>
-            {% for value in rights_values %}
-              <option value="{{ value }}"{% if row.rights == value %} selected{% endif %}>{{ value }}</option>
-            {% endfor %}
-          </select>
-        </td>
-        <td class="js-may-act">{% if row.may_act %}yes{% else %}no{% endif %}</td>
-        <td>
           {% if row.last_seen %}
             <span data-relative-time="{{ row.last_seen }}"></span>
           {% elif row.last_login %}
@@ -74,7 +65,18 @@
             <span class="text-muted">&mdash;</span>
           {% endif %}
         </td>
-        <td><button type="button" class="btn btn-sm btn-primary js-save">Save</button></td>
+        <td class="js-may-act">{% if row.may_act %}yes{% else %}no{% endif %}</td>
+        <td>
+          <select class="form-select form-select-sm w-auto d-inline-block js-rights">
+            <option value=""{% if not row.rights %} selected{% endif %}>unset</option>
+            {% for value in rights_values %}
+              <option value="{{ value }}"{% if row.rights == value %} selected{% endif %}>{{ value }}</option>
+            {% endfor %}
+          </select>
+        </td>
+        {# Outline until the row is changed, then filled: Save per line, quiet. #}
+        {# Row-size type in a visible colour, never smaller or greyer. #}
+        <td><button type="button" class="btn btn-sm btn-outline-primary js-save">Save</button></td>
       </tr>
       {% endfor %}
     </tbody>
@@ -93,12 +95,21 @@
     status.style.color = ok ? '' : '#b02a37';
   }
 
+  function setDirty(button, dirty) {
+    button.classList.toggle('btn-primary', dirty);
+    button.classList.toggle('btn-outline-primary', !dirty);
+  }
+
   document.querySelectorAll('tr[data-username]').forEach(function (row) {
     var button = row.querySelector('.js-save');
     if (!button) { return; }
+    var select = row.querySelector('.js-rights');
+    var saved = select.value;
+    select.addEventListener('change', function () {
+      setDirty(button, select.value !== saved);
+    });
     button.addEventListener('click', function () {
       var username = row.getAttribute('data-username');
-      var select = row.querySelector('.js-rights');
       var value = select.value;
       button.disabled = true;
       say('Saving ' + username + '...', true);
@@ -118,6 +129,8 @@
         }
         row.querySelector('.js-may-act').textContent =
           result.data.may_act ? 'yes' : 'no';
+        saved = result.data.authority.rights || '';
+        setDirty(button, false);
         var rights = result.data.authority.rights;
         say(username + ': rights ' + (rights || 'unset') + ', may act ' +
             (result.data.may_act ? 'yes' : 'no'), true);
