@@ -277,7 +277,7 @@ Read-only JSON endpoints under `/swf-monitor/api/panda/` for external consumers 
 - `GET /api/panda/activity/` - Aggregate counts by task status and job status
   - Query params: `days` (default 1), `username`, `site`, `workinggroup`
 
-Authentication: `TunnelAuthentication` (X-Remote-User via swf-remote proxy) + `SessionAuthentication` + `TokenAuthentication`. Localhost-direct requests without X-Remote-User auto-authenticate as `swf-remote-proxy`; matches the existing pattern used by PCS and other `/swf-monitor/api/` routes.
+Authentication: `TunnelAuthentication` (X-Remote-User via swf-remote proxy) + `SessionAuthentication` + `TokenAuthentication`. A localhost request without X-Remote-User carries no tunnel identity and falls through to session or token authentication; swf-remote's own service calls name their identity explicitly. Writes by a person are subject to the authority gate ([AUTHORITY.md](AUTHORITY.md)).
 
 ## Server-Sent Events (SSE) Streaming
 

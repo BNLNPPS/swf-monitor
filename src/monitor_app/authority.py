@@ -127,6 +127,50 @@ def is_ops(record):
     return record.get('rights') == RIGHTS_OPS
 
 
+#: The SysConfig knob that turns refusal on. Until it is true the gates
+#: observe: a refusal they would have made is logged and the request goes
+#: through, so the rule is proven against live traffic before it bites.
+ENFORCE_KEY = 'authority_enforce'
+
+JOIN_URL = 'https://eic.github.io/documentation/getstarted.html'
+
+
+def enforcing():
+    """Whether the gates refuse, or only observe."""
+    from .models import SysConfig
+
+    return bool(SysConfig.get_setting(ENFORCE_KEY, False))
+
+
+def refusal_text(username):
+    """What a person who may not act is told, with the way forward.
+
+    GitHub has no self-service join, so the text names the login that was
+    checked and links the procedure rather than leaving a bare refusal.
+    """
+    record = get_authority(username)
+    login = record['github'] or username
+    if record['rights'] == RIGHTS_READ:
+        return ('Your account is set to read on this system: you may read '
+                'monitoring information, and actions against the production '
+                'system are withheld. An administrator can change that on '
+                'the User admin page.')
+    if record['eic'] is False:
+        return (f'Your GitHub account {login} is not a member of the eic '
+                'organization. ePIC production monitoring requires membership '
+                'for actions against the production system; reading '
+                'monitoring information does not. The joining procedure is on '
+                f'the ePIC Software & Computing Get Started page, {JOIN_URL} '
+                '(see "Join GitHub"). Once you have been added, sign in again '
+                'and your account will work.')
+    return (f'No eic organization membership has been recorded for {login}. '
+            'Membership is checked when you sign in through '
+            'epic-devcloud.org; reading monitoring information needs no '
+            'membership, actions against the production system do. The '
+            'joining procedure is on the ePIC Software & Computing Get '
+            f'Started page, {JOIN_URL} (see "Join GitHub").')
+
+
 def _write(username, changes):
     from .models import UserPreference
 

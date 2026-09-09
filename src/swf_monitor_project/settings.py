@@ -138,6 +138,7 @@ MIDDLEWARE = [
     "monitor_app.middleware.MCPAuthMiddleware",  # Auth0 OAuth for MCP
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "monitor_app.middleware.TunnelAuthMiddleware",
+    "monitor_app.middleware.AuthorityGateMiddleware",  # a person who writes must hold authority (docs/AUTHORITY.md)
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]

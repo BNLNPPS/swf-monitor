@@ -30,6 +30,7 @@
     {% endfor %}
   </ul>
 
+  {% csrf_token %}
   <div id="user-admin-status" class="mb-2" style="min-height:1.5em;"></div>
 
   <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
@@ -39,7 +40,7 @@
         <th>GitHub login</th>
         <th>Origin</th>
         <th>eic</th>
-        <th>Last sign-in</th>
+        <th title="When eic membership was last observed for the account: at sign-in through epic-devcloud.org, or by the backfill">Membership checked</th>
         <th>May act</th>
         <th>Rights</th>
         <th></th>
@@ -89,6 +90,10 @@
   var url = "{% url 'monitor_app:user-rights' %}";
   var status = document.getElementById('user-admin-status');
   if (!status) { return; }
+  // The internal face is a CILogon session with CSRF in force; the tunnel
+  // exempts it. Send the token both ways (house pattern, pcs/find.html).
+  var csrfInput = document.querySelector('input[name="csrfmiddlewaretoken"]');
+  var csrf = csrfInput ? csrfInput.value : '';
 
   function say(text, ok) {
     status.textContent = text;
@@ -115,7 +120,7 @@
       say('Saving ' + username + '...', true);
       fetch(url, {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
         body: JSON.stringify({username: username, rights: value || null})
       }).then(function (response) {
         return response.json().then(function (data) {

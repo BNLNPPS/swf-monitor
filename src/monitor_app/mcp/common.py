@@ -43,6 +43,55 @@ def _default_start_time(hours=24):
 CALLER: contextvars.ContextVar = contextvars.ContextVar('mcp_caller', default='')
 
 
+#: Every tool that changes the system. Each carries ``@requires_authority``
+#: under its ``@mcp.tool()``; tests/test_authority.py asserts the two sets
+#: match, so a write tool cannot be added without declaring it here and a
+#: declared name cannot go stale.
+AUTHORITY_GUARDED_TOOLS = frozenset({
+    'ai_decide_proposal', 'ai_propose_ping', 'epic_register_ai_assessment',
+    'pcs_dataset_intake', 'pcs_prodtask_intake', 'pcs_prodtask_link_input',
+    'pcs_prodtask_set_status', 'swf_kill_agent', 'swf_record_ai_memory',
+    'swf_send_message', 'swf_start_user_testbed', 'swf_start_workflow',
+    'swf_stop_user_testbed', 'swf_stop_workflow',
+})
+
+
+def requires_authority(fn):
+    """The one rule, on the MCP face: a person who writes must hold authority.
+
+    A tunnel caller is a person (``CALLER`` is their name) and must
+    ``may_act``; a bearer-token caller carries no person and passes, as on
+    the REST face. While ``authority_enforce`` is false the guard observes
+    and logs instead of refusing. Place it under ``@mcp.tool()`` so the
+    registered tool is the guarded one. docs/AUTHORITY.md.
+    """
+    import functools
+    import logging
+
+    from asgiref.sync import sync_to_async
+
+    log = logging.getLogger(__name__)
+
+    @functools.wraps(fn)
+    async def guarded(*args, **kwargs):
+        caller = CALLER.get()
+        if caller:
+            from monitor_app.authority import (enforcing, may_act,
+                                               refusal_text)
+            if not await sync_to_async(may_act)(caller):
+                text = await sync_to_async(refusal_text)(caller)
+                if await sync_to_async(enforcing)():
+                    log.info('authority: refused MCP %s by %s',
+                             fn.__name__, caller)
+                    return {'error': text, 'authority': 'refused'}
+                log.warning('authority (observing, not enforced): would '
+                            'refuse MCP %s by %s', fn.__name__, caller)
+        return await fn(*args, **kwargs)
+
+    guarded.__authority_guarded__ = True
+    return guarded
+
+
 def _get_username(username: str = None) -> str:
     """The username a tool acts as: the proxied caller's identity when
     the request came through the tunnel, else the username the caller

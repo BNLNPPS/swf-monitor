@@ -30,27 +30,28 @@ class TunnelAuthentication(BaseAuthentication):
     CSRF. Must be listed BEFORE SessionAuthentication in authentication_classes
     so DRF uses it first for tunnel requests and never reaches CSRF checks.
 
-    Falls back to a generic 'swf-remote-proxy' user if no header is present.
-    Returns None (skip) for non-localhost requests, letting the next backend try.
+    Returns None (skip) for non-localhost requests, and for localhost requests
+    carrying no X-Remote-User, letting the next backend try. It used to fall
+    back to a generic 'swf-remote-proxy' user in that second case, which made
+    any localhost request without the header — a valid token, a garbage
+    token, nothing at all — act as that user before a token was ever read;
+    the hourly production-record writer ran under it (docs/AUTHORITY.md).
+    swf-remote's own service calls name their identity explicitly.
     """
 
     def authenticate(self, request):
         if not _is_localhost(request):
             return None
-        User = get_user_model()
         remote_user = request.META.get('HTTP_X_REMOTE_USER', '').strip()
-        if remote_user:
-            user, created = User.objects.get_or_create(
-                username=remote_user,
-                defaults={'is_active': True},
-            )
-            if created:
-                logger.info(f"Auto-created user '{remote_user}' from tunnel proxy")
-        else:
-            user, _ = User.objects.get_or_create(
-                username='swf-remote-proxy',
-                defaults={'is_active': True},
-            )
+        if not remote_user:
+            return None
+        User = get_user_model()
+        user, created = User.objects.get_or_create(
+            username=remote_user,
+            defaults={'is_active': True},
+        )
+        if created:
+            logger.info(f"Auto-created user '{remote_user}' from tunnel proxy")
         return (user, None)
 
 
@@ -90,6 +91,91 @@ class TunnelAuthMiddleware:
 def tunnel_context(request):
     """Template context processor: sets is_tunnel for localhost requests."""
     return {'is_tunnel': is_tunnel_request(request)}
+
+
+# Writes that must work for anyone, or that carry a stricter check of their
+# own: signing in and out, changing a password, and the two authority
+# endpoints, which admit only the swf-remote service identity or an
+# administrator (viewdir/authority_api.py, viewdir/user_admin.py).
+AUTHORITY_EXEMPT_URL_NAMES = frozenset({
+    'login', 'logout', 'password_change', 'password_change_done',
+    'user-authority', 'user-rights',
+})
+
+_UNSAFE_METHODS = frozenset({'POST', 'PATCH', 'PUT', 'DELETE'})
+_JSON_PATH_PREFIXES = ('/api/', '/pcs/api/', '/mcp')
+
+
+class AuthorityGateMiddleware:
+    """The one rule: a person who writes must hold authority.
+
+    Runs after TunnelAuthMiddleware, so a request that carries a person —
+    a browser session, or the identity swf-remote forwards over the tunnel
+    — is authenticated by now. On an unsafe method that person must
+    ``may_act`` (monitor_app.authority), or the request is refused with the
+    joining procedure. A request carrying no person — machinery on a
+    service token, or nothing — is left to the view's own authentication,
+    exactly as before; the gate adds protection for people and removes
+    nothing else.
+
+    Enforcement is the SysConfig knob ``authority_enforce``. While it is
+    false the gate observes: every refusal it would have made is logged
+    and the request proceeds, so live traffic proves the rule before it
+    bites. docs/AUTHORITY.md.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        if request.method in _UNSAFE_METHODS:
+            refusal = self._refusal(request)
+            if refusal is not None:
+                return refusal
+        return self.get_response(request)
+
+    @staticmethod
+    def _wants_json(request):
+        path = request.path_info
+        if path.startswith(_JSON_PATH_PREFIXES):
+            return True
+        accept = request.META.get('HTTP_ACCEPT', '')
+        return ('application/json' in accept
+                or request.content_type == 'application/json')
+
+    def _refusal(self, request):
+        from django.urls import Resolver404, resolve
+
+        from .authority import enforcing, may_act, refusal_text
+
+        user = getattr(request, 'user', None)
+        if not user or not user.is_authenticated:
+            return None
+        # Exemption is by resolved URL name; a path that resolves to nothing
+        # is not exempt — the check still runs, and the view 404s after.
+        try:
+            if resolve(request.path_info).url_name in AUTHORITY_EXEMPT_URL_NAMES:
+                return None
+        except Resolver404:
+            pass
+        if may_act(user.username):
+            return None
+
+        text = refusal_text(user.username)
+        if not enforcing():
+            logger.warning(
+                'authority (observing, not enforced): would refuse %s %s '
+                'by %s — %s', request.method, request.path_info,
+                user.username, text.splitlines()[0])
+            return None
+        logger.info('authority: refused %s %s by %s', request.method,
+                    request.path_info, user.username)
+        if self._wants_json(request):
+            return JsonResponse({'error': text, 'authority': 'refused'},
+                                status=403)
+        from django.shortcuts import render
+        return render(request, 'monitor_app/authority_refused.html',
+                      {'refusal': text}, status=403)
 
 
 class MCPAuthMiddleware:

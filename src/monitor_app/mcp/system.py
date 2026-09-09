@@ -13,7 +13,7 @@ from monitor_app.mcp import mcp
 
 from ..models import SystemAgent, RunState, PersistentState, SystemStateEvent, AppLog
 from ..workflow_models import WorkflowExecution, WorkflowMessage, Namespace
-from .common import _parse_time, _default_start_time, _monitor_url, _get_testbed_config_path, _get_username
+from .common import _parse_time, _default_start_time, _monitor_url, _get_testbed_config_path, _get_username, requires_authority
 
 logger = logging.getLogger(__name__)
 
@@ -636,6 +636,7 @@ async def swf_get_log_entry(log_id: int) -> dict:
 # -----------------------------------------------------------------------------
 
 @mcp.tool()
+@requires_authority
 async def swf_kill_agent(name: str) -> dict:
     """
     Kill an agent process by sending SIGKILL to its PID.
@@ -781,6 +782,7 @@ async def swf_check_agent_manager(username: str = None) -> dict:
 
 
 @mcp.tool()
+@requires_authority
 async def swf_start_user_testbed(username: str = None, config_name: str = None) -> dict:
     """
     Start a user's testbed via their agent manager daemon.
@@ -868,6 +870,7 @@ async def swf_start_user_testbed(username: str = None, config_name: str = None) 
 
 
 @mcp.tool()
+@requires_authority
 async def swf_stop_user_testbed(username: str = None) -> dict:
     """
     Stop a user's testbed via their agent manager daemon.

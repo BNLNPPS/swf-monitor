@@ -18,6 +18,7 @@ from ai.assessments import (
 from ai.corun_client import CorunAPIError, CorunClient, corun_configured
 from monitor_app.epicprod_logging import log_epicprod_action
 from monitor_app.mcp import mcp
+from monitor_app.mcp.common import requires_authority
 
 logger = logging.getLogger(__name__)
 
@@ -371,6 +372,7 @@ def _get_ai_content_sync(ids=None, corun_page_group_ids=None):
 
 
 @mcp.tool()
+@requires_authority
 async def epic_register_ai_assessment(
     subject_type: str,
     subject_key: str,

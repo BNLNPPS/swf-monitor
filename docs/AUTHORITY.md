@@ -158,49 +158,78 @@ stale independently.
 
 ## Enforcement
 
-Two rules, both keyed on the authority the requester holds, computed from the
-expression above and never from `eic` alone.
+One rule: **a person who writes must hold authority.** It is applied at one
+point on each of the two surfaces a person can write through, and it is
+keyed on the expression above, never on `eic` alone.
 
-**Methods.** `POST`, `PATCH`, `PUT` and `DELETE` require authority. `GET`,
-`HEAD` and `OPTIONS` pass on sign-in alone. The safe-method set is the
-complement, so a verb that changes state is covered by construction.
+**The REST and page surface.** `AuthorityGateMiddleware`
+(`monitor_app/middleware.py`) runs after the tunnel middleware, so a request
+that carries a person — a browser session, or the identity swf-remote
+forwards as `X-Remote-User` — is authenticated by then. On `POST`, `PATCH`,
+`PUT` or `DELETE` that person must `may_act`; otherwise the request is
+refused with the joining procedure, as JSON on the API paths and as a page
+elsewhere. `GET`, `HEAD` and `OPTIONS` pass on sign-in alone. Signing in and
+out, changing a password, and the two authority endpoints — which admit only
+the swf-remote service identity or an administrator — are exempt.
 
-**The operations agent.** Reaching `epicprod_ops_agent` requires authority
-whatever verb triggered it, because one of the two supported external-safe
-trigger shapes is a `GET` page view that drops a message as a side effect
-([EPICPROD_OPS_AGENT.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/EPICPROD_OPS_AGENT.md)
-§ *Building a new capability*). The method gate alone would let that shape
-through.
+A request carrying **no person** — machinery on a service token, or nothing
+— is left to the view's own authentication, exactly as before. The gate adds
+protection for people and removes nothing else. This is what keeps the
+testbed running: the agents' log posts (some ten thousand a day, open by
+design), the heartbeats, the host reporters, the episode builder, the
+production-record ingest and the registrar all authenticate by token and
+carry no person. The `02:47 catalog_sync` chain publishes in process and
+never crosses the web tier at all.
 
-Authority is declared per `msg_type` against the agent's `KNOWN_TYPES`:
+**The MCP surface.** MCP is a separate service calling the service layer in
+process, so a Django middleware never sees it. Each of the fourteen tools
+that change the system carries `@requires_authority` under its
+`@mcp.tool()` (`monitor_app/mcp/common.py`): a tunnel caller is a person
+and must `may_act`; a bearer-token caller carries no person and passes, as
+on the REST face. `AUTHORITY_GUARDED_TOOLS` declares the fourteen, and
+`tests/test_authority.py` asserts that the guarded set and the declared set
+are identical, so a write tool cannot be added without being declared and a
+declared name cannot go stale.
 
-- **Open to any signed-in account**: `fetch_payload_log`,
-  `sync_epicprod_inventory`. Both are bounded per-object retrievals that
-  serve the requesting viewer's own page.
-- **Internal only**: `health_ping`, `shutdown`, refused to any externally
-  originated request. `shutdown` stops production; organisation membership is
-  not the right test for it.
-- **Requires authority**: every other type.
+**Observe, then enforce.** The SysConfig knob `authority_enforce` (false
+until set) decides whether the gates refuse or only observe. While false,
+every refusal a gate would have made is logged as a warning naming the
+method, path and person, and the request proceeds; the rule is proven
+against live traffic before it bites. Setting it true on the System page
+turns refusal on with no deploy.
 
-The publish path takes the authority basis as a required argument, so a call
-site that does not state its basis raises instead of publishing, and a test
-asserts that every name in `KNOWN_TYPES` resolves to a declared authority, so
-the catalog and the policy cannot drift apart.
+### The tunnel identity fallback
 
-Internal callers are unaffected by construction. Cron, the `catalog_sync`
-chain steps, and other agents publish inside the perimeter, in process or
-through `enqueue-ops-message.py`, without crossing the web tier. What is
-gated is an externally originated request, not the `msg_type` itself; gating
-the type would stop the nightly chain and would put an organisation
-requirement on functions used outside the monitor.
+`TunnelAuthentication` used to answer a localhost request carrying no
+`X-Remote-User` with a generic `swf-remote-proxy` user, before any token was
+read. A valid token, a garbage token and no credential at all were all that
+user. The hourly production-record writer, whose default endpoint is the
+localhost face, ran under it: 65 PCS rows and, in one week, 24 production
+action records including task submissions were attributed to it. The
+fallback is removed; a localhost request without the header falls through to
+session or token authentication. swf-remote names its service identity
+explicitly on the calls that need one, all of them reads.
 
-Two mechanisms that look like candidates for the gate cannot carry it.
+### What cannot carry the gate
+
 `log_epicprod_action` runs at or after execution and its contract is that it
 never raises, so a gate there would fail open. `ACTION_DEFAULTS` is not
 authoritative either: `epicprod_logging.py` computes the known actions as the
 catalog plus any action observed in the log, which means the code expects
 call sites that were never declared — exactly the forgotten action a gate
-must catch.
+must catch. And a gate keyed on the service token would exempt six people
+who hold one and, since the agents authenticate with a person's token, would
+either exempt that person or stop every agent.
+
+### Tokens
+
+Six people and four services hold API tokens. A person's token is that
+person: on the external face the proxy forwards `Authorization` and sets
+`X-Remote-User` from the session, so the person is present and gated; on the
+internal face a bare token carries no person and is governed by the view's
+authentication, as any API token is. Token issuance is the control there.
+The agents authenticate with a person's token; giving the machinery its own
+identity is a separate cleanup.
 
 ## Rollout
 
