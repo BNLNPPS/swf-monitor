@@ -468,6 +468,12 @@ ACTION_DEFAULTS = {
         'description': "Fold a duplicate edition into the record that holds "
                        "its identity; the record of a repair.",
     },
+    'dataset_edit': {
+        'sublevel': 'normal', 'live': False,
+        'description': "Edit an edition's tags on the datasets compose page; "
+                       "the name recomposes and the former name still "
+                       "resolves.",
+    },
     'trial_cost': {
         'sublevel': 'low', 'live': False,
         'description': "Record a trial's measured cost on the edition it "
