@@ -96,6 +96,54 @@
             {% if not user.is_superuser and not user.is_staff %}User{% endif %}
         </p>
 
+        <h3 style="margin-top: 24px;">Production access</h3>
+        {% if authority.may_act %}
+        <p><strong>You may act on the production system.</strong></p>
+        <p>
+          {% if authority.record.eic is True %}
+            Your GitHub account {{ authority.record.github|default:"" }} is a
+            member of the eic organization.
+          {% else %}
+            Your account holds
+            {{ authority.record.rights|default:"granted" }} rights on this
+            system.
+          {% endif %}
+          {% if authority.is_ops %}
+            Operations rights also let you administer accounts on the
+            <a href="{% url 'monitor_app:user_admin' %}">User admin</a> page.
+          {% endif %}
+        </p>
+        {% else %}
+        <p><strong>You may read monitoring information. Actions against the
+          production system are withheld.</strong></p>
+        {% if authority.record.rights == 'read' %}
+        <p>Your account is set to read on this system. An administrator can
+          change that on the User admin page.</p>
+        {% elif authority.record.eic is False %}
+        <p>
+          Your GitHub account {{ authority.record.github|default:"" }} is not a
+          member of the eic organization. ePIC production monitoring requires
+          membership for actions against the production system; reading
+          monitoring information does not. The joining procedure is on the
+          ePIC Software &amp; Computing
+          <a href="https://eic.github.io/documentation/getstarted.html"
+             target="_blank" rel="noopener">Get Started</a> page &mdash; see
+          "Join GitHub". Once you have been added, sign in again and your
+          account will work.
+        </p>
+        {% else %}
+        <p>
+          No eic organization membership has been recorded for this account
+          yet. Membership is checked when you sign in through
+          epic-devcloud.org. The joining procedure is on the ePIC Software
+          &amp; Computing
+          <a href="https://eic.github.io/documentation/getstarted.html"
+             target="_blank" rel="noopener">Get Started</a> page &mdash; see
+          "Join GitHub".
+        </p>
+        {% endif %}
+        {% endif %}
+
         <h3 style="margin-top: 24px;">Change Password</h3>
         {% if is_tunnel %}
         <p><a class="btn btn-primary btn-sm" href="/prod/accounts/password_change/">Change password</a></p>

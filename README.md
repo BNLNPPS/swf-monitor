@@ -61,6 +61,7 @@ index in [`CLAUDE.md`](CLAUDE.md).
 | **[Action Stream](docs/ACTION_STREAM.md)** | Structured action logging: sublevel/live axes, live policy, live view | Operational record |
 | **[AI Proposals](docs/AI_PROPOSALS.md)** | LLM proposes, human approves, deterministic execution | AI-assisted operations |
 | **[External Access](docs/EXTERNAL_ACCESS.md)** | The swf-remote proxy contract, including write-action triggers | External face |
+| **[Authority](docs/AUTHORITY.md)** | Who may act on the system, as distinct from who may read it | Access control |
 | **[System Status](docs/SYSTEM_STATUS.md)** | Cached production/system health, ops-agent refresh, and red nav indicator | Operations monitoring |
 | **[Test System](docs/TEST_SYSTEM.md)** | Testing approach, structure, and best practices | Quality assurance |
 

@@ -279,10 +279,13 @@ def _active_nav(request):
         'canary': namespace == 'canary',
         'about': namespace == 'monitor_app' and url_name == 'about',
         'account': namespace == 'monitor_app' and url_name == 'account',
+        'user_admin': namespace == 'monitor_app' and url_name == 'user_admin',
     }
 
 
 def system_status_nav(request):
+    from .viewdir.user_admin import may_administer
+
     summary = status_summary()
     return {
         'active_nav': _active_nav(request),
@@ -290,4 +293,7 @@ def system_status_nav(request):
         'system_status_reason': summary.get('overall_reason', ''),
         'system_status_latest_checked_at': summary.get('latest_checked_at'),
         'external_face_base_url': external_face_base_url(),
+        # The User admin entry appears only for those who may use it
+        # (docs/AUTHORITY.md).
+        'may_administer_users': may_administer(getattr(request, 'user', None)),
     }

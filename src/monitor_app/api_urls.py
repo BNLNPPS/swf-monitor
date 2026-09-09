@@ -15,6 +15,8 @@ from .host_reports import host_report
 from .sse_views import sse_message_stream, sse_status
 from .panda import api as panda_api
 from .panda.corun_callback import corun_callback
+from .viewdir.authority_api import user_authority
+from .viewdir.user_admin import user_rights_set
 from .viewdir.capcom import (capcom_notice_ingest, capcom_notices,
                              capcom_state, capcom_user_state,
                              NoticeSubscriptionViewSet)
@@ -80,6 +82,10 @@ urlpatterns = [
     path('panda/jobs/', panda_api.jobs_list, name='panda-api-jobs-list'),
     path('panda/activity/', panda_api.activity, name='panda-api-activity'),
     path('users/', users_list, name='users-list'),
+    # Who may act on the system, written by swf-remote at sign-in
+    # (docs/AUTHORITY.md).
+    path('user-authority/', user_authority, name='user-authority'),
+    path('user-rights/', user_rights_set, name='user-rights'),
     # Episode ingest (token-authenticated writes from the episode
     # builder agent) and read surfaces; snapper_episodes_api.py.
     path('snapper/episodes/open/', episodes_open, name='snapper-episodes-open'),

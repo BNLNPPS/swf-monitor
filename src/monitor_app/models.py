@@ -809,6 +809,18 @@ class UserPreference(models.Model):
 
     @classmethod
     def set_pref(cls, username, key, value):
+        """Set one top-level preference key.
+
+        Reserved keys are refused loudly: ``authority`` decides who may act
+        on the system (authority.py) and is writable only through
+        ``authority.set_authority``, so no general preferences surface can
+        become a path to privilege.
+        """
+        from .authority import AUTHORITY_KEY
+        if key == AUTHORITY_KEY:
+            raise ValueError(
+                f"'{key}' is reserved; write it through "
+                'monitor_app.authority.set_authority')
         if not username or not key:
             return None
         from django.db import transaction

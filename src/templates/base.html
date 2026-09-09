@@ -694,6 +694,10 @@
                 <a href="{% url 'snapper_ai:snapper_report' scope='epicprod' %}"
                    class="{% if active_nav.snapper %}nav-active{% endif %}">Snapper report</a>
                 <a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='platform' %}">Platform status</a>
+                {% if may_administer_users %}
+                    <a href="{% url 'monitor_app:user_admin' %}"
+                       class="{% if active_nav.user_admin %}nav-active{% endif %}">User admin</a>
+                {% endif %}
                 {% if user.is_authenticated and user.is_staff %}
                     <a href="{% url 'admin:index' %}">Admin</a>
                 {% endif %}

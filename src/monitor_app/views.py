@@ -246,9 +246,18 @@ def account_view(request):
             logger.error('snapper embed failed for account page: %s', exc)
             snapper_embed = {'scope': 'testbed', 'error': str(exc)}
 
+    from .authority import get_authority, is_ops, may_act
+    authority_record = get_authority(request.user.username) \
+        if request.user.is_authenticated else None
+
     return render(request, 'monitor_app/account.html', {
         'form': form,
         'user': request.user,
+        'authority': {
+            'record': authority_record,
+            'may_act': bool(authority_record) and may_act(authority_record),
+            'is_ops': bool(authority_record) and is_ops(authority_record),
+        } if authority_record else None,
         'panda_username': panda_username,
         'my_tasks': my_tasks,
         'my_tasks_error': my_tasks_error,

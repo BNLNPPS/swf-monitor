@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}User admin{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-3">
+  <h2>User admin</h2>
+
+  {% if forbidden %}
+    <p>This page is for staff and accounts holding operations rights.</p>
+  {% else %}
+
+  <p>
+    Reading the monitor needs a signed-in account and nothing more. Acting on
+    the production system needs authority: membership of the eic GitHub
+    organization, or rights granted here.
+    {{ acting_count }} of {{ rows|length }} accounts may act.
+  </p>
+
+  <p>
+    Membership is observed at sign-in and is shown here, not set here: a hand
+    edit would be overwritten the next time the person signs in. Rights are
+    set here, and a sign-in never touches them.
+  </p>
+
+  <ul>
+    <li><strong>unset</strong> &mdash; the ordinary state: the account draws
+      authority from its eic membership alone.</li>
+    {% for level in rights_levels %}
+      <li><strong>{{ level.value }}</strong> &mdash; {{ level.meaning }}</li>
+    {% endfor %}
+  </ul>
+
+  <div id="user-admin-status" class="mb-2" style="min-height:1.5em;"></div>
+
+  <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
+    <thead>
+      <tr>
+        <th>Account</th>
+        <th>GitHub login</th>
+        <th>Origin</th>
+        <th>eic</th>
+        <th>Rights</th>
+        <th>May act</th>
+        <th>Last sign-in</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr data-username="{{ row.username }}">
+        <td>{{ row.username }}{% if row.is_staff %} <span class="text-muted">(staff)</span>{% endif %}</td>
+        <td>{% if row.github %}{{ row.github }}{% else %}<span class="text-muted">&mdash;</span>{% endif %}</td>
+        <td>{{ row.origin|default:"&mdash;" }}</td>
+        <td>
+          {% if row.eic is True %}member
+          {% elif row.eic is False %}not a member
+          {% else %}<span class="text-muted">unset</span>{% endif %}
+        </td>
+        <td>
+          <select class="form-select form-select-sm w-auto d-inline-block js-rights">
+            <option value=""{% if not row.rights %} selected{% endif %}>unset</option>
+            {% for value in rights_values %}
+              <option value="{{ value }}"{% if row.rights == value %} selected{% endif %}>{{ value }}</option>
+            {% endfor %}
+          </select>
+        </td>
+        <td class="js-may-act">{% if row.may_act %}yes{% else %}no{% endif %}</td>
+        <td>
+          {% if row.last_seen %}
+            <span data-relative-time="{{ row.last_seen }}"></span>
+          {% elif row.last_login %}
+            <span data-relative-time="{{ row.last_login|date:'c' }}"></span>
+          {% else %}
+            <span class="text-muted">&mdash;</span>
+          {% endif %}
+        </td>
+        <td><button type="button" class="btn btn-sm btn-primary js-save">Save</button></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<script>
+(function () {
+  var url = "{% url 'monitor_app:user-rights' %}";
+  var status = document.getElementById('user-admin-status');
+  if (!status) { return; }
+
+  function say(text, ok) {
+    status.textContent = text;
+    status.style.color = ok ? '' : '#b02a37';
+  }
+
+  document.querySelectorAll('tr[data-username]').forEach(function (row) {
+    var button = row.querySelector('.js-save');
+    if (!button) { return; }
+    button.addEventListener('click', function () {
+      var username = row.getAttribute('data-username');
+      var select = row.querySelector('.js-rights');
+      var value = select.value;
+      button.disabled = true;
+      say('Saving ' + username + '...', true);
+      fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({username: username, rights: value || null})
+      }).then(function (response) {
+        return response.json().then(function (data) {
+          return {ok: response.ok, data: data};
+        });
+      }).then(function (result) {
+        button.disabled = false;
+        if (!result.ok) {
+          say(username + ': ' + (result.data.error || 'refused'), false);
+          return;
+        }
+        row.querySelector('.js-may-act').textContent =
+          result.data.may_act ? 'yes' : 'no';
+        var rights = result.data.authority.rights;
+        say(username + ': rights ' + (rights || 'unset') + ', may act ' +
+            (result.data.may_act ? 'yes' : 'no'), true);
+      }).catch(function (error) {
+        button.disabled = false;
+        say(username + ': ' + error, false);
+      });
+    });
+  });
+})();
+</script>
+{% endblock %}

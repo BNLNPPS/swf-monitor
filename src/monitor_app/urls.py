@@ -1,5 +1,6 @@
 from django.urls import path, include
 from . import alarm_views
+from .viewdir.user_admin import user_admin_page
 from .views import (
     home,
     authenticated_home,
@@ -152,6 +153,8 @@ urlpatterns = [
     path('<int:pk>/update/', system_agent_update, name='system_agent_update'),
     path('system_agents/<int:pk>/delete/', system_agent_delete, name='system_agent_delete'),
     path('account/', account_view, name='account'),
+    # Who may act on the system (docs/AUTHORITY.md).
+    path('users/admin/', user_admin_page, name='user_admin'),
     path('logs/summary/', log_summary, name='log_summary'),
     path('logs/summary/datatable/', log_summary_datatable_ajax, name='log_summary_datatable_ajax'),
     path('logs/', log_list, name='log_list'),
