@@ -15,6 +15,9 @@ The pilot tars the reported outputs, stages them out on the queue's
 es_events/pw activity and reports the ranges finished to the server.
 Exit 0 when the pilot says there are no more events.
 
+Usage in the job's exec: python3 es_range_client.py $PILOT_EVENTRANGECHANNEL
+(the token on the command line is what makes the pilot export it).
+
 Needs the python-yampl module on PYTHONPATH (built on the host by
 swf-epicprod tools/npps0/build-yampl.sh; the pass script exports it and
 the pilot's environment reaches the payload).
@@ -31,9 +34,14 @@ def log(msg):
 
 
 def main():
-    name = os.environ.get('PILOT_EVENTRANGECHANNEL')
+    # The pilot hands over the channel by string match: only a payload
+    # command that names PILOT_EVENTRANGECHANNEL gets the export prefix
+    # (pilot3 esprocess.py); any other command is given the AthenaMP
+    # --preExec form. So the job's exec passes $PILOT_EVENTRANGECHANNEL
+    # as the argument, and the environment is the fallback.
+    name = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else os.environ.get('PILOT_EVENTRANGECHANNEL')
     if not name:
-        log("ERROR: PILOT_EVENTRANGECHANNEL is not set; not an Event Service job")
+        log("ERROR: no channel name (argument or PILOT_EVENTRANGECHANNEL); not an Event Service job")
         return 2
     try:
         import yampl
@@ -42,7 +50,11 @@ def main():
         return 3
 
     work_seconds = float(os.environ.get('ES_PROBE_WORK_SECONDS', '2'))
-    outdir = os.path.abspath(os.environ.get('ES_PROBE_OUTDIR', 'es_probe_out'))
+    # Receipts go to the job directory, one level above runGen's workDir
+    # (the current directory): runGen removes workDir when the payload
+    # exits, before the pilot tars and stages the reported outputs.
+    outdir = os.path.abspath(os.environ.get('ES_PROBE_OUTDIR',
+                                            os.path.join(os.path.dirname(os.getcwd()), 'es_probe_out')))
     os.makedirs(outdir, exist_ok=True)
 
     sock = yampl.ClientSocket(name, 'local')

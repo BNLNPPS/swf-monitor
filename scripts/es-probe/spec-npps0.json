@@ -1,9 +1,9 @@
 {
   "outDS": "group.EIC.esprobe.npps0.%STAMP%",
-  "exec": "echo ES-probe payload start; hostname; python3 es_range_client.py; echo ES-probe payload done rc=$?",
+  "exec": "echo ES-probe payload start; hostname; python3 es_range_client.py $PILOT_EVENTRANGECHANNEL; echo ES-probe payload done rc=$?",
   "site": "BNL_NPPS_GPU",
   "prodSourceLabel": "test",
-  "nJobs": 1,
+  "nJobs": 100,
   "nEventsPerJob": 100,
   "nEventsPerWorker": 10,
   "nCore": 8,
