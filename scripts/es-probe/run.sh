@@ -17,8 +17,9 @@ SPEC="${1:-${HERE}/spec.json}"
 STAMP="$(date +%Y%m%d%H%M)"
 WORK="${SWF_TMP_DIR:-/data/swf-tmp}/es-probe/${STAMP}"
 mkdir -p "${WORK}/sandbox"
-echo "ES probe sandbox placeholder (payload uses no sandbox files)" \
+echo "ES probe sandbox: es_range_client.py speaks the pilot's range channel" \
     > "${WORK}/sandbox/README"
+cp "${HERE}/es_range_client.py" "${WORK}/sandbox/"
 sed "s/%STAMP%/${STAMP}/" "${SPEC}" > "${WORK}/spec.json"
 echo "spec: ${WORK}/spec.json"
 grep outDS "${WORK}/spec.json"
