@@ -31,8 +31,8 @@ the destination tailors itself.
 Contained simplicity. The brand at top left reads "epicprod User View"
 and is a plain link to the user view home (`pcs/user/`, an empty page
 whose content is not yet specified); it has no pulldown, and the mode
-flipper is not shown. The menu is Requests (Request Production,
-Production Requests), Campaign (Current campaign, Campaign Catalog),
+flipper is not shown. The menu is Requests (Request form, Request
+list), Campaign (Current campaign, Campaign Catalog),
 Find data, then a wider gap and Full epicprod view, which leaves the
 user view. The System menu and the built-at line are not shown; the
 account name and Logout remain.
