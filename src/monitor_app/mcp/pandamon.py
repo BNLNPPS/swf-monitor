@@ -489,7 +489,19 @@ async def panda_study_job(
             and compare the two before concluding. An `error` here means
             the log could not be read, so the stored diag is all there
             is and is known to be incomplete.
-        task: Parent JEDI task context.
+        task: Parent JEDI task context, with eventservice and splitrule.
+        event_service: Only for an Event Service job (eventservice flag
+            set). flavor_name (consumer, merge, cloned consumer, ...);
+            events_per_range from the task's split rule; ranges — the
+            job's jedi_events rows keyed by task and jobset: total rows,
+            distinct ranges, consumers, events_requested, events_done,
+            counts by range status (ready, sent, running, finished,
+            cancelled, discarded, done, failed, fatal, merged, ...) with
+            attempts left, and the rows under a cap, each with the
+            pilot-form range id task-jobset-file-process-attempt; verdict
+            — the es_* substatus and the taskbuffer code 111-126 with its
+            meaning, e.g. 125 no ES queues available for new consumers
+            (a std jobseed queue never receives a new consumer).
         monitor_url: Link to PanDA monitoring page.
         epicprod_diagnosis: {available, phase, failure_summary, timeline,
             last_refreshed_at, guidance}. Use this for the production-facing

@@ -63,6 +63,9 @@ STUDY_FIELDS = [
     # Pilot / batch
     'pilotid', 'pilottiming', 'batchid',
     'container_name', 'specialhandling', 'commandtopilot',
+    # Event Service: the flavor flag, the jobset the ranges are keyed on,
+    # and the ES verdict substatus
+    'eventservice', 'jobsetid', 'jobsubstatus',
     # All error fields
     'brokerageerrorcode', 'brokerageerrordiag',
     'ddmerrorcode', 'ddmerrordiag',
@@ -91,7 +94,42 @@ TASK_LIST_FIELDS = [
     'progress', 'failurerate', 'errordialog',
     'site', 'corecount', 'taskpriority', 'currentpriority',
     'gshare', 'attemptnr', 'parent_tid', 'workinggroup',
+    'eventservice', 'splitrule',
 ]
+
+# Event Service vocabulary, from panda-server taskbuffer/EventServiceUtils.py
+# and taskbuffer/ErrorCode.py (read 2026-09-09). A job's `eventservice`
+# flag names its flavor; a `jedi_events` row's `status` is a range state;
+# `taskbuffererrorcode` in this band is the server's ES verdict on a job.
+ES_JOB_FLAVORS = {
+    1: 'consumer', 2: 'merge', 3: 'cloned consumer',
+    4: 'jumbo', 5: 'co-jumbo', 6: 'fine-grained',
+}
+ES_RANGE_STATUS = {
+    0: 'ready', 1: 'sent', 2: 'running', 3: 'finished', 4: 'cancelled',
+    5: 'discarded', 6: 'done', 7: 'failed', 8: 'fatal', 9: 'merged',
+    10: 'corrupted', 98: 'reserved_fail', 99: 'reserved_get',
+}
+# Range states whose events count as processed.
+ES_RANGE_DONE = (3, 6, 9)
+ES_TASKBUFFER_CODES = {
+    111: 'retried for event service',
+    112: 'merge for event service',
+    113: 'merge job failed',
+    114: 'max attempt reached for event service',
+    115: 'nothing to do, other consumers still running',
+    116: 'killed, unused and unnecessary',
+    117: 'processed no events on the worker node',
+    118: 'processed no events on the worker node, last consumer',
+    119: 'all event ranges failed',
+    120: 'killed, associated consumer generated the merge',
+    121: 'killed, associated consumer failed',
+    122: 'killed for preemption',
+    123: 'retried but processed no events',
+    124: 'input files inconsistent with JEDI',
+    125: 'no ES queues available for new consumers',
+    126: 'closed in bad job status',
+}
 
 # State-color maps — imported verbatim from PanDA BigMon
 # (panda-bigmon-core/core/static/js/draw-plots-c3.js: task_state_colors /

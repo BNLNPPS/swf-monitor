@@ -21,6 +21,7 @@ from .constants import (
     PANDA_SCHEMA, LIST_FIELDS, ERROR_FIELDS, DIAGNOSE_EXTRA_FIELDS,
     ERROR_COMPONENTS, FAULTY_STATUSES, TASK_LIST_FIELDS,
     STUDY_FIELDS, FILE_FIELDS, JOB_STATUS_CATEGORIES,
+    ES_JOB_FLAVORS, ES_RANGE_STATUS, ES_RANGE_DONE, ES_TASKBUFFER_CODES,
 )
 from .sql import (
     build_union_query, build_count_query,
@@ -1557,6 +1558,9 @@ QUEUE_SUMMARY_FIELDS = [
     'status', 'state', 'vo_name', 'resource_type', 'type', 'capability',
     'corepower', 'atlas_site', 'region', 'country', 'tier', 'cloud',
     'container_type', 'pilot_version', 'maxrss', 'maxtime', 'maxwdir',
+    # Event Service: std never receives a new consumer for unprocessed
+    # ranges; all or es does (panda-server job_complex_module.py).
+    'jobseed',
 ]
 
 
@@ -2881,7 +2885,7 @@ def study_job(pandaid, include_batch_reason=False, include_log_analysis=True,
     if jeditaskid:
         task_sql = f"""
             SELECT "jeditaskid", "taskname", "status", "username", "errordialog",
-                   "failurerate", "workinggroup"
+                   "failurerate", "workinggroup", "eventservice", "splitrule"
             FROM "{PANDA_SCHEMA}"."jedi_tasks"
             WHERE "jeditaskid" = %s
         """
@@ -2891,7 +2895,8 @@ def study_job(pandaid, include_batch_reason=False, include_log_analysis=True,
                 trow = cursor.fetchone()
                 if trow:
                     tcols = ['jeditaskid', 'taskname', 'status', 'username',
-                             'errordialog', 'failurerate', 'workinggroup']
+                             'errordialog', 'failurerate', 'workinggroup',
+                             'eventservice', 'splitrule']
                     task_info = row_to_dict(trow, tcols)
                     task_info = {k: v for k, v in task_info.items() if v is not None}
                     _apply_effective_owners([task_info], 'username')
@@ -2952,6 +2957,12 @@ def study_job(pandaid, include_batch_reason=False, include_log_analysis=True,
 
     if task_info:
         result["task"] = task_info
+
+    # Event Service facts beside the record: one query on jedi_events,
+    # keyed by task and jobset, only for a job the flag marks as ES.
+    event_service = event_service_for_job(job, task_info)
+    if event_service:
+        result["event_service"] = event_service
 
     payload_report = _payload_report(conn, pandaid)
     if payload_report:
@@ -3027,6 +3038,201 @@ def study_job(pandaid, include_batch_reason=False, include_log_analysis=True,
             result['log_analysis'] = {'error': str(e)}
 
     return result
+
+
+# ── Event Service ────────────────────────────────────────────────────────────
+
+ES_RANGE_ROW_CAP = 60
+
+
+def es_events_per_range(splitrule):
+    """The task's events per range, from the ES= term of its split rule.
+
+    JEDI writes ``nEventsPerWorker`` into ``jedi_tasks.splitrule`` as
+    ``ES=<n>`` (``NE=100,ES=10,...``), which spares the taskparams JSON.
+    """
+    m = re.search(r'(?:^|,)ES=(\d+)', splitrule or '')
+    return int(m.group(1)) if m else None
+
+
+def _es_range_query(conn, where_sql, params, cap, consumer_ids=None):
+    """Ranges from jedi_events under one WHERE, read with the table's two
+    kinds of row told apart.
+
+    A range is one (file, process id) span of events. The server keeps a
+    row for it keyed by the JOBSET id: the bookkeeping row, whose status
+    is the range's disposition and whose attemptnr counts down. Each
+    consumer that takes the range adds a row keyed by its own PanDA id:
+    the attempt row, whose status and error code are that attempt's
+    outcome (task 39577, 2026-09-09: ten ranges, ten jobset rows
+    cancelled with 9 attempts left, ten consumer rows failed with pilot
+    error 1220). ``consumer_ids`` names the PanDA ids that are consumers;
+    every other id is a jobset. Without it every row reads as an attempt.
+
+    Returns totals, the distinct ranges, events requested and done (a
+    range is done when any row of it is), the bookkeeping counts by
+    status, the attempt counts by status and error code, and the first
+    ``cap`` rows. The pilot names a range
+    ``<task>-<pandaid>-<file>-<process>-<attempt>`` (task_event_module.py
+    decomposes it in that order); the same string is composed here for
+    reading pilot logs against the record.
+    """
+    sql = f"""
+        SELECT "jeditaskid", "pandaid", "fileid", "job_processid", "status",
+               "def_min_eventid", "def_max_eventid", "processed_upto_eventid",
+               "attemptnr", "error_code", "error_diag"
+        FROM "{PANDA_SCHEMA}"."jedi_events"
+        WHERE {where_sql}
+        ORDER BY "pandaid", "job_processid"
+    """
+    consumer_ids = set(int(i) for i in consumer_ids) if consumer_ids is not None else None
+    range_counts = {}
+    attempt_counts = {}
+    rows = []
+    total = 0
+    consumers = set()
+    jobsets = set()
+    distinct = {}
+    # A successor consumer gets its own jobset with its own copy of the
+    # bookkeeping rows, so a range's current state is the row under its
+    # latest jobset; the range counts are taken over those, one per range.
+    latest_bookkeeping = {}
+
+    def _count(table, key, status, attempt, ecode):
+        c = table.setdefault(key, {
+            'status': status, 'label': ES_RANGE_STATUS.get(status, str(status)),
+            'error_code': ecode, 'n': 0, 'attempts_min': None, 'attempts_max': None})
+        c['n'] += 1
+        if attempt is not None:
+            c['attempts_min'] = attempt if c['attempts_min'] is None else min(c['attempts_min'], attempt)
+            c['attempts_max'] = attempt if c['attempts_max'] is None else max(c['attempts_max'], attempt)
+
+    with conn.cursor() as cursor:
+        cursor.execute(sql, params)
+        for r in cursor.fetchall():
+            (taskid, pid, fileid, procid, status, emin, emax, upto,
+             attempt, ecode, ediag) = r
+            total += 1
+            is_consumer = consumer_ids is None or pid in consumer_ids
+            (consumers if is_consumer else jobsets).add(pid)
+            span = (emax - emin + 1) if emin is not None and emax is not None else 0
+            key = (fileid, procid)
+            done = status in ES_RANGE_DONE
+            prev = distinct.get(key)
+            distinct[key] = (span, done or (prev[1] if prev else False))
+            if is_consumer:
+                _count(attempt_counts, (status, ecode), status, attempt, ecode)
+            else:
+                held = latest_bookkeeping.get(key)
+                if held is None or pid > held[0]:
+                    latest_bookkeeping[key] = (pid, status, attempt)
+            if len(rows) < cap:
+                rows.append({
+                    'range_id': f'{taskid}-{pid}-{fileid}-{procid}-{attempt}',
+                    'keyed': 'consumer' if is_consumer else 'jobset',
+                    'pandaid': pid,
+                    'process': procid,
+                    'status': status,
+                    'label': ES_RANGE_STATUS.get(status, str(status)),
+                    'first_event': emin,
+                    'last_event': emax,
+                    'events': span,
+                    'processed_upto': upto,
+                    'attempts_left': attempt,
+                    'error_code': ecode,
+                    'error_diag': ediag,
+                })
+    for _pid, status, attempt in latest_bookkeeping.values():
+        _count(range_counts, (status,), status, attempt, None)
+    return {
+        'total': total,
+        'ranges': len(distinct),
+        'consumers': len(consumers),
+        'jobsets': sorted(jobsets),
+        'events_requested': sum(span for span, _ in distinct.values()),
+        'events_done': sum(span for span, done in distinct.values() if done),
+        'range_counts': sorted(range_counts.values(), key=lambda c: c['status']),
+        'attempt_counts': sorted(attempt_counts.values(),
+                                 key=lambda c: (c['status'], c['error_code'] or 0)),
+        'rows': rows,
+        'truncated': bool(cap) and total > len(rows),
+        'cap': cap,
+    }
+
+
+def event_service_ranges(jeditaskid, pandaid, jobsetid=None, cap=ES_RANGE_ROW_CAP):
+    """One job's ranges. ``jedi_events.pandaid`` holds the consumer's
+    jobset id, not its own PanDA id (the 2026-09-09 probes: 2722536 for
+    job 2722535), so the rows are keyed by task and by either id."""
+    conn = connections['panda']
+    ids = [int(pandaid)]
+    if jobsetid and int(jobsetid) != int(pandaid):
+        ids.append(int(jobsetid))
+    marks = ', '.join(['%s'] * len(ids))
+    try:
+        return _es_range_query(
+            conn, f'"jeditaskid" = %s AND "pandaid" IN ({marks})',
+            [int(jeditaskid), *ids], cap, consumer_ids=[int(pandaid)])
+    except Exception as e:
+        logger.error(f"event_service_ranges failed for job {pandaid}: {e}")
+        return {'error': str(e)}
+
+
+def event_service_task_summary(jeditaskid, consumer_ids=None, cap=0):
+    """The task's ranges across all its consumers: counts by status and
+    events done against requested. ``consumer_ids`` are the task's job
+    ids, which tell the attempt rows from the jobset bookkeeping rows.
+    No rows by default."""
+    conn = connections['panda']
+    try:
+        return _es_range_query(conn, '"jeditaskid" = %s', [int(jeditaskid)], cap,
+                               consumer_ids=consumer_ids)
+    except Exception as e:
+        logger.error(f"event_service_task_summary failed for task {jeditaskid}: {e}")
+        return {'error': str(e)}
+
+
+def es_verdict(job):
+    """The server's Event Service disposition of a job, when it made one:
+    the es_* substatus and the taskbuffer code in the ES band with its
+    meaning (panda-server ErrorCode.py)."""
+    sub = str(job.get('jobsubstatus') or '')
+    code = job.get('taskbuffererrorcode')
+    try:
+        code = int(code) if code is not None else None
+    except (TypeError, ValueError):
+        code = None
+    meaning = ES_TASKBUFFER_CODES.get(code)
+    if not sub.startswith('es_') and meaning is None:
+        return None
+    return {
+        'substatus': sub or None,
+        'code': code if meaning else None,
+        'meaning': meaning,
+        'diag': job.get('taskbuffererrordiag') if meaning else None,
+    }
+
+
+def event_service_for_job(job, task_info):
+    """The Event Service facts of one job for the job page and the study
+    tool: flavor, events per range, the job's ranges, the verdict. None
+    for a job that is not an Event Service job."""
+    flavor = job.get('eventservice')
+    try:
+        flavor = int(flavor) if flavor is not None else 0
+    except (TypeError, ValueError):
+        flavor = 0
+    if not flavor and 'eventservice' not in str(job.get('specialhandling') or ''):
+        return None
+    ranges = event_service_ranges(job.get('jeditaskid'), job.get('pandaid'),
+                                  job.get('jobsetid'))
+    return {
+        'flavor': flavor,
+        'flavor_name': ES_JOB_FLAVORS.get(flavor, f'flag {flavor}'),
+        'events_per_range': es_events_per_range((task_info or {}).get('splitrule')),
+        'ranges': ranges,
+        'verdict': es_verdict(job),
+    }
 
 
 # ── DataTables query functions ───────────────────────────────────────────────

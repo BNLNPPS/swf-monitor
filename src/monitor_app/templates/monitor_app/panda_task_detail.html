@@ -54,6 +54,42 @@
     </div>
     {% endif %}
 
+    {% if event_service %}
+    <!-- Event Service mode line and the task's range accounting, from
+         jedi_events (swf-epicprod NODE_EVENT_DISPATCHER.md). -->
+    <div class="mb-3 fs-6">
+        <strong>Event Service task</strong>{% if event_service.events_per_range %}, ranges of {{ event_service.events_per_range }} event{{ event_service.events_per_range|pluralize }}{% endif %}:
+        {% with r=event_service.ranges %}
+        {% if r.error %}<span class="text-danger">range record unavailable: {{ r.error }}</span>
+        {% else %}
+        {{ r.events_done }} of {{ r.events_requested }} event{{ r.events_requested|pluralize }} done in {{ r.ranges }} range{{ r.ranges|pluralize }}, {{ r.consumers }} consumer{{ r.consumers|pluralize }}.
+        {% if r.range_counts %}Ranges: {% for c in r.range_counts %}{{ c.n }} {{ c.label }}{% if c.attempts_max is not None %} ({{ c.attempts_max }} attempt{{ c.attempts_max|pluralize }} left){% endif %}{% if not forloop.last %}, {% endif %}{% endfor %}.{% endif %}
+        {% if r.attempt_counts %}Consumer attempts: {% for c in r.attempt_counts %}{{ c.n }} {{ c.label }}{% if c.error_code %} (error {{ c.error_code }}){% endif %}{% if not forloop.last %}, {% endif %}{% endfor %}.{% endif %}
+        {% if not r.total %}No range rows recorded.{% endif %}
+        {% endif %}
+        {% endwith %}
+    </div>
+    {% if event_service.ranges.range_counts or event_service.ranges.attempt_counts %}
+    <div class="card mb-3">
+        <div class="card-header"><strong>Event Ranges</strong> <span class="text-muted ms-2">{{ event_service.ranges.total }} row{{ event_service.ranges.total|pluralize }} in the range record across the task</span></div>
+        <div class="card-body">
+            <p class="mb-2 text-muted">Each range has a row keyed by its jobset, the server's bookkeeping with the attempts left, and a row keyed by each consumer that took it, that attempt's outcome.</p>
+            <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable mb-0">
+                <thead><tr><th>Keyed by</th><th>Status</th><th>Ranges</th><th>Attempts left</th><th>Error</th></tr></thead>
+                <tbody>
+                {% for c in event_service.ranges.range_counts %}
+                <tr><td>jobset</td><td class="{{ c.label|state_class }}">{{ c.label }}</td><td>{{ c.n }}</td><td>{% if c.attempts_min == c.attempts_max %}{{ c.attempts_min|default_if_none:"" }}{% else %}{{ c.attempts_min }} to {{ c.attempts_max }}{% endif %}</td><td></td></tr>
+                {% endfor %}
+                {% for c in event_service.ranges.attempt_counts %}
+                <tr><td>consumers</td><td class="{{ c.label|state_class }}">{{ c.label }}</td><td>{{ c.n }}</td><td>{% if c.attempts_min == c.attempts_max %}{{ c.attempts_min|default_if_none:"" }}{% else %}{{ c.attempts_min }} to {{ c.attempts_max }}{% endif %}</td><td>{{ c.error_code|default_if_none:"" }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+    {% endif %}
+
     <div class="row">
         <!-- Task Info -->
         <div class="col-md-6 mb-3">

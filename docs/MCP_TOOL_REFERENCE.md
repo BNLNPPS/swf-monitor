@@ -561,7 +561,8 @@ Returns:
 - `log_urls`: Harvester log URLs — `pilot_stdout`, `pilot_stderr`, `batch_log` (require CILogon auth)
 - `log_file`: Log tarball metadata if registered (lfn, guid, scope for future rucio retrieval)
 - `harvester`: Condor worker details (workerid, status, error info)
-- `task`: Parent JEDI task context (name, status, error dialog)
+- `task`: Parent JEDI task context (name, status, error dialog, eventservice, splitrule)
+- `event_service`: Event Service jobs only — flavor, events per range, the job's ranges from `jedi_events` (counts by range status with attempts left, distinct ranges and events done against requested, rows under a cap with the pilot-form range id) and the server's verdict (es_* substatus, taskbuffer code 111–126 with its meaning). The same facts are on the job and task pages; the ePIC queues page shows each queue's `jobseed`.
 - `monitor_url`: Link to PanDA monitoring page
 - `ai_content`: Availability flag and exact retrieval tool/arguments for linked AI assessments
 

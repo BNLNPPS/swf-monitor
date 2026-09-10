@@ -23,6 +23,25 @@
     <div class="alert alert-danger">{{ error }}</div>
     {% else %}
 
+    {% if event_service %}
+    <!-- Event Service mode line: the job's ES facts beside the record -->
+    <div class="mb-3 fs-6">
+        <strong>Event Service {{ event_service.flavor_name }} job</strong>:
+        {% with r=event_service.ranges %}
+        {% if r.error %}<span class="text-danger">range record unavailable: {{ r.error }}</span>
+        {% else %}
+        {{ r.events_requested }} event{{ r.events_requested|pluralize }} in {{ r.ranges }} range{{ r.ranges|pluralize }}{% if event_service.events_per_range %} of {{ event_service.events_per_range }}{% endif %}, {{ r.events_done }} done.
+        {% if r.range_counts %}Ranges: {% for c in r.range_counts %}{{ c.n }} {{ c.label }}{% if c.attempts_max is not None %} ({{ c.attempts_max }} attempt{{ c.attempts_max|pluralize }} left){% endif %}{% if not forloop.last %}, {% endif %}{% endfor %}.{% endif %}
+        {% if r.attempt_counts %}This consumer: {% for c in r.attempt_counts %}{{ c.n }} {{ c.label }}{% if c.error_code %} (error {{ c.error_code }}){% endif %}{% if not forloop.last %}, {% endif %}{% endfor %}.{% elif r.total %}This consumer took no range.{% endif %}
+        {% if not r.total %}No range rows recorded.{% endif %}
+        {% endif %}
+        {% endwith %}
+        {% if event_service.verdict %}
+        <span class="ms-2">Verdict: <span class="{% if event_service.verdict.substatus %}text-danger{% endif %}">{{ event_service.verdict.substatus|default:"" }}{% if event_service.verdict.code %}{% if event_service.verdict.substatus %}, {% endif %}code {{ event_service.verdict.code }}: {{ event_service.verdict.meaning }}{% endif %}</span></span>
+        {% endif %}
+    </div>
+    {% endif %}
+
     <div class="row">
         <!-- Job Info -->
         <div class="col-md-6 mb-3">
@@ -113,6 +132,54 @@
             {% endif %}
         </div>
     </div>
+
+    <!-- The job's event ranges from jedi_events: the server's record of
+         what the consumer was given and what became of each range
+         (swf-epicprod NODE_EVENT_DISPATCHER.md). -->
+    {% if event_service and not event_service.ranges.error %}
+    <div class="card mb-3">
+        <div class="card-header"><strong>Event Ranges ({{ event_service.ranges.total }})</strong>
+            <span class="text-muted ms-2">{{ event_service.ranges.events_done }} of {{ event_service.ranges.events_requested }} events done</span>
+            {% if event_service.ranges.truncated %}<span class="text-muted ms-2">first {{ event_service.ranges.cap }} of {{ event_service.ranges.total }} rows shown</span>{% endif %}
+        </div>
+        <div class="card-body">
+            <p class="mb-2 text-muted">Each range has a row keyed by the jobset{% if event_service.ranges.jobsets %} ({{ event_service.ranges.jobsets|join:", " }}){% endif %}, the server's bookkeeping with the attempts left, and a row keyed by each consumer that took it, that attempt's outcome.</p>
+            {% if event_service.ranges.range_counts or event_service.ranges.attempt_counts %}
+            <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable mb-3">
+                <thead><tr><th>Keyed by</th><th>Status</th><th>Ranges</th><th>Attempts left</th><th>Error</th></tr></thead>
+                <tbody>
+                {% for c in event_service.ranges.range_counts %}
+                <tr><td>jobset</td><td class="{{ c.label|state_class }}">{{ c.label }}</td><td>{{ c.n }}</td><td>{% if c.attempts_min == c.attempts_max %}{{ c.attempts_min|default_if_none:"" }}{% else %}{{ c.attempts_min }} to {{ c.attempts_max }}{% endif %}</td><td></td></tr>
+                {% endfor %}
+                {% for c in event_service.ranges.attempt_counts %}
+                <tr><td>this consumer</td><td class="{{ c.label|state_class }}">{{ c.label }}</td><td>{{ c.n }}</td><td>{% if c.attempts_min == c.attempts_max %}{{ c.attempts_min|default_if_none:"" }}{% else %}{{ c.attempts_min }} to {{ c.attempts_max }}{% endif %}</td><td>{{ c.error_code|default_if_none:"" }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+            {% if event_service.ranges.rows %}
+            <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable mb-0">
+                <thead><tr><th>Range</th><th>Keyed by</th><th>Events</th><th>Status</th><th>Processed up to</th><th>Attempts left</th><th>Error</th></tr></thead>
+                <tbody>
+                {% for r in event_service.ranges.rows %}
+                <tr>
+                    <td>{{ r.range_id }}</td>
+                    <td>{{ r.keyed }}</td>
+                    <td>{{ r.first_event }}{% if r.last_event != r.first_event %} to {{ r.last_event }}{% endif %} ({{ r.events }})</td>
+                    <td class="{{ r.label|state_class }}">{{ r.label }}</td>
+                    <td>{{ r.processed_upto|default:"" }}</td>
+                    <td>{{ r.attempts_left|default_if_none:"" }}</td>
+                    <td>{% if r.error_code %}{{ r.error_code }} {% endif %}{{ r.error_diag|default:"" }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="mb-0 text-muted">No range rows recorded for this job.</p>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
 
     <!-- What the payload reported: stage by stage, from the payload's own
          report carried in the job metadata (swf-epicprod EPICPROD_PAYLOAD.md).

@@ -66,6 +66,7 @@
                     <th title="Finished (green) and failed (red) jobs per 8-hour bin over the last 2 weeks">Completions<br>2&nbsp;wks</th>
                     <th title="Landing declines in the last 2 weeks: jobs whose payload could not reach the Rucio server or the input door from the worker and started no work (payload exit 80)">Declined<br>2&nbsp;wks</th>
                     <th>Resource Type</th>
+                    <th title="Event Service job seed: a std queue never receives a new consumer for a job's unprocessed ranges, so deferred ranges die with the job; all or es lets the server issue one">Job<br>seed</th>
                     <th>Type</th>
                     <th>Region</th>
                     <th>Tier</th>
@@ -107,6 +108,7 @@
                         {% endif %}
                     </td>
                     <td>{{ q.resource_type|default:"—" }}</td>
+                    <td>{{ q.jobseed|default:"—" }}</td>
                     <td>{{ q.type|default:"—" }}</td>
                     <td>{{ q.country|default:"—" }}</td>
                     <td{% if q.tier == "Opp" %} title="Opportunistic"{% endif %}>{{ q.tier|default:"—" }}</td>
@@ -114,7 +116,7 @@
                     <td><a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ q.panda_queue }}">View</a></td>
                 </tr>
             {% empty %}
-                <tr><td colspan="15" class="text-center text-muted">No ePIC queues found</td></tr>
+                <tr><td colspan="16" class="text-center text-muted">No ePIC queues found</td></tr>
             {% endfor %}
             </tbody>
         </table>

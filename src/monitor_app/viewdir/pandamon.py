@@ -1638,8 +1638,28 @@ def panda_task_detail(request, jeditaskid):
             pcs_adopt = {'applicable': True, 'eligible': False,
                          'blocked': 'the readiness check failed; see the server log',
                          'jedi_task_id': jeditaskid, 'config': None}
+    # Event Service facts across the task: the range counts by status and
+    # events done against requested, one query on jedi_events. Only for a
+    # task the flag marks as ES.
+    event_service = None
+    if task.get('eventservice'):
+        from ..panda.queries import event_service_task_summary, es_events_per_range
+        from ..panda.constants import ES_JOB_FLAVORS
+        try:
+            flavor = int(task.get('eventservice') or 0)
+        except (TypeError, ValueError):
+            flavor = 0
+        event_service = {
+            'flavor': flavor,
+            'flavor_name': ES_JOB_FLAVORS.get(flavor, f'flag {flavor}'),
+            'events_per_range': es_events_per_range(task.get('splitrule')),
+            'ranges': event_service_task_summary(
+                int(jeditaskid),
+                consumer_ids=[j['pandaid'] for j in jobs if j.get('pandaid')]),
+        }
     return render(request, 'monitor_app/panda_task_detail.html', {
         'task': task,
+        'event_service': event_service,
         'pcs_adopt': pcs_adopt,
         'errordialog_display': errordialog_display,
         'jeditaskid': jeditaskid,
