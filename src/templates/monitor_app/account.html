@@ -90,11 +90,6 @@
         <h3>Account Details</h3>
         <p><strong>Username:</strong> {{ user.username }}</p>
         <p><strong>Email:</strong> {{ user.email|default:'Not set' }}</p>
-        <p><strong>Roles:</strong>
-            {% if user.is_superuser %}Superuser{% endif %}
-            {% if user.is_staff and not user.is_superuser %}Staff{% endif %}
-            {% if not user.is_superuser and not user.is_staff %}User{% endif %}
-        </p>
 
         <h3 style="margin-top: 24px;">Production access</h3>
         {% if authority.may_act %}
@@ -107,15 +102,6 @@
             Your account holds
             {{ authority.record.rights|default:"granted" }} rights on this
             system.
-          {% endif %}
-          {% if authority.is_ops %}
-            The operations role also lets you administer accounts on the
-            <a href="{% url 'monitor_app:user_admin' %}">User admin</a> page.
-          {% endif %}
-          {% if authority.may_set_priority %}
-            You may set request priorities{% if authority.is_pac %}, as a physics analysis coordinator (PAC){% endif %}.
-          {% else %}
-            Request priorities are set by the physics analysis coordinators (PAC); your account does not hold that role.
           {% endif %}
         </p>
         {% else %}
@@ -148,6 +134,14 @@
         </p>
         {% endif %}
         {% endif %}
+
+        <h3 style="margin-top: 24px;">Roles</h3>
+        <p>
+          <span class="me-3"><input type="checkbox" class="form-check-input" disabled{% if authority.is_ops %} checked{% endif %}> Ops</span>
+          <span class="me-3"><input type="checkbox" class="form-check-input" disabled{% if authority.is_pac %} checked{% endif %}> PAC</span>
+          <span class="me-3"><input type="checkbox" class="form-check-input" disabled{% if user.is_staff or user.is_superuser %} checked{% endif %}> Admin</span>
+        </p>
+        <p class="text-muted">Ops: act on the production system, administer accounts, set request priorities. PAC: set request priorities, as a physics analysis coordinator. Admin: staff on this system. Roles are granted on the <a href="{% url 'monitor_app:user_admin' %}">User admin</a> page.</p>
 
         <h3 style="margin-top: 24px;">Change Password</h3>
         {% if is_tunnel %}
