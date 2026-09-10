@@ -436,6 +436,7 @@
       .sticky-header > nav a.nav-user-link,
       .sticky-header > nav a.nav-user-item { color: #8fc7e8; }
       .nav-user-link { font-weight: 700; }
+      .nav-user-exit { margin-left: 2.5em; }
       /* In the user view the only white text is the brand: the System
          menu and the built-at line are not shown, and the account links
          take the menu-bar blue. */
@@ -578,14 +579,14 @@
     </script>
     <div class="sticky-header">
     <nav>
-        <a id="mode-user-brand" href="{% url 'monitor_app:user_view_home' %}?user_view=1">epicprod User View</a>
+        <a id="mode-user-brand" href="{% url 'pcs:user_view_home' %}?user_view=1">epicprod User View</a>
         <div class="dropdown" id="mode-flipper">
             <button class="dropbtn" id="mode-label">
                 <span class="mode-title mode-title-production">epicprod</span>
                 <span class="mode-title mode-title-testbed">ePIC Testbed</span>
             </button>
             <div class="dropdown-content">
-                <a href="{% url 'monitor_app:user_view_home' %}?user_view=1">epicprod User View</a>
+                <a href="{% url 'pcs:user_view_home' %}?user_view=1">epicprod User View</a>
                 <a href="{% url 'monitor_app:prod_hub' %}?user_view=0" id="flip-production" onclick="setNavMode('production');">epicprod - ePIC Production</a>
                 <a href="{% if is_tunnel %}https://pandaserver02.sdcc.bnl.gov/swf-monitor/testbed/{% else %}{% url 'monitor_app:testbed_hub' %}{% endif %}" id="flip-testbed" onclick="setNavMode('testbed');">ePIC Testbed</a>
             </div>
@@ -650,12 +651,13 @@
             </div>
         </div>
         <a href="{% url 'pcs:find_data' %}?user_view=1" class="nav-user-item{% if active_nav.find_data %} nav-active{% endif %}">Find data</a>
+        <a href="{% url 'monitor_app:prod_hub' %}?user_view=0" class="nav-user-item nav-user-exit">Full epicprod view</a>
         </span>
 
         {# ── Production mode ── #}
         {# This nav is the only copy: swf-remote fetches it from the hub for its own pages. #}
         <span class="nav-mode nav-production">
-        <a href="{% url 'monitor_app:user_view_home' %}?user_view=1" class="nav-user-link">User view</a>
+        <a href="{% url 'pcs:user_view_home' %}?user_view=1" class="nav-user-link">User view</a>
         <div class="dropdown">
             <button class="dropbtn{% if active_nav.requests %} nav-active{% endif %}">Requests</button>
             <div class="dropdown-content">

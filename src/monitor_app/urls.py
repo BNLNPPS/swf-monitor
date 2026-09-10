@@ -58,7 +58,7 @@ from .views import (
     update_panda_queues_from_github,
     update_rucio_endpoints_from_github,
     mcp_health,
-    panda_hub, prod_hub, testbed_hub, user_view_home,
+    panda_hub, prod_hub, testbed_hub,
     ai_content_list,
     ai_content_detail,
     ai_content_by_name,
@@ -252,7 +252,6 @@ urlpatterns = [
     # PanDA Hub
     path('panda/', panda_hub, name='panda_hub'),
     path('prod/', prod_hub, name='prod_hub'),
-    path('user/', user_view_home, name='user_view_home'),
     path('compute-usage/', compute_usage, name='compute_usage'),
     path('compute-usage/data/', compute_usage_data,
          name='compute_usage_data'),
