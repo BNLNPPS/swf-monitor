@@ -1,10 +1,12 @@
 {% load swf_fmt %}
-{# The campaign completion panel: one summary line and one priority table
-   per current or producing campaign, from the cached completion product
-   (CAMPAIGN_DELIVERY.md, Completion). Shared by the epicprod home and the
-   user view home; the operator controls (Update summary, the progress
-   view link) are left out in the user view, and the table's links carry
-   the user view parameter there. #}
+{% comment %}
+The campaign completion panel: one summary line and one priority table
+per current or producing campaign, from the cached completion product
+(CAMPAIGN_DELIVERY.md, Completion). Shared by the epicprod home and the
+user view home; the operator controls (Update summary, the progress view
+link) are left out in the user view, and the table's links carry the user
+view parameter there.
+{% endcomment %}
 <style>
   .prod-summary-strip {
     color: var(--bs-body-color);
