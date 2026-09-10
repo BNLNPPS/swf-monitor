@@ -1,0 +1,22 @@
+{# Inclusive filter rows (monitor_app/inclusive_filter.py): every value listed with its count, selected values bold, the shown rows the union of the selections. Context: inclusive_filter = InclusiveFilter.context(...). #}
+<div class="card mb-3">
+    <div class="card-body">
+        {% for label, f in inclusive_filter.facet_rows %}
+        <div><strong>{{ label }}:</strong>
+            <a href="{{ f.all_url }}" {% if f.all_active %}style="font-weight:bold;text-decoration:underline;"{% endif %} class="me-2">All</a>
+            {% for item in f.items %}
+            <a href="{{ item.url }}" {% if item.active %}style="font-weight:bold;text-decoration:underline;"{% endif %} class="me-2" title="{% if item.active %}Selected: click to remove{% else %}Click to add its rows{% endif %}">{{ item.value }} ({{ item.count }})</a>
+            {% endfor %}
+        </div>
+        {% endfor %}
+        <div class="mt-2" style="display: inline-block;{% if inclusive_filter.active %} padding: .35em .8em; border-radius: .5em; border: 2px solid #d39e00; background-color: rgba(255, 193, 7, .12);{% endif %}">
+            {% if inclusive_filter.active %}
+            <strong>Showing rows matching any of:</strong>
+            {% for label, value in inclusive_filter.active_filters %}<span class="me-2">{{ label }}: <strong>{{ value }}</strong></span>{% endfor %}
+            <a href="{{ inclusive_filter.clear_url }}" class="btn btn-link btn-sm p-0 ms-2">clear all</a>
+            {% else %}
+            <strong>Filters:</strong> <span class="text-muted">none selected, all rows shown. Click a value to select it; each further click adds its rows.</span>
+            {% endif %}
+        </div>
+    </div>
+</div>
