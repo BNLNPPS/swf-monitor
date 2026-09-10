@@ -3412,6 +3412,14 @@ def _corun_narrative_count():
     return len(payload or [])
 
 
+def user_view_home(request):
+    """The user view home: the reduced epicprod face's landing page. Its
+    content is not yet specified; the page carries the user-view nav
+    and nothing else."""
+    return render(request, 'monitor_app/user_view_home.html',
+                  {'nav_mode': 'production'})
+
+
 def prod_hub(request):
     """ePIC Production home — Nav (workflow hub) and Ops (dashboard) tabs."""
     from pcs.views import pcs_hub_counts

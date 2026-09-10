@@ -436,6 +436,13 @@
       .sticky-header > nav a.nav-user-link,
       .sticky-header > nav a.nav-user-item { color: #8fc7e8; }
       .nav-user-link { font-weight: 700; }
+      /* In the user view the only white text is the brand: the System
+         menu and the built-at line are not shown, and the account links
+         take the menu-bar blue. */
+      html[data-user-view="1"] #nav-system,
+      html[data-user-view="1"] .main-time-info { display: none; }
+      html[data-user-view="1"] .sticky-header > nav .nav-auth a,
+      html[data-user-view="1"] .sticky-header > nav .nav-auth button { color: #8fc7e8; }
       .nav-label {
         color: #fff;
         font-weight: 700;
@@ -571,14 +578,14 @@
     </script>
     <div class="sticky-header">
     <nav>
-        <a id="mode-user-brand" href="{% url 'pcs:pcs_campaign_plan' %}?user_view=1">epicprod User View</a>
+        <a id="mode-user-brand" href="{% url 'monitor_app:user_view_home' %}?user_view=1">epicprod User View</a>
         <div class="dropdown" id="mode-flipper">
             <button class="dropbtn" id="mode-label">
                 <span class="mode-title mode-title-production">epicprod</span>
                 <span class="mode-title mode-title-testbed">ePIC Testbed</span>
             </button>
             <div class="dropdown-content">
-                <a href="{% url 'pcs:pcs_campaign_plan' %}?user_view=1">epicprod User View</a>
+                <a href="{% url 'monitor_app:user_view_home' %}?user_view=1">epicprod User View</a>
                 <a href="{% url 'monitor_app:prod_hub' %}?user_view=0" id="flip-production" onclick="setNavMode('production');">epicprod - ePIC Production</a>
                 <a href="{% if is_tunnel %}https://pandaserver02.sdcc.bnl.gov/swf-monitor/testbed/{% else %}{% url 'monitor_app:testbed_hub' %}{% endif %}" id="flip-testbed" onclick="setNavMode('testbed');">ePIC Testbed</a>
             </div>
@@ -648,7 +655,7 @@
         {# ── Production mode ── #}
         {# This nav is the only copy: swf-remote fetches it from the hub for its own pages. #}
         <span class="nav-mode nav-production">
-        <a href="{% url 'pcs:pcs_campaign_plan' %}?user_view=1" class="nav-user-link">User view</a>
+        <a href="{% url 'monitor_app:user_view_home' %}?user_view=1" class="nav-user-link">User view</a>
         <div class="dropdown">
             <button class="dropbtn{% if active_nav.requests %} nav-active{% endif %}">Requests</button>
             <div class="dropdown-content">
@@ -737,7 +744,7 @@
         <a href="{% url 'monitor_app:log_list' %}?app_name=epicprod" class="{% if active_nav.logs %}nav-active{% endif %}">Logs</a>
         </span>
         <span class="nav-spacer"></span>
-        <div class="dropdown">
+        <div class="dropdown" id="nav-system">
             <button class="dropbtn{% if system_status_overall == 'error' %} nav-system-error{% endif %}{% if active_nav.system or active_nav.snapper or active_nav.about %} nav-active{% endif %}"
                     id="system-status-nav-link"
                     data-system-status="{{ system_status_overall|default:'unknown' }}"
