@@ -23,31 +23,6 @@
         color: var(--prod-muted);
         margin-bottom: 0;
       }
-      .prod-summary-strip {
-        color: var(--bs-body-color);
-        font-size: 1.08rem;
-        font-weight: 600;
-        margin: 0 0 .55rem;
-      }
-      .prod-summary-strip a { font-weight: 500; }
-      .prod-summary-updated { font-size: .92rem; font-weight: 400; }
-      .prod-completion-panel {
-        background: var(--prod-panel);
-        border: 1px solid var(--prod-border);
-        border-radius: 6px;
-        margin: .5rem 0 .8rem;
-        padding: .7rem .85rem .45rem;
-      }
-      .prod-completion-table {
-        font-size: 1.02rem;
-        margin-bottom: .25rem;
-      }
-      .prod-completion-table th { white-space: nowrap; }
-      .prod-completion-table td { text-align: right; }
-      .prod-completion-table td:first-child {
-        font-weight: 600;
-        text-align: left;
-      }
       .workflow-grid {
         align-items: stretch;
         display: grid;
@@ -162,41 +137,7 @@
     <div class="prod-workflow-header">
         <h1>epicprod - ePIC Production {% if active_tab == 'ops' %}Operations{% else %}System{% endif %}</h1>
         <p>ePIC experiment production requests, configuration, management and monitoring</p>
-        {% for row in campaign_summary_lines %}
-        <div class="prod-completion-panel" title="Campaign completion estimate as of {{ campaign_summary_built_at|fmt_dt }} (docs/CAMPAIGN_DELIVERY.md, Completion)">
-            <p class="prod-summary-strip">{{ row.summary|linebreaksbr }} · <a href="{% url 'snapper_ai:snapper_focus' 'epicprod' 'campaign' %}?campaign={{ row.campaign }}">campaign progress view</a>
-                <a href="?tab={{ active_tab }}&amp;refresh=1" class="btn btn-sm btn-secondary ms-2 swf-update-btn">Update summary</a>
-                <span class="text-muted prod-summary-updated">updated <span data-relative-time="{{ campaign_summary_built_at|date:'c' }}" data-relative-time-interval="10">{{ campaign_summary_built_at|fmt_dt }}</span></span></p>
-            {% if row.priority_rows %}
-            <table class="table table-bordered table-sm align-middle w-auto swf-sortable prod-completion-table">
-                <thead>
-                    <tr>
-                        <th title="Request priority of the physics configuration; a configuration takes the highest priority among its requests">request priority</th>
-                        <th title="Physics configurations in the campaign">physics configs</th>
-                        <th title="Has an event count target, delivered events below it">below target</th>
-                        <th title="No files delivered and no task in flight">not started</th>
-                        <th title="Has delivered data but no event count target, so completion is unknown">no target</th>
-                        <th title="Delivered events reached the event count target">complete</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for prow in row.priority_rows %}
-                    {% with plan_base='?campaign='|add:row.campaign|add:'&view=pc' %}
-                    <tr>
-                        <td>{{ prow.label }}</td>
-                        <td><a href="{% url 'pcs:pcs_campaign_plan' %}{{ plan_base }}{% if prow.param %}&amp;priority={{ prow.param }}{% endif %}">{{ prow.configurations }}</a></td>
-                        <td><a href="{% url 'pcs:pcs_campaign_plan' %}{{ plan_base }}{% if prow.param %}&amp;priority={{ prow.param }}{% endif %}&amp;status=below-target">{{ prow.below_target }}</a></td>
-                        <td><a href="{% url 'pcs:pcs_campaign_plan' %}{{ plan_base }}{% if prow.param %}&amp;priority={{ prow.param }}{% endif %}&amp;status=not-started">{{ prow.not_started }}</a></td>
-                        <td><a href="{% url 'pcs:pcs_campaign_plan' %}{{ plan_base }}{% if prow.param %}&amp;priority={{ prow.param }}{% endif %}&amp;status=no-target">{{ prow.no_target }}</a></td>
-                        <td><a href="{% url 'pcs:pcs_campaign_plan' %}{{ plan_base }}{% if prow.param %}&amp;priority={{ prow.param }}{% endif %}&amp;status=complete">{{ prow.complete }}</a></td>
-                    </tr>
-                    {% endwith %}
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% endif %}
-        </div>
-        {% endfor %}
+        {% include 'monitor_app/_campaign_completion_panel.html' %}
     </div>
 
     {% if active_tab == 'ops' %}
