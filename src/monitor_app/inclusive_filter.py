@@ -6,23 +6,35 @@ the rows shown are the union of everything selected. Clicking a selected
 value deselects it; a facet's All clears that facet; clear all clears
 everything. With nothing selected every row is shown.
 
-State rides one URL parameter, ``f``, the selections in click order as
-``facet:value`` pairs joined by ``|`` (``?f=process:DIS|beam:10x100``),
-so the page stays bookmarkable and a consumer that carries the page's
-query forward carries one key. A page that had one parameter per facet
-names them in ``legacy`` and old links keep working: each is read as a
-selection and dropped from the URLs this filter writes.
+The selection is applied in the browser. The server renders every row
+once, each carrying its facet values in a ``data-if`` attribute and the
+initial hidden state from the URL, and the include's script does the
+rest without a request: bold, show and hide, the shown count, the
+statement, the URL. State rides one URL parameter, ``f``, the selections
+in click order as ``facet:value`` pairs joined by ``|``
+(``?f=process:DIS|beam:10x100``), rewritten with replaceState on each
+click, so the page stays bookmarkable and a consumer that carries the
+page's query forward carries one key. A page that had one parameter per
+facet names them in ``legacy`` and old links keep working: each is read
+as a selection and dropped from the URLs this filter writes.
 
 Usage, on a view whose rows are plain mappings::
 
     facets = [Facet('process', 'Process', lambda r: r['process']), ...]
     flt = InclusiveFilter(request.GET, legacy={'process': 'process'})
-    rows = flt.apply(rows_all, facets)
+    shown = flt.annotate(rows_all, facets)   # row['if_attr'], row['if_hidden']
     context['inclusive_filter'] = flt.context(rows_all, facets, request)
 
-and in the template ``{% include 'monitor_app/_inclusive_filter.html' %}``.
+in the template ``{% include 'monitor_app/_inclusive_filter.html' %}``
+above the table, and on every row
+``<tr data-if="{{ r.if_attr }}"{% if r.if_hidden %} class="swf-if-hidden"{% endif %}>``.
+An element with class ``swf-if-shown`` receives the shown count. A page
+script that must follow the selection listens for the ``swf-if-change``
+event on ``document`` (``detail.selections``, ``detail.query``,
+``detail.shown``) and reads visible rows as ``tr[data-if]:not(.swf-if-hidden)``.
 """
 
+import json
 from urllib.parse import urlencode
 
 PARAM = 'f'
@@ -47,7 +59,7 @@ class Facet:
 
     def values(self, row):
         got = self._values(row)
-        if got is None:
+        if got is None or got == '':
             return ()
         if isinstance(got, (str, int, float)):
             return (str(got),)
@@ -95,22 +107,52 @@ class InclusiveFilter:
         """The query fragment that reproduces this slice, for urlencode."""
         return {self.param: self.encode()} if self.selections else {}
 
+    def _wanted(self):
+        wanted = {}
+        for key, value in self.selections:
+            wanted.setdefault(key, set()).add(value)
+        return wanted
+
+    def matches(self, row, facets):
+        """Whether the row carries ANY selected value; True with none made."""
+        if not self.selections:
+            return True
+        by_key = {f.key: f for f in facets}
+        for key, values in self._wanted().items():
+            facet = by_key.get(key)
+            if facet is not None and values & set(facet.values(row)):
+                return True
+        return False
+
     def apply(self, rows, facets):
         """The rows matching ANY selection; all rows when none is made."""
         if not self.selections:
             return list(rows)
-        by_key = {f.key: f for f in facets}
-        wanted = {}
-        for key, value in self.selections:
-            wanted.setdefault(key, set()).add(value)
-        out = []
-        for row in rows:
-            for key, values in wanted.items():
-                facet = by_key.get(key)
-                if facet is not None and values & set(facet.values(row)):
-                    out.append(row)
-                    break
+        return [row for row in rows if self.matches(row, facets)]
+
+    def row_values(self, row, facets):
+        """{facet key: [values]} the row carries, the browser's copy of
+        what the facets see."""
+        out = {}
+        for facet in facets:
+            values = facet.values(row)
+            if values:
+                out[facet.key] = list(values)
         return out
+
+    def row_attr(self, row, facets):
+        """The row's ``data-if`` attribute value (JSON)."""
+        return json.dumps(self.row_values(row, facets), separators=(',', ':'))
+
+    def annotate(self, rows, facets):
+        """Set ``if_attr`` and ``if_hidden`` on every row (plain mappings)
+        for the template; returns the number initially shown."""
+        shown = 0
+        for row in rows:
+            row['if_attr'] = self.row_attr(row, facets)
+            row['if_hidden'] = not self.matches(row, facets)
+            shown += 0 if row['if_hidden'] else 1
+        return shown
 
     def _url(self, request, selections):
         params = request.GET.copy()
@@ -180,12 +222,17 @@ class InclusiveFilter:
 
     def context(self, rows_all, facets, request):
         """The template include's context: facet rows, the active list,
-        the clear-all URL and the shown-rows statement."""
+        the clear-all URL, and the state the include's script starts
+        from (the parameter name, the legacy parameters it drops from
+        the URL, the selections)."""
         return {
             'facet_rows': self.facet_rows(rows_all, facets, request),
             'active_filters': self.active_filters(facets),
             'clear_url': self.clear_url(request),
             'active': self.active,
+            'param': self.param,
+            'legacy_json': json.dumps(sorted(self.legacy.values())),
+            'selections_json': json.dumps([list(p) for p in self.selections]),
         }
 
 

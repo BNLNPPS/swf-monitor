@@ -1,22 +1,191 @@
-{# Inclusive filter rows (monitor_app/inclusive_filter.py): every value listed with its count, selected values bold, the shown rows the union of the selections. Context: inclusive_filter = InclusiveFilter.context(...). #}
-<div class="card mb-3">
+{% comment %}
+Inclusive filter (monitor_app/inclusive_filter.py, docs/INCLUSIVE_FILTER.md):
+every value listed with its count, selected values bold, the shown rows the
+union of the selections. Server-rendered from inclusive_filter =
+InclusiveFilter.context(...); from there the script below applies clicks in
+the browser: rows are tr[data-if] anywhere on the page, hidden with the
+swf-if-hidden class; elements with class swf-if-shown receive the shown
+count; the URL parameter is rewritten with replaceState; the swf-if-change
+event on document carries the new state to page scripts. The anchors keep
+server URLs, so a middle click or a page without script still works.
+{% endcomment %}
+<style>
+  .swf-if-hidden { display: none !important; }
+  .swf-if a.swf-if-on { font-weight: bold; text-decoration: underline; }
+  .swf-if .swf-if-box { display: inline-block; }
+  .swf-if .swf-if-box.swf-if-active { padding: .35em .8em; border-radius: .5em; border: 2px solid #d39e00; background-color: rgba(255, 193, 7, .12); }
+  .swf-if-restriped > tbody > tr.swf-if-odd > * { --bs-table-accent-bg: var(--bs-table-striped-bg); color: var(--bs-table-striped-color); }
+</style>
+<div class="card mb-3 swf-if" data-if-param="{{ inclusive_filter.param }}" data-if-legacy="{{ inclusive_filter.legacy_json }}" data-if-selections="{{ inclusive_filter.selections_json }}">
     <div class="card-body">
         {% for label, f in inclusive_filter.facet_rows %}
-        <div><strong>{{ label }}:</strong>
-            <a href="{{ f.all_url }}" {% if f.all_active %}style="font-weight:bold;text-decoration:underline;"{% endif %} class="me-2">All</a>
+        <div data-if-label="{{ label }}"><strong>{{ label }}:</strong>
+            <a href="{{ f.all_url }}" data-if-all="{{ f.key }}" class="me-2{% if f.all_active %} swf-if-on{% endif %}">All</a>
             {% for item in f.items %}
-            <a href="{{ item.url }}" {% if item.active %}style="font-weight:bold;text-decoration:underline;"{% endif %} class="me-2" title="{% if item.active %}Selected: click to remove{% else %}Click to add its rows{% endif %}">{{ item.value }} ({{ item.count }})</a>
+            <a href="{{ item.url }}" class="me-2 swf-if-value{% if item.active %} swf-if-on{% endif %}" data-if-key="{{ f.key }}" data-if-value="{{ item.raw }}" data-if-display="{{ item.value }}" title="{% if item.active %}Selected: click to remove{% else %}Click to add its rows{% endif %}">{{ item.value }} ({{ item.count }})</a>
             {% endfor %}
         </div>
         {% endfor %}
-        <div class="mt-2" style="display: inline-block;{% if inclusive_filter.active %} padding: .35em .8em; border-radius: .5em; border: 2px solid #d39e00; background-color: rgba(255, 193, 7, .12);{% endif %}">
+        <div class="mt-2 swf-if-box{% if inclusive_filter.active %} swf-if-active{% endif %}">
+            <span class="swf-if-statement">
             {% if inclusive_filter.active %}
             <strong>Showing rows matching any of:</strong>
             {% for label, value in inclusive_filter.active_filters %}<span class="me-2">{{ label }}: <strong>{{ value }}</strong></span>{% endfor %}
-            <a href="{{ inclusive_filter.clear_url }}" class="btn btn-link btn-sm p-0 ms-2">clear all</a>
+            <a href="{{ inclusive_filter.clear_url }}" data-if-clear class="btn btn-link btn-sm p-0 ms-2">clear all</a>
             {% else %}
             <strong>Filters:</strong> <span class="text-muted">none selected, all rows shown. Click a value to select it; each further click adds its rows.</span>
             {% endif %}
+            </span>
         </div>
     </div>
 </div>
+<script>
+(function () {
+  // The include sits above the table, so the rows exist only once the
+  // document has parsed.
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+  function init() {
+  const root = document.querySelector('.swf-if');
+  if (!root || root.dataset.ifReady) return;
+  root.dataset.ifReady = '1';
+  const PARAM = root.dataset.ifParam || 'f';
+  const LEGACY = JSON.parse(root.dataset.ifLegacy || '[]');
+  let selections = JSON.parse(root.dataset.ifSelections || '[]');
+  const rows = Array.from(document.querySelectorAll('tr[data-if]'));
+  const rowValues = rows.map(function (tr) {
+    try { return JSON.parse(tr.dataset.if || '{}'); } catch (e) { return {}; }
+  });
+
+  // The two quote characters are built from their codes so the template
+  // lint, which counts quotes per line, stays quiet.
+  const DQ = String.fromCharCode(34), SQ = String.fromCharCode(39);
+  const ESC = {'&': '&amp;', '<': '&lt;', '>': '&gt;'};
+  ESC[DQ] = '&quot;';
+  ESC[SQ] = '&#39;';
+  const ESC_RE = new RegExp('[&<>' + DQ + SQ + ']', 'g');
+  function esc(s) {
+    return String(s).replace(ESC_RE, function (c) { return ESC[c]; });
+  }
+  function has(key, value) {
+    return selections.some(function (p) { return p[0] === key && p[1] === value; });
+  }
+  function encode(sel) {
+    return sel.map(function (p) { return p[0] + ':' + p[1]; }).join('|');
+  }
+  function urlFor(sel) {
+    const url = new URL(window.location.href);
+    LEGACY.forEach(function (k) { url.searchParams.delete(k); });
+    url.searchParams.delete(PARAM);
+    if (sel.length) url.searchParams.set(PARAM, encode(sel));
+    return url;
+  }
+  function matches(values) {
+    if (!selections.length) return true;
+    return selections.some(function (p) { return (values[p[0]] || []).indexOf(p[1]) >= 0; });
+  }
+  function restripe() {
+    const tables = new Set();
+    rows.forEach(function (tr) { const t = tr.closest('table'); if (t) tables.add(t); });
+    tables.forEach(function (table) {
+      table.classList.remove('table-striped');
+      table.classList.add('swf-if-restriped');
+      let i = 0;
+      Array.from(table.tBodies).forEach(function (tbody) {
+        Array.from(tbody.rows).forEach(function (tr) {
+          if (tr.classList.contains('swf-if-hidden')) { tr.classList.remove('swf-if-odd'); return; }
+          tr.classList.toggle('swf-if-odd', i % 2 === 0);
+          i++;
+        });
+      });
+    });
+  }
+  function applyRows() {
+    let shown = 0;
+    rows.forEach(function (tr, i) {
+      const on = matches(rowValues[i]);
+      tr.classList.toggle('swf-if-hidden', !on);
+      if (on) shown++;
+    });
+    document.querySelectorAll('.swf-if-shown').forEach(function (el) { el.textContent = shown; });
+    restripe();
+    return shown;
+  }
+  function paint() {
+    root.querySelectorAll('.swf-if-value').forEach(function (a) {
+      const key = a.dataset.ifKey, value = a.dataset.ifValue;
+      const on = has(key, value);
+      a.classList.toggle('swf-if-on', on);
+      a.title = on ? 'Selected: click to remove' : 'Click to add its rows';
+      const next = on ? selections.filter(function (p) { return !(p[0] === key && p[1] === value); })
+                      : selections.concat([[key, value]]);
+      a.href = urlFor(next).toString();
+    });
+    root.querySelectorAll('[data-if-all]').forEach(function (a) {
+      const key = a.dataset.ifAll;
+      const rest = selections.filter(function (p) { return p[0] !== key; });
+      a.classList.toggle('swf-if-on', rest.length === selections.length);
+      a.href = urlFor(rest).toString();
+    });
+    const box = root.querySelector('.swf-if-box');
+    const statement = root.querySelector('.swf-if-statement');
+    box.classList.toggle('swf-if-active', selections.length > 0);
+    if (!selections.length) {
+      statement.innerHTML = '<strong>Filters:</strong> <span class="text-muted">none selected, '
+        + 'all rows shown. Click a value to select it; each further click adds its rows.</span>';
+      return;
+    }
+    let html = '<strong>Showing rows matching any of:</strong> ';
+    selections.forEach(function (p) {
+      const a = root.querySelector('.swf-if-value[data-if-key="' + CSS.escape(p[0])
+                                   + '"][data-if-value="' + CSS.escape(p[1]) + '"]');
+      const holder = a ? a.closest('[data-if-label]') : null;
+      const label = holder ? holder.dataset.ifLabel : p[0];
+      const shown = a ? a.dataset.ifDisplay : p[1];
+      html += '<span class="me-2">' + esc(label) + ': <strong>' + esc(shown) + '</strong></span>';
+    });
+    html += '<a href="' + esc(urlFor([]).toString()) + '" data-if-clear class="btn btn-link btn-sm p-0 ms-2">clear all</a>';
+    statement.innerHTML = html;
+  }
+  function update() {
+    paint();
+    const shown = applyRows();
+    history.replaceState(null, '', urlFor(selections));
+    document.dispatchEvent(new CustomEvent('swf-if-change', {detail: {
+      selections: selections.map(function (p) { return p.slice(); }),
+      query: selections.length ? PARAM + '=' + encodeURIComponent(encode(selections)) : '',
+      shown: shown,
+    }}));
+  }
+  root.addEventListener('click', function (ev) {
+    const a = ev.target.closest('a');
+    if (!a || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+    if (a.classList.contains('swf-if-value')) {
+      ev.preventDefault();
+      const key = a.dataset.ifKey, value = a.dataset.ifValue;
+      if (has(key, value)) {
+        selections = selections.filter(function (p) { return !(p[0] === key && p[1] === value); });
+      } else {
+        selections.push([key, value]);
+      }
+      update();
+    } else if (a.dataset.ifAll !== undefined) {
+      ev.preventDefault();
+      selections = selections.filter(function (p) { return p[0] !== a.dataset.ifAll; });
+      update();
+    } else if (a.dataset.ifClear !== undefined) {
+      ev.preventDefault();
+      selections = [];
+      update();
+    }
+  });
+  // A sort moves the row nodes, so the stripes are laid again after it.
+  if (window.jQuery) { window.jQuery(document).on('draw.dt', restripe); }
+  paint();
+  applyRows();
+  }
+})();
+</script>

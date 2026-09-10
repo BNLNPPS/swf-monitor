@@ -1,9 +1,9 @@
 # Inclusive filter
 
 A facet filter whose selections widen the shown set instead of narrowing
-it. `monitor_app/inclusive_filter.py` and the include
-`monitor_app/_inclusive_filter.html`; first used on the campaign plan
-page (swf-epicprod `pcs/views.py`, `pcs_campaign_plan`).
+it, applied in the browser. `monitor_app/inclusive_filter.py` and the
+include `monitor_app/_inclusive_filter.html`; first used on the campaign
+plan page (swf-epicprod `pcs/views.py`, `pcs_campaign_plan`).
 
 ## Behavior
 
@@ -18,12 +18,19 @@ page (swf-epicprod `pcs/views.py`, `pcs_campaign_plan`).
   facet. Clear all clears everything. With nothing selected every row
   is shown.
 - The statement under the facet rows names the selections in click
-  order: "Showing rows matching any of: Process: DIS · Beam: 10x100".
+  order: "Showing rows matching any of: Process: DIS Beam: 10x100".
+- A click costs no request. The server renders every row once with its
+  facet values and the initial hidden state; the include's script
+  applies each click to the page: the bold marks, the rows, the shown
+  count, the statement, the URL. On the campaign plan, 1070 rows, the
+  table changes in about 50 ms.
 
 ## URL contract
 
 One parameter carries the state: `f`, the selections as `facet:value`
-pairs joined by `|`, in click order.
+pairs joined by `|`, in click order, rewritten with `replaceState` on
+every click, so the address bar always holds the current state and a
+bookmark opens it. Back leaves the page.
 
     ?f=process:DIS|beam:10x100
 
@@ -31,7 +38,9 @@ A page that previously carried one parameter per facet lists them in
 `legacy`; such a parameter is read as a selection and dropped from the
 URLs the filter writes, so old links keep resolving. Consumers that
 carry a page's filter state forward (the campaign plan's Time history
-embed and the Snapper Campaign focus view) carry the one key.
+embed and the Snapper Campaign focus view) carry the one key. A value
+containing `|` cannot be encoded; no filtered value on the plan carries
+one.
 
 Two parameters that used to mean an intersection (`priority=1` and
 `status=below-target` from the production home completion panel) are
@@ -50,25 +59,43 @@ are affected; their treatment is undecided.
               display=lambda v: label_of.get(v, v), order=[...slugs...]),
     ]
     flt = InclusiveFilter(request.GET, legacy={'process': 'process'})
-    rows = flt.apply(rows_all, facets)
+    shown = flt.annotate(rows_all, facets)     # row['if_attr'], row['if_hidden']
     context['inclusive_filter'] = flt.context(rows_all, facets, request)
 
-and in the template `{% include 'monitor_app/_inclusive_filter.html' %}`.
+In the template, the include above the table and two things on every
+row:
+
+    {% include 'monitor_app/_inclusive_filter.html' %}
+    ...
+    <tr data-if="{{ r.if_attr }}"{% if r.if_hidden %} class="swf-if-hidden"{% endif %}>
+
+An element with class `swf-if-shown` receives the shown count. Page
+scripts that must follow the selection listen for the `swf-if-change`
+event on `document`, whose `detail` carries `selections`, `query` (the
+`f=...` fragment, URL-encoded) and `shown`, and read the visible rows as
+`tr[data-if]:not(.swf-if-hidden)`. A page with its own row selection
+(tick boxes, select all) restricts it to visible rows the same way.
+
+Rows live in the house sortable tables (DataTables through
+`swf-sortable`), which move row nodes on a sort and never recreate them,
+so the hidden class survives sorting; the include restripes the visible
+rows after each change and after each sort.
 
 `Facet(key, label, values, display=None, order=None)`: `values(row)`
 returns the value or values a row carries (several for a
 multi-membership axis; None or empty for none); `display` maps a stored
 value to its shown form; `order` is a list of values or a sort key,
 else values sort. `InclusiveFilter.echo` is the query fragment that
-reproduces the slice, for `urlencode`; `active_filters(facets)` the
-(label, shown value) list; `toggle_url`, `clear_facet_url` and
-`clear_url` the link builders the include uses.
+reproduces the slice, for `urlencode`; `matches`, `apply`,
+`active_filters`, and the link builders `toggle_url`, `clear_facet_url`
+and `clear_url` serve the server side and the no-script fallback: the
+anchors keep server URLs, so a middle click opens the right page.
 
 ## Pages
 
 | Page | Since |
 |---|---|
-| Campaign plan (`/pcs/plan/`), both the plan and the assembly view | 2026-09-10 |
+| Campaign plan (`/pcs/plan/`), both the plan and the assembly view; its delivery map follows the selection through the Snapper embed's `setHidden` hook (snapper-ai docs/INTEGRATION.md § 4) | 2026-09-10 |
 
 Other pages switch as decided, one at a time, by replacing their facet
-construction with the three calls above.
+construction with the calls above.
