@@ -3,8 +3,7 @@
 The user view is the reduced face of epicprod for collaborators: the
 same pages with less on them, behind one parameter. It is entered from
 the bold **User view** link before Requests in the production nav, or
-from any URL carrying `?user_view=1`, and left with `?user_view=0` or
-from the mode flipper.
+from any URL carrying `?user_view=1`, and left by any URL without it.
 
 ## The parameter
 
@@ -18,13 +17,12 @@ every template, so any page tailors itself with
 a view reads `request.GET.get('user_view')` when it should not build
 what it will not show.
 
-No session survives the external proxy (EXTERNAL_ACCESS.md), so the
-base template persists a stated value in the browser
-(`localStorage.userView`, `data-user-view` on the document element).
-The reduced nav therefore holds across links that carry no parameter,
-while server-side tailoring follows the parameter alone; the user nav's
-own links carry it, and a page's internal links should carry it where
-the destination tailors itself.
+The view follows the URL alone. Nothing is remembered in the browser
+or in a session: a URL without `user_view=1` renders the full view,
+whatever page came before. The base template sets `data-user-view` on
+the document element from the parameter and nothing else. The user
+nav's own links carry the parameter, and a page's internal links carry
+it where the destination is meant to stay in the user view.
 
 ## The nav
 

@@ -19,20 +19,13 @@
         } catch (e) {}
         if (mode !== 'testbed') mode = 'production';
         document.documentElement.setAttribute('data-nav-mode', mode);
-        /* The user view: ?user_view=1 enters, ?user_view=0 leaves, and
-           the stated value persists in the browser so the reduced nav
-           holds across links that carry no parameter. */
+        /* The user view follows the URL alone: ?user_view=1 renders it,
+           any other request renders the full view. Nothing is remembered
+           in the browser (Torre, 2026-09-10: no flag in the URL, no user
+           view). A value an earlier version stored is cleared. */
         var routeUserView = '{{ user_view_param|default:""|escapejs }}';
-        var userView = '';
-        try {
-            if (routeUserView === '1' || routeUserView === '0') {
-                userView = routeUserView;
-                localStorage.setItem('userView', userView);
-            } else {
-                userView = localStorage.getItem('userView') || '';
-            }
-        } catch (e) {}
-        if (userView === '1') document.documentElement.setAttribute('data-user-view', '1');
+        try { localStorage.removeItem('userView'); } catch (e) {}
+        if (routeUserView === '1') document.documentElement.setAttribute('data-user-view', '1');
     })();
     /* Poll gate: a page polls only while someone is with it. Visibility
        alone does not establish that — the frontmost tab of a background
