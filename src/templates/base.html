@@ -586,8 +586,7 @@
                 <span class="mode-title mode-title-testbed">ePIC Testbed</span>
             </button>
             <div class="dropdown-content">
-                <a href="{% url 'pcs:user_view_home' %}?user_view=1">epicprod User View</a>
-                <a href="{% url 'monitor_app:prod_hub' %}?user_view=0" id="flip-production" onclick="setNavMode('production');">epicprod - ePIC Production</a>
+                <a href="{% url 'monitor_app:prod_hub' %}" id="flip-production" onclick="setNavMode('production');">epicprod - ePIC Production</a>
                 <a href="{% if is_tunnel %}https://pandaserver02.sdcc.bnl.gov/swf-monitor/testbed/{% else %}{% url 'monitor_app:testbed_hub' %}{% endif %}" id="flip-testbed" onclick="setNavMode('testbed');">ePIC Testbed</a>
             </div>
         </div>
@@ -639,15 +638,15 @@
         <div class="dropdown">
             <button class="dropbtn{% if active_nav.requests %} nav-active{% endif %}">Requests</button>
             <div class="dropdown-content">
-                <a href="{% url 'pcs:pcs_request_composer' %}?user_view=1">Form</a>
-                <a href="{% url 'pcs:questionnaires_list' %}?user_view=1">List</a>
+                <a href="{% url 'pcs:pcs_request_composer' %}?user_view=1">Request Production</a>
+                <a href="{% url 'pcs:questionnaires_list' %}?user_view=1">Production Requests</a>
             </div>
         </div>
         <div class="dropdown">
             <button class="dropbtn{% if active_nav.campaigns %} nav-active{% endif %}">Campaign</button>
             <div class="dropdown-content">
                 <a href="{% url 'pcs:pcs_campaign_plan' %}?user_view=1">Current campaign</a>
-                <a href="{% url 'pcs:pcs_catalog' %}?user_view=1">Campaign catalogs</a>
+                <a href="{% url 'pcs:pcs_catalog' %}?user_view=1">Campaign Catalog</a>
             </div>
         </div>
         <a href="{% url 'pcs:find_data' %}?user_view=1" class="nav-user-item{% if active_nav.find_data %} nav-active{% endif %}">Find data</a>

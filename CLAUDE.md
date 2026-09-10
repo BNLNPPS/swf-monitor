@@ -63,6 +63,7 @@ the old paths here. This repo's docs cover the platform services:
 - `SSE_PUSH.md` — browser push of agent action completion (design).
 - `SSE_RELAY.md` — the ActiveMQ → remote SSE relay this builds on.
 - `EXTERNAL_ACCESS.md` — the swf-remote proxy contract, including write-action trigger rules.
+- `USER_VIEW.md` — the user view: the reduced epicprod face behind the universal `user_view` parameter, its nav and conventions, and how a page tailors itself.
 - `SYSTEM_STATUS.md` — cached system status record and page.
 - `SNAPPER.md`, `SNAPPER_ERRORS.md`, `SNAPPER_PLATFORM.md`, `SNAPPER_STORAGE.md`, `PANDA_SERVER_REPORTER.md` — Snapper operations in SWF; the error-state component and errors view; the platform-health component, Platform view, and the pandaserver01 reporter; the Storage view over the storage record. All three are in production.
 - `ERROR_ATTRIBUTION.md` — correcting unreliable PanDA error labels at a single service root: rule lifetimes, evidence grades, representative-job digs, payload/pilot channels.
