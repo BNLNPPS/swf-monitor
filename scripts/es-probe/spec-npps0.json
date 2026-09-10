@@ -1,0 +1,16 @@
+{
+  "outDS": "group.EIC.esprobe.npps0.%STAMP%",
+  "exec": "echo ES-probe payload start; hostname; env | grep -iE PILOT_EVENTRANGECHANNEL ; env | grep -iE PILOT_ES ; sleep 120; echo ES-probe payload done",
+  "site": "BNL_NPPS_GPU",
+  "prodSourceLabel": "test",
+  "nJobs": 1,
+  "nEventsPerJob": 100,
+  "nEventsPerWorker": 10,
+  "nCore": 8,
+  "memory": 2048,
+  "walltimeHours": 0.5,
+  "skipScout": true,
+  "maxAttempt": 1,
+  "noLog": true,
+  "containerImage": "/cvmfs/singularity.opensciencegrid.org/eicweb/eic_xl:nightly"
+}

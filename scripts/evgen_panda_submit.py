@@ -175,6 +175,13 @@ def build_task_params(spec, archive_name):
     if spec.get('containerImage'):
         params['container_name'] = spec['containerImage']
 
+    # No log dataset at all (the prun --noSeparateLog shape): nothing for
+    # the refiner to validate against Rucio and nothing for the Adder to
+    # register. For queues whose log stage-out is an object store outside
+    # the Rucio catalog, BNL_NPPS_GPU among them.
+    if spec.get('noLog'):
+        del params['log']
+
     # -a <sandbox>
     params['jobParameters'].append({'type': 'constant', 'value': f'-a {archive_name}'})
 
