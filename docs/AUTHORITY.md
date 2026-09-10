@@ -57,18 +57,25 @@ because they read it on their own account page: `read`, not "none". `basic`
 rather than "user", which is already taken three times over by the Django
 model, `UserPreference`, and `X-Remote-User`.
 
-### The PAC role
+### The roles: PAC and Ops
 
 | Field | Values | Written by |
 |---|---|---|
 | `pac` | unset, true | a person, in the User admin page, and nothing else |
+| `ops` | unset, true | a person, in the User admin page, and nothing else |
 
-A physics analysis coordinator (PAC) may set request priorities. The role
-is a flag beside the rights ladder, not a rung on it, so an operations
-account can hold it too and a PAC need not administer accounts:
+Roles are flags beside the access level, held together or apart. A
+physics analysis coordinator (PAC) may set request priorities. Operations
+administers accounts on the User admin page, sets priorities, and holds
+authority to act on its own, like `basic`. The former `rights: ops` rung
+is read as the operations role, so a record written before the roles
+existed keeps what it had, and clearing the role on such a record lowers
+the rung to `basic`; the User admin page offers `read` and `basic` as the
+level and the two roles as checkboxes.
 
 ```
-may set priority  =  may act  and  (pac is true  or  rights == 'ops')
+may act           =  rights != 'read'  and  (eic is true  or  rights == 'basic'  or  ops is true)
+may set priority  =  may act  and  (pac is true  or  ops is true)
 ```
 
 The physics coordinator's requirement (2026-09-10): with the pages open to
@@ -78,10 +85,11 @@ priority control renders only for accounts that may set it (the template
 context variable `may_set_priority`), and the priority endpoints refuse a
 person who may not with the `PRIORITY_REFUSAL` text, naming the User admin
 page as the way to be granted the role. `may_set_priority`, `is_pac`,
-`set_pac` and `PRIORITY_REFUSAL` live in `monitor_app/authority.py`; the
-flag is written through the same endpoint as `rights`, `POST
-/api/user-rights/ {"username": ..., "pac": true|false}`, so the sign-in
-sweep's endpoint cannot touch it either.
+`is_ops`, `set_role` (`set_pac`, `set_ops`) and `PRIORITY_REFUSAL` live in
+`monitor_app/authority.py`; the roles are written through the same endpoint
+as `rights`, `POST /api/user-rights/ {"username": ..., "pac": true|false,
+"ops": true|false}`, so the sign-in sweep's endpoint cannot touch them
+either.
 
 `monitor_app/authority.py` is the whole namespace: `get_authority`,
 `all_authority`, `may_act`, `is_ops`, and the two setters `set_eic` and
@@ -156,10 +164,10 @@ whether they may act, which GitHub login was checked, and, when they may not,
 the joining procedure. What the person reads is what drove the naming of the
 levels, so the page is descriptive rather than punitive.
 
-**User admin**, under the System menu, visible to staff and to accounts with
-`rights == 'ops'` — the first live use of `ops`. It lists accounts with their
-GitHub login, origin, `eic`, `rights`, the PAC role, and last sign-in, and it
-is where `rights` and the PAC role are set. `eic` is display-only there: it
+**User admin**, under the System menu, visible to staff and to accounts
+holding the operations role. It lists accounts with their GitHub login,
+origin, `eic`, `rights`, the PAC and Ops roles, and last sign-in, and it is
+where `rights` and the roles are set. `eic` is display-only there: it
 is observed from GitHub, and a hand edit would be overwritten at the next
 sign-in.
 

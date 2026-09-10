@@ -26,11 +26,15 @@ from django.http import JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_http_methods
 
-from monitor_app.authority import (PAC_MEANING, RIGHTS_MEANING,
-                                   RIGHTS_VALUES, AuthorityError,
-                                   all_authority, get_authority, is_ops,
-                                   may_act, may_set_priority, set_pac,
+from monitor_app.authority import (OPS_MEANING, PAC_MEANING, RIGHTS_BASIC,
+                                   RIGHTS_MEANING, RIGHTS_READ,
+                                   AuthorityError, all_authority,
+                                   get_authority, is_ops, may_act,
+                                   may_set_priority, set_ops, set_pac,
                                    set_rights)
+
+#: The access levels the page offers; operations is a role beside them.
+ACCESS_VALUES = (RIGHTS_READ, RIGHTS_BASIC)
 
 
 def may_administer(user):
@@ -70,8 +74,10 @@ def _rows():
             'github': record['github'],
             'origin': _origin(record),
             'eic': record['eic'],
-            'rights': record['rights'],
+            'rights': (RIGHTS_BASIC if record['rights'] == 'ops'
+                       else record['rights']),
             'pac': record['pac'],
+            'ops': record['ops'],
             'may_act': may_act(record),
             'may_set_priority': may_set_priority(record),
             'last_seen': record['eic_at'] or '',
@@ -90,24 +96,28 @@ def user_admin_page(request):
     rows = _rows()
     return render(request, 'monitor_app/user_admin.html', {
         'rows': rows,
-        'rights_values': RIGHTS_VALUES,
+        'rights_values': ACCESS_VALUES,
         'rights_levels': [{'value': v, 'meaning': RIGHTS_MEANING[v]}
-                          for v in RIGHTS_VALUES],
+                          for v in ACCESS_VALUES],
         'pac_meaning': PAC_MEANING,
+        'ops_meaning': OPS_MEANING,
         'acting_count': sum(1 for r in rows if r['may_act']),
         'pac_count': sum(1 for r in rows if r['pac']),
+        'ops_count': sum(1 for r in rows if r['ops']),
     })
 
 
 @require_http_methods(['POST'])
 def user_rights_set(request):
-    """POST /api/user-rights/ ``{"username": "...", "rights": "basic"}``
-    or ``{"username": "...", "pac": true}``, or both.
+    """POST /api/user-rights/ ``{"username": "...", "rights": "basic"}``,
+    ``{"username": "...", "pac": true}``, ``{"username": "...", "ops": true}``,
+    or any of them together.
 
     ``rights: null`` clears the grant, returning the account to drawing
-    authority from ``eic`` alone; ``pac: false`` clears the coordinator
-    role. Both are a person's fields, written through this one endpoint
-    and never by the sign-in sweep. Returns the account's full record.
+    authority from ``eic`` alone; ``pac: false`` and ``ops: false`` clear
+    the roles. All are a person's fields, written through this one
+    endpoint and never by the sign-in sweep. Returns the account's full
+    record.
     """
     from monitor_app.authority import AUTHORITY_WRITER
     from monitor_app.middleware import is_tunnel_request
@@ -134,8 +144,8 @@ def user_rights_set(request):
             {'error': 'eic is observed at sign-in and cannot be set here'},
             status=400)
 
-    if 'rights' not in body and 'pac' not in body:
-        return JsonResponse({'error': 'rights or pac is required'},
+    if not any(k in body for k in ('rights', 'pac', 'ops')):
+        return JsonResponse({'error': 'rights, pac or ops is required'},
                             status=400)
     try:
         record = None
@@ -146,6 +156,8 @@ def user_rights_set(request):
             record = set_rights(username, rights)
         if 'pac' in body:
             record = set_pac(username, bool(body.get('pac')))
+        if 'ops' in body:
+            record = set_ops(username, bool(body.get('ops')))
     except AuthorityError as e:
         return JsonResponse({'error': str(e)}, status=400)
     return JsonResponse({'username': username, 'authority': record,

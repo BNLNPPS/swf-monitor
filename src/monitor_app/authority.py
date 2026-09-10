@@ -41,15 +41,23 @@ RIGHTS_VALUES = (RIGHTS_READ, RIGHTS_BASIC, RIGHTS_OPS)
 #: Rights that confer authority on their own, without organisation membership.
 RIGHTS_GRANTING = (RIGHTS_BASIC, RIGHTS_OPS)
 
-#: The physics analysis coordinator role: a flag beside the rights ladder,
-#: not a rung on it, so an operations account can hold it too. Set by a
-#: person on the User admin page. Priority setting on requests needs it,
-#: or operations rights (the physics coordinator's requirement,
-#: 2026-09-10: coordinators only, since anyone may otherwise raise their
-#: own request in good faith).
+#: Roles: flags beside the rights level, held together or apart. Set by a
+#: person on the User admin page, never by the sign-in sweep.
+#:
+#: PAC, the physics analysis coordinator: priority setting on requests
+#: needs it, or the operations role (the physics coordinator's
+#: requirement, 2026-09-10: coordinators only, since anyone may otherwise
+#: raise their own request in good faith).
 PAC_KEY = 'pac'
 PAC_MEANING = ('Set request priorities, as a physics analysis coordinator '
                '(PAC).')
+#: Operations: administers accounts on the User admin page and sets
+#: priorities. Confers authority to act on its own. The role replaces the
+#: former ``rights: ops`` rung, which is still read as the role.
+OPS_KEY = 'ops'
+OPS_MEANING = ('Act on the production system, administer accounts, and set '
+               'request priorities, as operations.')
+ROLE_KEYS = (PAC_KEY, OPS_KEY)
 
 #: What a person may do at each level, as they read it on their account page.
 RIGHTS_MEANING = {
@@ -72,7 +80,7 @@ class AuthorityError(ValueError):
 def empty_authority():
     """The record an account with nothing written resolves to."""
     return {'eic': None, 'rights': None, 'github': '', 'eic_at': '',
-            'pac': False}
+            'pac': False, 'ops': False}
 
 
 def _record_from(stored):
@@ -86,6 +94,9 @@ def _record_from(stored):
     if rights in RIGHTS_VALUES:
         record['rights'] = rights
     record['pac'] = stored.get(PAC_KEY) is True
+    # The former rights rung reads as the role, so a record written before
+    # the roles existed keeps what it had.
+    record['ops'] = stored.get(OPS_KEY) is True or rights == RIGHTS_OPS
     for field in ('github', 'eic_at'):
         value = stored.get(field)
         if isinstance(value, str):
@@ -129,14 +140,15 @@ def may_act(record):
         record = get_authority(record)
     if record.get('rights') == RIGHTS_READ:
         return False
-    return record.get('eic') is True or record.get('rights') in RIGHTS_GRANTING
+    return (record.get('eic') is True or record.get('rights') in RIGHTS_GRANTING
+            or record.get('ops') is True)
 
 
 def is_ops(record):
-    """Whether a record carries operations rights."""
+    """Whether a record carries the operations role."""
     if not isinstance(record, dict):
         record = get_authority(record)
-    return record.get('rights') == RIGHTS_OPS
+    return record.get('ops') is True
 
 
 def is_pac(record):
@@ -253,13 +265,31 @@ def set_eic(username, eic, github=None):
     return _write(username, changes)
 
 
-def set_pac(username, pac):
-    """Grant or clear the physics analysis coordinator role. A person's
-    setter, like ``set_rights``; ``pac=False`` or None clears it."""
-    if pac is not None and not isinstance(pac, bool):
+def set_role(username, role, held):
+    """Grant or clear a role (``pac`` or ``ops``). A person's setter, like
+    ``set_rights``; ``held=False`` or None clears it. Clearing ``ops`` on a
+    record still carrying the former ``rights: ops`` rung lowers that rung
+    to ``basic``, so the clearing is not undone by the compatibility read."""
+    if role not in ROLE_KEYS:
+        raise AuthorityError(f'role must be one of {ROLE_KEYS}, got {role!r}')
+    if held is not None and not isinstance(held, bool):
         raise AuthorityError(
-            f'pac must be true, false or null, got {type(pac).__name__}')
-    return _write(username, {PAC_KEY: True if pac else None})
+            f'{role} must be true, false or null, got {type(held).__name__}')
+    changes = {role: True if held else None}
+    if role == OPS_KEY and not held \
+            and get_authority(username).get('rights') == RIGHTS_OPS:
+        changes['rights'] = RIGHTS_BASIC
+    return _write(username, changes)
+
+
+def set_pac(username, pac):
+    """Grant or clear the physics analysis coordinator role."""
+    return set_role(username, PAC_KEY, pac)
+
+
+def set_ops(username, ops):
+    """Grant or clear the operations role."""
+    return set_role(username, OPS_KEY, ops)
 
 
 def set_rights(username, rights):

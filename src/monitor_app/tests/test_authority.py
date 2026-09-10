@@ -49,7 +49,8 @@ class AuthorityRuleTests(TestCase):
             ({'eic': True, 'rights': None, 'pac': False}, False),
             ({'eic': True, 'rights': None, 'pac': True}, True),
             ({'eic': False, 'rights': None, 'pac': True}, False),
-            ({'eic': None, 'rights': 'ops', 'pac': False}, True),
+            ({'eic': None, 'rights': 'ops', 'pac': False, 'ops': True}, True),
+            ({'eic': True, 'rights': None, 'pac': False, 'ops': True}, True),
             ({'eic': None, 'rights': 'basic', 'pac': False}, False),
             ({'eic': None, 'rights': 'basic', 'pac': True}, True),
             ({'eic': True, 'rights': 'read', 'pac': True}, False),
@@ -57,14 +58,26 @@ class AuthorityRuleTests(TestCase):
         for record, expected in cases:
             self.assertEqual(A.may_set_priority(record), expected, record)
 
-    def test_pac_is_a_flag_beside_rights(self):
-        A.set_rights('p', 'ops')
+    def test_roles_are_flags_beside_rights(self):
+        A.set_rights('p', 'basic')
         A.set_pac('p', True)
+        A.set_ops('p', True)
         record = A.get_authority('p')
-        self.assertEqual((record['rights'], record['pac']), ('ops', True))
+        self.assertEqual((record['rights'], record['pac'], record['ops']),
+                         ('basic', True, True))
+        self.assertTrue(A.is_ops(record) and A.may_set_priority(record))
         A.set_pac('p', False)
-        self.assertEqual(A.get_authority('p')['rights'], 'ops')
+        self.assertEqual(A.get_authority('p')['rights'], 'basic')
         self.assertFalse(A.get_authority('p')['pac'])
+        self.assertTrue(A.get_authority('p')['ops'])
+
+    def test_former_ops_rung_reads_as_the_role_and_clears_to_basic(self):
+        A.set_rights('o', 'ops')
+        record = A.get_authority('o')
+        self.assertTrue(record['ops'] and A.is_ops(record) and A.may_act(record))
+        A.set_ops('o', False)
+        record = A.get_authority('o')
+        self.assertEqual((record['rights'], record['ops']), ('basic', False))
 
 
 class TunnelIdentityTests(TestCase):
