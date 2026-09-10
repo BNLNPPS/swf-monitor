@@ -19,6 +19,20 @@
         } catch (e) {}
         if (mode !== 'testbed') mode = 'production';
         document.documentElement.setAttribute('data-nav-mode', mode);
+        /* The user view: ?user_view=1 enters, ?user_view=0 leaves, and
+           the stated value persists in the browser so the reduced nav
+           holds across links that carry no parameter. */
+        var routeUserView = '{{ user_view_param|default:""|escapejs }}';
+        var userView = '';
+        try {
+            if (routeUserView === '1' || routeUserView === '0') {
+                userView = routeUserView;
+                localStorage.setItem('userView', userView);
+            } else {
+                userView = localStorage.getItem('userView') || '';
+            }
+        } catch (e) {}
+        if (userView === '1') document.documentElement.setAttribute('data-user-view', '1');
     })();
     /* Poll gate: a page polls only while someone is with it. Visibility
        alone does not establish that — the frontmost tab of a background
@@ -401,6 +415,23 @@
       #mode-label .mode-title { display: none; }
       html[data-nav-mode="production"] #mode-label .mode-title-production,
       html[data-nav-mode="testbed"] #mode-label .mode-title-testbed { display: inline; }
+      /* User view: the reduced nav replaces the mode nav, and the brand
+         reads "epicprod User View" and links to the user view home. */
+      html[data-user-view="1"][data-nav-mode] .nav-production,
+      html[data-user-view="1"][data-nav-mode] .nav-testbed { display: none; }
+      html[data-user-view="1"] .nav-user { display: contents; }
+      #mode-user-brand { display: none; }
+      html[data-user-view="1"] #mode-label { display: none; }
+      html[data-user-view="1"] #mode-user-brand {
+        display: inline-block;
+        border-right: 1px solid rgba(255,255,255,.2);
+        color: #fff;
+        font-weight: 700;
+        padding-right: 12px;
+        margin-right: 4px;
+        text-decoration: none;
+      }
+      .nav-user-link { color: #fff; font-weight: 700; }
       .nav-label {
         color: #fff;
         font-weight: 700;
@@ -537,12 +568,14 @@
     <div class="sticky-header">
     <nav>
         <div class="dropdown" id="mode-flipper">
+            <a id="mode-user-brand" href="{% url 'pcs:pcs_campaign_plan' %}?user_view=1">epicprod User View</a>
             <button class="dropbtn" id="mode-label">
                 <span class="mode-title mode-title-production">epicprod</span>
                 <span class="mode-title mode-title-testbed">ePIC Testbed</span>
             </button>
             <div class="dropdown-content">
-                <a href="{% url 'monitor_app:prod_hub' %}" id="flip-production" onclick="setNavMode('production');">epicprod - ePIC Production</a>
+                <a href="{% url 'pcs:pcs_campaign_plan' %}?user_view=1">epicprod User View</a>
+                <a href="{% url 'monitor_app:prod_hub' %}?user_view=0" id="flip-production" onclick="setNavMode('production');">epicprod - ePIC Production</a>
                 <a href="{% if is_tunnel %}https://pandaserver02.sdcc.bnl.gov/swf-monitor/testbed/{% else %}{% url 'monitor_app:testbed_hub' %}{% endif %}" id="flip-testbed" onclick="setNavMode('testbed');">ePIC Testbed</a>
             </div>
         </div>
@@ -589,9 +622,29 @@
         </div>
         </span>
 
+        {# ── User view: the reduced epicprod face, entered with ?user_view=1 ── #}
+        <span class="nav-mode nav-user">
+        <div class="dropdown">
+            <button class="dropbtn{% if active_nav.requests %} nav-active{% endif %}">Requests</button>
+            <div class="dropdown-content">
+                <a href="{% url 'pcs:pcs_request_composer' %}?user_view=1">Form</a>
+                <a href="{% url 'pcs:questionnaires_list' %}?user_view=1">List</a>
+            </div>
+        </div>
+        <div class="dropdown">
+            <button class="dropbtn{% if active_nav.campaigns %} nav-active{% endif %}">Campaign</button>
+            <div class="dropdown-content">
+                <a href="{% url 'pcs:pcs_campaign_plan' %}?user_view=1">Current campaign</a>
+                <a href="{% url 'pcs:pcs_catalog' %}?user_view=1">Campaign catalogs</a>
+            </div>
+        </div>
+        <a href="{% url 'pcs:find_data' %}?user_view=1" class="{% if active_nav.find_data %}nav-active{% endif %}">Find data</a>
+        </span>
+
         {# ── Production mode ── #}
         {# This nav is the only copy: swf-remote fetches it from the hub for its own pages. #}
         <span class="nav-mode nav-production">
+        <a href="{% url 'pcs:pcs_campaign_plan' %}?user_view=1" class="nav-user-link">User view</a>
         <div class="dropdown">
             <button class="dropbtn{% if active_nav.requests %} nav-active{% endif %}">Requests</button>
             <div class="dropdown-content">
@@ -746,6 +799,9 @@
 <script>
 function setNavMode(mode) {
     localStorage.setItem('navMode', mode);
+    // Choosing a mode from the flipper leaves the user view.
+    try { localStorage.setItem('userView', '0'); } catch (e) {}
+    document.documentElement.removeAttribute('data-user-view');
     applyNavMode(mode);
 }
 function applyNavMode(mode) {

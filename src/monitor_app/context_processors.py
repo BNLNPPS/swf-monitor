@@ -283,12 +283,33 @@ def _active_nav(request):
     }
 
 
+def _user_view(request):
+    """The universal user-view parameter. ``?user_view=1`` renders a
+    page in the user view (the reduced epicprod face: its own nav, and
+    less on each page); ``?user_view=0`` leaves it. Returns ``'1'``,
+    ``'0'`` or ``''`` when the request does not say; the base template
+    persists a stated value in the browser so the nav keeps the view
+    across links that carry no parameter, while server-side tailoring
+    (a page dropping a panel) follows the parameter alone, since no
+    session survives the external proxy (docs/EXTERNAL_ACCESS.md)."""
+    value = (getattr(request, 'GET', None) or {}).get('user_view', '')
+    value = str(value or '').strip().lower()
+    if value in ('1', 'true', 'yes', 'on'):
+        return '1'
+    if value in ('0', 'false', 'no', 'off'):
+        return '0'
+    return ''
+
+
 def system_status_nav(request):
     from .viewdir.user_admin import may_administer
 
     summary = status_summary()
+    user_view_param = _user_view(request)
     return {
         'active_nav': _active_nav(request),
+        'user_view': user_view_param == '1',
+        'user_view_param': user_view_param,
         'system_status_overall': summary.get('overall_status', 'unknown'),
         'system_status_reason': summary.get('overall_reason', ''),
         'system_status_latest_checked_at': summary.get('latest_checked_at'),
