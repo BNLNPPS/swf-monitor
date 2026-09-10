@@ -28,6 +28,10 @@
     {% for level in rights_levels %}
       <li><strong>{{ level.value }}</strong> &mdash; {{ level.meaning }}</li>
     {% endfor %}
+    <li><strong>PAC</strong> &mdash; {{ pac_meaning }} A role beside the
+      rights level, so an operations account can hold it too; request
+      priorities can be set by PACs and by operations accounts only.
+      {{ pac_count }} account{{ pac_count|pluralize }} hold it.</li>
   </ul>
 
   {% csrf_token %}
@@ -43,6 +47,7 @@
         <th title="When eic membership was last observed for the account: at sign-in through epic-devcloud.org, or by the backfill">Membership checked</th>
         <th>May act</th>
         <th>Rights</th>
+        <th title="Physics analysis coordinator: may set request priorities">PAC</th>
         <th></th>
       </tr>
     </thead>
@@ -75,6 +80,7 @@
             {% endfor %}
           </select>
         </td>
+        <td><input type="checkbox" class="form-check-input js-pac"{% if row.pac %} checked{% endif %} title="Physics analysis coordinator"></td>
         {# Outline until the row is changed, then filled: Save per line, quiet. #}
         {# Row-size type in a visible colour, never smaller or greyer. #}
         <td><button type="button" class="btn btn-sm btn-outline-primary js-save">Save</button></td>
@@ -109,10 +115,12 @@
     var button = row.querySelector('.js-save');
     if (!button) { return; }
     var select = row.querySelector('.js-rights');
+    var pac = row.querySelector('.js-pac');
     var saved = select.value;
-    select.addEventListener('change', function () {
-      setDirty(button, select.value !== saved);
-    });
+    var savedPac = pac.checked;
+    function dirty() { return select.value !== saved || pac.checked !== savedPac; }
+    select.addEventListener('change', function () { setDirty(button, dirty()); });
+    pac.addEventListener('change', function () { setDirty(button, dirty()); });
     button.addEventListener('click', function () {
       var username = row.getAttribute('data-username');
       var value = select.value;
@@ -121,7 +129,7 @@
       fetch(url, {
         method: 'POST',
         headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
-        body: JSON.stringify({username: username, rights: value || null})
+        body: JSON.stringify({username: username, rights: value || null, pac: pac.checked})
       }).then(function (response) {
         return response.json().then(function (data) {
           return {ok: response.ok, data: data};
@@ -135,10 +143,13 @@
         row.querySelector('.js-may-act').textContent =
           result.data.may_act ? 'yes' : 'no';
         saved = result.data.authority.rights || '';
+        savedPac = !!result.data.authority.pac;
+        pac.checked = savedPac;
         setDirty(button, false);
         var rights = result.data.authority.rights;
         say(username + ': rights ' + (rights || 'unset') + ', may act ' +
-            (result.data.may_act ? 'yes' : 'no'), true);
+            (result.data.may_act ? 'yes' : 'no') + ', PAC ' +
+            (savedPac ? 'yes' : 'no'), true);
       }).catch(function (error) {
         button.disabled = false;
         say(username + ': ' + error, false);

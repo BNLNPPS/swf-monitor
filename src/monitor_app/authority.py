@@ -41,6 +41,16 @@ RIGHTS_VALUES = (RIGHTS_READ, RIGHTS_BASIC, RIGHTS_OPS)
 #: Rights that confer authority on their own, without organisation membership.
 RIGHTS_GRANTING = (RIGHTS_BASIC, RIGHTS_OPS)
 
+#: The physics analysis coordinator role: a flag beside the rights ladder,
+#: not a rung on it, so an operations account can hold it too. Set by a
+#: person on the User admin page. Priority setting on requests needs it,
+#: or operations rights (the physics coordinator's requirement,
+#: 2026-09-10: coordinators only, since anyone may otherwise raise their
+#: own request in good faith).
+PAC_KEY = 'pac'
+PAC_MEANING = ('Set request priorities, as a physics analysis coordinator '
+               '(PAC).')
+
 #: What a person may do at each level, as they read it on their account page.
 RIGHTS_MEANING = {
     RIGHTS_READ: 'Read monitoring information. Actions are withheld.',
@@ -61,7 +71,8 @@ class AuthorityError(ValueError):
 
 def empty_authority():
     """The record an account with nothing written resolves to."""
-    return {'eic': None, 'rights': None, 'github': '', 'eic_at': ''}
+    return {'eic': None, 'rights': None, 'github': '', 'eic_at': '',
+            'pac': False}
 
 
 def _record_from(stored):
@@ -74,6 +85,7 @@ def _record_from(stored):
     rights = stored.get('rights')
     if rights in RIGHTS_VALUES:
         record['rights'] = rights
+    record['pac'] = stored.get(PAC_KEY) is True
     for field in ('github', 'eic_at'):
         value = stored.get(field)
         if isinstance(value, str):
@@ -125,6 +137,27 @@ def is_ops(record):
     if not isinstance(record, dict):
         record = get_authority(record)
     return record.get('rights') == RIGHTS_OPS
+
+
+def is_pac(record):
+    """Whether a record carries the physics analysis coordinator role."""
+    if not isinstance(record, dict):
+        record = get_authority(record)
+    return record.get('pac') is True
+
+
+def may_set_priority(record):
+    """Whether an account may set request priorities: it may act, and it
+    is a physics analysis coordinator or holds operations rights."""
+    if not isinstance(record, dict):
+        record = get_authority(record)
+    return may_act(record) and (is_pac(record) or is_ops(record))
+
+
+PRIORITY_REFUSAL = ('Request priorities are set by the physics analysis '
+                    'coordinators (PAC). Your account does not hold that '
+                    'role; a coordinator or an administrator can grant it '
+                    'on the User admin page.')
 
 
 #: The SysConfig knob that turns refusal on. Until it is true the gates
@@ -218,6 +251,15 @@ def set_eic(username, eic, github=None):
                 f'github must be a string, got {type(github).__name__}')
         changes['github'] = github or None
     return _write(username, changes)
+
+
+def set_pac(username, pac):
+    """Grant or clear the physics analysis coordinator role. A person's
+    setter, like ``set_rights``; ``pac=False`` or None clears it."""
+    if pac is not None and not isinstance(pac, bool):
+        raise AuthorityError(
+            f'pac must be true, false or null, got {type(pac).__name__}')
+    return _write(username, {PAC_KEY: True if pac else None})
 
 
 def set_rights(username, rights):

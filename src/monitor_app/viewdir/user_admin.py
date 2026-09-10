@@ -26,9 +26,11 @@ from django.http import JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_http_methods
 
-from monitor_app.authority import (RIGHTS_MEANING, RIGHTS_VALUES,
-                                   AuthorityError, all_authority,
-                                   get_authority, is_ops, may_act, set_rights)
+from monitor_app.authority import (PAC_MEANING, RIGHTS_MEANING,
+                                   RIGHTS_VALUES, AuthorityError,
+                                   all_authority, get_authority, is_ops,
+                                   may_act, may_set_priority, set_pac,
+                                   set_rights)
 
 
 def may_administer(user):
@@ -69,7 +71,9 @@ def _rows():
             'origin': _origin(record),
             'eic': record['eic'],
             'rights': record['rights'],
+            'pac': record['pac'],
             'may_act': may_act(record),
+            'may_set_priority': may_set_priority(record),
             'last_seen': record['eic_at'] or '',
             'last_login': logins.get(username),
             'is_staff': username in staff,
@@ -89,16 +93,21 @@ def user_admin_page(request):
         'rights_values': RIGHTS_VALUES,
         'rights_levels': [{'value': v, 'meaning': RIGHTS_MEANING[v]}
                           for v in RIGHTS_VALUES],
+        'pac_meaning': PAC_MEANING,
         'acting_count': sum(1 for r in rows if r['may_act']),
+        'pac_count': sum(1 for r in rows if r['pac']),
     })
 
 
 @require_http_methods(['POST'])
 def user_rights_set(request):
     """POST /api/user-rights/ ``{"username": "...", "rights": "basic"}``
+    or ``{"username": "...", "pac": true}``, or both.
 
     ``rights: null`` clears the grant, returning the account to drawing
-    authority from ``eic`` alone. Returns the account's full record.
+    authority from ``eic`` alone; ``pac: false`` clears the coordinator
+    role. Both are a person's fields, written through this one endpoint
+    and never by the sign-in sweep. Returns the account's full record.
     """
     from monitor_app.authority import AUTHORITY_WRITER
     from monitor_app.middleware import is_tunnel_request
@@ -125,12 +134,20 @@ def user_rights_set(request):
             {'error': 'eic is observed at sign-in and cannot be set here'},
             status=400)
 
-    rights = body.get('rights')
-    if rights == '':
-        rights = None
+    if 'rights' not in body and 'pac' not in body:
+        return JsonResponse({'error': 'rights or pac is required'},
+                            status=400)
     try:
-        record = set_rights(username, rights)
+        record = None
+        if 'rights' in body:
+            rights = body.get('rights')
+            if rights == '':
+                rights = None
+            record = set_rights(username, rights)
+        if 'pac' in body:
+            record = set_pac(username, bool(body.get('pac')))
     except AuthorityError as e:
         return JsonResponse({'error': str(e)}, status=400)
     return JsonResponse({'username': username, 'authority': record,
-                         'may_act': may_act(record)})
+                         'may_act': may_act(record),
+                         'may_set_priority': may_set_priority(record)})

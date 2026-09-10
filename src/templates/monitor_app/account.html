@@ -112,6 +112,11 @@
             Operations rights also let you administer accounts on the
             <a href="{% url 'monitor_app:user_admin' %}">User admin</a> page.
           {% endif %}
+          {% if authority.may_set_priority %}
+            You may set request priorities{% if authority.is_pac %}, as a physics analysis coordinator (PAC){% endif %}.
+          {% else %}
+            Request priorities are set by the physics analysis coordinators (PAC); your account does not hold that role.
+          {% endif %}
         </p>
         {% else %}
         <p><strong>You may read monitoring information. Actions against the

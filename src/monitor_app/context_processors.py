@@ -318,4 +318,16 @@ def system_status_nav(request):
         # The User admin entry appears only for those who may use it
         # (docs/AUTHORITY.md).
         'may_administer_users': may_administer(getattr(request, 'user', None)),
+        # Priority controls render only for PACs and operations accounts
+        # (docs/AUTHORITY.md, The PAC role); the endpoints refuse the rest.
+        'may_set_priority': _may_set_priority(request),
     }
+
+
+def _may_set_priority(request):
+    from .authority import may_set_priority
+
+    user = getattr(request, 'user', None)
+    if not user or not user.is_authenticated:
+        return False
+    return may_set_priority(user.username)

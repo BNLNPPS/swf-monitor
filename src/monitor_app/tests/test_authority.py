@@ -44,6 +44,28 @@ class AuthorityRuleTests(TestCase):
         with self.assertRaises(ValueError):
             UserPreference.set_pref('u', A.AUTHORITY_KEY, {})
 
+    def test_may_set_priority_needs_pac_or_ops_and_authority(self):
+        cases = [
+            ({'eic': True, 'rights': None, 'pac': False}, False),
+            ({'eic': True, 'rights': None, 'pac': True}, True),
+            ({'eic': False, 'rights': None, 'pac': True}, False),
+            ({'eic': None, 'rights': 'ops', 'pac': False}, True),
+            ({'eic': None, 'rights': 'basic', 'pac': False}, False),
+            ({'eic': None, 'rights': 'basic', 'pac': True}, True),
+            ({'eic': True, 'rights': 'read', 'pac': True}, False),
+        ]
+        for record, expected in cases:
+            self.assertEqual(A.may_set_priority(record), expected, record)
+
+    def test_pac_is_a_flag_beside_rights(self):
+        A.set_rights('p', 'ops')
+        A.set_pac('p', True)
+        record = A.get_authority('p')
+        self.assertEqual((record['rights'], record['pac']), ('ops', True))
+        A.set_pac('p', False)
+        self.assertEqual(A.get_authority('p')['rights'], 'ops')
+        self.assertFalse(A.get_authority('p')['pac'])
+
 
 class TunnelIdentityTests(TestCase):
 
