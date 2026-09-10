@@ -431,6 +431,10 @@
         margin-right: 4px;
         text-decoration: none;
       }
+      /* Top-level user-view links take the menu-bar blue of the dropdown
+         buttons; the selector outranks style.css's `.sticky-header > nav a`. */
+      .sticky-header > nav a.nav-user-link,
+      .sticky-header > nav a.nav-user-item { color: #8fc7e8; }
       .nav-user-link { font-weight: 700; }
       .nav-label {
         color: #fff;
@@ -638,7 +642,7 @@
                 <a href="{% url 'pcs:pcs_catalog' %}?user_view=1">Campaign catalogs</a>
             </div>
         </div>
-        <a href="{% url 'pcs:find_data' %}?user_view=1" class="{% if active_nav.find_data %}nav-active{% endif %}">Find data</a>
+        <a href="{% url 'pcs:find_data' %}?user_view=1" class="nav-user-item{% if active_nav.find_data %} nav-active{% endif %}">Find data</a>
         </span>
 
         {# ── Production mode ── #}
