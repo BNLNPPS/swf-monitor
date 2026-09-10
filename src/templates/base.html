@@ -421,7 +421,7 @@
       html[data-user-view="1"][data-nav-mode] .nav-testbed { display: none; }
       html[data-user-view="1"] .nav-user { display: contents; }
       #mode-user-brand { display: none; }
-      html[data-user-view="1"] #mode-label { display: none; }
+      html[data-user-view="1"] #mode-flipper { display: none; }
       html[data-user-view="1"] #mode-user-brand {
         display: inline-block;
         border-right: 1px solid rgba(255,255,255,.2);
@@ -567,8 +567,8 @@
     </script>
     <div class="sticky-header">
     <nav>
+        <a id="mode-user-brand" href="{% url 'pcs:pcs_campaign_plan' %}?user_view=1">epicprod User View</a>
         <div class="dropdown" id="mode-flipper">
-            <a id="mode-user-brand" href="{% url 'pcs:pcs_campaign_plan' %}?user_view=1">epicprod User View</a>
             <button class="dropbtn" id="mode-label">
                 <span class="mode-title mode-title-production">epicprod</span>
                 <span class="mode-title mode-title-testbed">ePIC Testbed</span>
