@@ -34,18 +34,20 @@ bookmark opens it. Back leaves the page.
 
     ?f=process:DIS|beam:10x100
 
-A page that previously carried one parameter per facet lists them in
-`legacy`; such a parameter is read as a selection and dropped from the
-URLs the filter writes, so old links keep resolving. Consumers that
-carry a page's filter state forward (the campaign plan's Time history
-embed and the Snapper Campaign focus view) carry the one key. A value
-containing `|` cannot be encoded; no filtered value on the plan carries
-one.
+A link may frame the page with `n`, the same syntax: pairs every row
+must carry, an intersection, which is what a count on another page
+means (the completion panel's "priority 1, below target" cell opens
+exactly the rows it counts). Clicks widen within the frame; clear all
+drops it. The statement reads "Showing rows within Priority: 1 Status:
+below target matching any of: ...".
 
-Two parameters that used to mean an intersection (`priority=1` and
-`status=below-target` from the production home completion panel) are
-read as two selections and therefore a union. The panel's cell links
-are affected; their treatment is undecided.
+A page that previously carried one parameter per facet lists them in
+`legacy`. Those parameters meant an intersection, so they are read into
+the frame and dropped from the URLs the filter writes; old links open
+exactly what they opened before. Consumers that carry a page's filter
+state forward (the campaign plan's Time history embed and the Snapper
+Campaign focus view) carry `n`, `f` and `q`. A value containing `|`
+cannot be encoded; no filtered value on the plan carries one.
 
 ## Usage
 

@@ -14,9 +14,12 @@ statement, the URL. State rides one URL parameter, ``f``, the selections
 in click order as ``facet:value`` pairs joined by ``|``
 (``?f=process:DIS|beam:10x100``), rewritten with replaceState on each
 click, so the page stays bookmarkable and a consumer that carries the
-page's query forward carries one key. A page that had one parameter per
-facet names them in ``legacy`` and old links keep working: each is read
-as a selection and dropped from the URLs this filter writes.
+page's query forward carries the keys. A link may also frame the page
+with ``n``, the same syntax, pairs a row must ALL carry (an intersection,
+what a count on another page means); clicks widen within that frame and
+clear all drops it. A page that had one parameter per facet names them
+in ``legacy``; those meant an intersection and are read into ``n``, so
+old links open exactly what they opened before.
 
 Usage, on a view whose rows are plain mappings::
 
@@ -67,12 +70,19 @@ class Facet:
 
 
 SEARCH_PARAM = 'q'
+# The narrowing frame: selections a row must ALL carry, from links that
+# name an intersection (the completion panel's cells, the former
+# one-per-facet links). Clicks on the page add to f, never to n.
+NARROW_PARAM = 'n'
 
 
 class InclusiveFilter:
-    """The selections in ``query`` plus a free-text search (``q``), which
-    the browser applies over each row's text: a row shows when it matches
-    the selections (or none is made) and contains the search text."""
+    """The selections in ``query`` (``f``, a union), a narrowing frame
+    (``n``, an intersection: every pair must hold), and a free-text
+    search (``q``), applied in the browser over each row: a row shows when
+    it carries every narrowing pair, matches any selection (or none is
+    made), and contains the search text. A page's former one-per-facet
+    parameters meant an intersection, so they are read into the frame."""
 
     def __init__(self, query, param=PARAM, legacy=None):
         self.param = param
@@ -80,29 +90,37 @@ class InclusiveFilter:
         self.search = ((query.get(SEARCH_PARAM) or '').strip()
                        if query else '')
         self.selections = []
-        raw = ''
-        if hasattr(query, 'getlist'):
-            raw = SEP.join(v for v in query.getlist(param) if v)
-        else:
-            raw = (query.get(param) or '') if query else ''
-        for item in raw.split(SEP):
-            item = item.strip()
-            if not item or ':' not in item:
-                continue
-            key, value = item.split(':', 1)
-            self._add(key.strip(), value.strip())
+        self.narrow = []
+        for item in self._raw(query, param).split(SEP):
+            self._add(self.selections, item)
+        for item in self._raw(query, NARROW_PARAM).split(SEP):
+            self._add(self.narrow, item)
         for key, legacy_param in self.legacy.items():
             value = (query.get(legacy_param) or '').strip() if query else ''
             if value:
-                self._add(key, value)
+                self._add(self.narrow, f'{key}:{value}')
 
-    def _add(self, key, value):
-        if key and value and (key, value) not in self.selections:
-            self.selections.append((key, value))
+    @staticmethod
+    def _raw(query, param):
+        if not query:
+            return ''
+        if hasattr(query, 'getlist'):
+            return SEP.join(v for v in query.getlist(param) if v)
+        return query.get(param) or ''
+
+    @staticmethod
+    def _add(target, item):
+        item = (item or '').strip()
+        if not item or ':' not in item:
+            return
+        key, value = item.split(':', 1)
+        pair = (key.strip(), value.strip())
+        if pair[0] and pair[1] and pair not in target:
+            target.append(pair)
 
     @property
     def active(self):
-        return bool(self.selections)
+        return bool(self.selections or self.narrow)
 
     def selected(self, key):
         return {v for k, v in self.selections if k == key}
@@ -114,7 +132,12 @@ class InclusiveFilter:
     @property
     def echo(self):
         """The query fragment that reproduces this slice, for urlencode."""
-        return {self.param: self.encode()} if self.selections else {}
+        out = {}
+        if self.narrow:
+            out[NARROW_PARAM] = self.encode(self.narrow)
+        if self.selections:
+            out[self.param] = self.encode()
+        return out
 
     def _wanted(self):
         wanted = {}
@@ -123,10 +146,15 @@ class InclusiveFilter:
         return wanted
 
     def matches(self, row, facets):
-        """Whether the row carries ANY selected value; True with none made."""
+        """Whether the row carries every narrowing pair and ANY selected
+        value (or none is made)."""
+        by_key = {f.key: f for f in facets}
+        for key, value in self.narrow:
+            facet = by_key.get(key)
+            if facet is None or value not in facet.values(row):
+                return False
         if not self.selections:
             return True
-        by_key = {f.key: f for f in facets}
         for key, values in self._wanted().items():
             facet = by_key.get(key)
             if facet is not None and values & set(facet.values(row)):
@@ -134,8 +162,9 @@ class InclusiveFilter:
         return False
 
     def apply(self, rows, facets):
-        """The rows matching ANY selection; all rows when none is made."""
-        if not self.selections:
+        """The rows within the frame matching ANY selection; all rows
+        when nothing is in force."""
+        if not self.active:
             return list(rows)
         return [row for row in rows if self.matches(row, facets)]
 
@@ -163,11 +192,15 @@ class InclusiveFilter:
             shown += 0 if row['if_hidden'] else 1
         return shown
 
-    def _url(self, request, selections):
+    def _url(self, request, selections, narrow=None):
         params = request.GET.copy()
         for legacy_param in self.legacy.values():
             params.pop(legacy_param, None)
         params.pop(self.param, None)
+        params.pop(NARROW_PARAM, None)
+        narrow = self.narrow if narrow is None else narrow
+        if narrow:
+            params[NARROW_PARAM] = self.encode(narrow)
         if selections:
             params[self.param] = self.encode(selections)
         encoded = params.urlencode()
@@ -185,17 +218,29 @@ class InclusiveFilter:
         return self._url(request, [p for p in self.selections if p[0] != key])
 
     def clear_url(self, request):
-        return self._url(request, [])
+        return self._url(request, [], narrow=[])
 
-    def active_filters(self, facets):
-        """(label, shown value) per selection, in click order."""
+    def _labelled(self, pairs, facets):
         by_key = {f.key: f for f in facets}
         out = []
-        for key, value in self.selections:
+        for key, value in pairs:
             facet = by_key.get(key)
             out.append((facet.label if facet else key,
                         facet.display(value) if facet else value))
         return out
+
+    def narrow_filters(self, facets):
+        """(label, shown value) per narrowing pair."""
+        return self._labelled(self.narrow, facets)
+
+    def union_filters(self, facets):
+        """(label, shown value) per selection, in click order."""
+        return self._labelled(self.selections, facets)
+
+    def active_filters(self, facets):
+        """Every filter in force, the narrowing pairs first: what a
+        consumer states about the slice."""
+        return self.narrow_filters(facets) + self.union_filters(facets)
 
     def facet_rows(self, rows_all, facets, request):
         """Every value of every facet with its count over all rows, its
@@ -237,13 +282,17 @@ class InclusiveFilter:
         return {
             'facet_rows': self.facet_rows(rows_all, facets, request),
             'active_filters': self.active_filters(facets),
+            'narrow_filters': self.narrow_filters(facets),
+            'union_filters': self.union_filters(facets),
             'clear_url': self.clear_url(request),
             'active': self.active,
             'param': self.param,
+            'narrow_param': NARROW_PARAM,
             'search': self.search,
             'search_param': SEARCH_PARAM,
             'legacy_json': json.dumps(sorted(self.legacy.values())),
             'selections_json': json.dumps([list(p) for p in self.selections]),
+            'narrow_json': json.dumps([list(p) for p in self.narrow]),
         }
 
 
