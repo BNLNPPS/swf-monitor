@@ -287,13 +287,14 @@ def _user_view(request):
     """The universal user-view parameter. ``?user_view=1`` renders a
     page in the user view (the reduced epicprod face: its own nav, and
     less on each page); ``?user_view=0`` leaves it. Returns ``'1'``,
-    ``'0'`` or ``''`` when the request does not say; the base template
-    persists a stated value in the browser so the nav keeps the view
-    across links that carry no parameter, while server-side tailoring
-    (a page dropping a panel) follows the parameter alone, since no
-    session survives the external proxy (docs/EXTERNAL_ACCESS.md)."""
+    ``'0'`` or ``''`` when the request does not say. The view follows the
+    parameter alone; nothing is remembered in the browser. A trailing
+    non-alphanumeric character is ignored: a URL clicked out of a
+    terminal or a chat arrives with the marker glyph beside it swept in
+    (``user_view=1✻``), and that click must still work."""
     value = (getattr(request, 'GET', None) or {}).get('user_view', '')
     value = str(value or '').strip().lower()
+    value = ''.join(ch for ch in value if ch.isalnum())
     if value in ('1', 'true', 'yes', 'on'):
         return '1'
     if value in ('0', 'false', 'no', 'off'):

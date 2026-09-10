@@ -16,8 +16,12 @@ server URLs, so a middle click or a page without script still works.
   .swf-if .swf-if-box.swf-if-active { padding: .35em .8em; border-radius: .5em; border: 2px solid #d39e00; background-color: rgba(255, 193, 7, .12); }
   .swf-if-restriped > tbody > tr.swf-if-odd > * { --bs-table-accent-bg: var(--bs-table-striped-bg); color: var(--bs-table-striped-color); }
 </style>
-<div class="card mb-3 swf-if" data-if-param="{{ inclusive_filter.param }}" data-if-legacy="{{ inclusive_filter.legacy_json }}" data-if-selections="{{ inclusive_filter.selections_json }}">
+<div class="card mb-3 swf-if" data-if-param="{{ inclusive_filter.param }}" data-if-search-param="{{ inclusive_filter.search_param }}" data-if-legacy="{{ inclusive_filter.legacy_json }}" data-if-selections="{{ inclusive_filter.selections_json }}">
     <div class="card-body">
+        <div class="mb-2 d-flex align-items-center gap-2">
+            <strong>Search:</strong>
+            <input type="search" class="form-control form-control-sm swf-if-search" style="max-width: 24em;" value="{{ inclusive_filter.search }}" placeholder="text in any column" title="Rows whose text contains this, in any column; applies together with the selections below">
+        </div>
         {% for label, f in inclusive_filter.facet_rows %}
         <div data-if-label="{{ label }}"><strong>{{ label }}:</strong>
             <a href="{{ f.all_url }}" data-if-all="{{ f.key }}" class="me-2{% if f.all_active %} swf-if-on{% endif %}">All</a>
@@ -53,11 +57,18 @@ server URLs, so a middle click or a page without script still works.
   if (!root || root.dataset.ifReady) return;
   root.dataset.ifReady = '1';
   const PARAM = root.dataset.ifParam || 'f';
+  const SEARCH_PARAM = root.dataset.ifSearchParam || 'q';
   const LEGACY = JSON.parse(root.dataset.ifLegacy || '[]');
   let selections = JSON.parse(root.dataset.ifSelections || '[]');
+  const searchEl = root.querySelector('.swf-if-search');
+  let search = searchEl ? searchEl.value.trim().toLowerCase() : '';
   const rows = Array.from(document.querySelectorAll('tr[data-if]'));
   const rowValues = rows.map(function (tr) {
     try { return JSON.parse(tr.dataset.if || '{}'); } catch (e) { return {}; }
+  });
+  // Each row's text, for the search: every column, as the reader sees it.
+  const rowText = rows.map(function (tr) {
+    return tr.textContent.replace(/\s+/g, ' ').toLowerCase();
   });
 
   // The two quote characters are built from their codes so the template
@@ -80,10 +91,13 @@ server URLs, so a middle click or a page without script still works.
     const url = new URL(window.location.href);
     LEGACY.forEach(function (k) { url.searchParams.delete(k); });
     url.searchParams.delete(PARAM);
+    url.searchParams.delete(SEARCH_PARAM);
     if (sel.length) url.searchParams.set(PARAM, encode(sel));
+    if (search) url.searchParams.set(SEARCH_PARAM, search);
     return url;
   }
-  function matches(values) {
+  function matches(values, i) {
+    if (search && rowText[i].indexOf(search) < 0) return false;
     if (!selections.length) return true;
     return selections.some(function (p) { return (values[p[0]] || []).indexOf(p[1]) >= 0; });
   }
@@ -106,7 +120,7 @@ server URLs, so a middle click or a page without script still works.
   function applyRows() {
     let shown = 0;
     rows.forEach(function (tr, i) {
-      const on = matches(rowValues[i]);
+      const on = matches(rowValues[i], i);
       tr.classList.toggle('swf-if-hidden', !on);
       if (on) shown++;
     });
@@ -132,13 +146,18 @@ server URLs, so a middle click or a page without script still works.
     });
     const box = root.querySelector('.swf-if-box');
     const statement = root.querySelector('.swf-if-statement');
-    box.classList.toggle('swf-if-active', selections.length > 0);
-    if (!selections.length) {
+    box.classList.toggle('swf-if-active', selections.length > 0 || !!search);
+    if (!selections.length && !search) {
       statement.innerHTML = '<strong>Filters:</strong> <span class="text-muted">none selected, '
         + 'all rows shown. Click a value to select it; each further click adds its rows.</span>';
       return;
     }
-    let html = '<strong>Showing rows matching any of:</strong> ';
+    let html = selections.length ? '<strong>Showing rows matching any of:</strong> '
+                                 : '<strong>Showing rows</strong> ';
+    if (search) {
+      html += '<span class="me-2">containing <strong>' + esc(search) + '</strong></span>'
+            + (selections.length ? '<span class="me-2">and any of:</span>' : '');
+    }
     selections.forEach(function (p) {
       const a = root.querySelector('.swf-if-value[data-if-key="' + CSS.escape(p[0])
                                    + '"][data-if-value="' + CSS.escape(p[1]) + '"]');
@@ -179,9 +198,17 @@ server URLs, so a middle click or a page without script still works.
     } else if (a.dataset.ifClear !== undefined) {
       ev.preventDefault();
       selections = [];
+      search = '';
+      if (searchEl) searchEl.value = '';
       update();
     }
   });
+  if (searchEl) {
+    searchEl.addEventListener('input', function () {
+      search = searchEl.value.trim().toLowerCase();
+      update();
+    });
+  }
   // A sort moves the row nodes, so the stripes are laid again after it.
   if (window.jQuery) { window.jQuery(document).on('draw.dt', restripe); }
   paint();

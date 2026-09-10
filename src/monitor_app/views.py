@@ -3446,6 +3446,12 @@ def prod_hub(request):
         'campaign_summary_lines': summary_product['value'] or [],
         'campaign_summary_built_at': summary_product['built_at'],
     }
+    # The production root in the user view is the user view home
+    # (docs/USER_VIEW.md): https://epic-devcloud.org/prod/?user_view=1.
+    from .context_processors import _user_view
+    if _user_view(request) == '1':
+        return render(request, 'pcs/user_view_home.html', {
+            'nav_mode': 'production', **summary})
     if tab == 'ops':
         return render(request, 'monitor_app/prod_hub_workflow.html', {
             'active_tab': 'ops',

@@ -66,10 +66,19 @@ class Facet:
         return tuple(str(v) for v in got if v is not None and v != '')
 
 
+SEARCH_PARAM = 'q'
+
+
 class InclusiveFilter:
+    """The selections in ``query`` plus a free-text search (``q``), which
+    the browser applies over each row's text: a row shows when it matches
+    the selections (or none is made) and contains the search text."""
+
     def __init__(self, query, param=PARAM, legacy=None):
         self.param = param
         self.legacy = dict(legacy or {})
+        self.search = ((query.get(SEARCH_PARAM) or '').strip()
+                       if query else '')
         self.selections = []
         raw = ''
         if hasattr(query, 'getlist'):
@@ -231,6 +240,8 @@ class InclusiveFilter:
             'clear_url': self.clear_url(request),
             'active': self.active,
             'param': self.param,
+            'search': self.search,
+            'search_param': SEARCH_PARAM,
             'legacy_json': json.dumps(sorted(self.legacy.values())),
             'selections_json': json.dumps([list(p) for p in self.selections]),
         }

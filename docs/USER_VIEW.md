@@ -27,8 +27,10 @@ it where the destination is meant to stay in the user view.
 ## The nav
 
 Contained simplicity. The brand at top left reads "epicprod User View"
-and is a plain link to the user view home (`pcs/user/`, an empty page
-whose content is not yet specified); it has no pulldown, and the mode
+and is a plain link to the user view home, which is the production root
+in the mode: `https://epic-devcloud.org/prod/?user_view=1` (the
+production hub view renders the home when the parameter is on; the
+earlier `pcs/user/` redirects there). It has no pulldown, and the mode
 flipper is not shown. The menu is Requests (Request form, Request
 list), Campaign (Current campaign, Campaign Catalog),
 Find data, then a wider gap and Full epicprod view, which leaves the
@@ -46,7 +48,8 @@ user nav takes the class `nav-user-item` for the blue.
 - Current campaign is the campaign plan (`pcs/plan/`) without the
   delivery map; the view does not build the snapper embed under
   `user_view=1`.
-- The home page (`pcs/user/`) lives under `pcs/` so the external
-  proxy's catch-all serves it without an swf-remote route.
+- The home page is the production root with the parameter; the hub
+  view renders the user home template there. `pcs/user/` redirects to
+  it.
 
 Further tailoring is named page by page.

@@ -136,7 +136,8 @@
 
     <div class="prod-workflow-header">
         <h1>epicprod - ePIC Production {% if active_tab == 'ops' %}Operations{% else %}System{% endif %}</h1>
-        <p>ePIC experiment production requests, configuration, management and monitoring</p>
+        <p>ePIC experiment production requests, configuration, management and monitoring<br>
+        <a href="{% url 'monitor_app:prod_hub' %}?user_view=1"><strong>A simplified interface for non-expert users is available.</strong></a></p>
         {% include 'monitor_app/_campaign_completion_panel.html' %}
     </div>
 
@@ -156,12 +157,15 @@
                     </div>
                     <div class="workflow-link-desc">Compose a production request against existing configurations</div>
                 </div>
+                {% comment %}The Google Form intake is retired (2026-09-10); the row stays in the code and is not shown.{% endcomment %}
+                {% if False %}
                 <div class="workflow-link-row" title="The Google request form, the current external intake">
                     <div class="workflow-link-line">
                         <strong><a href="https://docs.google.com/forms/d/e/1FAIpQLScDqiEaHayAcwBDGAWa4W6k-6yUFzS-XiWuhLolpy64mLk5FA/viewform" target="_blank" rel="noopener" class="text-decoration-none">Google request form</a></strong>
                     </div>
                     <div class="workflow-link-desc">The Google Form intake, mirrored into the request list</div>
                 </div>
+                {% endif %}
                 <div class="workflow-link-row" title="Production request questionnaire intake">
                     <div class="workflow-link-line">
                         <strong><a href="{% url 'pcs:questionnaires_list' %}" class="text-decoration-none">Production Requests</a></strong>
