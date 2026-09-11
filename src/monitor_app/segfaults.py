@@ -336,6 +336,9 @@ def signature_summary(sig):
         'task_ids': [t.get('jeditaskid') for t in (sig.tasks or [])],
         'task_names': [t.get('taskname') for t in (sig.tasks or [])],
         'configuration': sig.configuration or {},
+        # The image as its name: the cvmfs path before it carries nothing.
+        'image': ((sig.configuration or {}).get('container_image_ran')
+                  or (sig.configuration or {}).get('container_image') or '').rpartition('/')[2],
         'crashes': sig.crashes,
         'rate': sig.rate,
         'rate_pct': (f'{100 * sig.rate:.1f}%' if sig.rate is not None else ''),
