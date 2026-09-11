@@ -1744,7 +1744,7 @@ def panda_segfaults(request):
         'rows': rows,
         'shown': shown,
         'total': len(rows),
-        'crashes_total': sum(r['crashes'] for r in rows),
+        'crashes_total': sum(r['crashes'] for r in rows if r['level'] == 'record'),
         'class_counts': [(CLASS_LABELS.get(c, c), class_counts.get(c, 0))
                          for c in CLASS_ORDER],
         'inclusive_filter': flt.context(rows, facets, request),

@@ -580,8 +580,11 @@ def merge_trace_level(sig):
         classes[m.class_hint] += m.crashes
     merged.class_hint = max(classes.items(), key=lambda kv: kv[1])[0]
     merged.configuration = dict(sig.configuration or {})
-    merged.configuration['prod_task'] = '; '.join(
-        sorted({(m.configuration or {}).get('prod_task', '') for m in members} - {''}))
+    prod_tasks = sorted({(m.configuration or {}).get('prod_task', '') for m in members} - {''})
+    merged.configuration['prod_task'] = (
+        prod_tasks[0] if len(prod_tasks) == 1
+        else f'{len(prod_tasks)} configurations' if prod_tasks else '')
+    merged.configuration['prod_tasks'] = prod_tasks
     if not merged.trace:
         merged.trace = dict(sig.trace)
     data = dict(merged.data or {})
