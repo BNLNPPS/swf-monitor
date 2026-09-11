@@ -94,6 +94,22 @@ def dig(sig, pandaid=None):
     sig.status = 'digging' if sig.status == 'new' else sig.status
     sig.save(update_fields=['status', 'updated_at'])
     log.info('%s: representative job %s (task %s)', sig.key, pandaid, jeditaskid)
+    # Payload 0.12 and later send the crashing stage's log tail in the
+    # report's note (SEGFAULT_DIAGNOSIS.md, Traces going forward); the
+    # sweep files it beside the job, so no tarball is fetched.
+    from monitor_app.models import EpicProdJob as _Job
+    filed = (_Job.objects.filter(pandaid=int(pandaid)).only('data').first() or _Job()).data or {}
+    note = (((filed.get('payload_report') or {}).get('report') or {}).get('note') or '')
+    if note.startswith('crash:'):
+        result = trace_extract([note])
+        if result['trace_status'] == 'found':
+            log.info('%s: trace read from the filed payload report of job %s', sig.key, pandaid)
+            merged = record_trace(sig, result, pandaid, '')
+            return {'key': sig.key, 'pandaid': pandaid, 'trace_status': 'found',
+                    'source': 'payload_report', 'program': result.get('program'),
+                    'stage': result.get('stage'), 'frame': result.get('frame'),
+                    'library': result.get('library'),
+                    'events_processed': result.get('events_processed'), 'merged_into': merged}
     scope, lfn = resolve_log_did(pandaid, jeditaskid)
     if not lfn:
         reason = 'no log file on the PanDA record'
