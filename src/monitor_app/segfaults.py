@@ -418,6 +418,7 @@ def signature_detail(key, jobs_limit=200):
         'assessment_ids': sig.assessment_ids or [],
         'package': sig.package or {},
         'data': sig.data or {},
+        'local_repro': local_repro(sig),
     })
     task_ids = [t.get('jeditaskid') for t in (sig.tasks or []) if t.get('jeditaskid')]
     jobs = []
@@ -647,11 +648,10 @@ REFERENCE_QUEUE = 'BNL_NPPS_GPU'
 CRASH_EXITS = {134, 135, 136, 139}
 
 
-def reproduction_plan(sig, pandaid=None):
-    """What a reproduction of the signature runs: the crashed job (the
-    representative unless named), its row, its PCS task, its production
-    queue and that queue's memory. Raises ValueError with the reason when
-    the run cannot be formed."""
+def crashed_run(sig, pandaid=None):
+    """The crashed job a reproduction runs (the representative unless
+    named) with its crash record, its manifest row and the row as manifest
+    text. Raises ValueError with the reason when the run cannot be formed."""
     if pandaid is None:
         rep = representative(sig)
         if rep is None:
@@ -670,6 +670,82 @@ def reproduction_plan(sig, pandaid=None):
         raise ValueError(f"job {pandaid}'s manifest row is unresolved; the attempt has "
                          f'no manifest record')
     row_text = f"{row['file']},{row['ext']},{row['nevents']},{int(row['ichunk']):04d}"
+    return job, crash, row, row_text
+
+
+def repro_environment(prod_task):
+    """The payload environment of a run outside PanDA: the task's own
+    (pcs.commands._evgen_env) with registration, the copies and the log
+    upload off, so the run leaves its outputs in the working directory and
+    touches no catalog."""
+    from pcs.commands import _evgen_env
+    env = _evgen_env(prod_task)
+    env.update({'USERUCIO': 'false', 'COPYRECO': 'false', 'COPYFULL': 'false',
+                'COPYLOG': 'false'})
+    return env
+
+
+PAYLOAD_REPO = 'https://github.com/BNLNPPS/swf-epicprod'
+PAYLOAD_PATH = 'swf_epicprod/payload/run.sh'
+# The JLab door and base the payload streams EVGEN input from (run.sh,
+# XRDRURL and XRDRBASE defaults).
+INPUT_DOOR = 'root://dtn-eic.jlab.org//volatile/eic/EPIC'
+
+
+def local_repro(sig, pandaid=None):
+    """The crashed job's run as a shell fragment for a reproduction by hand:
+    the image, the payload environment, the input, and the payload's
+    invocation with the row's arguments as the dispatcher passes them
+    (evgen_job_dispatcher.run_row: EVGEN/<file>, extension, events, chunk).
+    The representative job unless one is named. Returns {'error': reason}
+    when the run cannot be formed."""
+    try:
+        job, crash, row, row_text = crashed_run(sig, pandaid)
+    except ValueError as e:
+        return {'error': str(e)}
+    try:
+        env = repro_environment(job.prod_task)
+    except Exception as e:                                    # noqa: BLE001
+        logger.error('segfault %s: payload environment of task %s failed: %s',
+                     sig.key, job.prod_task.name, e)
+        return {'error': f'payload environment of {job.prod_task.name}: {e}'}
+    container = crash.get('container') or ''
+    if not container:
+        cfg = job.prod_task.prod_config
+        container = getattr(cfg, 'container_image', '') if cfg else ''
+    ichunk = int(row['ichunk'])
+    nevents = int(row['nevents'])
+    input_url = f"{INPUT_DOOR}/EVGEN/{row['file']}.{row['ext']}"
+    signal_name = SIGNAL_NAMES.get(crash.get('signal'), crash.get('signal'))
+    lines = [
+        f"# PanDA job {job.pandaid} (task {job.jeditaskid}, {job.prod_task.name}): "
+        f"the payload died on {signal_name} (exit {crash.get('exit_code')}) "
+        f"after {crash.get('minutes')} min at {crash.get('computingsite')}",
+        f"# Image: {container or '(not on record)'}",
+        "# Inside the image (eic-shell, or: apptainer exec <image> bash), in an empty directory:",
+        f"git clone {PAYLOAD_REPO}",
+        "cat > environment-manifest.sh <<'EOF'",
+    ]
+    lines += [f'export {k}={v}' for k, v in env.items()]
+    lines += [
+        'EOF',
+        f"swf-epicprod/{PAYLOAD_PATH} EVGEN/{row['file']} {row['ext']} {nevents} {ichunk:04d}",
+        f"# Input (public read): {input_url}",
+        f"# Manifest row {ichunk + 1}: {nevents} events after skipping {ichunk} x {nevents}, "
+        f"seed {ichunk + 1}; outputs stay in the working directory, nothing is registered.",
+    ]
+    return {'pandaid': job.pandaid, 'jeditaskid': job.jeditaskid,
+            'task': job.prod_task.name, 'container': container, 'row_text': row_text,
+            'input_url': input_url, 'environment': env, 'fragment': '\n'.join(lines)}
+
+
+def reproduction_plan(sig, pandaid=None):
+    """What a reproduction of the signature runs: the crashed job (the
+    representative unless named), its row, its PCS task, its production
+    queue and that queue's memory. Raises ValueError with the reason when
+    the run cannot be formed."""
+    job, crash, row, row_text = crashed_run(sig, pandaid)
+    pandaid = job.pandaid
     site = crash.get('computingsite') or ''
     maxrss_mb = None
     if site:

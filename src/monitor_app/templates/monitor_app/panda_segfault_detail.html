@@ -131,6 +131,14 @@
             </form>
             {% endif %}
 
+            <h4>Local reproduction</h4>
+            {% if sig.local_repro.fragment %}
+            <p>The crashed job's run by hand, for a software expert: the image, the payload environment and the payload's invocation with the row's arguments, as the job ran them. <button type="button" id="local-repro-copy" class="btn btn-sm btn-outline-secondary">Copy</button></p>
+            <pre id="local-repro" class="p-2 border rounded" style="white-space: pre; overflow-x: auto;">{{ sig.local_repro.fragment }}</pre>
+            {% else %}
+            <p class="text-muted">No run can be formed: {{ sig.local_repro.error }}.</p>
+            {% endif %}
+
             <h4>Reproduction package</h4>
             {% if sig.package.tarball %}
             <p><a href="{% url 'monitor_app:panda_segfault_package' key=sig.key %}">Download the package</a> for job {{ sig.package.pandaid }}, built {{ sig.package.built_at|fmt_dt }}: the run script, the payload, the row, the environment, the trace and the job records, for a software expert to run the crash again outside PanDA.</p>
@@ -251,6 +259,20 @@
 })();
 
 (function() {
+    // Copy the local reproduction fragment.
+    (function () {
+        const btn = document.getElementById('local-repro-copy');
+        const pre = document.getElementById('local-repro');
+        if (!btn || !pre) return;
+        btn.addEventListener('click', function () {
+            navigator.clipboard.writeText(pre.textContent).then(function () {
+                btn.textContent = 'Copied';
+                setTimeout(function () { btn.textContent = 'Copy'; }, 1500);
+            }, function (err) {
+                btn.textContent = 'Copy failed: ' + err;
+            });
+        });
+    })();
     // The package build: queue it, listen for segfault_package_done, reload.
     const form = document.getElementById('package-form');
     if (!form) return;

@@ -42,7 +42,7 @@ import django  # noqa: E402
 django.setup()
 
 from monitor_app.models import CrashSignature, EpicProdJob  # noqa: E402
-from monitor_app.segfaults import SIGNAL_NAMES, signature_for_job  # noqa: E402
+from monitor_app.segfaults import SIGNAL_NAMES, repro_environment, signature_for_job  # noqa: E402
 
 SWF_TMP_DIR = os.environ.get('SWF_TMP_DIR', '/data/swf-tmp')
 PACKAGE_ROOT = os.path.join(SWF_TMP_DIR, 'segfault-packages')
@@ -53,16 +53,6 @@ def _payload_dir():
     """The payload as this release ships it (the submit doer's rule)."""
     import swf_epicprod
     return os.path.join(os.path.dirname(swf_epicprod.__file__), 'payload')
-
-
-def _environment(prod_task):
-    from pcs.commands import _evgen_env
-    env = _evgen_env(prod_task)
-    # No registration, no copies, no log upload: the run leaves its outputs
-    # in the working directory and touches no catalog.
-    env.update({'USERUCIO': 'false', 'COPYRECO': 'false', 'COPYFULL': 'false',
-                'COPYLOG': 'false'})
-    return env
 
 
 def _container(prod_task):
@@ -89,7 +79,7 @@ def build(pandaid):
         shutil.rmtree(outdir)
     os.makedirs(outdir)
 
-    env = _environment(job.prod_task)
+    env = repro_environment(job.prod_task)
     container = _container(job.prod_task)
     row_text = f"{row['file']},{row['ext']},{row['nevents']},{int(row['ichunk']):04d}"
     with open(os.path.join(outdir, 'manifest.csv'), 'w') as fh:
