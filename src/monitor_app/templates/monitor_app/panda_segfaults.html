@@ -9,12 +9,18 @@
     <p class="text-muted mb-2">
         Payload crashes in ePIC production jobs, one row per crash signature: a job whose payload died on a signal
         (exit code 128 plus the signal: 139 SIGSEGV, 134 SIGABRT, 135 SIGBUS, 136 SIGFPE), found from the PanDA record
-        and grouped by exit code and PanDA task. The class is read from the record alone: a storm dies at one fixed
-        time across many nodes, a dead configuration crashes every job, a sparse signature crashes a few jobs at
-        varying times and is where event-dependent crashes live. Signatures are promoted as traces and reproductions
-        arrive. Rebuilt nightly by the catalog sync; the crashed jobs behind each row carry their manifest row where
-        the attempt's manifest is on record.
+        and grouped by exit code and PanDA task at record level; signatures sharing a crashing frame merge into one
+        trace-level entry once dug. Rebuilt nightly by the catalog sync; the crashed jobs behind each row carry their
+        manifest row where the attempt's manifest is on record.
     </p>
+    <p class="mb-1">The class is read from the record alone:</p>
+    <ul class="mb-3">
+        <li><strong>Storm</strong>: a fixed time to death across many nodes, one deterministic cause (crash rate at or above 20% and the middle half of the deaths within 20% of the median).</li>
+        <li><strong>Configuration dead</strong>: the configuration cannot run at all (95% or more of the task's jobs crash).</li>
+        <li><strong>Sparse</strong>: a few crashes at varying times, about one per host; where event-dependent crashes live (under 5% of the task's jobs).</li>
+        <li><strong>Abort</strong>: exit 134, the program aborted itself (an exception or assertion), whatever the rate.</li>
+        <li><strong>Mixed</strong>: none of the above; a class to look at, not a verdict.</li>
+    </ul>
     <p class="mb-2">
         <strong class="swf-if-shown">{{ shown }}</strong> of <strong>{{ total }}</strong> signatures,
         <strong>{{ crashes_total }}</strong> crashed jobs in the inventory.
