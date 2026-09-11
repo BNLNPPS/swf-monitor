@@ -208,7 +208,9 @@
       .swf-table-frame.swf-wide-table-scroll {
         max-height: var(--swf-table-max-height, 70vh);
         overflow: auto;
-        overscroll-behavior: contain;
+        /* Scrolling chains to the page at the frame's ends, so the wheel
+           brings the matter above back when the table is at its top. */
+        overscroll-behavior: auto;
         scrollbar-gutter: stable;
       }
       .swf-wide-table-scroll > table {
@@ -996,11 +998,16 @@ function applyNavMode(mode) {
           if (!frame.classList.contains('swf-wide-table-scroll')) return;
           const nav = document.querySelector('.sticky-header');
           const navHeight = nav ? nav.offsetHeight : 0;
-          const top = Math.max(frame.getBoundingClientRect().top, navHeight);
+          // The region is sized to the whole height under the nav, wherever
+          // the frame sits, so the page keeps exactly (frame top - nav) to
+          // scroll: the matter above scrolls away until the header seats
+          // beneath the nav, where it latches. Until then the frame lets
+          // the wheel through (no vertical scrolling of its own), so
+          // scrolling anywhere moves the page first and the table after.
           const fullAvailable = Math.max(120, window.innerHeight - navHeight - 16);
-          const available = Math.max(
-            Math.min(240, fullAvailable), window.innerHeight - top - 16);
-          frame.style.setProperty('--swf-table-max-height', available + 'px');
+          frame.style.setProperty('--swf-table-max-height', fullAvailable + 'px');
+          const seated = frame.getBoundingClientRect().top <= navHeight + 1;
+          frame.style.overflowY = seated ? 'auto' : 'hidden';
         }
 
         function updateTableFrame(table) {
