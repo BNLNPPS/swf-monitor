@@ -89,7 +89,7 @@
                     exit {{ r.exit_code }}, {{ r.signal_name }}{% if r.frame %}; {{ r.frame }}{% endif %}</td>
                 <td class="cfg-col">{% if r.configuration.prod_task %}{{ r.configuration.prod_task }}{% else %}{{ r.task_names.0|default:'' }}{% endif %}
                     {% if r.image %}<br>{{ r.image }}{% endif %}</td>
-                <td class="tasks-col" data-order="{{ r.tasks }}">{% if r.tasks > 3 %}{{ r.tasks }} tasks{% else %}{% for tid in r.task_ids %}<a href="{% url 'monitor_app:panda_task_detail' jeditaskid=tid %}">{{ tid }}</a>{% if not forloop.last %}<br>{% endif %}{% endfor %}{% endif %}</td>
+                <td class="tasks-col" data-order="{{ r.tasks }}">{% if r.task_ids %}<a href="{% url 'monitor_app:panda_task_detail' jeditaskid=r.task_ids.0 %}">{{ r.task_ids.0 }}</a>{% if r.tasks > 1 %}<br>&amp; {{ r.tasks|add:"-1" }} other{{ r.tasks|add:"-1"|pluralize }}{% endif %}{% endif %}</td>
                 <td data-order="{{ r.crashes }}">{{ r.crashes }}</td>
                 <td data-order="{{ r.rate|default_if_none:'-1' }}">{{ r.rate_pct }}</td>
                 <td data-order="{{ r.minutes_p50|default_if_none:'-1' }}">{% if r.minutes_p50 is not None %}{{ r.minutes_p10 }} / {{ r.minutes_p50 }}{% endif %}</td>
