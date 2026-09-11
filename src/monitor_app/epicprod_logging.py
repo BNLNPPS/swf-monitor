@@ -97,6 +97,16 @@ ACTION_DEFAULTS = {
                        "Standard Production configuration bound, so the retry "
                        "family applies. Nothing is submitted.",
     },
+    'walltime_queue_cap': {
+        'sublevel': 'normal', 'live': True,
+        'description': "A residual rerun's declared walltime held under its "
+                       "queue's maxtime at submission (JEDI_INTEGRATION.md "
+                       "§ Residual rerun), carrying severity for notice "
+                       "routing: warning when the attempt's own jobs ran "
+                       "longer than the queue declares (the queue "
+                       "declaration is wrong), info when the estimate alone "
+                       "was capped.",
+    },
     # ops agent
     'task_submit': {
         'sublevel': 'high', 'live': True,
