@@ -242,6 +242,24 @@ ACTION_DEFAULTS = {
                        "page, queued to the production operations agent; "
                        "the dig itself is the segfault_dig event.",
     },
+    'segfault_reproduce': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Operator request to reproduce a crash signature: "
+                       "the crashed job's own manifest row run again as "
+                       "payload canaries on the production queue and the "
+                       "reference queue BNL_NPPS_GPU, queued to the canary "
+                       "agent; the outcome (reproduced, site_dependent, "
+                       "not_reproduced, inconclusive) settles on the "
+                       "signature from the runs' payload reports.",
+    },
+    'segfault_package': {
+        'sublevel': 'normal', 'live': True,
+        'description': "A crashed job's reproduction package built for a "
+                       "software expert (scripts/segfault-repro-package.py): "
+                       "the run script, the payload, the row, the "
+                       "environment, the trace and the job records, as a "
+                       "tarball the signature page serves.",
+    },
     'system_status_refresh': {
         'sublevel': 'low', 'live': False,
         'description': "Periodic refresh of the cached System page status "

@@ -209,11 +209,23 @@ def run_row(n, csv_base, workdir, extra_env=None):
     env = dict(os.environ)
     if extra_env:
         env.update(extra_env)
+    # A reproduction's reference run matches the production queue's memory
+    # (SEGFAULT_DIAGNOSIS.md, Reproduction): CANARY_MEM_LIMIT_MB puts an
+    # address-space limit on the payload and everything it starts.
+    preexec = None
+    mem_limit_mb = env.get("CANARY_MEM_LIMIT_MB", "").strip()
+    if mem_limit_mb.isdigit() and int(mem_limit_mb) > 0:
+        import resource
+        limit = int(mem_limit_mb) * 1024 * 1024
+
+        def preexec():
+            resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+        print(f"payload address-space limit: {mem_limit_mb} MB (RLIMIT_AS)")
     # The payload prepends the JLab xrootd path to EVGEN/<file>; pass the
     # EVGEN-relative path, extension, event count and chunk index through.
     result = subprocess.run(
         [payload_run, f"EVGEN/{file_path}", ext, nevents, ichunk],
-        text=True, env=env,
+        text=True, env=env, preexec_fn=preexec,
     )
     return result.returncode, row
 

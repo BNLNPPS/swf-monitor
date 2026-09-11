@@ -182,6 +182,7 @@ SEGFAULT_DIG_TIMEOUT = int(os.environ.get("EPICPROD_SEGFAULT_DIG_TIMEOUT", "3600
 # The automatic dig per night: one representative log per new signature,
 # capped so a storm is not a thousand fetches (SEGFAULT_DIAGNOSIS.md).
 SEGFAULT_DIG_AUTO = int(os.environ.get("EPICPROD_SEGFAULT_DIG_AUTO", "10"))
+SEGFAULT_PACKAGE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "segfault-repro-package.py"
 # The registrar (swf-epicprod docs/RUCIO_RESILIENCE.md, Measure 2): completes
 # the registrations the payload left pending, hourly, and holds the only
 # retry — one gentle attempt per job, then bounded attempts from one process.
@@ -316,7 +317,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "rucio_arrivals_sweep", "epic_prod_past_import",
                    "file_events_measure", "delivery_daily_rebuild",
                    "batch_log_capture", "batch_log_learn",
-                   "segfault_inventory", "segfault_dig",
+                   "segfault_inventory", "segfault_dig", "segfault_package",
                    "report_sweep", "outputs_ingest", "registrar",
                    "content_validate", "content_accept", "stash_drain",
                    "node_measure_ingest", "dataset_definitions_sweep",
@@ -2455,6 +2456,60 @@ class EpicProdOpsAgent(BaseAgent):
             'frame': summary.get('frame') or '',
             'reason': summary.get('reason') or '',
             'merged_into': summary.get('merged_into') or ''})
+
+    def _handle_segfault_package(self, m):
+        """Build a crashed job's reproduction package for a software expert
+        (SEGFAULT_DIAGNOSIS.md, The reproduction package)."""
+        if not m.get('pandaid'):
+            self.logger.error("PRODOPS segfault_package: missing pandaid")
+            return
+        self.run_in_background(
+            self._do_segfault_package, m,
+            dedup_key=f"segfault_package:{m.get('pandaid')}",
+            label=f"segfault_package {m.get('pandaid')}")
+
+    def _do_segfault_package(self, m):
+        pandaid = str(int(m['pandaid']))
+        key = str(m.get('key') or '')
+        cmd = [sys.executable, str(SEGFAULT_PACKAGE_SCRIPT), pandaid]
+        t0 = time.monotonic()
+        username = str(m.get('requested_by') or '')
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        except subprocess.TimeoutExpired:
+            self._log_action('segfault_package', t0, outcome='error',
+                             reason='timed out after 600s', subject_type='crash_signature',
+                             subject_key=key, username=username, sublevel='normal',
+                             live_default=True, level=logging.ERROR)
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'segfault_package_done', 'key': key, 'pandaid': pandaid,
+                'ok': False, 'reason': 'timed out'})
+            return
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  segfault-repro-package: {line[:300]}")
+        summary = {}
+        try:
+            summary = json.loads(((p.stdout or '').strip().splitlines() or ['{}'])[-1])
+        except Exception as e:
+            summary = {'error': f'unreadable summary: {e}'}
+        if p.returncode != 0 or summary.get('error'):
+            reason = str(summary.get('error') or self._derive_reason(p))[:300]
+            self._log_action('segfault_package', t0, outcome='error', reason=reason,
+                             subject_type='crash_signature', subject_key=key,
+                             username=username, sublevel='normal', live_default=True,
+                             level=logging.ERROR)
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'segfault_package_done', 'key': key, 'pandaid': pandaid,
+                'ok': False, 'reason': reason})
+            return
+        self._log_action('segfault_package', t0, subject_type='crash_signature',
+                         subject_key=key, username=username, sublevel='normal',
+                         live_default=True,
+                         summary=f"job {pandaid}: {summary.get('tarball')} ({summary.get('bytes')} bytes)",
+                         pandaid=int(pandaid), bytes=summary.get('bytes'))
+        self.send_message('/topic/epictopic', {
+            'msg_type': 'segfault_package_done', 'key': key, 'pandaid': pandaid,
+            'ok': True, 'tarball': summary.get('tarball')})
 
     def _do_segfault_dig_auto(self, m):
         """The nightly automatic dig (catalog_sync chain step): the largest

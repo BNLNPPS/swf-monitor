@@ -374,11 +374,17 @@ def signature_detail(key, jobs_limit=200):
     sig = CrashSignature.objects.filter(key=key).first()
     if sig is None:
         return None
+    if sig.reproduction:
+        try:
+            reproduction_refresh(sig)
+        except Exception as e:                                # noqa: BLE001
+            logger.error('segfault %s: reproduction refresh failed: %s', key, e)
     detail = signature_summary(sig)
     detail.update({
         'tasks_detail': sig.tasks or [],
         'trace': sig.trace or {},
         'reproduction': sig.reproduction or [],
+        'reproduction_outcome': (sig.data or {}).get('reproduction_outcome', ''),
         'verdict': sig.verdict,
         'assessment_ids': sig.assessment_ids or [],
         'package': sig.package or {},
@@ -597,3 +603,174 @@ def dig_candidates(limit):
     qs = (CrashSignature.objects.filter(level='record')
           .exclude(trace__has_key='trace_status').order_by('-crashes'))
     return list(qs[:limit])
+
+
+# --------------------------------------------------------- reproduction
+
+CANARY_QUEUE = '/queue/canary.ops'
+CANARY_NAMESPACE = 'canary'
+REFERENCE_QUEUE = 'BNL_NPPS_GPU'
+CRASH_EXITS = {134, 135, 136, 139}
+
+
+def reproduction_plan(sig, pandaid=None):
+    """What a reproduction of the signature runs: the crashed job (the
+    representative unless named), its row, its PCS task, its production
+    queue and that queue's memory. Raises ValueError with the reason when
+    the run cannot be formed."""
+    if pandaid is None:
+        rep = representative(sig)
+        if rep is None:
+            raise ValueError('no crashed job on record')
+        pandaid = rep[0]
+    job = EpicProdJob.objects.filter(pandaid=int(pandaid), phase=PHASE).select_related(
+        'prod_task').first()
+    if job is None:
+        raise ValueError(f'job {pandaid} is not in the crash inventory')
+    crash = (job.data or {}).get('crash') or {}
+    if job.prod_task is None:
+        raise ValueError(f'job {pandaid} has no PCS task; move its task to PCS first '
+                         f'(EPICPROD_RETRIES.md, Move this task to PCS)')
+    row = crash.get('row')
+    if not row:
+        raise ValueError(f"job {pandaid}'s manifest row is unresolved; the attempt has "
+                         f'no manifest record')
+    row_text = f"{row['file']},{row['ext']},{row['nevents']},{int(row['ichunk']):04d}"
+    site = crash.get('computingsite') or ''
+    maxrss_mb = None
+    if site:
+        # The queue's memory from schedconfig (the PanDA record, a table
+        # read, no remote service).
+        from .panda.queries import get_queue
+        cfg = (get_queue(site) or {}).get('queue') or {}
+        raw = cfg.get('maxrss')
+        try:
+            maxrss_mb = int(raw) if raw else None
+        except (TypeError, ValueError):
+            maxrss_mb = None
+    return {'pandaid': int(pandaid), 'task': job.prod_task.name, 'row_text': row_text,
+            'production_queue': site, 'reference_queue': REFERENCE_QUEUE,
+            'maxrss_mb': maxrss_mb, 'job_maxrss_mb': crash.get('maxrss_mb')}
+
+
+def reproduce(sig, pandaid, queues, mem_limits, username):
+    """Queue one payload canary per queue to the canary agent for the
+    crashed job's row, and record the runs on the signature as submitted.
+    ``mem_limits`` maps queue -> MB or None. Returns the entries added."""
+    import json
+    from .activemq_connection import ActiveMQConnectionManager
+    plan = reproduction_plan(sig, pandaid)
+    entries = []
+    now = _iso(timezone.now())
+    for queue in queues:
+        msg = {'msg_type': 'payload_canary', 'namespace': CANARY_NAMESPACE,
+               'task': plan['task'], 'queue': queue, 'row_text': plan['row_text'],
+               'signature': sig.key, 'pandaid': plan['pandaid'],
+               'created_by': username or 'segfault_reproduce'}
+        limit = mem_limits.get(queue)
+        if limit:
+            msg['mem_limit_mb'] = int(limit)
+        sent = ActiveMQConnectionManager().send_message(CANARY_QUEUE, json.dumps(msg))
+        if not sent:
+            raise RuntimeError('the canary agent queue could not be reached')
+        entries.append({'pandaid': plan['pandaid'], 'queue': queue,
+                        'row_text': plan['row_text'], 'mem_limit_mb': limit,
+                        'requested_at': now, 'requested_by': username,
+                        'outcome': 'submitted', 'jedi_task_id': None,
+                        'canary_pandaid': None, 'minutes': None,
+                        'verdict_time': None, 'exit_code': None})
+    sig.reproduction = list(sig.reproduction or []) + entries
+    if sig.status in ('new', 'traced', 'digging'):
+        sig.status = 'reproducing'
+    sig.save(update_fields=['reproduction', 'status', 'updated_at'])
+    return entries
+
+
+def reproduction_refresh(sig):
+    """Bring the signature's reproduction entries up to date from the
+    canary runs (ProbeRun, kind payload, this signature), and settle the
+    outcome once a production run and a reference run have both
+    reported: reproduced (both crashed), site_dependent (production
+    only), not_reproduced (neither), inconclusive (a run failed for
+    another reason). swfdb only; returns True when anything changed."""
+    from canary.store.models import ProbeRun
+    entries = list(sig.reproduction or [])
+    if not entries:
+        return False
+    runs = list(ProbeRun.objects.filter(
+        data__kind='payload', data__signature=sig.key).select_related('queue')
+        .order_by('submitted_at'))
+    changed = False
+    for e in entries:
+        if e.get('outcome') not in ('submitted', 'running', None):
+            continue
+        run = next((r for r in runs if r.queue.name == e['queue']
+                    and (r.data or {}).get('reproduction_of') == e['pandaid']
+                    and str(r.submitted_at) >= str(e.get('requested_at') or '')[:19]), None)
+        if run is None:
+            continue
+        d = run.data or {}
+        before = dict(e)
+        e['jedi_task_id'] = run.jeditaskid
+        e['run_id'] = str(run.id)
+        e['canary_pandaid'] = d.get('pandaid')
+        if run.status == ProbeRun.Status.FAILED_SUBMIT:
+            e['outcome'] = 'inconclusive'
+            e['reason'] = 'submission failed: ' + str(d.get('error') or d.get('stderr') or '')[-200:]
+        elif run.status == ProbeRun.Status.COLLECTED:
+            rc = d.get('payload_exit_code')
+            e['exit_code'] = rc
+            e['minutes'] = d.get('run_seconds') / 60.0 if d.get('run_seconds') else e.get('minutes')
+            e['verdict_time'] = _iso(run.modified_at)
+            if rc in CRASH_EXITS:
+                e['outcome'] = 'crashed'
+            elif rc == 0:
+                e['outcome'] = 'completed'
+            else:
+                e['outcome'] = 'inconclusive'
+                e['reason'] = f'payload exited {rc}'
+        elif run.status == ProbeRun.Status.FAILED:
+            e['outcome'] = 'inconclusive'
+            e['reason'] = 'the canary job failed: ' + ', '.join(
+                str(x) for x in (d.get('errors') or [])[:3])
+            e['verdict_time'] = _iso(run.modified_at)
+        elif run.status == ProbeRun.Status.FINISHED:
+            e['outcome'] = 'inconclusive'
+            e['reason'] = d.get('collect_note') or 'finished without a payload report'
+        elif d.get('started_at') or d.get('wait_s') is not None:
+            e['outcome'] = 'running'
+        if e != before:
+            changed = True
+    # The pair settles the signature.
+    settled = [e for e in entries if e.get('outcome') in ('crashed', 'completed', 'inconclusive')]
+    prod = [e for e in settled if e['queue'] != REFERENCE_QUEUE]
+    ref = [e for e in settled if e['queue'] == REFERENCE_QUEUE]
+    outcome = None
+    if prod and ref:
+        p, r = prod[-1]['outcome'], ref[-1]['outcome']
+        if p == 'crashed' and r == 'crashed':
+            outcome = 'reproduced'
+        elif p == 'crashed' and r == 'completed':
+            outcome = 'site_dependent'
+        elif p == 'completed' and r == 'completed':
+            outcome = 'not_reproduced'
+        elif p == 'completed' and r == 'crashed':
+            outcome = 'reproduced'
+        else:
+            outcome = 'inconclusive'
+    elif ref and ref[-1]['outcome'] == 'crashed':
+        outcome = 'reproduced'
+    data = dict(sig.data or {})
+    if outcome and data.get('reproduction_outcome') != outcome:
+        data['reproduction_outcome'] = outcome
+        data['reproduction_settled_at'] = _iso(timezone.now())
+        sig.data = data
+        if outcome in ('reproduced', 'site_dependent') and sig.status in ('reproducing', 'traced', 'new'):
+            sig.status = 'reproduced'
+        elif outcome == 'not_reproduced' and sig.status == 'reproducing':
+            sig.status = 'not_reproduced'
+        changed = True
+    if changed:
+        sig.reproduction = entries
+        sig.save(update_fields=['reproduction', 'status', 'data', 'updated_at'])
+    return changed

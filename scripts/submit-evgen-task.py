@@ -300,6 +300,19 @@ def main():
                          "IMPLEMENTATION.md, Payload canaries)")
     ap.add_argument("--canary-queue", default="",
                     help="the PanDA queue a payload canary is sent to")
+    ap.add_argument("--canary-row", type=int, default=0,
+                    help="payload canary: this manifest row (1-based) of the "
+                         "task's spec instead of row 1")
+    ap.add_argument("--canary-row-text", default="",
+                    help="payload canary: this exact manifest row "
+                         "(file,ext,nevents,ichunk) instead of one of the "
+                         "spec's, the crashed job's row of a reproduction "
+                         "(swf-epicprod SEGFAULT_DIAGNOSIS.md, Reproduction)")
+    ap.add_argument("--canary-mem-limit-mb", type=int, default=0,
+                    help="payload canary: an address-space limit (RLIMIT_AS, "
+                         "MB) the dispatcher puts on the payload, so a "
+                         "reference run matches the production queue's "
+                         "memory")
     ap.add_argument("--trial", action="store_true",
                     help="trial run (docs/PCS.md, Trials): the composed "
                          "configuration submitted small and for real — one "
@@ -362,15 +375,34 @@ def main():
         # canary, one job, one attempt) on the named queue, its outputs in
         # the expiring dataset the dispatcher's payload-canary mode names.
         qtag = args.canary_queue.lower()
-        spec['csvRows'] = list(spec['csvRows'])[:1]
+        rows = list(spec['csvRows'])
+        if args.canary_row_text:
+            # A reproduction runs the crashed job's own row: the sandbox
+            # manifest holds that row alone, and the dispatcher's row 1
+            # is it.
+            spec['csvRows'] = [args.canary_row_text.strip()]
+        elif args.canary_row:
+            if args.canary_row < 1 or args.canary_row > len(rows):
+                _log(f"ERROR: --canary-row {args.canary_row} is outside the "
+                     f"spec's {len(rows)} rows")
+                return 2
+            spec['csvRows'] = [rows[args.canary_row - 1]]
+        else:
+            spec['csvRows'] = rows[:1]
         spec['outDS'] = f"group.EIC.canary.{qtag}.{args.canary_stamp}"
-        spec['exec'] = (f"python3 evgen_job_dispatcher.py payload-canary "
+        # Settings ride as an environment prefix on the dispatcher command,
+        # as a trial's do.
+        prefix = (f"CANARY_MEM_LIMIT_MB={int(args.canary_mem_limit_mb)} "
+                  if args.canary_mem_limit_mb else "")
+        spec['exec'] = (f"{prefix}python3 evgen_job_dispatcher.py payload-canary "
                         f"{spec['csvBase']} {args.canary_stamp}")
         spec.update(site=args.canary_queue, processingType='canary',
                     prodSourceLabel='test', userName='canary', nJobs=1,
                     maxAttempt=1, skipScout=True)
         _log(f"payload canary {spec['outDS']} on {args.canary_queue}: "
-             f"row {spec['csvRows'][0]}")
+             f"row {spec['csvRows'][0]}"
+             + (f", RLIMIT_AS {args.canary_mem_limit_mb} MB"
+                if args.canary_mem_limit_mb else ""))
     elif args.trial or spec.get('trial'):
         # The spec carries the trial's own settings when the task is a
         # trial, so submitting one needs no flag; --trial with explicit

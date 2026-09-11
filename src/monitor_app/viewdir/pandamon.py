@@ -1799,6 +1799,104 @@ def panda_segfault_dig(request, key):
     return JsonResponse({'queued': True, 'key': key, 'pandaid': pandaid or None})
 
 
+def panda_segfault_reproduce(request, key):
+    """The Reproduce action: run the crashed job's row again as payload
+    canaries on the production queue and the reference queue
+    (SEGFAULT_DIAGNOSIS.md, Reproduction), queued to the canary agent;
+    the outcomes are read from the runs on the next visit. JSON in and
+    out; authenticated, under the authority gate."""
+    from ..models import CrashSignature
+    from ..segfaults import REFERENCE_QUEUE, reproduce, reproduction_plan
+    if request.method == 'GET':
+        # The plan a page shows before asking: the job, its row, the queues
+        # and the production queue's memory.
+        sig = CrashSignature.objects.filter(key=key).first()
+        if sig is None:
+            return JsonResponse({'error': f'no crash signature {key}'}, status=404)
+        pandaid = (request.GET.get('pandaid') or '').strip()
+        try:
+            plan = reproduction_plan(sig, int(pandaid) if pandaid.isdigit() else None)
+        except ValueError as e:
+            return JsonResponse({'error': str(e)}, status=400)
+        return JsonResponse(plan)
+    if request.method != 'POST':
+        return JsonResponse({'error': 'GET or POST'}, status=405)
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'sign in to reproduce'}, status=403)
+    sig = CrashSignature.objects.filter(key=key).first()
+    if sig is None:
+        return JsonResponse({'error': f'no crash signature {key}'}, status=404)
+    pandaid = (request.POST.get('pandaid') or '').strip()
+    queues = [q.strip() for q in request.POST.getlist('queue') if q.strip()]
+    if not queues:
+        return JsonResponse({'error': 'name at least one queue'}, status=400)
+    mem_limits = {}
+    for q in queues:
+        raw = (request.POST.get(f'mem_limit_mb[{q}]') or '').strip()
+        if raw:
+            if not raw.isdigit():
+                return JsonResponse({'error': f'memory limit for {q} must be MB'}, status=400)
+            mem_limits[q] = int(raw)
+    try:
+        entries = reproduce(sig, int(pandaid) if pandaid.isdigit() else None,
+                            queues, mem_limits, request.user.username)
+    except ValueError as e:
+        return JsonResponse({'error': str(e)}, status=400)
+    except RuntimeError as e:
+        logger.error(f"segfault reproduce {key}: {e}")
+        return JsonResponse({'error': str(e)}, status=502)
+    log_epicprod_action('web', 'segfault_reproduce', subject_type='crash_signature',
+                        subject_key=key, username=request.user.username,
+                        sublevel='normal', live_default=True,
+                        message=(f"segfault_reproduce {key}: job {entries[0]['pandaid']} "
+                                 f"on {', '.join(queues)}"),
+                        runs=len(entries))
+    return JsonResponse({'queued': True, 'key': key, 'runs': entries,
+                         'reference_queue': REFERENCE_QUEUE})
+
+
+def panda_segfault_package(request, key):
+    """The reproduction package: POST queues its build for a crashed job to
+    the production operations agent (segfault_package_done when built);
+    GET serves the built tarball from the package store."""
+    from ..models import CrashSignature
+    sig = CrashSignature.objects.filter(key=key).first()
+    if sig is None:
+        return JsonResponse({'error': f'no crash signature {key}'}, status=404)
+    if request.method == 'GET':
+        tarball = (sig.package or {}).get('tarball') or ''
+        root = os.path.join(os.environ.get('SWF_TMP_DIR', '/data/swf-tmp'), 'segfault-packages')
+        if not tarball or not os.path.realpath(tarball).startswith(os.path.realpath(root) + os.sep) \
+                or not os.path.isfile(tarball):
+            return HttpResponse('no package built for this signature\n', status=404,
+                                content_type='text/plain; charset=utf-8')
+        from django.http import FileResponse
+        return FileResponse(open(tarball, 'rb'), as_attachment=True,
+                            filename=os.path.basename(tarball),
+                            content_type='application/gzip')
+    if request.method != 'POST':
+        return JsonResponse({'error': 'GET or POST'}, status=405)
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'sign in to build a package'}, status=403)
+    pandaid = (request.POST.get('pandaid') or '').strip()
+    if not pandaid.isdigit():
+        from ..segfaults import representative
+        rep = representative(sig)
+        if rep is None:
+            return JsonResponse({'error': 'no crashed job on record'}, status=400)
+        pandaid = str(rep[0])
+    msg = {'msg_type': 'segfault_package', 'namespace': 'prodops', 'key': key,
+           'pandaid': pandaid, 'requested_by': request.user.username}
+    try:
+        queued = ActiveMQConnectionManager().send_message('/queue/epicprod.ops', json.dumps(msg))
+    except Exception as e:
+        logger.error(f"segfault package trigger failed for {key}: {e}")
+        queued = False
+    if not queued:
+        return JsonResponse({'error': 'the ops-agent queue could not be reached'}, status=502)
+    return JsonResponse({'queued': True, 'key': key, 'pandaid': int(pandaid)})
+
+
 def panda_errors_datatable_ajax(request):
     from ..cached_product import get_product
 

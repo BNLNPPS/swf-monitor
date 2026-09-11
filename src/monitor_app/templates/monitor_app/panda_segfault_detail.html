@@ -91,22 +91,63 @@
             {% endif %}
 
             <h4>Reproduction</h4>
+            {% if sig.reproduction_outcome %}<p>Outcome: <strong>{{ sig.reproduction_outcome }}</strong> (reproduced: both runs crashed; site_dependent: the production run alone; not_reproduced: neither; inconclusive: a run failed for another reason).</p>{% endif %}
             {% if sig.reproduction %}
             <table class="table table-striped table-bordered table-sm align-middle w-auto">
-                <thead><tr><th>Job</th><th>Queue</th><th>Canary task</th><th>Outcome</th><th>Minutes</th><th>Verdict time</th></tr></thead>
+                <thead><tr><th>Crashed job</th><th>Queue</th><th>Memory limit</th><th>Canary task</th><th>Canary job</th><th>Outcome</th><th>Exit</th><th>Requested</th><th>Settled</th></tr></thead>
                 <tbody>
                 {% for r in sig.reproduction %}
-                <tr><td>{{ r.pandaid }}</td><td>{{ r.queue }}</td><td>{{ r.jedi_task_id }}</td><td>{{ r.outcome }}</td><td>{{ r.minutes }}</td><td>{{ r.verdict_time|default:''|slice:":16" }}</td></tr>
+                <tr>
+                    <td><a href="{% url 'monitor_app:panda_job_detail' pandaid=r.pandaid %}">{{ r.pandaid }}</a></td>
+                    <td>{{ r.queue }}</td>
+                    <td>{% if r.mem_limit_mb %}{{ r.mem_limit_mb }} MB{% endif %}</td>
+                    <td>{% if r.jedi_task_id %}<a href="{% url 'monitor_app:panda_task_detail' jeditaskid=r.jedi_task_id %}">{{ r.jedi_task_id }}</a>{% endif %}</td>
+                    <td>{% if r.canary_pandaid %}<a href="{% url 'monitor_app:panda_job_detail' pandaid=r.canary_pandaid %}">{{ r.canary_pandaid }}</a>{% endif %}</td>
+                    <td title="{{ r.reason|default:'' }}">{{ r.outcome }}{% if r.reason %} <span class="text-muted">({{ r.reason|truncatechars:80 }})</span>{% endif %}</td>
+                    <td>{{ r.exit_code|default_if_none:'' }}</td>
+                    <td>{{ r.requested_at|default:''|slice:":16" }}</td>
+                    <td>{{ r.verdict_time|default:''|slice:":16" }}</td>
+                </tr>
                 {% endfor %}
                 </tbody>
             </table>
             {% else %}
             <p class="text-muted">No reproduction run yet.</p>
             {% endif %}
+            {% if sig.level == 'record' %}
+            <form id="repro-form" class="mb-3" method="post" action="{% url 'monitor_app:panda_segfault_reproduce' key=sig.key %}" data-key="{{ sig.key }}" data-plan-url="{% url 'monitor_app:panda_segfault_reproduce' key=sig.key %}">
+                {% csrf_token %}
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <button type="submit" id="repro-button" class="btn btn-sm btn-success" title="Run the crashed job's own manifest row again through the production payload as one-job canary tasks on the two queues below; the outcome is read from the payload reports when the runs finish">Reproduce</button>
+                    <input type="text" name="pandaid" id="repro-pandaid" class="form-control form-control-sm" style="max-width: 10em;" placeholder="job (optional)" title="A chosen crashed job instead of the median one">
+                    <span id="repro-status" class="text-muted small"></span>
+                </div>
+                <div id="repro-plan" class="small mt-1 text-muted"></div>
+                <div class="d-flex align-items-center gap-3 flex-wrap mt-1">
+                    <label class="small"><input type="checkbox" name="queue" id="repro-prod-queue" value="" checked> production queue <span id="repro-prod-name"></span></label>
+                    <label class="small"><input type="checkbox" name="queue" value="BNL_NPPS_GPU" checked> reference queue BNL_NPPS_GPU, memory limit
+                        <input type="text" id="repro-mem" class="form-control form-control-sm d-inline-block" style="max-width: 7em;" placeholder="MB" title="RLIMIT_AS on the payload for the reference run, set from the production queue's maxrss; clear it to run unlimited"></label>
+                </div>
+            </form>
+            {% endif %}
+
+            <h4>Reproduction package</h4>
+            {% if sig.package.tarball %}
+            <p><a href="{% url 'monitor_app:panda_segfault_package' key=sig.key %}">Download the package</a> for job {{ sig.package.pandaid }}, built {{ sig.package.built_at|default:''|slice:":16" }}: the run script, the payload, the row, the environment, the trace and the job records, for a software expert to run the crash again outside PanDA.</p>
+            {% else %}
+            <p class="text-muted">No package built yet.</p>
+            {% endif %}
+            {% if sig.level == 'record' %}
+            <form id="package-form" class="d-flex align-items-center gap-2 mb-3" method="post" action="{% url 'monitor_app:panda_segfault_package' key=sig.key %}" data-key="{{ sig.key }}">
+                {% csrf_token %}
+                <button type="submit" id="package-button" class="btn btn-sm btn-primary" title="Build the self-contained reproduction package for a crashed job (the median one unless named) through the production operations agent">Build package</button>
+                <input type="text" name="pandaid" class="form-control form-control-sm" style="max-width: 10em;" placeholder="job (optional)">
+                <span id="package-status" class="text-muted small"></span>
+            </form>
+            {% endif %}
 
             <h4>Verdict</h4>
             {% if sig.verdict %}<p>{{ sig.verdict }}</p>{% else %}<p class="text-muted">None yet.</p>{% endif %}
-            {% if sig.package.path %}<p>Reproduction package: {{ sig.package.path }} ({{ sig.package.built_at|default:'' }})</p>{% endif %}
             {% if sig.assessment_ids %}<p>Assessments: {{ sig.assessment_ids|join:", " }}</p>{% endif %}
         </div>
     </div>
@@ -193,6 +234,102 @@
         window.setTimeout(function() {
             if (!done) finish('Dig still running or event not received; refresh to check.', true);
         }, 600000);
+    });
+})();
+
+(function() {
+    // The package build: queue it, listen for segfault_package_done, reload.
+    const form = document.getElementById('package-form');
+    if (!form) return;
+    const button = document.getElementById('package-button');
+    const status = document.getElementById('package-status');
+    form.addEventListener('submit', function(ev) {
+        ev.preventDefault();
+        const key = String(form.dataset.key || '');
+        const token = form.querySelector('input[name="csrfmiddlewaretoken"]')?.value || '';
+        const pandaid = (form.querySelector('input[name="pandaid"]')?.value || '').trim();
+        const streamUrl = "{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=segfault_package_done";
+        let done = false, es = null;
+        function finish(message, failed) {
+            done = true; if (es) es.close(); button.disabled = false;
+            status.textContent = message || ''; status.className = failed ? 'text-danger small' : 'text-muted small';
+        }
+        button.disabled = true; status.className = 'text-muted small'; status.textContent = 'Building...';
+        if (window.EventSource) {
+            es = new EventSource(streamUrl);
+            es.addEventListener('segfault_package_done', function(event) {
+                let data = {}; try { data = JSON.parse(event.data); } catch (e) { return; }
+                if (String(data.key || '') !== key) return;
+                if (data.ok) window.location.reload(); else finish(data.reason || 'Build failed.', true);
+            });
+        }
+        const body = new URLSearchParams(); if (pandaid) body.set('pandaid', pandaid);
+        fetch(form.action, {method: 'POST', headers: {'X-CSRFToken': token, 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/x-www-form-urlencoded'}, body: body.toString()})
+          .then(function(resp) { return resp.json().then(function(d) { return {ok: resp.ok, d: d}; }); })
+          .then(function(r) { if (!r.ok) finish(r.d.error || 'Could not queue the build.', true); })
+          .catch(function() { finish('Could not queue the build.', true); });
+        window.setTimeout(function() { if (!done) finish('Build still running or event not received; refresh to check.', true); }, 120000);
+    });
+})();
+
+(function() {
+    // The Reproduce action: show the plan (job, row, production queue, its
+    // memory) as the page loads and when a job is typed; on submit, queue
+    // the canaries and reload with the runs recorded as submitted.
+    const form = document.getElementById('repro-form');
+    if (!form) return;
+    const button = document.getElementById('repro-button');
+    const status = document.getElementById('repro-status');
+    const planBox = document.getElementById('repro-plan');
+    const jobInput = document.getElementById('repro-pandaid');
+    const prodQueue = document.getElementById('repro-prod-queue');
+    const prodName = document.getElementById('repro-prod-name');
+    const memInput = document.getElementById('repro-mem');
+    let plan = null;
+    function loadPlan() {
+        const pandaid = (jobInput.value || '').trim();
+        const url = form.dataset.planUrl + (pandaid ? '?pandaid=' + encodeURIComponent(pandaid) : '');
+        fetch(url, {headers: {'Accept': 'application/json'}})
+          .then(function(resp) { return resp.json().then(function(d) { return {ok: resp.ok, d: d}; }); })
+          .then(function(r) {
+              if (!r.ok) { plan = null; planBox.textContent = r.d.error || 'No plan.'; planBox.className = 'small mt-1 text-danger'; button.disabled = true; return; }
+              plan = r.d;
+              planBox.className = 'small mt-1 text-muted';
+              planBox.textContent = 'Job ' + plan.pandaid + ' of ' + plan.task + ', row ' + plan.row_text +
+                  (plan.maxrss_mb ? '; the production queue allows ' + plan.maxrss_mb + ' MB' : '') +
+                  (plan.job_maxrss_mb ? '; the job peaked at ' + plan.job_maxrss_mb + ' MB' : '') + '.';
+              prodQueue.value = plan.production_queue || '';
+              prodName.textContent = plan.production_queue || '(unknown)';
+              prodQueue.disabled = !plan.production_queue;
+              if (!plan.production_queue) prodQueue.checked = false;
+              if (!memInput.value && plan.maxrss_mb) memInput.value = plan.maxrss_mb;
+              button.disabled = false;
+          }).catch(function() { planBox.textContent = 'Plan unavailable.'; });
+    }
+    jobInput.addEventListener('change', loadPlan);
+    loadPlan();
+    form.addEventListener('submit', function(ev) {
+        ev.preventDefault();
+        if (!plan) return;
+        const token = form.querySelector('input[name="csrfmiddlewaretoken"]')?.value || '';
+        const body = new URLSearchParams();
+        body.set('pandaid', String(plan.pandaid));
+        form.querySelectorAll('input[name="queue"]:checked').forEach(function(cb) { if (cb.value) body.append('queue', cb.value); });
+        const mem = (memInput.value || '').trim();
+        if (mem) body.set('mem_limit_mb[BNL_NPPS_GPU]', mem);
+        button.disabled = true;
+        status.className = 'text-muted small';
+        status.textContent = 'Queueing the canaries...';
+        fetch(form.action, {
+            method: 'POST',
+            headers: {'X-CSRFToken': token, 'X-Requested-With': 'XMLHttpRequest',
+                      'Content-Type': 'application/x-www-form-urlencoded'},
+            body: body.toString()
+        }).then(function(resp) { return resp.json().then(function(d) { return {ok: resp.ok, d: d}; }); })
+          .then(function(r) {
+              if (!r.ok) { button.disabled = false; status.className = 'text-danger small'; status.textContent = r.d.error || 'Could not queue.'; return; }
+              window.location.reload();
+          }).catch(function() { button.disabled = false; status.className = 'text-danger small'; status.textContent = 'Could not queue.'; });
     });
 })();
 </script>

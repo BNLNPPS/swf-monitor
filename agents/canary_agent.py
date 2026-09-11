@@ -184,9 +184,13 @@ class CanaryAgent(BaseAgent):
                 f"CANARY payload_canary: task and queue are required; got "
                 f"task={task!r} queue={queue!r}")
             return
+        # A reproduction (SEGFAULT_DIAGNOSIS.md) names its signature; two
+        # of them on one queue for two crashed jobs must both run.
+        dedup = f"payload_canary:{task}:{queue}"
+        if m.get("signature"):
+            dedup += f":{m.get('signature')}:{m.get('pandaid') or ''}"
         self.run_in_background(
-            self._do_payload_canary, m,
-            dedup_key=f"payload_canary:{task}:{queue}", label="payload_canary")
+            self._do_payload_canary, m, dedup_key=dedup, label="payload_canary")
 
     def _do_payload_canary(self, m):
         created_by = str(m.get("created_by") or "?")
@@ -195,8 +199,20 @@ class CanaryAgent(BaseAgent):
         self.logger.info(
             f"CANARY payload_canary: {task} on {queue} (by {created_by})")
         t0 = time.monotonic()
-        ok = self._run_doer(["payload-canary", "--task", task, "--queue", queue],
-                            PROBE_TIMEOUT)
+        args = ["payload-canary", "--task", task, "--queue", queue]
+        # The reproduction settings (SEGFAULT_DIAGNOSIS.md, Reproduction):
+        # the crashed job's row, the memory match, the signature it serves.
+        if m.get("row_text"):
+            args += ["--row-text", str(m["row_text"])]
+        elif m.get("row"):
+            args += ["--row", str(int(m["row"]))]
+        if m.get("mem_limit_mb"):
+            args += ["--mem-limit-mb", str(int(m["mem_limit_mb"]))]
+        if m.get("signature"):
+            args += ["--signature", str(m["signature"])]
+        if m.get("pandaid"):
+            args += ["--pandaid", str(int(m["pandaid"]))]
+        ok = self._run_doer(args, PROBE_TIMEOUT)
         self.logger.info(
             f"CANARY payload_canary {'submitted' if ok else 'FAILED'} "
             f"in {time.monotonic() - t0:.1f}s")
