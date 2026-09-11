@@ -35,24 +35,8 @@
         <strong>{{ crashes_total }}</strong> crashed jobs in the inventory.
     </p>
 
-    {% for f in filters %}
-    <div class="filter-bar mb-2">
-        <strong>{{ f.label }}:</strong>
-        <a href="?{% for o in filters %}{% if o.key != f.key and o.selected %}{{ o.key }}={{ o.selected|urlencode }}&amp;{% endif %}{% endfor %}{% if q %}q={{ q|urlencode }}{% endif %}"
-           class="filter-link {% if not f.selected %}filter-active{% endif %}">All</a>
-        {% for opt in f.options %}
-        <a href="?{{ f.key }}={{ opt.value|urlencode }}{% for o in filters %}{% if o.key != f.key and o.selected %}&amp;{{ o.key }}={{ o.selected|urlencode }}{% endif %}{% endfor %}{% if q %}&amp;q={{ q|urlencode }}{% endif %}"
-           class="filter-link {% if f.selected == opt.value %}filter-active{% endif %}">{{ opt.label }} ({{ opt.count }})</a>
-        {% endfor %}
-    </div>
-    {% endfor %}
-    <form method="get" class="d-flex align-items-center gap-2 mb-2">
-        {% for f in filters %}{% if f.selected %}<input type="hidden" name="{{ f.key }}" value="{{ f.selected }}">{% endif %}{% endfor %}
-        <strong>Search:</strong>
-        <input type="search" name="q" class="form-control form-control-sm" style="max-width: 24em;" value="{{ q }}" placeholder="text in any column">
-        <button type="submit" class="btn btn-sm btn-secondary">Apply</button>
-    </form>
-    {% include "monitor_app/_active_filters.html" with active_filters=active_filters clear_all_url=clear_all_url %}
+    {# Narrowing filter (monitor_app/narrowing_filter.py): one value per facet, rows are the intersection, every bar counts within the selection. #}
+    {% include 'monitor_app/_narrowing_filter.html' %}
 
     <style>
       /* The signature and configuration cells wrap inside a bound, so the

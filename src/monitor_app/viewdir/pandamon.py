@@ -1724,64 +1724,28 @@ def panda_errors_list(request):
 
 def panda_segfaults(request):
     """The segfault catalog (swf-epicprod docs/SEGFAULT_DIAGNOSIS.md):
-    one row per crash signature, from swfdb alone. The filter is the
-    house narrowing filter of the operations views: one value per facet
-    in the URL, the rows shown are the intersection, and every facet
-    bar counts the distribution within the selection (a facet's own
-    bar counts within the other facets' selections, so its alternatives
-    stay in view)."""
+    one row per crash signature, from swfdb alone, under the narrowing
+    filter of the operations views (monitor_app/narrowing_filter.py)."""
+    from ..narrowing_filter import Facet, NarrowingFilter
     from ..segfaults import CLASS_LABELS, CLASS_ORDER, STATUS_LABELS, catalog
     rows_all, _class_counts = catalog()
     facets = [
-        ('class', 'Class', lambda r: [r['class']],
-         lambda v: CLASS_LABELS.get(v, v), CLASS_ORDER.index),
-        ('exit', 'Exit code', lambda r: [str(r['exit_code'])], str, str),
-        ('queue', 'Queue', lambda r: r['site_names'] or [], str, str),
-        ('status', 'Status', lambda r: [r['status']],
-         lambda v: STATUS_LABELS.get(v, v), str),
-        ('level', 'Level', lambda r: [r['level']], str, str),
+        Facet('class', 'Class', lambda r: r['class'],
+              display=lambda v: CLASS_LABELS.get(v, v), order=CLASS_ORDER),
+        Facet('exit', 'Exit code', lambda r: str(r['exit_code'])),
+        Facet('queue', 'Queue', lambda r: r['site_names'] or None),
+        Facet('status', 'Status', lambda r: r['status'],
+              display=lambda v: STATUS_LABELS.get(v, v)),
+        Facet('level', 'Level', lambda r: r['level']),
     ]
-    selected = {key: (request.GET.get(key) or '').strip() for key, *_ in facets}
-    q = (request.GET.get('q') or '').strip().lower()
-
-    def matches(row, skip=None):
-        for key, _label, values, _disp, _order in facets:
-            want = selected[key]
-            if want and key != skip and want not in values(row):
-                return False
-        if q and q not in json.dumps(row, default=str).lower():
-            return False
-        return True
-
-    filters = []
-    for key, label, values, display, order in facets:
-        pool = [r for r in rows_all if matches(r, skip=key)]
-        counts = Counter(v for r in pool for v in values(r) if v)
-        try:
-            ordered = sorted(counts, key=order)
-        except (ValueError, TypeError):
-            ordered = sorted(counts)
-        filters.append({
-            'key': key, 'label': label, 'selected': selected[key],
-            'options': [{'value': v, 'label': display(v), 'count': counts[v]}
-                        for v in ordered],
-        })
-    rows = [r for r in rows_all if matches(r)]
-    active = [{'label': f['label'], 'value': next(
-        (o['label'] for o in f['options'] if o['value'] == f['selected']), f['selected'])}
-        for f in filters if f['selected']]
-    if q:
-        active.append({'label': 'Search', 'value': q})
+    flt = NarrowingFilter(request.GET, facets)
+    rows = flt.apply(rows_all, facets)
     context = {
         'rows': rows,
         'shown': len(rows),
         'total': len(rows_all),
-        'total_count': len(rows_all),
         'crashes_total': sum(r['crashes'] for r in rows_all if r['level'] == 'record'),
-        'filters': filters,
-        'q': q,
-        'active_filters': active,
-        'clear_all_url': reverse('monitor_app:panda_segfaults'),
+        'narrowing_filter': flt.context(rows_all, facets, request),
     }
     return render(request, 'monitor_app/panda_segfaults.html', context)
 

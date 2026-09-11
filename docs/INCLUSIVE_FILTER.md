@@ -101,3 +101,56 @@ anchors keep server URLs, so a middle click opens the right page.
 
 Other pages switch as decided, one at a time, by replacing their facet
 construction with the calls above.
+
+## The narrowing filter
+
+The other house filter, for the operations views: a selection narrows.
+`monitor_app/narrowing_filter.py` and the include
+`monitor_app/_narrowing_filter.html`; first used on the segfault catalog
+(`monitor_app/viewdir/pandamon.py`, `panda_segfaults`).
+
+The two filters answer different questions. The inclusive filter serves
+a view where the reader assembles the set to look at (the campaign
+plan): selections widen, every value keeps its full count. The
+narrowing filter serves a view where the reader asks what a slice looks
+like (the operations views): a selection narrows the rows to the
+intersection, and every bar re-counts within the selection. A facet's
+own bar counts within the other facets' selections, so its alternatives
+stay listed with the count each would give; the other bars count
+within the whole selection. Picking a queue on the catalog leaves the
+class bar showing the classes of that queue's crashes.
+
+### URL contract
+
+One parameter per facet, its key the facet key, one value
+(`?class=sparse&queue=NERSC_Perlmutter_epic`); `q` a free-text search
+over every column. Every bar anchor is a server URL carrying the whole
+selection, so the filter works without script and a middle click opens
+the right page. Clear all is the page's path.
+
+### Usage
+
+    from monitor_app.narrowing_filter import Facet, NarrowingFilter
+
+    facets = [
+        Facet('class', 'Class', lambda r: r['class'],
+              display=lambda v: labels.get(v, v), order=[...values...]),
+        Facet('queue', 'Queue', lambda r: r['queues'] or None),
+    ]
+    flt = NarrowingFilter(request.GET, facets)
+    rows = flt.apply(rows_all, facets)
+    context['narrowing_filter'] = flt.context(rows_all, facets, request)
+
+In the template, `{% include 'monitor_app/_narrowing_filter.html' %}`
+above the table renders the bars in the house filter-bar markup, the
+search box (which submits the current selection with it), and the
+active-filters line. `Facet` is the same class both filters use.
+
+### Pages
+
+| Page | Since |
+|---|---|
+| Segfault catalog (`/panda/segfaults/`) | 2026-09-11 |
+
+The ePIC queues page and the physics-configuration page carry their own
+inline bars, counted over the full set; they switch when named.

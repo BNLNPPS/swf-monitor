@@ -1,0 +1,24 @@
+{% comment %}
+Narrowing filter (monitor_app/narrowing_filter.py, docs/INCLUSIVE_FILTER.md
+§ The narrowing filter): one value per facet, the rows shown are the
+intersection, every bar counts within the selection. Rendered from
+narrowing_filter = NarrowingFilter.context(...); the anchors are server
+URLs (the house filter-bar markup of the operations views), the search
+box submits the same parameters, and the active-filters line follows.
+{% endcomment %}
+{% for f in narrowing_filter.bars %}
+<div class="filter-bar mb-2">
+    <strong>{{ f.label }}:</strong>
+    <a href="{{ f.all_url }}" class="filter-link {% if f.all_active %}filter-active{% endif %}">All</a>
+    {% for item in f.items %}
+    <a href="{{ item.url }}" class="filter-link {% if item.active %}filter-active{% endif %}">{{ item.display }} ({{ item.count }})</a>
+    {% endfor %}
+</div>
+{% endfor %}
+<form method="get" class="d-flex align-items-center gap-2 mb-2">
+    {% for k, v in narrowing_filter.hidden %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <strong>Search:</strong>
+    <input type="search" name="{{ narrowing_filter.search_param }}" class="form-control form-control-sm" style="max-width: 24em;" value="{{ narrowing_filter.search }}" placeholder="text in any column">
+    <button type="submit" class="btn btn-sm btn-secondary">Apply</button>
+</form>
+{% include "monitor_app/_active_filters.html" with active_filters=narrowing_filter.active_filters clear_all_url=narrowing_filter.clear_url %}
