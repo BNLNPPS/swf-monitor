@@ -33,9 +33,10 @@ logger = logging.getLogger(__name__)
 PHASE = 'payload_crash'
 SIGNAL_NAMES = {6: 'SIGABRT', 7: 'SIGBUS', 8: 'SIGFPE', 11: 'SIGSEGV'}
 CLASS_LABELS = {
-    'storm': 'Storm', 'configuration_dead': 'Configuration dead',
+    'storm': 'Storm', 'configuration_dead': 'Config dead',
     'sparse': 'Sparse', 'abort': 'Abort', 'mixed': 'Mixed',
 }
+STAGE_LABELS = {'simulation': 'simu', 'reconstruction': 'reco'}
 CLASS_ORDER = ['storm', 'configuration_dead', 'mixed', 'sparse', 'abort']
 STATUS_LABELS = dict(CrashSignature.STATUSES)
 
@@ -346,7 +347,8 @@ def signature_summary(sig):
         'rows_lost': sig.rows_lost,
         'events_lost': sig.events_lost,
         'rows_lost_note': (sig.data or {}).get('rows_lost_note', ''),
-        'stages': (sig.data or {}).get('stages') or {},
+        'stages': {STAGE_LABELS.get(k, k): v
+                   for k, v in ((sig.data or {}).get('stages') or {}).items()},
         'status': sig.status,
         'status_label': STATUS_LABELS.get(sig.status, sig.status),
         'trace_status': (sig.trace or {}).get('trace_status', 'unknown'),
@@ -418,7 +420,7 @@ def signature_detail(key, jobs_limit=200):
                 'host': crash.get('modificationhost', ''),
                 'minutes': crash.get('minutes'),
                 'maxrss_mb': crash.get('maxrss_mb'),
-                'stage': crash.get('stage', ''),
+                'stage': STAGE_LABELS.get(crash.get('stage', ''), crash.get('stage', '')),
                 # PanDA's times are naive UTC; stated with the zone so the
                 # house formatter shows them in Eastern.
                 'endtime': _iso(_parse_dt(crash.get('endtime'))),

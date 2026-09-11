@@ -19,15 +19,31 @@
             <li><strong>Class</strong>, read from the record alone:
                 <ul>
                     <li><strong>Storm</strong>: a fixed time to death across many nodes, one deterministic cause (crash rate at or above 20% and the middle half of the deaths within 20% of the median).</li>
-                    <li><strong>Configuration dead</strong>: the configuration cannot run at all (95% or more of the task's jobs crash).</li>
+                    <li><strong>Config dead</strong>: the configuration cannot run at all (95% or more of the task's jobs crash).</li>
                     <li><strong>Sparse</strong>: a few crashes at varying times, about one per host; where event-dependent crashes live (under 5% of the task's jobs).</li>
                     <li><strong>Abort</strong>: exit 134, the program aborted itself (an exception or assertion), whatever the rate.</li>
                     <li><strong>Mixed</strong>: none of the above; a class to look at, not a verdict.</li>
                 </ul>
             </li>
+            <li><strong>Status</strong>, where the signature stands from first sighting to a verdict:
+                <ul>
+                    <li><strong>new</strong>: on the record, nothing read yet.</li>
+                    <li><strong>digging</strong>: a representative job's payload log is being fetched.</li>
+                    <li><strong>traced</strong>: the crashing frame is on record.</li>
+                    <li><strong>reproducing</strong>: the crashed row is running again as canary jobs on the production queue and the reference queue.</li>
+                    <li><strong>reproduced</strong>: a rerun crashed (on both queues, or on the production queue alone: site dependent).</li>
+                    <li><strong>not reproduced</strong>: neither rerun crashed.</li>
+                    <li><strong>diagnosed</strong>: the LLM study has classified the crash and named the operator action.</li>
+                    <li><strong>handed off</strong>: the study handed the crash to the software experts with the reproduction package.</li>
+                    <li><strong>fixed</strong>: a fix is named (the fixing image or commit); the residual rerun under it closes the signature.</li>
+                    <li><strong>accepted</strong>: production accepted the stated loss.</li>
+                </ul>
+            </li>
+            <li><strong>Manifest row</strong>: the unit of work of a production job, one line of the task's manifest: the EVGEN input file, its extension, the number of events, and the chunk index; the payload skips chunk × events into the file, simulates and reconstructs those events with the seed chunk + 1, and writes one output named by the row. A crashed job's row is what a reproduction runs again.</li>
+            <li><strong>Rows lost</strong>: crashed manifest rows with no delivered output in any attempt of the configuration (and the events they carried).</li>
             <li><strong>TTD</strong>, time to death: minutes from job start to the crash, the 10th and 50th percentile over the signature's crashed jobs.</li>
             <li><strong>Rate</strong>: the signature's crashes over the task's finished plus failed jobs.</li>
-            <li><strong>Rows lost</strong>: crashed manifest rows with no delivered output in any attempt of the configuration (and the events they carried).</li>
+            <li><strong>Stage</strong>: where the payload died, simu (npsim) or reco (eicrecon), where the jobs' payload digest carries it.</li>
         </ul>
     </details>
     <p class="mb-2">
@@ -44,6 +60,7 @@
       #segfault-table td.sig-col { width: 20em; min-width: 17em; max-width: 20em; overflow-wrap: anywhere; }
       #segfault-table td.cfg-col { width: 24em; min-width: 18em; max-width: 24em; overflow-wrap: anywhere; }
       #segfault-table td.class-col { max-width: 7em; }
+      #segfault-table td.tasks-col { max-width: 6em; }
     </style>
     <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable" id="segfault-table" data-swf-order="0,desc">
         <thead>
@@ -72,7 +89,7 @@
                     exit {{ r.exit_code }}, {{ r.signal_name }}{% if r.frame %}; {{ r.frame }}{% endif %}</td>
                 <td class="cfg-col">{% if r.configuration.prod_task %}{{ r.configuration.prod_task }}{% else %}{{ r.task_names.0|default:'' }}{% endif %}
                     {% if r.configuration.container_image_ran %}<br>{{ r.configuration.container_image_ran }}{% elif r.configuration.container_image %}<br>{{ r.configuration.container_image }}{% endif %}</td>
-                <td data-order="{{ r.tasks }}">{% if r.tasks > 3 %}{{ r.tasks }} tasks{% else %}{% for tid in r.task_ids %}<a href="{% url 'monitor_app:panda_task_detail' jeditaskid=tid %}">{{ tid }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}</td>
+                <td class="tasks-col" data-order="{{ r.tasks }}">{% if r.tasks > 3 %}{{ r.tasks }} tasks{% else %}{% for tid in r.task_ids %}<a href="{% url 'monitor_app:panda_task_detail' jeditaskid=tid %}">{{ tid }}</a>{% if not forloop.last %}<br>{% endif %}{% endfor %}{% endif %}</td>
                 <td data-order="{{ r.crashes }}">{{ r.crashes }}</td>
                 <td data-order="{{ r.rate|default_if_none:'-1' }}">{{ r.rate_pct }}</td>
                 <td data-order="{{ r.minutes_p50|default_if_none:'-1' }}">{% if r.minutes_p50 is not None %}{{ r.minutes_p10 }} / {{ r.minutes_p50 }}{% endif %}</td>
