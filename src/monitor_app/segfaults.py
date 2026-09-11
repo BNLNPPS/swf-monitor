@@ -713,14 +713,21 @@ def reproduction_refresh(sig):
         data__kind='payload', data__signature=sig.key).select_related('queue')
         .order_by('submitted_at'))
     changed = False
+    from datetime import timedelta
+    claimed = set()
     for e in entries:
         if e.get('outcome') not in ('submitted', 'running', None):
             continue
+        requested = _parse_dt(e.get('requested_at')) or datetime.min.replace(tzinfo=dt_timezone.utc)
+        # The run this request produced: same queue and crashed job, submitted
+        # from the request on, the earliest not yet claimed by another entry.
         run = next((r for r in runs if r.queue.name == e['queue']
                     and (r.data or {}).get('reproduction_of') == e['pandaid']
-                    and str(r.submitted_at) >= str(e.get('requested_at') or '')[:19]), None)
+                    and r.submitted_at >= requested - timedelta(seconds=5)
+                    and r.id not in claimed), None)
         if run is None:
             continue
+        claimed.add(run.id)
         d = run.data or {}
         before = dict(e)
         e['jedi_task_id'] = run.jeditaskid
