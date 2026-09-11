@@ -6,8 +6,7 @@
 {% block content %}
 <div class="container-fluid">
     <h1>Segfault Findings</h1>
-    <div style="width: fit-content; max-width: 100%;">
-    <p class="text-muted mb-3">
+    <p class="text-muted mb-3" id="findings-desc">
         The curated reading of the <a href="{% url 'monitor_app:panda_segfaults' %}">Segfault Catalog</a>: one entry per crashing
         frame, stating what the crash is, which configurations it hits and what they lost, and what production does about it.
         The catalog is the record, rebuilt from the production record nightly; this page is the reading of it, written by the
@@ -72,6 +71,16 @@
             {% endfor %}
         </tbody>
     </table>
-    </div>
 </div>
+<script>
+    // The description takes the table's width, no wider.
+    (function () {
+        const desc = document.getElementById('findings-desc');
+        const table = document.getElementById('findings-table');
+        if (!desc || !table) return;
+        const fit = () => { desc.style.maxWidth = table.offsetWidth + 'px'; };
+        fit();
+        window.addEventListener('resize', fit);
+    })();
+</script>
 {% endblock %}
