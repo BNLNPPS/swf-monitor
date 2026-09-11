@@ -23,7 +23,6 @@
       #findings-table td.finding-col h5 { margin: 0 0 0.5rem 0; }
       #findings-table td.finding-col .finding-label { font-weight: bold; margin-top: 0.6rem; }
       #findings-table td.finding-col p { margin: 0; }
-      #findings-table tr.entry-alt td { background-color: rgba(0, 0, 0, 0.04); }
     </style>
     <table class="table table-bordered table-sm align-top w-auto" id="findings-table">
         <thead>
@@ -42,8 +41,7 @@
         </thead>
         <tbody>
             {% for e in entries %}
-            {% cycle '' 'entry-alt' as alt silent %}
-            <tr id="{{ e.anchor }}" class="{{ alt }}">
+            <tr id="{{ e.anchor }}">
                 <td rowspan="2">{{ e.date }}</td>
                 <td rowspan="2">{% with t=e.updated_at|fmt_dt %}{{ t|slice:":8" }}<br>{{ t|slice:"9:" }}{% endwith %}<br>{{ e.updated_by }}</td>
                 <td class="frame-col">{{ e.frame }}</td>
@@ -55,7 +53,7 @@
                 <td class="text-nowrap">{% if e.rows_lost %}{{ e.rows_lost }}<br>{{ e.events_lost }} ev{% endif %}</td>
                 <td>{{ e.standing }}</td>
             </tr>
-            <tr class="{{ alt }}">
+            <tr>
                 <td class="finding-col" colspan="8">
                     <h5>{{ e.title }}{% if e.model_reading %} <span class="ai-attr">model reading</span>{% endif %}</h5>
                     <div class="finding-label">What it is</div>
