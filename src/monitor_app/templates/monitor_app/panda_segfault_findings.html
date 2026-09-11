@@ -51,7 +51,7 @@
                 <td class="sig-col">{% for s in e.signatures %}{% if s.missing %}{{ s.key }} (not in the catalog){% else %}<a href="{% url 'monitor_app:panda_segfault_detail' key=s.key %}">{{ s.key }}</a>{% if s.level == 'trace' %} ({{ s.tasks }} task{{ s.tasks|pluralize }}){% endif %}{% endif %}{% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
                 <td data-order="{{ e.crashes }}">{{ e.crashes }}</td>
                 <td data-order="{{ e.tasks }}">{{ e.tasks }}</td>
-                <td data-order="{{ e.rows_lost }}">{% if e.rows_lost %}{{ e.rows_lost }}<br>{{ e.events_lost }} ev{% endif %}</td>
+                <td data-order="{{ e.rows_lost }}" class="text-nowrap">{% if e.rows_lost %}{{ e.rows_lost }}<br>{{ e.events_lost }} ev{% endif %}</td>
                 <td class="what-col">{{ e.what }}</td>
                 <td>{% for s in e.sources %}<a href="{{ s.url }}">{{ s.label }}</a>{% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
                 <td class="action-col">{{ e.action }}</td>
