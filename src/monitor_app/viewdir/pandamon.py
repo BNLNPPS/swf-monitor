@@ -1724,30 +1724,64 @@ def panda_errors_list(request):
 
 def panda_segfaults(request):
     """The segfault catalog (swf-epicprod docs/SEGFAULT_DIAGNOSIS.md):
-    one row per crash signature, from swfdb alone, with the inclusive
-    filter over class, exit code, site and status."""
-    from ..inclusive_filter import Facet, InclusiveFilter
+    one row per crash signature, from swfdb alone. The filter is the
+    house narrowing filter of the operations views: one value per facet
+    in the URL, the rows shown are the intersection, and every facet
+    bar counts the distribution within the selection (a facet's own
+    bar counts within the other facets' selections, so its alternatives
+    stay in view)."""
     from ..segfaults import CLASS_LABELS, CLASS_ORDER, STATUS_LABELS, catalog
-    rows, class_counts = catalog()
+    rows_all, _class_counts = catalog()
     facets = [
-        Facet('class', 'Class', lambda r: r['class'],
-              display=lambda v: CLASS_LABELS.get(v, v), order=CLASS_ORDER),
-        Facet('exit', 'Exit code', lambda r: str(r['exit_code'])),
-        Facet('site', 'Site', lambda r: r['site_names'] or None),
-        Facet('status', 'Status', lambda r: r['status'],
-              display=lambda v: STATUS_LABELS.get(v, v)),
-        Facet('level', 'Level', lambda r: r['level']),
+        ('class', 'Class', lambda r: [r['class']],
+         lambda v: CLASS_LABELS.get(v, v), CLASS_ORDER.index),
+        ('exit', 'Exit code', lambda r: [str(r['exit_code'])], str, str),
+        ('queue', 'Queue', lambda r: r['site_names'] or [], str, str),
+        ('status', 'Status', lambda r: [r['status']],
+         lambda v: STATUS_LABELS.get(v, v), str),
+        ('level', 'Level', lambda r: [r['level']], str, str),
     ]
-    flt = InclusiveFilter(request.GET)
-    shown = flt.annotate(rows, facets)
+    selected = {key: (request.GET.get(key) or '').strip() for key, *_ in facets}
+    q = (request.GET.get('q') or '').strip().lower()
+
+    def matches(row, skip=None):
+        for key, _label, values, _disp, _order in facets:
+            want = selected[key]
+            if want and key != skip and want not in values(row):
+                return False
+        if q and q not in json.dumps(row, default=str).lower():
+            return False
+        return True
+
+    filters = []
+    for key, label, values, display, order in facets:
+        pool = [r for r in rows_all if matches(r, skip=key)]
+        counts = Counter(v for r in pool for v in values(r) if v)
+        try:
+            ordered = sorted(counts, key=order)
+        except (ValueError, TypeError):
+            ordered = sorted(counts)
+        filters.append({
+            'key': key, 'label': label, 'selected': selected[key],
+            'options': [{'value': v, 'label': display(v), 'count': counts[v]}
+                        for v in ordered],
+        })
+    rows = [r for r in rows_all if matches(r)]
+    active = [{'label': f['label'], 'value': next(
+        (o['label'] for o in f['options'] if o['value'] == f['selected']), f['selected'])}
+        for f in filters if f['selected']]
+    if q:
+        active.append({'label': 'Search', 'value': q})
     context = {
         'rows': rows,
-        'shown': shown,
-        'total': len(rows),
-        'crashes_total': sum(r['crashes'] for r in rows if r['level'] == 'record'),
-        'class_counts': [(CLASS_LABELS.get(c, c), class_counts.get(c, 0))
-                         for c in CLASS_ORDER],
-        'inclusive_filter': flt.context(rows, facets, request),
+        'shown': len(rows),
+        'total': len(rows_all),
+        'total_count': len(rows_all),
+        'crashes_total': sum(r['crashes'] for r in rows_all if r['level'] == 'record'),
+        'filters': filters,
+        'q': q,
+        'active_filters': active,
+        'clear_all_url': reverse('monitor_app:panda_segfaults'),
     }
     return render(request, 'monitor_app/panda_segfaults.html', context)
 

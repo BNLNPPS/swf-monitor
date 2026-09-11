@@ -31,11 +31,28 @@
         </ul>
     </details>
     <p class="mb-2">
-        <strong class="swf-if-shown">{{ shown }}</strong> of <strong>{{ total }}</strong> signatures,
+        <strong>{{ shown }}</strong> of <strong>{{ total }}</strong> signatures,
         <strong>{{ crashes_total }}</strong> crashed jobs in the inventory.
     </p>
 
-    {% include 'monitor_app/_inclusive_filter.html' %}
+    {% for f in filters %}
+    <div class="filter-bar mb-2">
+        <strong>{{ f.label }}:</strong>
+        <a href="?{% for o in filters %}{% if o.key != f.key and o.selected %}{{ o.key }}={{ o.selected|urlencode }}&amp;{% endif %}{% endfor %}{% if q %}q={{ q|urlencode }}{% endif %}"
+           class="filter-link {% if not f.selected %}filter-active{% endif %}">All</a>
+        {% for opt in f.options %}
+        <a href="?{{ f.key }}={{ opt.value|urlencode }}{% for o in filters %}{% if o.key != f.key and o.selected %}&amp;{{ o.key }}={{ o.selected|urlencode }}{% endif %}{% endfor %}{% if q %}&amp;q={{ q|urlencode }}{% endif %}"
+           class="filter-link {% if f.selected == opt.value %}filter-active{% endif %}">{{ opt.label }} ({{ opt.count }})</a>
+        {% endfor %}
+    </div>
+    {% endfor %}
+    <form method="get" class="d-flex align-items-center gap-2 mb-2">
+        {% for f in filters %}{% if f.selected %}<input type="hidden" name="{{ f.key }}" value="{{ f.selected }}">{% endif %}{% endfor %}
+        <strong>Search:</strong>
+        <input type="search" name="q" class="form-control form-control-sm" style="max-width: 24em;" value="{{ q }}" placeholder="text in any column">
+        <button type="submit" class="btn btn-sm btn-secondary">Apply</button>
+    </form>
+    {% include "monitor_app/_active_filters.html" with active_filters=active_filters clear_all_url=clear_all_url %}
 
     <style>
       /* The signature and configuration cells wrap inside a bound, so the
@@ -55,7 +72,7 @@
                 <th>Crashes</th>
                 <th>Rate</th>
                 <th title="Time to death: minutes from job start to the crash, p10 / p50">TTD</th>
-                <th>Sites</th>
+                <th>Queues</th>
                 <th title="Distinct worker hosts among the crashed jobs">Hosts</th>
                 <th title="Crashed manifest rows with no delivered output in any attempt">Rows lost</th>
                 <th>Stage</th>
@@ -64,7 +81,7 @@
         </thead>
         <tbody>
             {% for r in rows %}
-            <tr data-if="{{ r.if_attr }}"{% if r.if_hidden %} class="swf-if-hidden"{% endif %}>
+            <tr>
                 <td data-order="{{ r.last_seen|default:'' }}">{% with t=r.last_seen|fmt_dt %}{{ t|slice:":8" }}<br>{{ t|slice:"9:" }}{% endwith %}</td>
                 <td class="class-col">{{ r.class_label }}</td>
                 <td class="sig-col"><a href="{% url 'monitor_app:panda_segfault_detail' key=r.key %}">{{ r.key }}</a><br>

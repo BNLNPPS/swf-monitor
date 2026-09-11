@@ -50,9 +50,9 @@
             <p class="text-muted">No PCS task is associated with this PanDA task.</p>
             {% endif %}
 
-            <h4>Sites</h4>
+            <h4>Queues</h4>
             <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
-                <thead><tr><th>Site</th><th>Crashes</th><th>Hosts</th></tr></thead>
+                <thead><tr><th>Queue</th><th>Crashes</th><th>Hosts</th></tr></thead>
                 <tbody>
                 {% for s in sig.sites %}<tr><td>{{ s.site }}</td><td>{{ s.crashes }}</td><td>{{ s.hosts }}</td></tr>{% endfor %}
                 </tbody>
