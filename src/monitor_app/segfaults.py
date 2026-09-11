@@ -475,19 +475,27 @@ def signature_for_job(pandaid):
 
 # ---------------------------------------------------------------- the dig
 
-def representative(sig):
+def representative(sig, runnable=False):
     """The crashed job the dig reads for a signature: the one with the
     median time to death among its jobs, per ERROR_ATTRIBUTION.md's one
-    representative per signature. None when the signature has no jobs."""
+    representative per signature. With ``runnable``, the median among the
+    jobs a reproduction can run (a resolved manifest row and a PCS task),
+    since a merged signature can hold legacy attempts without a manifest
+    record beside PCS attempts with one. None when no job qualifies."""
     task_ids = [t.get('jeditaskid') for t in (sig.tasks or []) if t.get('jeditaskid')]
     if not task_ids:
         return None
     timed = []
-    for job in (EpicProdJob.objects
-                .filter(phase=PHASE, jeditaskid__in=task_ids,
-                        data__crash__exit_code=sig.exit_code)
-                .only('pandaid', 'jeditaskid', 'data')):
+    qs = (EpicProdJob.objects
+          .filter(phase=PHASE, jeditaskid__in=task_ids,
+                  data__crash__exit_code=sig.exit_code)
+          .only('pandaid', 'jeditaskid', 'data'))
+    if runnable:
+        qs = qs.filter(prod_task__isnull=False, data__crash__row__isnull=False)
+    for job in qs:
         crash = (job.data or {}).get('crash') or {}
+        if runnable and not crash.get('row'):
+            continue
         timed.append((crash.get('minutes') if crash.get('minutes') is not None else -1,
                       job.pandaid, job.jeditaskid))
     if not timed:
@@ -653,7 +661,7 @@ def crashed_run(sig, pandaid=None):
     named) with its crash record, its manifest row and the row as manifest
     text. Raises ValueError with the reason when the run cannot be formed."""
     if pandaid is None:
-        rep = representative(sig)
+        rep = representative(sig, runnable=True) or representative(sig)
         if rep is None:
             raise ValueError('no crashed job on record')
         pandaid = rep[0]
