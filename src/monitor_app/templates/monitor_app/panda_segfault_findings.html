@@ -18,7 +18,9 @@
 
     <style>
       #findings-table td.sig-col { max-width: 16em; overflow-wrap: anywhere; }
-      #findings-table td.finding-col { min-width: 40em; max-width: 60em; }
+      #findings-table td.frame-col { max-width: 14em; overflow-wrap: anywhere; }
+      #findings-table td.fix-col { min-width: 11em; }
+      #findings-table td.finding-col { min-width: 30em; max-width: 60em; }
       #findings-table td.finding-col h5 { margin: 0 0 0.5rem 0; }
       #findings-table td.finding-col .finding-label { font-weight: bold; margin-top: 0.6rem; }
       #findings-table td.finding-col p { margin: 0; }
@@ -45,7 +47,7 @@
             <tr id="{{ e.anchor }}">
                 <td>{{ e.date }}</td>
                 <td>{% with t=e.updated_at|fmt_dt %}{{ t|slice:":8" }}<br>{{ t|slice:"9:" }}{% endwith %}<br>{{ e.updated_by }}</td>
-                <td>{{ e.frame }}</td>
+                <td class="frame-col">{{ e.frame }}</td>
                 <td>{{ e.stage }}</td>
                 <td>{{ e.class }}</td>
                 <td class="sig-col">{% for s in e.signatures %}{% if s.missing %}{{ s.key }} (not in the catalog){% else %}<a href="{% url 'monitor_app:panda_segfault_detail' key=s.key %}">{{ s.key }}</a>{% if s.level == 'trace' %} ({{ s.tasks }} task{{ s.tasks|pluralize }}){% endif %}{% endif %}{% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
@@ -53,7 +55,7 @@
                 <td data-order="{{ e.tasks }}">{{ e.tasks }}</td>
                 <td data-order="{{ e.rows_lost }}" class="text-nowrap">{% if e.rows_lost %}{{ e.rows_lost }}<br>{{ e.events_lost }} ev{% endif %}</td>
                 <td>{{ e.standing }}</td>
-                <td>{{ e.fix }}</td>
+                <td class="fix-col">{{ e.fix }}</td>
                 <td class="finding-col">
                     <h5>{{ e.title }}{% if e.model_reading %} <span class="ai-attr">model reading</span>{% endif %}</h5>
                     <div class="finding-label">What it is</div>
