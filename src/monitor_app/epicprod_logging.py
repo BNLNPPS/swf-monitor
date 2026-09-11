@@ -219,10 +219,28 @@ ACTION_DEFAULTS = {
                        "(scripts/segfault-inventory.py): payload crashes "
                        "(exit 134/135/136/139) read from the PanDA record "
                        "for a window and written as EpicProdJob rows with "
-                       "their manifest row; one event per run carrying the "
+                       "their manifest row, then the crash signatures of "
+                       "the tasks touched; one event per run carrying the "
                        "window, jobs seen, rows added and updated, rows "
-                       "unresolved and tasks touched (swf-epicprod "
+                       "unresolved, tasks and signatures (swf-epicprod "
                        "SEGFAULT_DIAGNOSIS.md).",
+    },
+    'segfault_dig': {
+        'sublevel': 'normal', 'live': True,
+        'description': "A crash signature's dig (scripts/segfault-dig.py): "
+                       "one representative crashed job's payload log "
+                       "fetched through the doer and its backtrace read "
+                       "onto the signature; on operator request from the "
+                       "signature page, or the nightly automatic dig of "
+                       "the largest signatures never dug (ten a night). "
+                       "Carries the trace status and crashing frame, or "
+                       "the reason the log was unavailable.",
+    },
+    'segfault_dig_request': {
+        'sublevel': 'low', 'live': False,
+        'description': "Operator request of a signature's dig from its "
+                       "page, queued to the production operations agent; "
+                       "the dig itself is the segfault_dig event.",
     },
     'system_status_refresh': {
         'sublevel': 'low', 'live': False,

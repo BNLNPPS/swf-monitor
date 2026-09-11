@@ -25,6 +25,7 @@ from datetime import datetime, timezone as dt_timezone
 from django.db import connections
 from django.utils import timezone
 
+from .epicprod_inventory import TRACE_MAX_FRAMES
 from .models import CrashSignature, EpicProdJob, SysConfig
 
 logger = logging.getLogger(__name__)
@@ -432,3 +433,167 @@ def signature_for_job(pandaid):
             tasks__contains=[{'jeditaskid': int(job.jeditaskid)}],
             exit_code=int(exit_code)).first()
     return signature_summary(sig) if sig else None
+
+
+# ---------------------------------------------------------------- the dig
+
+def representative(sig):
+    """The crashed job the dig reads for a signature: the one with the
+    median time to death among its jobs, per ERROR_ATTRIBUTION.md's one
+    representative per signature. None when the signature has no jobs."""
+    task_ids = [t.get('jeditaskid') for t in (sig.tasks or []) if t.get('jeditaskid')]
+    if not task_ids:
+        return None
+    timed = []
+    for job in (EpicProdJob.objects
+                .filter(phase=PHASE, jeditaskid__in=task_ids,
+                        data__crash__exit_code=sig.exit_code)
+                .only('pandaid', 'jeditaskid', 'data')):
+        crash = (job.data or {}).get('crash') or {}
+        timed.append((crash.get('minutes') if crash.get('minutes') is not None else -1,
+                      job.pandaid, job.jeditaskid))
+    if not timed:
+        return None
+    timed.sort()
+    _minutes, pandaid, jeditaskid = timed[len(timed) // 2]
+    return pandaid, jeditaskid
+
+
+def resolve_log_did(pandaid, jeditaskid):
+    """(scope, lfn) of the job's log tarball from the PanDA record: the
+    job's own file row while filestable4 holds it, else the task's log
+    dataset contents row, whose LFN carries a ``$JEDITASKID`` placeholder.
+    The builder's and the dig's call, never a page's."""
+    from .panda.constants import PANDA_SCHEMA
+    with connections['panda'].cursor() as cur:
+        cur.execute(
+            f"""SELECT "scope", "lfn" FROM "{PANDA_SCHEMA}"."filestable4"
+                WHERE "pandaid" = %s AND "type" = 'log'""", [int(pandaid)])
+        row = cur.fetchone()
+        if row and row[1]:
+            return row[0] or 'group.EIC', row[1]
+        cur.execute(
+            f"""SELECT c."lfn" FROM "{PANDA_SCHEMA}"."jedi_dataset_contents" c
+                JOIN "{PANDA_SCHEMA}"."jedi_datasets" d
+                  ON d."datasetid" = c."datasetid" AND d."jeditaskid" = c."jeditaskid"
+                WHERE c."jeditaskid" = %s AND c."pandaid" = %s AND d."type" = 'log'""",
+            [int(jeditaskid), int(pandaid)])
+        row = cur.fetchone()
+    if row and row[0]:
+        return 'group.EIC', row[0].replace('$JEDITASKID', str(int(jeditaskid)))
+    return None, None
+
+
+def frame_key(exit_code, program, frame):
+    import hashlib
+    digest = hashlib.sha256(f'{program}|{frame}'.encode()).hexdigest()[:12]
+    return f'exit{exit_code}:frame:{digest}'
+
+
+def record_trace(sig, result, pandaid, reason=''):
+    """Write a dig's outcome on the signature: the trace when found, the
+    status ``absent`` or ``log_unavailable`` with its reason otherwise;
+    then merge into a trace-level entry when another record-level entry
+    shares the crashing frame. Returns the trace-level key or None."""
+    trace = dict(sig.trace or {})
+    trace.update({
+        'trace_status': result.get('trace_status', 'log_unavailable'),
+        'program': result.get('program', ''),
+        'stage': result.get('stage', ''),
+        'frame': result.get('frame', ''),
+        'library': result.get('library', ''),
+        'frames': [f"{f['n']}: {f['function']}" + (f"  [{f['library']}]" if f.get('library') else '')
+                   for f in (result.get('frames') or [])][:TRACE_MAX_FRAMES],
+        'context': result.get('context') or [],
+        'events_processed': result.get('events_processed'),
+        'form': result.get('form', ''),
+        'source_pandaid': pandaid,
+        'reason': reason,
+        'dug_at': _iso(timezone.now()),
+    })
+    sig.trace = trace
+    if trace['trace_status'] == 'found' and sig.status in ('new', 'digging'):
+        sig.status = 'traced'
+    elif sig.status == 'digging':
+        sig.status = 'new'
+    sig.save(update_fields=['trace', 'status', 'updated_at'])
+    if trace['trace_status'] != 'found' or sig.level != 'record':
+        return None
+    return merge_trace_level(sig)
+
+
+def merge_trace_level(sig):
+    """Record-level entries sharing a crashing frame become members of one
+    trace-level entry (key exit<code>:frame:<sha>), whose counts are the
+    members' sums; the members stay in the catalog at record level."""
+    frame, program = (sig.trace or {}).get('frame'), (sig.trace or {}).get('program')
+    if not frame:
+        return None
+    members = [s for s in CrashSignature.objects.filter(
+        level='record', exit_code=sig.exit_code, trace__frame=frame,
+        trace__program=program)]
+    if len(members) < 2:
+        return None
+    key = frame_key(sig.exit_code, program, frame)
+    merged = CrashSignature.objects.filter(key=key).first()
+    created = merged is None
+    if created:
+        merged = CrashSignature(key=key, level='trace', status='traced',
+                                exit_code=sig.exit_code, signal=sig.signal)
+    tasks, sites, minutes = [], defaultdict(lambda: {'crashes': 0, 'hosts': 0}), []
+    for m in members:
+        tasks.extend(m.tasks or [])
+        for s in (m.sites or []):
+            sites[s['site']]['crashes'] += s.get('crashes', 0)
+            sites[s['site']]['hosts'] += s.get('hosts', 0)
+    merged.tasks = tasks
+    merged.sites = sorted(({'site': k, **v} for k, v in sites.items()),
+                          key=lambda s: -s['crashes'])
+    merged.crashes = sum(m.crashes for m in members)
+    rates = [m.rate for m in members if m.rate is not None]
+    merged.rate = round(sum(rates) / len(rates), 4) if rates else None
+    p10 = [m.minutes_p10 for m in members if m.minutes_p10 is not None]
+    p50 = [m.minutes_p50 for m in members if m.minutes_p50 is not None]
+    merged.minutes_p10 = round(sum(p10) / len(p10), 1) if p10 else None
+    merged.minutes_p50 = round(sum(p50) / len(p50), 1) if p50 else None
+    firsts = [m.first_seen for m in members if m.first_seen]
+    lasts = [m.last_seen for m in members if m.last_seen]
+    merged.first_seen = min(firsts) if firsts else None
+    merged.last_seen = max(lasts) if lasts else None
+    lost = [m.rows_lost for m in members if m.rows_lost is not None]
+    merged.rows_lost = sum(lost) if lost else None
+    ev = [m.events_lost for m in members if m.events_lost is not None]
+    merged.events_lost = sum(ev) if ev else None
+    classes = defaultdict(int)
+    for m in members:
+        classes[m.class_hint] += m.crashes
+    merged.class_hint = max(classes.items(), key=lambda kv: kv[1])[0]
+    merged.configuration = dict(sig.configuration or {})
+    merged.configuration['prod_task'] = '; '.join(
+        sorted({(m.configuration or {}).get('prod_task', '') for m in members} - {''}))
+    if not merged.trace:
+        merged.trace = dict(sig.trace)
+    data = dict(merged.data or {})
+    data['members'] = sorted(m.key for m in members)
+    data['hosts'] = sum((m.data or {}).get('hosts') or 0 for m in members)
+    data['stages'] = {}
+    for m in members:
+        for stage, n in ((m.data or {}).get('stages') or {}).items():
+            data['stages'][stage] = data['stages'].get(stage, 0) + n
+    merged.data = data
+    merged.save()
+    for m in members:
+        mdata = dict(m.data or {})
+        if mdata.get('member_of') != key:
+            mdata['member_of'] = key
+            m.data = mdata
+            m.save(update_fields=['data', 'updated_at'])
+    return key
+
+
+def dig_candidates(limit):
+    """Record-level signatures never dug, largest first, for the automatic
+    dig: at most ``limit`` a night so a storm is not a thousand fetches."""
+    qs = (CrashSignature.objects.filter(level='record')
+          .exclude(trace__has_key='trace_status').order_by('-crashes'))
+    return list(qs[:limit])

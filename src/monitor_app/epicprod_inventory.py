@@ -585,6 +585,149 @@ def _worker_ended_reading(job, worker=None):
     return operation, confidence, summary
 
 
+# The backtrace forms the payload's programs print on a signal death
+# (swf-epicprod docs/SEGFAULT_DIAGNOSIS.md, The dig). JANA2 (eicrecon):
+# "[fatal] Segfault detected!" then "Backtrace:" then numbered frames,
+# each a function line and a library:offset line. Geant4 (npsim) and ROOT:
+# "*** Break *** segmentation violation" then "#N 0x... in function () from
+# library" frames. glibc: "Segmentation fault" with nothing to follow.
+_TRACE_JANA_START_RE = re.compile(r'\[fatal\].*Backtrace:')
+_TRACE_JANA_FRAME_RE = re.compile(r'\[fatal\]\s+(\d+):\s+(.+?)\s*$')
+_TRACE_JANA_LIB_RE = re.compile(r'\[fatal\]\s+(\S+?):([0-9a-fA-F]+)\s*$')
+_TRACE_BREAK_RE = re.compile(r'\*\*\* Break \*\*\* (.+)')
+_TRACE_GDB_FRAME_RE = re.compile(r'^#(\d+)\s+(?:0x[0-9a-fA-F]+ in )?(.+?)(?: \(.*\))?(?: (?:from|at) (\S+))?\s*$')
+_TRACE_GLIBC_RE = re.compile(r'Segmentation fault|Bus error|Floating point exception|Aborted \(core dumped\)')
+# DD4hep's handler (npsim) reports the signal with no backtrace; the
+# evidence is the last G4Exception block before it, which names the
+# exception, the Geant4 function that raised it and the volume
+# (job 2723082: GeomNav0003 in G4Navigator::ComputeStep, DRICH_gas_0).
+_TRACE_DD4HEP_RE = re.compile(r'\[FATAL\] \(SignalHandler\) Handle signal: (\d+)')
+_TRACE_G4EXC_START_RE = re.compile(r'G4Exception-START')
+_TRACE_G4EXC_CODE_RE = re.compile(r'\*\*\* G4Exception : (\S+)')
+_TRACE_G4EXC_BY_RE = re.compile(r'issued by : (.+?)\s*$')
+_TRACE_G4EXC_VOL_RE = re.compile(r"(?:Current|Physical)\s+phys(?:ical)? volume\s*: '([^']+)'")
+# The prmon wrapper names the stage in its output file:
+# "Error on line N: prmon --filename ${LOG_TEMP}/${TASKNAME}.<stage>.prmon.txt".
+_TRACE_STAGE_RE = re.compile(r'prmon --filename \S*\$\{TASKNAME\}\.(\w+)\.prmon')
+_TRACE_STATUS_RE = re.compile(r'Status: (\d+) events processed')
+_TRACE_STAGE_PROGRAM = {'eicrecon': ('eicrecon', 'reconstruction'),
+                        'npsim': ('npsim', 'simulation'),
+                        'ddsim': ('npsim', 'simulation')}
+TRACE_MAX_FRAMES = 20
+TRACE_CONTEXT_LINES = 12
+
+
+def trace_extract(texts):
+    """The crash trace in a job's payload output: the program and stage,
+    the frames (bounded), the crashing frame, the lines before the crash
+    and the events processed by then. ``texts`` are the payload stdout and
+    stderr as cached. Returns a dict with ``trace_status`` ``found`` or
+    ``absent``; the caller records ``log_unavailable`` when there was
+    nothing to read."""
+    result = {'trace_status': 'absent', 'program': '', 'stage': '',
+              'frames': [], 'frame': '', 'library': '', 'context': [],
+              'events_processed': None, 'form': ''}
+    for text in texts:
+        if not text:
+            continue
+        lines = text.splitlines()
+        # JANA2, the form eicrecon prints.
+        start = next((i for i, l in enumerate(lines) if _TRACE_JANA_START_RE.search(l)), None)
+        if start is not None:
+            frames, i = [], start + 1
+            while i < len(lines) and len(frames) < TRACE_MAX_FRAMES:
+                m = _TRACE_JANA_FRAME_RE.search(lines[i])
+                if m:
+                    lib = ''
+                    if i + 1 < len(lines):
+                        lm = _TRACE_JANA_LIB_RE.search(lines[i + 1])
+                        if lm:
+                            lib = lm.group(1)
+                            i += 1
+                    frames.append({'n': int(m.group(1)), 'function': m.group(2), 'library': lib})
+                elif frames and not lines[i].strip().endswith('[fatal]') and '[fatal]' not in lines[i]:
+                    break
+                i += 1
+            _finish_trace(result, lines, start, frames, 'jana2')
+            return result
+        # Geant4 / ROOT: the Break banner then gdb-style frames.
+        start = next((i for i, l in enumerate(lines) if _TRACE_BREAK_RE.search(l)), None)
+        if start is not None:
+            frames = []
+            for l in lines[start + 1:start + 400]:
+                m = _TRACE_GDB_FRAME_RE.match(l.strip())
+                if m:
+                    frames.append({'n': int(m.group(1)), 'function': m.group(2).strip(),
+                                   'library': m.group(3) or ''})
+                    if len(frames) >= TRACE_MAX_FRAMES:
+                        break
+            _finish_trace(result, lines, start, frames, 'root')
+            return result
+        # DD4hep's signal handler (npsim): no frames; the last G4Exception
+        # block before it is the crashing frame's stand-in.
+        hit = next((i for i, l in enumerate(lines) if _TRACE_DD4HEP_RE.search(l)), None)
+        if hit is not None:
+            starts = [i for i, l in enumerate(lines[:hit]) if _TRACE_G4EXC_START_RE.search(l)]
+            frames = []
+            if starts:
+                block = lines[starts[-1]:hit]
+                code = next((m.group(1) for l in block for m in [_TRACE_G4EXC_CODE_RE.search(l)] if m), '')
+                by = next((m.group(1) for l in block for m in [_TRACE_G4EXC_BY_RE.search(l)] if m), '')
+                vol = next((m.group(1) for l in block for m in [_TRACE_G4EXC_VOL_RE.search(l)] if m), '')
+                if by or code:
+                    by = by.replace('()', '').strip()
+                    frames.append({'n': 0, 'function': f'G4Exception {code} in {by}'.strip(),
+                                   'library': vol})
+                    frames.extend({'n': n + 1, 'function': l.strip()[:200], 'library': ''}
+                                  for n, l in enumerate(block[:TRACE_MAX_FRAMES - 1]) if l.strip())
+            _finish_trace(result, lines, hit, frames, 'dd4hep')
+            if not result['program']:
+                result['program'], result['stage'] = 'npsim', 'simulation'
+            return result
+    # No frames anywhere: the bare glibc line still names the stage.
+    for text in texts:
+        if not text:
+            continue
+        lines = text.splitlines()
+        hit = next((i for i, l in enumerate(lines) if _TRACE_GLIBC_RE.search(l)), None)
+        if hit is not None:
+            _finish_trace(result, lines, hit, [], 'glibc')
+            result['trace_status'] = 'absent'
+            return result
+    for text in texts:
+        if text:
+            _stage_from_text(result, text)
+    return result
+
+
+def _stage_from_text(result, text):
+    m = _TRACE_STAGE_RE.search(text)
+    if m:
+        program, stage = _TRACE_STAGE_PROGRAM.get(m.group(1), (m.group(1), m.group(1)))
+        result['program'], result['stage'] = program, stage
+
+
+def _finish_trace(result, lines, start, frames, form):
+    result['form'] = form
+    result['frames'] = frames
+    named = next((f for f in frames if f['function'] and not f['function'].startswith('???')), None)
+    if named:
+        lib = PurePosixPath(named['library']).name if named['library'] else ''
+        result['frame'] = named['function'].split('(')[0].strip()
+        result['library'] = lib
+        result['trace_status'] = 'found'
+    result['context'] = [l[:300] for l in lines[max(0, start - TRACE_CONTEXT_LINES):start]]
+    counts = [int(m.group(1)) for l in lines[:start] for m in [_TRACE_STATUS_RE.search(l)] if m]
+    result['events_processed'] = counts[-1] if counts else None
+    _stage_from_text(result, '\n'.join(lines[start:start + 400]))
+    if not result['program'] and frames:
+        libs = ' '.join(f['library'] for f in frames)
+        if 'eicrecon' in libs or 'EICrecon' in libs or 'JANA' in libs:
+            result['program'], result['stage'] = 'eicrecon', 'reconstruction'
+        elif 'G4' in libs or 'DDG4' in libs or 'npsim' in libs:
+            result['program'], result['stage'] = 'npsim', 'simulation'
+
+
 def diagnosis_from_log_texts(log_texts, job=None, worker=None):
     """Derive production phase and causal attribution from job evidence.
     ``worker`` is the harvester worker record of the batch job the PanDA job

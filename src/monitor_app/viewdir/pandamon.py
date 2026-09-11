@@ -47,6 +47,7 @@ from ..epicprod_inventory import (
     diagnosis_for_study_data,
     inventory_for_job_context,
 )
+from ..epicprod_logging import log_epicprod_action
 
 logger = logging.getLogger(__name__)
 
@@ -1761,6 +1762,41 @@ def panda_segfault_detail(request, key):
         raise Http404(f'no crash signature {key}')
     return render(request, 'monitor_app/panda_segfault_detail.html',
                   {'sig': detail})
+
+
+def panda_segfault_dig(request, key):
+    """The Dig action: queue one signature's trace fetch to the production
+    operations agent (SEGFAULT_DIAGNOSIS.md, The dig); the result reaches
+    the page as segfault_dig_done over the SSE relay. An authenticated
+    operator decision under the authority gate; JSON in and out."""
+    from ..models import CrashSignature
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST only'}, status=405)
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'sign in to dig'}, status=403)
+    sig = CrashSignature.objects.filter(key=key).only('key').first()
+    if sig is None:
+        return JsonResponse({'error': f'no crash signature {key}'}, status=404)
+    pandaid = (request.POST.get('pandaid') or '').strip()
+    if pandaid and not pandaid.isdigit():
+        return JsonResponse({'error': 'pandaid must be a number'}, status=400)
+    msg = {'msg_type': 'segfault_dig', 'namespace': 'prodops', 'key': key,
+           'requested_by': request.user.username}
+    if pandaid:
+        msg['pandaid'] = pandaid
+    try:
+        queued = ActiveMQConnectionManager().send_message(
+            '/queue/epicprod.ops', json.dumps(msg))
+    except Exception as e:
+        logger.error(f"segfault dig trigger failed for {key}: {e}")
+        queued = False
+    if not queued:
+        return JsonResponse({'error': 'the ops-agent queue could not be reached'},
+                            status=502)
+    log_epicprod_action('web', 'segfault_dig_request', subject_type='crash_signature',
+                        subject_key=key, username=request.user.username,
+                        sublevel='low', live_default=False, pandaid=pandaid or None)
+    return JsonResponse({'queued': True, 'key': key, 'pandaid': pandaid or None})
 
 
 def panda_errors_datatable_ajax(request):

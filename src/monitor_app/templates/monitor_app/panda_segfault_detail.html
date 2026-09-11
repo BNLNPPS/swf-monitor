@@ -68,12 +68,26 @@
         <div class="col-lg-6">
             <h4>Trace</h4>
             {% if sig.trace.frames %}
-            <p>{{ sig.trace.program }}{% if sig.trace.stage %}, stage {{ sig.trace.stage }}{% endif %}; from job
-               <a href="{% url 'monitor_app:panda_job_detail' pandaid=sig.trace.source_pandaid %}">{{ sig.trace.source_pandaid }}</a></p>
+            <p>{{ sig.trace.program }}{% if sig.trace.stage %}, stage {{ sig.trace.stage }}{% endif %}{% if sig.trace.events_processed is not None %}, {{ sig.trace.events_processed }} events processed{% endif %}; from job
+               <a href="{% url 'monitor_app:panda_job_detail' pandaid=sig.trace.source_pandaid %}">{{ sig.trace.source_pandaid }}</a>
+               (<a href="{% url 'monitor_app:panda_payload_log' sig.trace.source_pandaid %}" target="_blank" rel="noopener">payload log</a>), read {{ sig.trace.dug_at|default:''|slice:":16" }}.
+               Crashing frame: <strong>{{ sig.trace.frame }}</strong>{% if sig.trace.library %} in {{ sig.trace.library }}{% endif %}.</p>
             <pre class="small">{% for line in sig.trace.frames %}{{ line }}
 {% endfor %}</pre>
+            {% if sig.trace.context %}<details><summary>The lines before the crash</summary><pre class="small">{% for line in sig.trace.context %}{{ line }}
+{% endfor %}</pre></details>{% endif %}
             {% else %}
-            <p class="text-muted">Trace status: {{ sig.trace_status }}. {% if sig.trace.reason %}{{ sig.trace.reason }}{% endif %}</p>
+            <p class="text-muted">Trace status: {{ sig.trace_status }}.{% if sig.trace.reason %} {{ sig.trace.reason }}{% endif %}{% if sig.trace.source_pandaid %} (job {{ sig.trace.source_pandaid }}, read {{ sig.trace.dug_at|default:''|slice:":16" }}){% endif %}</p>
+            {% endif %}
+            {% if sig.data.members %}<p class="text-muted">Members: {% for m in sig.data.members %}<a href="{% url 'monitor_app:panda_segfault_detail' key=m %}">{{ m }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+            {% if sig.data.member_of %}<p class="text-muted">Member of the trace-level signature <a href="{% url 'monitor_app:panda_segfault_detail' key=sig.data.member_of %}">{{ sig.data.member_of }}</a>.</p>{% endif %}
+            {% if sig.level == 'record' %}
+            <form id="dig-form" class="d-flex align-items-center gap-2 mb-3" method="post" action="{% url 'monitor_app:panda_segfault_dig' key=sig.key %}" data-key="{{ sig.key }}">
+                {% csrf_token %}
+                <button type="submit" id="dig-button" class="btn btn-sm btn-dark-green" title="Fetch one crashed job's payload log through the production operations agent and read its backtrace; the median job unless one is named">Dig</button>
+                <input type="text" name="pandaid" class="form-control form-control-sm" style="max-width: 10em;" placeholder="job (optional)" title="A chosen crashed job instead of the median one, for a signature that mixes stages">
+                <span id="dig-status" class="text-muted small"></span>
+            </form>
             {% endif %}
 
             <h4>Reproduction</h4>
@@ -118,4 +132,68 @@
         </tbody>
     </table>
 </div>
+{{ sig.trace.dug_at|default:''|json_script:"dig-before" }}
+
+<script>
+(function() {
+    // The Dig action (docs/SSE_PUSH.md): queue the fetch, listen on a
+    // short-lived stream for segfault_dig_done, and poll the signature's
+    // REST record as the backstop; reload on the result.
+    const form = document.getElementById('dig-form');
+    const button = document.getElementById('dig-button');
+    const status = document.getElementById('dig-status');
+    if (!form || !button || !status) return;
+    form.addEventListener('submit', function(ev) {
+        ev.preventDefault();
+        const key = String(form.dataset.key || '');
+        const token = form.querySelector('input[name="csrfmiddlewaretoken"]')?.value || '';
+        const pandaid = (form.querySelector('input[name="pandaid"]')?.value || '').trim();
+        const streamUrl = "{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=segfault_dig_done";
+        const recordUrl = "{{ request.META.SCRIPT_NAME }}/api/segfaults/" + encodeURIComponent(key) + "/?jobs_limit=1";
+        let done = false, es = null, poll = null;
+        function finish(message, failed) {
+            done = true;
+            if (es) es.close();
+            if (poll) window.clearInterval(poll);
+            button.disabled = false;
+            status.textContent = message || '';
+            status.className = failed ? 'text-danger small' : 'text-muted small';
+        }
+        button.disabled = true;
+        status.className = 'text-muted small';
+        status.textContent = 'Digging: fetching the payload log...';
+        if (window.EventSource) {
+            es = new EventSource(streamUrl);
+            es.addEventListener('segfault_dig_done', function(event) {
+                let data = {};
+                try { data = JSON.parse(event.data); } catch (e) { return; }
+                if (String(data.key || '') !== key) return;
+                window.location.reload();
+            });
+        }
+        const body = new URLSearchParams();
+        if (pandaid) body.set('pandaid', pandaid);
+        fetch(form.action, {
+            method: 'POST',
+            headers: {'X-CSRFToken': token, 'X-Requested-With': 'XMLHttpRequest',
+                      'Content-Type': 'application/x-www-form-urlencoded'},
+            body: body.toString()
+        }).then(function(resp) { return resp.json().then(function(d) { return {ok: resp.ok, d: d}; }); })
+          .then(function(r) { if (!r.ok) finish(r.d.error || 'Could not queue the dig.', true); })
+          .catch(function() { finish('Could not queue the dig.', true); });
+        // Backstop: the record changes when the dig lands, event or not.
+        poll = window.setInterval(function() {
+            fetch(recordUrl, {headers: {'Accept': 'application/json'}})
+              .then(function(resp) { return resp.json(); })
+              .then(function(d) {
+                  const now = (d.trace && d.trace.dug_at) || '';
+                  if (now && now !== JSON.parse(document.getElementById('dig-before').textContent)) window.location.reload();
+              }).catch(function() {});
+        }, 15000);
+        window.setTimeout(function() {
+            if (!done) finish('Dig still running or event not received; refresh to check.', true);
+        }, 600000);
+    });
+})();
+</script>
 {% endblock %}

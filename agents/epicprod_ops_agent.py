@@ -177,6 +177,11 @@ BATCH_LOG_LEARN_TIMEOUT = int(os.environ.get("EPICPROD_BATCH_LOG_LEARN_TIMEOUT",
 SEGFAULT_INVENTORY_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "segfault-inventory.py"
 SEGFAULT_INVENTORY_TIMEOUT = int(os.environ.get("EPICPROD_SEGFAULT_INVENTORY_TIMEOUT", "1800"))
 SEGFAULT_INVENTORY_DAYS = int(os.environ.get("EPICPROD_SEGFAULT_INVENTORY_DAYS", "3"))
+SEGFAULT_DIG_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "segfault-dig.py"
+SEGFAULT_DIG_TIMEOUT = int(os.environ.get("EPICPROD_SEGFAULT_DIG_TIMEOUT", "3600"))
+# The automatic dig per night: one representative log per new signature,
+# capped so a storm is not a thousand fetches (SEGFAULT_DIAGNOSIS.md).
+SEGFAULT_DIG_AUTO = int(os.environ.get("EPICPROD_SEGFAULT_DIG_AUTO", "10"))
 # The registrar (swf-epicprod docs/RUCIO_RESILIENCE.md, Measure 2): completes
 # the registrations the payload left pending, hourly, and holds the only
 # retry — one gentle attempt per job, then bounded attempts from one process.
@@ -311,7 +316,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "rucio_arrivals_sweep", "epic_prod_past_import",
                    "file_events_measure", "delivery_daily_rebuild",
                    "batch_log_capture", "batch_log_learn",
-                   "segfault_inventory",
+                   "segfault_inventory", "segfault_dig",
                    "report_sweep", "outputs_ingest", "registrar",
                    "content_validate", "content_accept", "stash_drain",
                    "node_measure_ingest", "dataset_definitions_sweep",
@@ -1411,6 +1416,7 @@ class EpicProdOpsAgent(BaseAgent):
             # Before the first Rucio step: a catalog stall must not cost the
             # day's crash record (SEGFAULT_DIAGNOSIS.md, Inventory builder).
             ('segfault_inventory', self._do_segfault_inventory),
+            ('segfault_dig', self._do_segfault_dig_auto),
             ('catalog_import_csv',
              lambda msg: self._do_catalog_import(dict(msg, source='csv'))),
             ('epic_prod_past_import', self._do_epic_prod_past_import),
@@ -2384,6 +2390,93 @@ class EpicProdOpsAgent(BaseAgent):
                                   f"{counts['signatures']} signatures "
                                   f"({counts['signatures_new']} new)"),
                          **{k: v for k, v in counts.items() if v is not None})
+
+    def _handle_segfault_dig(self, m):
+        """The Dig action of a crash signature's page: fetch one crashed
+        job's payload log and record its trace (key, optional pandaid)."""
+        key = str(m.get('key') or '')
+        if not key:
+            self.logger.error("PRODOPS segfault_dig: missing key")
+            return
+        self.run_in_background(
+            self._do_segfault_dig, m,
+            dedup_key=f"segfault_dig:{key}", label=f"segfault_dig {key}")
+
+    def _run_segfault_dig(self, args, label, m):
+        """Run the dig script; returns (summary dict or None, reason)."""
+        cmd = [sys.executable, str(SEGFAULT_DIG_SCRIPT)] + args
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=SEGFAULT_DIG_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            return None, f'timed out after {SEGFAULT_DIG_TIMEOUT}s'
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  segfault-dig: {line[:300]}")
+        summary = {}
+        try:
+            summary = json.loads(((p.stdout or '').strip().splitlines() or ['{}'])[-1])
+        except Exception as e:
+            return None, f'unreadable summary: {e}'
+        if p.returncode != 0 or summary.get('error'):
+            return None, str(summary.get('error') or self._derive_reason(p))[:300]
+        return summary, ''
+
+    def _do_segfault_dig(self, m):
+        """One signature's dig on operator request; the result is pushed to
+        the page as segfault_dig_done (docs/SSE_PUSH.md)."""
+        key = str(m.get('key') or '')
+        args = ['--key', key]
+        if m.get('pandaid'):
+            args += ['--pandaid', str(m['pandaid'])]
+        self.logger.info(f"PRODOPS segfault_dig: {key}")
+        t0 = time.monotonic()
+        summary, reason = self._run_segfault_dig(args, key, m)
+        username = str(m.get('requested_by') or '')
+        if summary is None:
+            self.logger.error(f"PRODOPS segfault_dig {key} FAILED: {reason}")
+            self._log_action('segfault_dig', t0, outcome='error', reason=reason,
+                             subject_type='crash_signature', subject_key=key,
+                             username=username, sublevel='normal',
+                             live_default=True, level=logging.ERROR)
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'segfault_dig_done', 'key': key, 'ok': False,
+                'trace_status': 'log_unavailable', 'reason': reason})
+            return
+        self._log_action('segfault_dig', t0,
+                         subject_type='crash_signature', subject_key=key,
+                         username=username, sublevel='normal', live_default=True,
+                         summary=(f"{summary.get('trace_status')}: "
+                                  f"{summary.get('frame') or summary.get('reason') or ''}")[:300],
+                         pandaid=summary.get('pandaid'))
+        self.send_message('/topic/epictopic', {
+            'msg_type': 'segfault_dig_done', 'key': key, 'ok': True,
+            'pandaid': str(summary.get('pandaid') or ''),
+            'trace_status': summary.get('trace_status'),
+            'frame': summary.get('frame') or '',
+            'reason': summary.get('reason') or '',
+            'merged_into': summary.get('merged_into') or ''})
+
+    def _do_segfault_dig_auto(self, m):
+        """The nightly automatic dig (catalog_sync chain step): the largest
+        signatures never dug, at most SEGFAULT_DIG_AUTO fetches."""
+        self.logger.info(f"PRODOPS segfault_dig: automatic, up to {SEGFAULT_DIG_AUTO}")
+        t0 = time.monotonic()
+        summary, reason = self._run_segfault_dig(['--auto', str(SEGFAULT_DIG_AUTO)], 'auto', m)
+        username = str(m.get('created_by') or '')
+        if summary is None:
+            self.logger.error(f"PRODOPS segfault_dig auto FAILED: {reason}")
+            self._log_action('segfault_dig', t0, outcome='error', reason=reason,
+                             username=username, sublevel='normal',
+                             live_default=True, level=logging.ERROR)
+            return
+        self._log_action('segfault_dig', t0, username=username,
+                         sublevel='normal', live_default=True,
+                         summary=(f"automatic: {summary.get('digs')} dug, "
+                                  f"{summary.get('found')} traced, "
+                                  f"{summary.get('log_unavailable')} logs unavailable, "
+                                  f"{summary.get('absent')} without a trace"),
+                         digs=summary.get('digs'), found=summary.get('found'),
+                         log_unavailable=summary.get('log_unavailable'))
 
     def _handle_batch_log_capture(self, m):
         """Run the batch-record capture off the receiver thread — normally a

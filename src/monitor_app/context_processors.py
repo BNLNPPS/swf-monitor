@@ -250,6 +250,7 @@ def _active_nav(request):
         'panda_segfaults': namespace == 'monitor_app' and url_name in {
             'panda_segfaults',
             'panda_segfault_detail',
+            'panda_segfault_dig',
         },
         'panda_diagnostics': namespace == 'monitor_app' and url_name in {
             'panda_diagnostics_list',
