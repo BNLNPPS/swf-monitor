@@ -85,7 +85,7 @@
             <tr>
                 <td data-order="{{ r.last_seen|default:'' }}">{% with t=r.last_seen|fmt_dt %}{{ t|slice:":8" }}<br>{{ t|slice:"9:" }}{% endwith %}</td>
                 <td class="class-col">{{ r.class_label }}</td>
-                <td class="sig-col"><a href="{% url 'monitor_app:panda_segfault_detail' key=r.key %}">{{ r.key }}</a><br>
+                <td class="sig-col"><a href="{% url 'monitor_app:panda_segfault_detail' key=r.key %}">{{ r.key }}</a>{% if r.finding_anchor %} <a href="{% url 'ai:ai_narrative_detail' name='findings_segfault' %}#{{ r.finding_anchor }}" title="The curated finding for this crashing frame">finding</a>{% endif %}<br>
                     exit {{ r.exit_code }}, {{ r.signal_name }}{% if r.frame %}; {{ r.frame }}{% endif %}</td>
                 <td class="cfg-col">{% if r.configuration.prod_task %}{{ r.configuration.prod_task }}{% else %}{{ r.task_names.0|default:'' }}{% endif %}
                     {% if r.image %}<br>{{ r.image }}{% endif %}</td>

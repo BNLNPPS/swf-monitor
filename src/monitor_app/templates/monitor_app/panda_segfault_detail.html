@@ -147,6 +147,7 @@
             {% endif %}
 
             <h4>Diagnosis</h4>
+            {% if sig.finding_anchor %}<p>The curated reading of this crashing frame: <a href="{% url 'ai:ai_narrative_detail' name='findings_segfault' %}#{{ sig.finding_anchor }}">Segfault findings</a>.</p>{% endif %}
             {% if sig.verdict %}<p>Verdict: <strong>{{ sig.verdict }}</strong></p>{% endif %}
             {% if sig.data.diagnosis %}
             <p class="small">Study {{ sig.data.diagnosis.state }}{% if sig.data.diagnosis.job_id %}, corun job {{ sig.data.diagnosis.job_id }}{% endif %}{% if sig.data.diagnosis.submitted_at %}, submitted {{ sig.data.diagnosis.submitted_at|fmt_dt }}{% endif %}{% if sig.data.diagnosis.requested_by %} by {{ sig.data.diagnosis.requested_by }}{% endif %}{% if sig.data.diagnosis.reason %}: {{ sig.data.diagnosis.reason }}{% endif %}{% if sig.data.diagnosis.problems %}; problems: {{ sig.data.diagnosis.problems|join:"; " }}{% endif %}</p>

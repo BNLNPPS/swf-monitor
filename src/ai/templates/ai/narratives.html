@@ -58,6 +58,13 @@
   {% endfor %}
   {% endif %}
 
+  {% if finding_entries %}
+  <h3 class="text-muted mt-3">Findings</h3>
+  {% for e in finding_entries %}
+    {% include "ai/_narrative_entry.html" %}
+  {% endfor %}
+  {% endif %}
+
   {% if campaign_entries %}
   <h3 class="text-muted mt-3">Campaigns</h3>
   {% for e in campaign_entries %}
