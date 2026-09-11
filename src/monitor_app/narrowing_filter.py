@@ -118,8 +118,11 @@ class NarrowingFilter:
                 'key': f.key, 'label': f.label, 'selected': selected,
                 'all_url': self.url({f.key: ''}),
                 'all_active': not selected,
+                # A click on the selected value clears it, as in the
+                # inclusive filter; any other value replaces the selection.
                 'items': [{'value': v, 'display': f.display(v), 'count': counts[v],
-                           'url': self.url({f.key: v}), 'active': selected == v}
+                           'url': self.url({f.key: '' if selected == v else v}),
+                           'active': selected == v}
                           for v in ordered],
             })
         return bars

@@ -124,7 +124,8 @@ class bar showing the classes of that queue's crashes.
 
 One parameter per facet, its key the facet key, one value
 (`?class=sparse&queue=NERSC_Perlmutter_epic`); `q` a free-text search
-over every column. Every bar anchor is a server URL carrying the whole
+over every column. A click on the selected value clears it, as in the
+inclusive filter; a click on another value replaces the selection. Every bar anchor is a server URL carrying the whole
 selection, so the filter works without script and a middle click opens
 the right page. Clear all is the page's path.
 

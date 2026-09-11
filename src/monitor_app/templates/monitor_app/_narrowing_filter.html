@@ -11,7 +11,7 @@ box submits the same parameters, and the active-filters line follows.
     <strong>{{ f.label }}:</strong>
     <a href="{{ f.all_url }}" class="filter-link {% if f.all_active %}filter-active{% endif %}">All</a>
     {% for item in f.items %}
-    <a href="{{ item.url }}" class="filter-link {% if item.active %}filter-active{% endif %}">{{ item.display }} ({{ item.count }})</a>
+    <a href="{{ item.url }}" class="filter-link {% if item.active %}filter-active{% endif %}" title="{% if item.active %}Selected: click to clear{% else %}Narrow to this value{% endif %}">{{ item.display }} ({{ item.count }})</a>
     {% endfor %}
 </div>
 {% endfor %}
