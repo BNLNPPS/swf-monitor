@@ -322,6 +322,17 @@ def build_record_signatures(jeditaskids=None, rows_lost=True,
 
 # ---------------------------------------------------------- the reading
 
+# The campaign images all live at one cvmfs path; the version is the
+# information. Another image keeps its name.
+IMAGE_PREFIX = '/cvmfs/singularity.opensciencegrid.org/eicweb/eic_xl:'
+
+
+def _image_label(image):
+    if image.startswith(IMAGE_PREFIX):
+        return image[len(IMAGE_PREFIX):]
+    return image.rpartition('/')[2]
+
+
 def signature_summary(sig):
     """The list-row form of a signature, as the page and the tools show it."""
     return {
@@ -336,9 +347,8 @@ def signature_summary(sig):
         'task_ids': [t.get('jeditaskid') for t in (sig.tasks or [])],
         'task_names': [t.get('taskname') for t in (sig.tasks or [])],
         'configuration': sig.configuration or {},
-        # The image as its name: the cvmfs path before it carries nothing.
-        'image': ((sig.configuration or {}).get('container_image_ran')
-                  or (sig.configuration or {}).get('container_image') or '').rpartition('/')[2],
+        'image': _image_label((sig.configuration or {}).get('container_image_ran')
+                              or (sig.configuration or {}).get('container_image') or ''),
         'crashes': sig.crashes,
         'rate': sig.rate,
         'rate_pct': (f'{100 * sig.rate:.1f}%' if sig.rate is not None else ''),
