@@ -40,8 +40,9 @@
     <style>
       /* The signature and configuration cells wrap inside a bound, so the
          frame and the composed name do not set the table's width. */
-      #segfault-table td.sig-col { max-width: 15em; overflow-wrap: anywhere; }
+      #segfault-table td.sig-col { max-width: 20em; overflow-wrap: anywhere; }
       #segfault-table td.cfg-col { max-width: 24em; overflow-wrap: anywhere; }
+      #segfault-table td.class-col { max-width: 7em; }
     </style>
     <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable" id="segfault-table" data-swf-order="0,desc">
         <thead>
@@ -65,7 +66,7 @@
             {% for r in rows %}
             <tr data-if="{{ r.if_attr }}"{% if r.if_hidden %} class="swf-if-hidden"{% endif %}>
                 <td data-order="{{ r.last_seen|default:'' }}">{{ r.last_seen|fmt_dt }}</td>
-                <td>{{ r.class_label }}</td>
+                <td class="class-col">{{ r.class_label }}</td>
                 <td class="sig-col"><a href="{% url 'monitor_app:panda_segfault_detail' key=r.key %}">{{ r.key }}</a><br>
                     exit {{ r.exit_code }}, {{ r.signal_name }}{% if r.frame %}; {{ r.frame }}{% endif %}</td>
                 <td class="cfg-col">{% if r.configuration.prod_task %}{{ r.configuration.prod_task }}{% else %}{{ r.task_names.0|default:'' }}{% endif %}
