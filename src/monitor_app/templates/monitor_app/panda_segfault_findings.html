@@ -25,6 +25,7 @@
         <thead>
             <tr>
                 <th>Date</th>
+                <th>Updated</th>
                 <th>Crashing frame</th>
                 <th>Stage</th>
                 <th>Class</th>
@@ -38,13 +39,13 @@
                 <th>Standing</th>
                 <th>Fix</th>
                 <th>Notes</th>
-                <th>Updated</th>
             </tr>
         </thead>
         <tbody>
             {% for e in entries %}
             <tr id="{{ e.anchor }}">
                 <td>{{ e.date }}</td>
+                <td>{% with t=e.updated_at|fmt_dt %}{{ t|slice:":8" }}<br>{{ t|slice:"9:" }}{% endwith %}<br>{{ e.updated_by }}</td>
                 <td><strong>{{ e.title }}</strong>{% if e.model_reading %} <span class="ai-attr">model reading</span>{% endif %}<br>{{ e.frame }}</td>
                 <td>{{ e.stage }}</td>
                 <td>{{ e.class }}</td>
@@ -58,7 +59,6 @@
                 <td>{{ e.standing }}</td>
                 <td>{{ e.fix }}</td>
                 <td class="action-col">{{ e.notes }}</td>
-                <td>{% with t=e.updated_at|fmt_dt %}{{ t|slice:":8" }}<br>{{ t|slice:"9:" }}{% endwith %}<br>{{ e.updated_by }}</td>
             </tr>
             {% endfor %}
         </tbody>
