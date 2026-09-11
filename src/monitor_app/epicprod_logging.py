@@ -213,6 +213,17 @@ ACTION_DEFAULTS = {
                        "inventory and parsed failure diagnosis for a PanDA "
                        "job.",
     },
+    'segfault_inventory': {
+        'sublevel': 'normal', 'live': True,
+        'description': "The crash-class inventory pass "
+                       "(scripts/segfault-inventory.py): payload crashes "
+                       "(exit 134/135/136/139) read from the PanDA record "
+                       "for a window and written as EpicProdJob rows with "
+                       "their manifest row; one event per run carrying the "
+                       "window, jobs seen, rows added and updated, rows "
+                       "unresolved and tasks touched (swf-epicprod "
+                       "SEGFAULT_DIAGNOSIS.md).",
+    },
     'system_status_refresh': {
         'sublevel': 'low', 'live': False,
         'description': "Periodic refresh of the cached System page status "
