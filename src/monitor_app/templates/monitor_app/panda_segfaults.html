@@ -95,7 +95,7 @@
                 <td data-order="{{ r.minutes_p50|default_if_none:'-1' }}">{% if r.minutes_p50 is not None %}{{ r.minutes_p10 }} / {{ r.minutes_p50 }}{% endif %}</td>
                 <td>{% for s in r.sites %}{{ s.site }} ({{ s.crashes }}){% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
                 <td data-order="{{ r.hosts|default_if_none:'-1' }}">{{ r.hosts|default_if_none:'' }}</td>
-                <td data-order="{{ r.rows_lost|default_if_none:'-1' }}" title="{{ r.rows_lost_note }}">{% if r.rows_lost is not None %}{{ r.rows_lost }}{% if r.events_lost %} ({{ r.events_lost }} ev){% endif %}{% endif %}</td>
+                <td data-order="{{ r.rows_lost|default_if_none:'-1' }}" title="{{ r.rows_lost_note }}">{% if r.rows_lost is not None %}{{ r.rows_lost }}{% if r.events_lost %}<br>{{ r.events_lost }} ev{% endif %}{% endif %}</td>
                 <td>{% for stage, n in r.stages.items %}{{ stage }} ({{ n }}){% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
                 <td>{{ r.status_label }}</td>
             </tr>
