@@ -139,13 +139,22 @@ the right page. Clear all is the page's path.
         Facet('queue', 'Queue', lambda r: r['queues'] or None),
     ]
     flt = NarrowingFilter(request.GET, facets)
-    rows = flt.apply(rows_all, facets)
+    shown = flt.annotate(rows_all, facets)      # row['nf_attr'], row['nf_hidden']
     context['narrowing_filter'] = flt.context(rows_all, facets, request)
 
 In the template, `{% include 'monitor_app/_narrowing_filter.html' %}`
 above the table renders the bars in the house filter-bar markup, the
-search box (which submits the current selection with it), and the
-active-filters line. `Facet` is the same class both filters use.
+search box, and the active-filters line; every row carries
+`data-nf="{{ r.nf_attr }}"` and the class `swf-nf-hidden` when
+`r.nf_hidden` (`flt.annotate(rows_all, facets)` sets both and returns
+the number initially shown), and an element with class `swf-nf-shown`
+receives the shown count. As with the inclusive filter, a click costs
+no request: the server renders every row once with the request's
+selection applied (the no-script state, and what a link opens), and
+the include's script hides and shows rows, recounts every bar within
+the selection, and rewrites the URL with `replaceState`; the `swf-nf-change`
+event on `document` carries the selection, the search and the shown
+count to page scripts. `Facet` is the same class both filters use.
 
 ### Pages
 

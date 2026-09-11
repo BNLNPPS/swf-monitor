@@ -1,24 +1,188 @@
 {% comment %}
 Narrowing filter (monitor_app/narrowing_filter.py, docs/INCLUSIVE_FILTER.md
 § The narrowing filter): one value per facet, the rows shown are the
-intersection, every bar counts within the selection. Rendered from
-narrowing_filter = NarrowingFilter.context(...); the anchors are server
-URLs (the house filter-bar markup of the operations views), the search
-box submits the same parameters, and the active-filters line follows.
+intersection, every bar counts within the selection. The server renders
+the bars and the rows for the request's selection (the no-script state and
+what a link opens); the script below applies every click in the browser:
+rows are tr[data-nf] anywhere on the page, hidden with the swf-nf-hidden
+class; every bar is recounted within the selection; elements with class
+swf-nf-shown receive the shown count; the URL is rewritten with
+replaceState, one parameter per facet. The anchors keep server URLs, so a
+middle click or a page without script still works.
 {% endcomment %}
+<style>
+  .swf-nf-hidden { display: none !important; }
+  .swf-nf-restriped > tbody > tr.swf-nf-odd > * { --bs-table-accent-bg: var(--bs-table-striped-bg); color: var(--bs-table-striped-color); }
+</style>
+<div class="swf-nf" data-nf-facets="{{ narrowing_filter.facets_json }}" data-nf-selected="{{ narrowing_filter.selected_json }}" data-nf-search-param="{{ narrowing_filter.search_param }}" data-nf-clear="{{ narrowing_filter.clear_url }}">
 {% for f in narrowing_filter.bars %}
-<div class="filter-bar mb-2">
+<div class="filter-bar mb-2" data-nf-bar="{{ f.key }}">
     <strong>{{ f.label }}:</strong>
-    <a href="{{ f.all_url }}" class="filter-link {% if f.all_active %}filter-active{% endif %}">All</a>
+    <a href="{{ f.all_url }}" data-nf-all="{{ f.key }}" class="filter-link {% if f.all_active %}filter-active{% endif %}">All</a>
     {% for item in f.items %}
-    <a href="{{ item.url }}" class="filter-link {% if item.active %}filter-active{% endif %}" title="{% if item.active %}Selected: click to clear{% else %}Narrow to this value{% endif %}">{{ item.display }} ({{ item.count }})</a>
+    <a href="{{ item.url }}" data-nf-key="{{ f.key }}" data-nf-value="{{ item.value }}" class="filter-link swf-nf-value {% if item.active %}filter-active{% endif %}" title="{% if item.active %}Selected: click to clear{% else %}Narrow to this value{% endif %}">{{ item.display }} (<span class="swf-nf-count">{{ item.count }}</span>)</a>
     {% endfor %}
 </div>
 {% endfor %}
-<form method="get" class="d-flex align-items-center gap-2 mb-2">
+<form method="get" class="d-flex align-items-center gap-2 mb-2 swf-nf-form">
     {% for k, v in narrowing_filter.hidden %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
     <strong>Search:</strong>
-    <input type="search" name="{{ narrowing_filter.search_param }}" class="form-control form-control-sm" style="max-width: 24em;" value="{{ narrowing_filter.search }}" placeholder="text in any column">
-    <button type="submit" class="btn btn-sm btn-secondary">Apply</button>
+    <input type="search" name="{{ narrowing_filter.search_param }}" class="form-control form-control-sm swf-nf-search" style="max-width: 24em;" value="{{ narrowing_filter.search }}" placeholder="text in any column">
+    <button type="submit" class="btn btn-sm btn-secondary swf-nf-apply">Apply</button>
 </form>
-{% include "monitor_app/_active_filters.html" with active_filters=narrowing_filter.active_filters clear_all_url=narrowing_filter.clear_url %}
+<div id="active-filters" class="mt-2 mb-3">
+    <strong>Active filters:</strong>
+    <span id="filter-badges" class="swf-nf-badges{% if not narrowing_filter.active_filters %} text-muted{% endif %}">{% if narrowing_filter.active_filters %}{% for f in narrowing_filter.active_filters %}<span class="badge bg-info me-1">{{ f.label }}: {{ f.value }}</span>{% endfor %}{% else %}None{% endif %}</span>
+    <a href="{{ narrowing_filter.clear_url }}" data-nf-clear-all class="btn btn-link btn-sm p-0 ms-2 swf-nf-clear"{% if not narrowing_filter.active_filters %} hidden{% endif %}>clear all</a>
+</div>
+</div>
+<script>
+(function () {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+  function init() {
+  const root = document.querySelector('.swf-nf');
+  if (!root || root.dataset.nfReady) return;
+  root.dataset.nfReady = '1';
+  const FACETS = JSON.parse(root.dataset.nfFacets || '[]');
+  const SEARCH_PARAM = root.dataset.nfSearchParam || 'q';
+  let selected = JSON.parse(root.dataset.nfSelected || '{}');
+  const searchEl = root.querySelector('.swf-nf-search');
+  let search = searchEl ? searchEl.value.trim().toLowerCase() : '';
+  const rows = Array.from(document.querySelectorAll('tr[data-nf]'));
+  const rowValues = rows.map(function (tr) {
+    try { return JSON.parse(tr.dataset.nf || '{}'); } catch (e) { return {}; }
+  });
+  const rowText = rows.map(function (tr) { return tr.textContent.replace(/\s+/g, ' ').toLowerCase(); });
+  const DQ = String.fromCharCode(34), SQ = String.fromCharCode(39);
+  const ESC = {'&': '&amp;', '<': '&lt;', '>': '&gt;'};
+  ESC[DQ] = '&quot;'; ESC[SQ] = '&#39;';
+  const ESC_RE = new RegExp('[&<>' + DQ + SQ + ']', 'g');
+  function esc(s) { return String(s).replace(ESC_RE, function (c) { return ESC[c]; }); }
+  function urlFor(sel, q) {
+    const url = new URL(window.location.href);
+    FACETS.forEach(function (f) { url.searchParams.delete(f.key); });
+    url.searchParams.delete(SEARCH_PARAM);
+    FACETS.forEach(function (f) { if (sel[f.key]) url.searchParams.set(f.key, sel[f.key]); });
+    if (q) url.searchParams.set(SEARCH_PARAM, q);
+    return url;
+  }
+  // A row matches the selection, the facet `skip` excepted (a bar counts
+  // its own values within the other facets' selections).
+  function matches(i, sel, skip) {
+    if (search && rowText[i].indexOf(search) < 0) return false;
+    const values = rowValues[i];
+    for (let k = 0; k < FACETS.length; k++) {
+      const key = FACETS[k].key, want = sel[key];
+      if (want && key !== skip && (values[key] || []).indexOf(want) < 0) return false;
+    }
+    return true;
+  }
+  function restripe() {
+    const tables = new Set();
+    rows.forEach(function (tr) { const t = tr.closest('table'); if (t) tables.add(t); });
+    tables.forEach(function (table) {
+      table.classList.remove('table-striped');
+      table.classList.add('swf-nf-restriped');
+      let i = 0;
+      Array.from(table.tBodies).forEach(function (tbody) {
+        Array.from(tbody.rows).forEach(function (tr) {
+          if (tr.classList.contains('swf-nf-hidden')) { tr.classList.remove('swf-nf-odd'); return; }
+          tr.classList.toggle('swf-nf-odd', i % 2 === 0);
+          i++;
+        });
+      });
+    });
+  }
+  function applyRows() {
+    let shown = 0;
+    rows.forEach(function (tr, i) {
+      const on = matches(i, selected, null);
+      tr.classList.toggle('swf-nf-hidden', !on);
+      if (on) shown++;
+    });
+    document.querySelectorAll('.swf-nf-shown').forEach(function (el) { el.textContent = shown; });
+    restripe();
+    return shown;
+  }
+  function paint() {
+    FACETS.forEach(function (f) {
+      const bar = root.querySelector('[data-nf-bar="' + CSS.escape(f.key) + '"]');
+      if (!bar) return;
+      // Recount this bar's values over the rows the OTHER facets keep.
+      const counts = {};
+      rows.forEach(function (tr, i) {
+        if (!matches(i, selected, f.key)) return;
+        (rowValues[i][f.key] || []).forEach(function (v) { counts[v] = (counts[v] || 0) + 1; });
+      });
+      const current = selected[f.key] || '';
+      bar.querySelectorAll('.swf-nf-value').forEach(function (a) {
+        const v = a.dataset.nfValue;
+        const n = counts[v] || 0;
+        const on = current === v;
+        a.querySelector('.swf-nf-count').textContent = n;
+        a.classList.toggle('filter-active', on);
+        // A value with no rows in the selection stays listed, muted, still clickable.
+        a.classList.toggle('text-muted', !on && n === 0);
+        a.title = on ? 'Selected: click to clear' : 'Narrow to this value';
+        const next = Object.assign({}, selected);
+        if (on) delete next[f.key]; else next[f.key] = v;
+        a.href = urlFor(next, search).toString();
+      });
+      const all = bar.querySelector('[data-nf-all]');
+      if (all) {
+        all.classList.toggle('filter-active', !current);
+        const next = Object.assign({}, selected); delete next[f.key];
+        all.href = urlFor(next, search).toString();
+      }
+    });
+    const badges = root.querySelector('.swf-nf-badges');
+    const clear = root.querySelector('.swf-nf-clear');
+    let html = '';
+    FACETS.forEach(function (f) {
+      const v = selected[f.key];
+      if (v) html += '<span class="badge bg-info me-1">' + esc(f.label) + ': ' + esc((f.display || {})[v] || v) + '</span>';
+    });
+    if (search) html += '<span class="badge bg-info me-1">Search: ' + esc(search) + '</span>';
+    badges.innerHTML = html || 'None';
+    badges.classList.toggle('text-muted', !html);
+    if (clear) { clear.hidden = !html; clear.href = root.dataset.nfClear || '?'; }
+  }
+  function update() {
+    paint();
+    const shown = applyRows();
+    history.replaceState(null, '', urlFor(selected, search));
+    document.dispatchEvent(new CustomEvent('swf-nf-change', {detail: {selected: Object.assign({}, selected), search: search, shown: shown}}));
+  }
+  root.addEventListener('click', function (ev) {
+    const a = ev.target.closest('a');
+    if (!a || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+    if (a.classList.contains('swf-nf-value')) {
+      ev.preventDefault();
+      const key = a.dataset.nfKey, value = a.dataset.nfValue;
+      if (selected[key] === value) delete selected[key]; else selected[key] = value;
+      update();
+    } else if (a.dataset.nfAll !== undefined) {
+      ev.preventDefault();
+      delete selected[a.dataset.nfAll];
+      update();
+    } else if (a.dataset.nfClearAll !== undefined) {
+      ev.preventDefault();
+      selected = {}; search = ''; if (searchEl) searchEl.value = '';
+      update();
+    }
+  });
+  if (searchEl) {
+    searchEl.addEventListener('input', function () { search = searchEl.value.trim().toLowerCase(); update(); });
+    const form = root.querySelector('.swf-nf-form');
+    if (form) form.addEventListener('submit', function (ev) { ev.preventDefault(); update(); });
+  }
+  if (window.jQuery) { window.jQuery(document).on('draw.dt', restripe); }
+  paint();
+  applyRows();
+  }
+})();
+</script>

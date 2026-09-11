@@ -47,7 +47,7 @@
         </ul>
     </details>
     <p class="mb-2">
-        <strong>{{ shown }}</strong> of <strong>{{ total }}</strong> signatures,
+        <strong class="swf-nf-shown">{{ shown }}</strong> of <strong>{{ total }}</strong> signatures,
         <strong>{{ crashes_total }}</strong> crashed jobs in the inventory.
         The curated reading of the frames: <a href="{% url 'monitor_app:panda_segfault_findings' %}">Segfault Findings</a>.
     </p>
@@ -83,7 +83,7 @@
         </thead>
         <tbody>
             {% for r in rows %}
-            <tr>
+            <tr data-nf="{{ r.nf_attr }}"{% if r.nf_hidden %} class="swf-nf-hidden"{% endif %}>
                 <td data-order="{{ r.last_seen|default:'' }}">{% with t=r.last_seen|fmt_dt %}{{ t|slice:":8" }}<br>{{ t|slice:"9:" }}{% endwith %}</td>
                 <td class="class-col">{{ r.class_label }}</td>
                 <td class="sig-col"><a href="{% url 'monitor_app:panda_segfault_detail' key=r.key %}">{{ r.key }}</a>{% if r.finding_anchor %} <a href="{% url 'monitor_app:panda_segfault_findings' %}#{{ r.finding_anchor }}" title="The curated finding for this crashing frame">finding</a>{% endif %}<br>

@@ -1739,10 +1739,12 @@ def panda_segfaults(request):
         Facet('level', 'Level', lambda r: r['level']),
     ]
     flt = NarrowingFilter(request.GET, facets)
-    rows = flt.apply(rows_all, facets)
+    # Every row is rendered with its facet values; the browser applies the
+    # selection (the server's initial state covers links and no script).
+    shown = flt.annotate(rows_all, facets)
     context = {
-        'rows': rows,
-        'shown': len(rows),
+        'rows': rows_all,
+        'shown': shown,
         'total': len(rows_all),
         'crashes_total': sum(r['crashes'] for r in rows_all if r['level'] == 'record'),
         'narrowing_filter': flt.context(rows_all, facets, request),

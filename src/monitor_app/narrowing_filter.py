@@ -28,7 +28,12 @@ Usage::
 
 and in the template, ``{% include 'monitor_app/_narrowing_filter.html' %}``
 above the table, which renders the bars, the search box and the
-active-filters line.
+active-filters line; every row carries ``data-nf="{{ r.nf_attr }}"`` and
+the class ``swf-nf-hidden`` when ``r.nf_hidden``. The server renders the
+full row set with the request's selection applied (the no-script state,
+and what a link opens); the include's script applies every click in the
+browser: hides and shows rows, recounts every bar within the selection,
+rewrites the URL with ``replaceState``. A click costs no request.
 """
 import json
 from collections import Counter
@@ -81,6 +86,23 @@ class NarrowingFilter:
         if not self.selected:
             self.read(facets)
         return [r for r in rows if self.matches(r, facets)]
+
+    def row_values(self, row, facets):
+        return {f.key: list(f.values(row)) for f in facets}
+
+    def annotate(self, rows, facets):
+        """Set ``nf_attr`` (the row's facet values, JSON) and ``nf_hidden``
+        (whether the current selection hides it) on every row, so the page
+        renders every row once and the browser applies each click; returns
+        the number initially shown."""
+        if not self.selected:
+            self.read(facets)
+        shown = 0
+        for row in rows:
+            row['nf_attr'] = json.dumps(self.row_values(row, facets), separators=(',', ':'))
+            row['nf_hidden'] = not self.matches(row, facets)
+            shown += 0 if row['nf_hidden'] else 1
+        return shown
 
     # --------------------------------------------------------- the bars
 
@@ -139,7 +161,10 @@ class NarrowingFilter:
         return out
 
     def context(self, rows_all, facets, request):
-        """The include's context."""
+        """The include's context: the bars as the server counts them for
+        this request (the no-script state), plus what the browser script
+        needs to recount and rewrite the URL on every click: the facet
+        keys, labels and display names, and the selection."""
         return {
             'bars': self.bars(rows_all, facets),
             'search': self.search,
@@ -148,4 +173,11 @@ class NarrowingFilter:
             'active_filters': self.active_filters(facets),
             'clear_url': request.path,
             'total': len(rows_all),
+            'facets_json': json.dumps([
+                {'key': f.key, 'label': f.label,
+                 'display': {v: f.display(v) for r in rows_all for v in f.values(r)},
+                 'order': [str(v) for v in f.order] if isinstance(f.order, (list, tuple)) else None}
+                for f in facets], separators=(',', ':')),
+            'selected_json': json.dumps({k: v for k, v in self.selected.items() if v},
+                                        separators=(',', ':')),
         }
