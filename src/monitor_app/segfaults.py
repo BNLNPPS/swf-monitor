@@ -366,6 +366,8 @@ def signature_summary(sig):
         'status_label': STATUS_LABELS.get(sig.status, sig.status),
         'trace_status': (sig.trace or {}).get('trace_status', 'unknown'),
         'frame': (sig.trace or {}).get('frame', ''),
+        'member_of': (sig.data or {}).get('member_of', ''),
+        'finding_anchor': '',
         'first_seen': _iso(sig.first_seen),
         'last_seen': _iso(sig.last_seen),
         'updated_at': _iso(sig.updated_at),
@@ -383,6 +385,11 @@ def catalog(status=None, class_hint=None, limit=None):
     if limit:
         qs = qs[:int(limit)]
     rows = [signature_summary(s) for s in qs]
+    # The curated finding each frame has, by signature key or by the
+    # trace-level entry a member belongs to.
+    anchors = finding_anchors()
+    for r in rows:
+        r['finding_anchor'] = anchors.get(r['key']) or anchors.get(r['member_of'] or '') or ''
     counts = defaultdict(int)
     for s in CrashSignature.objects.values_list('class_hint', flat=True):
         counts[s] += 1
@@ -400,6 +407,8 @@ def signature_detail(key, jobs_limit=200):
         except Exception as e:                                # noqa: BLE001
             logger.error('segfault %s: reproduction refresh failed: %s', key, e)
     detail = signature_summary(sig)
+    anchors = finding_anchors()
+    detail['finding_anchor'] = anchors.get(sig.key) or anchors.get(detail['member_of'] or '') or ''
     detail.update({
         'tasks_detail': sig.tasks or [],
         'trace': sig.trace or {},
@@ -834,3 +843,88 @@ def queue_diagnosis(key, requested_by):
     except Exception as e:                                    # noqa: BLE001
         logger.error('segfault %s: diagnosis not queued: %s', key, e)
         return False
+
+
+# --------------------------------------------------------------- findings
+
+def findings():
+    """The curated findings (swf_epicprod/segfault/findings.yaml, one
+    entry per crashing frame), each joined live to its catalog entries:
+    the signatures it names, their crashes, configurations and loss.
+    Returns (entries, error); a file that cannot be read is an error
+    the page states, never an empty table."""
+    import os
+    try:
+        import yaml
+        import swf_epicprod
+        path = os.path.join(os.path.dirname(swf_epicprod.__file__), 'segfault', 'findings.yaml')
+        with open(path) as fh:
+            raw = yaml.safe_load(fh) or []
+    except Exception as e:                                    # noqa: BLE001
+        logger.error('segfault findings: cannot read findings.yaml: %s', e)
+        return [], f'the findings file could not be read: {e}'
+    entries = []
+    for i, f in enumerate(raw):
+        keys = [str(k) for k in (f.get('signatures') or [])]
+        sigs = {s.key: s for s in CrashSignature.objects.filter(key__in=keys)}
+        rows = []
+        crashes = 0
+        prod_tasks = set()
+        rows_lost = events_lost = 0
+        for key in keys:
+            s = sigs.get(key)
+            if s is None:
+                rows.append({'key': key, 'missing': True})
+                continue
+            summary = signature_summary(s)
+            rows.append(summary)
+            if s.level == 'trace' or len(keys) == 1:
+                crashes = max(crashes, s.crashes)
+                for t in (s.configuration or {}).get('prod_tasks') or ([s.configuration.get('prod_task')] if (s.configuration or {}).get('prod_task') else []):
+                    prod_tasks.add(t)
+                rows_lost += s.rows_lost or 0
+                events_lost += s.events_lost or 0
+        entries.append({
+            'n': i + 1,
+            'anchor': keys[0].replace(':', '-') if keys else f'finding-{i + 1}',
+            'date': str(f.get('date') or ''),
+            'frame': f.get('frame', ''),
+            'stage': f.get('stage', ''),
+            'title': f.get('title', ''),
+            'what': (f.get('what') or '').strip(),
+            'sources': f.get('sources') or [],
+            'class': f.get('class', ''),
+            'action': (f.get('action') or '').strip(),
+            'standing': f.get('standing', ''),
+            'fix': f.get('fix', ''),
+            'notes': (f.get('notes') or '').strip(),
+            'signatures': rows,
+            'crashes': crashes,
+            'tasks': len({t for r in rows for t in (r.get('task_ids') or [])}),
+            'configurations': sorted(prod_tasks),
+            'rows_lost': rows_lost,
+            'events_lost': events_lost,
+        })
+    return entries, ''
+
+
+def finding_anchors():
+    """{signature key: findings-page anchor} for every signature a finding
+    names, read from the findings file (no catalog join)."""
+    import os
+    try:
+        import yaml
+        import swf_epicprod
+        path = os.path.join(os.path.dirname(swf_epicprod.__file__), 'segfault', 'findings.yaml')
+        with open(path) as fh:
+            raw = yaml.safe_load(fh) or []
+    except Exception as e:                                    # noqa: BLE001
+        logger.error('segfault findings: cannot read findings.yaml: %s', e)
+        return {}
+    out = {}
+    for i, f in enumerate(raw):
+        keys = [str(k) for k in (f.get('signatures') or [])]
+        anchor = keys[0].replace(':', '-') if keys else f'finding-{i + 1}'
+        for k in keys:
+            out[k] = anchor
+    return out

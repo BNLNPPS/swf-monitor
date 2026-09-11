@@ -1750,6 +1750,16 @@ def panda_segfaults(request):
     return render(request, 'monitor_app/panda_segfaults.html', context)
 
 
+def panda_segfault_findings(request):
+    """Segfault findings: the curated reading of the catalog, one row per
+    crashing frame (swf_epicprod/segfault/findings.yaml), joined live to
+    the catalog entries each names."""
+    from ..segfaults import findings
+    entries, error = findings()
+    return render(request, 'monitor_app/panda_segfault_findings.html',
+                  {'entries': entries, 'error': error})
+
+
 def panda_segfault_detail(request, key):
     """One crash signature: its tasks, configuration, sites, crashed jobs,
     trace, reproductions, verdict and assessments."""
