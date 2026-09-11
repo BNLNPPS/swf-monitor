@@ -18,14 +18,14 @@
 
     <style>
       #findings-table td.sig-col { max-width: 16em; overflow-wrap: anywhere; }
-      #findings-table td.frame-col { max-width: 14em; overflow-wrap: anywhere; }
-      #findings-table td.fix-col { min-width: 8em; }
-      #findings-table td.finding-col { min-width: 28em; max-width: 60em; }
+      #findings-table td.frame-col { max-width: 18em; overflow-wrap: anywhere; }
+      #findings-table td.finding-col { max-width: 70em; }
       #findings-table td.finding-col h5 { margin: 0 0 0.5rem 0; }
       #findings-table td.finding-col .finding-label { font-weight: bold; margin-top: 0.6rem; }
       #findings-table td.finding-col p { margin: 0; }
+      #findings-table tr.entry-alt td { background-color: rgba(0, 0, 0, 0.04); }
     </style>
-    <table class="table table-striped table-bordered table-sm align-top swf-sortable" id="findings-table" data-swf-order="0,desc">
+    <table class="table table-bordered table-sm align-top w-auto" id="findings-table">
         <thead>
             <tr>
                 <th>Date</th>
@@ -38,25 +38,25 @@
                 <th>Tasks</th>
                 <th title="Crashed manifest rows with no delivered output, and the events they carried">Rows lost</th>
                 <th>Standing</th>
-                <th>Fix</th>
-                <th>Finding</th>
             </tr>
         </thead>
         <tbody>
             {% for e in entries %}
-            <tr id="{{ e.anchor }}">
-                <td>{{ e.date }}</td>
-                <td>{% with t=e.updated_at|fmt_dt %}{{ t|slice:":8" }}<br>{{ t|slice:"9:" }}{% endwith %}<br>{{ e.updated_by }}</td>
+            {% cycle '' 'entry-alt' as alt silent %}
+            <tr id="{{ e.anchor }}" class="{{ alt }}">
+                <td rowspan="2">{{ e.date }}</td>
+                <td rowspan="2">{% with t=e.updated_at|fmt_dt %}{{ t|slice:":8" }}<br>{{ t|slice:"9:" }}{% endwith %}<br>{{ e.updated_by }}</td>
                 <td class="frame-col">{{ e.frame }}</td>
                 <td>{{ e.stage }}</td>
                 <td>{{ e.class }}</td>
                 <td class="sig-col">{% for s in e.signatures %}{% if s.missing %}{{ s.key }} (not in the catalog){% else %}<a href="{% url 'monitor_app:panda_segfault_detail' key=s.key %}">{{ s.key }}</a>{% if s.level == 'trace' %} ({{ s.tasks }} task{{ s.tasks|pluralize }}){% endif %}{% endif %}{% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
-                <td data-order="{{ e.crashes }}">{{ e.crashes }}</td>
-                <td data-order="{{ e.tasks }}">{{ e.tasks }}</td>
-                <td data-order="{{ e.rows_lost }}" class="text-nowrap">{% if e.rows_lost %}{{ e.rows_lost }}<br>{{ e.events_lost }} ev{% endif %}</td>
+                <td>{{ e.crashes }}</td>
+                <td>{{ e.tasks }}</td>
+                <td class="text-nowrap">{% if e.rows_lost %}{{ e.rows_lost }}<br>{{ e.events_lost }} ev{% endif %}</td>
                 <td>{{ e.standing }}</td>
-                <td class="fix-col">{{ e.fix }}</td>
-                <td class="finding-col">
+            </tr>
+            <tr class="{{ alt }}">
+                <td class="finding-col" colspan="8">
                     <h5>{{ e.title }}{% if e.model_reading %} <span class="ai-attr">model reading</span>{% endif %}</h5>
                     <div class="finding-label">What it is</div>
                     <p>{{ e.what }}</p>
@@ -66,6 +66,8 @@
                     <p>{{ e.action }}</p>{% endif %}
                     {% if e.notes %}<div class="finding-label">Notes</div>
                     <p>{{ e.notes }}</p>{% endif %}
+                    {% if e.fix %}<div class="finding-label">Fix</div>
+                    <p>{{ e.fix }}</p>{% endif %}
                 </td>
             </tr>
             {% endfor %}
