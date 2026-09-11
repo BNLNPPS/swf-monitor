@@ -213,13 +213,29 @@ def seq_numbers_from_params(pandaids):
 
 # ----------------------------------------------------------- the reading
 
+CONTAINER_RE = re.compile(r'"container_name":\s*"([^"]+)"')
+
+
 class ManifestRows:
     """The manifest rows of an attempt from its record on PandaTasks, by
-    JEDI task id, fetched once per task; None when no record exists."""
+    JEDI task id, fetched once per task; None when no record exists. Also
+    the container image the task ran, from its PanDA task parameters."""
 
     def __init__(self):
         self._rows = {}
         self._tasks = {}
+        self._containers = {}
+
+    def container(self, jeditaskid):
+        """The image the task ran (``container_name`` in its task
+        parameters), '' when the parameters carry none."""
+        if not jeditaskid:
+            return ''
+        if jeditaskid not in self._containers:
+            from pcs.manifests import _taskparams
+            m = CONTAINER_RE.search(_taskparams(jeditaskid) or '')
+            self._containers[jeditaskid] = m.group(1) if m else ''
+        return self._containers[jeditaskid]
 
     def prod_task(self, jeditaskid):
         if jeditaskid not in self._tasks:
@@ -334,6 +350,7 @@ def write_batch(jobs, manifests, chains, dry_run, counts):
         if row is None:
             counts['rows_unresolved'] += 1
         crash, stage, signal, minutes = crash_record(j, seq, row, source)
+        crash['container'] = manifests.container(tid) if tid else ''
         obj = existing.get(pid)
         if obj is None:
             obj = EpicProdJob(pandaid=pid)

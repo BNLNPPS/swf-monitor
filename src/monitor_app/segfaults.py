@@ -232,6 +232,8 @@ def build_record_signatures(jeditaskids=None, rows_lost=True,
         digest = crash.get('digest') or {}
         if digest.get('version') and not g['payload_version']:
             g['payload_version'] = digest['version']
+        if crash.get('container') and not g.get('container'):
+            g['container'] = crash['container']
 
     totals = task_totals([g['jeditaskid'] for g in groups.values()])
     prod_tasks = {}
@@ -262,7 +264,7 @@ def build_record_signatures(jeditaskids=None, rows_lost=True,
         created = sig is None
         if created:
             sig = CrashSignature(key=key, status='new')
-        lost_note = 'not checked'
+        lost_note = (sig.data or {}).get('rows_lost_note') or 'not checked'
         lost, events_lost = sig.rows_lost, sig.events_lost
         if lost_budget > 0 and prod_task is not None and g['rows']:
             lost, events_lost, lost_note = _rows_lost(prod_task, g['rows'])
@@ -283,6 +285,9 @@ def build_record_signatures(jeditaskids=None, rows_lost=True,
         }]
         sig.configuration = _configuration(prod_task, payload_versions.get(tid, '')
                                            or g['payload_version'])
+        # The image the crashed task ran, from its PanDA task parameters:
+        # what a reproduction runs, whatever the configuration says now.
+        sig.configuration['container_image_ran'] = g.get('container', '')
         sig.sites = sorted(
             ({'site': s, 'crashes': v['crashes'], 'hosts': len(v['hosts'])}
              for s, v in g['sites'].items()),
@@ -649,6 +654,7 @@ def reproduction_plan(sig, pandaid=None):
         except (TypeError, ValueError):
             maxrss_mb = None
     return {'pandaid': int(pandaid), 'task': job.prod_task.name, 'row_text': row_text,
+            'container': crash.get('container') or '',
             'production_queue': site, 'reference_queue': REFERENCE_QUEUE,
             'maxrss_mb': maxrss_mb, 'job_maxrss_mb': crash.get('maxrss_mb')}
 
@@ -667,6 +673,8 @@ def reproduce(sig, pandaid, queues, mem_limits, username):
                'task': plan['task'], 'queue': queue, 'row_text': plan['row_text'],
                'signature': sig.key, 'pandaid': plan['pandaid'],
                'created_by': username or 'segfault_reproduce'}
+        if plan.get('container'):
+            msg['container'] = plan['container']
         limit = mem_limits.get(queue)
         if limit:
             msg['mem_limit_mb'] = int(limit)
@@ -675,6 +683,7 @@ def reproduce(sig, pandaid, queues, mem_limits, username):
             raise RuntimeError('the canary agent queue could not be reached')
         entries.append({'pandaid': plan['pandaid'], 'queue': queue,
                         'row_text': plan['row_text'], 'mem_limit_mb': limit,
+                        'container': plan.get('container') or '',
                         'requested_at': now, 'requested_by': username,
                         'outcome': 'submitted', 'jedi_task_id': None,
                         'canary_pandaid': None, 'minutes': None,

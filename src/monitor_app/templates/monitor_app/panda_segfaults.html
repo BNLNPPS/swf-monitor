@@ -13,14 +13,23 @@
         trace-level entry once dug. Rebuilt nightly by the catalog sync; the crashed jobs behind each row carry their
         manifest row where the attempt's manifest is on record.
     </p>
-    <p class="mb-1">The class is read from the record alone:</p>
-    <ul class="mb-3">
-        <li><strong>Storm</strong>: a fixed time to death across many nodes, one deterministic cause (crash rate at or above 20% and the middle half of the deaths within 20% of the median).</li>
-        <li><strong>Configuration dead</strong>: the configuration cannot run at all (95% or more of the task's jobs crash).</li>
-        <li><strong>Sparse</strong>: a few crashes at varying times, about one per host; where event-dependent crashes live (under 5% of the task's jobs).</li>
-        <li><strong>Abort</strong>: exit 134, the program aborted itself (an exception or assertion), whatever the rate.</li>
-        <li><strong>Mixed</strong>: none of the above; a class to look at, not a verdict.</li>
-    </ul>
+    <details class="mb-3">
+        <summary>Definitions</summary>
+        <ul class="mb-2 mt-1">
+            <li><strong>Class</strong>, read from the record alone:
+                <ul>
+                    <li><strong>Storm</strong>: a fixed time to death across many nodes, one deterministic cause (crash rate at or above 20% and the middle half of the deaths within 20% of the median).</li>
+                    <li><strong>Configuration dead</strong>: the configuration cannot run at all (95% or more of the task's jobs crash).</li>
+                    <li><strong>Sparse</strong>: a few crashes at varying times, about one per host; where event-dependent crashes live (under 5% of the task's jobs).</li>
+                    <li><strong>Abort</strong>: exit 134, the program aborted itself (an exception or assertion), whatever the rate.</li>
+                    <li><strong>Mixed</strong>: none of the above; a class to look at, not a verdict.</li>
+                </ul>
+            </li>
+            <li><strong>TTD</strong>, time to death: minutes from job start to the crash, the 10th and 50th percentile over the signature's crashed jobs.</li>
+            <li><strong>Rate</strong>: the signature's crashes over the task's finished plus failed jobs.</li>
+            <li><strong>Rows lost</strong>: crashed manifest rows with no delivered output in any attempt of the configuration (and the events they carried).</li>
+        </ul>
+    </details>
     <p class="mb-2">
         <strong class="swf-if-shown">{{ shown }}</strong> of <strong>{{ total }}</strong> signatures,
         <strong>{{ crashes_total }}</strong> crashed jobs in the inventory.
@@ -29,32 +38,39 @@
 
     {% include 'monitor_app/_inclusive_filter.html' %}
 
-    <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable" id="segfault-table">
+    <style>
+      /* The signature and configuration cells wrap inside a bound, so the
+         frame and the composed name do not set the table's width. */
+      #segfault-table td.sig-col { max-width: 15em; overflow-wrap: anywhere; }
+      #segfault-table td.cfg-col { max-width: 24em; overflow-wrap: anywhere; }
+    </style>
+    <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable" id="segfault-table" data-swf-order="0,desc">
         <thead>
             <tr>
+                <th>Last seen</th>
                 <th>Class</th>
                 <th>Signature</th>
                 <th>Configuration</th>
                 <th>Tasks</th>
                 <th>Crashes</th>
                 <th>Rate</th>
-                <th title="Minutes from job start to death, 10th and 50th percentile">Time to death (p10 / p50 min)</th>
+                <th title="Time to death: minutes from job start to the crash, p10 / p50">TTD</th>
                 <th>Sites</th>
                 <th title="Distinct worker hosts among the crashed jobs">Hosts</th>
                 <th title="Crashed manifest rows with no delivered output in any attempt">Rows lost</th>
                 <th>Stage</th>
                 <th>Status</th>
-                <th>Last seen</th>
             </tr>
         </thead>
         <tbody>
             {% for r in rows %}
             <tr data-if="{{ r.if_attr }}"{% if r.if_hidden %} class="swf-if-hidden"{% endif %}>
+                <td data-order="{{ r.last_seen|default:'' }}">{% if r.last_seen %}{{ r.last_seen|slice:":16" }}{% endif %}</td>
                 <td>{{ r.class_label }}</td>
-                <td><a href="{% url 'monitor_app:panda_segfault_detail' key=r.key %}">{{ r.key }}</a><br>
+                <td class="sig-col"><a href="{% url 'monitor_app:panda_segfault_detail' key=r.key %}">{{ r.key }}</a><br>
                     <span class="text-muted">exit {{ r.exit_code }}, {{ r.signal_name }}{% if r.frame %}; {{ r.frame }}{% endif %}</span></td>
-                <td>{% if r.configuration.prod_task %}{{ r.configuration.prod_task }}{% else %}{{ r.task_names.0|default:'' }}{% endif %}
-                    {% if r.configuration.container_image %}<br><span class="text-muted">{{ r.configuration.container_image }}</span>{% endif %}</td>
+                <td class="cfg-col">{% if r.configuration.prod_task %}{{ r.configuration.prod_task }}{% else %}{{ r.task_names.0|default:'' }}{% endif %}
+                    {% if r.configuration.container_image_ran %}<br><span class="text-muted">{{ r.configuration.container_image_ran }}</span>{% elif r.configuration.container_image %}<br><span class="text-muted">{{ r.configuration.container_image }}</span>{% endif %}</td>
                 <td>{% for tid in r.task_ids %}<a href="{% url 'monitor_app:panda_task_detail' jeditaskid=tid %}">{{ tid }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}</td>
                 <td data-order="{{ r.crashes }}">{{ r.crashes }}</td>
                 <td data-order="{{ r.rate|default_if_none:'-1' }}">{{ r.rate_pct }}</td>
@@ -64,7 +80,6 @@
                 <td data-order="{{ r.rows_lost|default_if_none:'-1' }}" title="{{ r.rows_lost_note }}">{% if r.rows_lost is not None %}{{ r.rows_lost }}{% if r.events_lost %} ({{ r.events_lost }} ev){% endif %}{% else %}<span class="text-muted">{{ r.rows_lost_note }}</span>{% endif %}</td>
                 <td>{% for stage, n in r.stages.items %}{{ stage }} ({{ n }}){% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
                 <td>{{ r.status_label }}</td>
-                <td data-order="{{ r.last_seen|default:'' }}">{% if r.last_seen %}{{ r.last_seen|slice:":16" }}{% endif %}</td>
             </tr>
             {% endfor %}
         </tbody>

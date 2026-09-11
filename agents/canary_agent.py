@@ -212,6 +212,8 @@ class CanaryAgent(BaseAgent):
             args += ["--signature", str(m["signature"])]
         if m.get("pandaid"):
             args += ["--pandaid", str(int(m["pandaid"]))]
+        if m.get("container"):
+            args += ["--container", str(m["container"])]
         ok = self._run_doer(args, PROBE_TIMEOUT)
         self.logger.info(
             f"CANARY payload_canary {'submitted' if ok else 'FAILED'} "

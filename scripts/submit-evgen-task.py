@@ -308,6 +308,10 @@ def main():
                          "(file,ext,nevents,ichunk) instead of one of the "
                          "spec's, the crashed job's row of a reproduction "
                          "(swf-epicprod SEGFAULT_DIAGNOSIS.md, Reproduction)")
+    ap.add_argument("--canary-container", default="",
+                    help="payload canary: run this container image instead "
+                         "of the configuration's (a reproduction runs the "
+                         "image the crashed task ran)")
     ap.add_argument("--canary-mem-limit-mb", type=int, default=0,
                     help="payload canary: an address-space limit (RLIMIT_AS, "
                          "MB) the dispatcher puts on the payload, so a "
@@ -350,6 +354,12 @@ def main():
         spec_query["panda_tasks_id"] = args.panda_tasks_id
     if args.residual:
         spec_query["residual"] = "1"
+    if args.canary_row_text:
+        # A reproduction brings its row: the spec builder then needs no
+        # EVGEN input resolution and no per-job count.
+        spec_query["row"] = args.canary_row_text.strip()
+    if args.canary_container:
+        spec_query["container"] = args.canary_container.strip()
     try:
         raw = _api_get(args.swf_monitor_url, "/pcs/api/prod-tasks/command/",
                        spec_query, args.token)
