@@ -247,6 +247,10 @@ def _active_nav(request):
             'panda_errors_list',
             'panda_errors_datatable_ajax',
         },
+        'panda_segfaults': namespace == 'monitor_app' and url_name in {
+            'panda_segfaults',
+            'panda_segfault_detail',
+        },
         'panda_diagnostics': namespace == 'monitor_app' and url_name in {
             'panda_diagnostics_list',
             'panda_diagnostics_datatable_ajax',

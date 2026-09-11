@@ -24,7 +24,9 @@ from .viewdir.snapper_api import (snapper_changes_between,
                                   snapper_component_history, snapper_context,
                                   snapper_cut_summary, snapper_latest,
                                   snapper_series, snapper_state_at,
-                                  system_status_history)
+                                  system_status_history,
+                                  segfault_catalog_api,
+                                  segfault_signature_api)
 from .viewdir.snapper_episodes_api import (episode_detail_view,
                                            episodes_append, episodes_close,
                                            episodes_list_view, episodes_open)
@@ -113,6 +115,9 @@ urlpatterns = [
          name='snapper-cut-summary'),
     path('system-status/history/', system_status_history,
          name='system-status-history'),
+    path('segfaults/', segfault_catalog_api, name='segfault-catalog'),
+    path('segfaults/<str:key>/', segfault_signature_api,
+         name='segfault-signature'),
     path('capcom/state/', capcom_state, name='capcom-state'),
     path('capcom/user-state/', capcom_user_state, name='capcom-user-state'),
     path('capcom/notices/', capcom_notices, name='capcom-notices'),

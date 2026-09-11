@@ -404,6 +404,16 @@ def get_available_tools_list() -> list:
             "description": "Live Harvester pilot/worker counts across EIC queues — running, submitted, finished by site.",
             "parameters": ["site", "hours"],
         },
+        {
+            "name": "panda_segfault_catalog",
+            "description": "The segfault catalog: payload crash signatures (exit 139/134/135/136) by class (storm, configuration_dead, sparse, abort, mixed) with crashes, rate, time to death, sites, loss and status; from the monitor's record.",
+            "parameters": ["status", "class_hint", "limit"],
+        },
+        {
+            "name": "panda_segfault_signature",
+            "description": "One crash signature in full: tasks, configuration, sites, loss, trace, reproductions, verdict and the crashed jobs behind it.",
+            "parameters": ["key", "jobs_limit"],
+        },
         # Snapper state history (snapper-ai): coherent snapshots and the view products
         {
             "name": "snapper_latest",

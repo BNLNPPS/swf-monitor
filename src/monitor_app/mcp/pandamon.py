@@ -557,3 +557,89 @@ async def panda_harvester_workers(
         "by_resourcetype": raw.get('nworkers_by_resourcetype', {}),
         "time_window": {"from": from_dt, "to": to_dt},
     }
+
+
+@mcp.tool()
+async def panda_segfault_catalog(
+    status: str = None,
+    class_hint: str = None,
+    limit: int = 50,
+) -> dict:
+    """
+    The segfault catalog: payload crash signatures in ePIC production
+    (swf-epicprod docs/SEGFAULT_DIAGNOSIS.md), as the catalog page shows
+    them, from the monitor's own record (no PanDA query).
+
+    A crash signature groups the failed jobs whose payload died on a signal
+    (transexitcode 139 SIGSEGV, 134 SIGABRT, 135 SIGBUS, 136 SIGFPE) by
+    exit code and PanDA task, promoted to trace level when the crashing
+    frame is known. The class is read from the record: storm (a fixed time
+    to death across many nodes, one deterministic cause), configuration_dead
+    (every job crashes), sparse (a few crashes at varying times, where
+    event-dependent crashes live), abort (exit 134), mixed (look closer).
+    Rebuilt nightly by the catalog sync from the crash inventory.
+
+    Args:
+        status: Filter by signature status (new, digging, traced,
+            reproducing, reproduced, not_reproduced, diagnosed, handed_off,
+            fixed, accepted).
+        class_hint: Filter by class (storm, configuration_dead, sparse,
+            abort, mixed).
+        limit: Maximum signatures, crashes descending (default 50).
+
+    Returns:
+        class_counts: Signatures per class over the whole catalog.
+        total_count: Signatures matching the filters.
+        signatures: Each with key, class, exit_code, signal_name, task_ids,
+            task_names, configuration (PCS task, campaign, container image,
+            detector and payload version), crashes, rate (crashes over the
+            task's finished plus failed jobs), minutes_p10/minutes_p50 (time
+            to death), sites, hosts, rows_lost/events_lost (crashed rows
+            with no delivered output, when known), stages, status,
+            trace_status, first_seen, last_seen. Detail and the crashed
+            jobs: panda_segfault_signature(key).
+        monitor_url: The catalog page.
+    """
+    from monitor_app.segfaults import catalog
+
+    def _work():
+        rows, counts = catalog(status=status, class_hint=class_hint, limit=limit)
+        return {
+            'class_counts': counts,
+            'total_count': len(rows),
+            'signatures': rows,
+            'monitor_url': '/swf-monitor/panda/segfaults/',
+        }
+    return await sync_to_async(_work)()
+
+
+@mcp.tool()
+async def panda_segfault_signature(key: str, jobs_limit: int = 50) -> dict:
+    """
+    One crash signature of the segfault catalog with its tasks,
+    configuration, sites, loss, trace, reproductions, verdict and the
+    crashed jobs behind it (swf-epicprod docs/SEGFAULT_DIAGNOSIS.md).
+
+    Args:
+        key: The signature key from panda_segfault_catalog, e.g.
+            'exit139:task38661'.
+        jobs_limit: Crashed jobs to include, latest first (default 50).
+
+    Returns:
+        The signature's fields as on its detail page, plus tasks_detail
+        (per task: crashes, finished, failed, first and last seen), trace
+        (program, stage, frames, source job, trace_status), reproduction
+        runs, verdict, assessment_ids, package, jobs_total and jobs (each
+        with pandaid, jeditaskid, seq, row, site, host, minutes, maxrss_mb,
+        stage, endtime; study one with panda_study_job). Or {'error': ...}
+        when the key is unknown.
+    """
+    from monitor_app.segfaults import signature_detail
+
+    def _work():
+        detail = signature_detail(key, jobs_limit=jobs_limit)
+        if detail is None:
+            return {'error': f'no crash signature {key}'}
+        detail['monitor_url'] = f'/swf-monitor/panda/segfaults/{key}/'
+        return detail
+    return await sync_to_async(_work)()

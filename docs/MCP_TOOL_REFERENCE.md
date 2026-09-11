@@ -480,6 +480,8 @@ Tools for querying the ePIC PanDA production database (`doma_panda` schema). Rea
 | `panda_get_queue` | `panda_queue` (required) | Full detail for a single PanDA queue. |
 | `panda_resource_usage` | `days`, `site`, `username`, `taskid`, `start_time`, `end_time`, `bucket` | Allocated vs used core-hours by site for an exact time window, with optional daily or weekly site series. |
 | `panda_harvester_workers` | `site`, `hours` | Live Harvester pilot/worker counts (via bamboo `askpanda_atlas`) — totals + breakdown by status, site, and resourcetype. |
+| `panda_segfault_catalog` | `status`, `class_hint`, `limit` | The segfault catalog: payload crash signatures (exit 139/134/135/136, grouped by exit code and PanDA task) with class (storm, configuration_dead, sparse, abort, mixed), crashes, rate, time to death, sites, loss and status. From the monitor's record; no PanDA query. |
+| `panda_segfault_signature` | `key` (required), `jobs_limit` | One crash signature in full: tasks, configuration, sites, loss, trace, reproductions, verdict, and the crashed jobs behind it. |
 
 **`panda_get_activity`** — Pre-digested overview, no individual records:
 - `days`: Time window in days (default 1)
@@ -671,10 +673,10 @@ them and a person reading the page see one history.
 | Snapper State History | `snapper_latest`, `snapper_state_at`, `snapper_component_history`, `snapper_changes_between`, `snapper_context_around`, `snapper_series`, `snapper_cut_summary` | 7 |
 | PCS Tags | `pcs_list_tags`, `pcs_get_tag`, `pcs_search_tags` | 3 |
 | PCS Datasets and Prod Tasks | `pcs_dataset_list`, `pcs_dataset_get`, `pcs_data_provenance`, `pcs_dataset_intake`, `pcs_prodtask_list`, `pcs_prodtask_get`, `pcs_prodtask_artifact`, `pcs_prodtask_intake`, `pcs_prodtask_link_input`, `pcs_prodtask_set_status` | 10 |
-| PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers` | 10 |
+| PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers`, `panda_segfault_catalog`, `panda_segfault_signature` | 12 |
 | JLab Rucio | `jlab_rucio_*` | 14 |
 | BNL Rucio | `bnl_rucio_*` | 14 |
-| **Total** | | **95** |
+| **Total** | | **97** |
 
 ---
 

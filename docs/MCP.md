@@ -119,10 +119,10 @@ The full tool catalog is in [MCP tool reference](MCP_TOOL_REFERENCE.md).
 | Snapper State History | `snapper_latest`, `snapper_state_at`, `snapper_component_history`, `snapper_changes_between`, `snapper_context_around`, `snapper_series`, `snapper_cut_summary` | 7 |
 | PCS Tags | `pcs_list_tags`, `pcs_get_tag`, `pcs_search_tags` | 3 |
 | PCS Datasets and Prod Tasks | `pcs_dataset_list`, `pcs_dataset_get`, `pcs_dataset_intake`, `pcs_prodtask_list`, `pcs_prodtask_get`, `pcs_prodtask_artifact`, `pcs_prodtask_intake`, `pcs_prodtask_link_input`, `pcs_prodtask_set_status` | 9 |
-| PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers` | 10 |
+| PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers`, `panda_segfault_catalog`, `panda_segfault_signature` | 12 |
 | JLab Rucio | `jlab_rucio_*` — scopes, DIDs, dataset summaries, metadata, content/files, rules/locks, replicas, RSEs, account usage | 14 |
 | BNL Rucio | `bnl_rucio_*` — scopes, DIDs, dataset summaries, metadata, content/files, rules/locks, replicas, RSEs, account usage | 14 |
-| **Total** | | **88** |
+| **Total** | | **90** |
 
 ## Implementation Files
 

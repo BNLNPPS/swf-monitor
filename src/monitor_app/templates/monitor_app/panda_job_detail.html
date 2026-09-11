@@ -265,6 +265,19 @@
     </div>
     {% endif %}
 
+    <!-- Crash: the payload died on a signal; the signature it belongs to in the segfault catalog -->
+    {% if crash_signature %}
+    <div class="card mb-3">
+        <div class="card-header"><strong>Crash</strong></div>
+        <div class="card-body">
+            The payload died on {{ crash_signature.signal_name }} (exit {{ crash_signature.exit_code }}).
+            Signature <a href="{% url 'monitor_app:panda_segfault_detail' key=crash_signature.key %}">{{ crash_signature.key }}</a>,
+            class <strong>{{ crash_signature.class_label }}</strong>: {{ crash_signature.crashes }} crashed jobs{% if crash_signature.rate_pct %}, {{ crash_signature.rate_pct }} of the task's jobs{% endif %};
+            status {{ crash_signature.status_label }}{% if crash_signature.frame %}; frame {{ crash_signature.frame }}{% endif %}.
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Payload log (clean, fetched from the Rucio log tarball by the prod-ops agent) -->
     {% if log_file %}
     <div class="card mb-3">

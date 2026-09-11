@@ -390,9 +390,27 @@ def run(args):
         'rows_unresolved': counts['rows_unresolved'],
         'tasks': len(counts['tasks']),
         'dry_run': bool(args.dry_run),
-        'seconds': round(time.monotonic() - t0, 1),
     }
+    if not args.dry_run and not args.no_signatures:
+        summary.update(signature_pass(sorted(counts['tasks']), args))
+    summary['seconds'] = round(time.monotonic() - t0, 1)
     return summary, t0
+
+
+def signature_pass(jeditaskids, args):
+    """The record-level signatures of the tasks touched (or of every task
+    in the inventory when ``jeditaskids`` is None)."""
+    from monitor_app.segfaults import build_record_signatures
+    log.info('signatures for %s', f'{len(jeditaskids)} tasks' if jeditaskids else 'every task')
+    result = build_record_signatures(
+        jeditaskids=jeditaskids, rows_lost=not args.no_rows_lost,
+        rows_lost_max_tasks=args.rows_lost_max_tasks)
+    log.info('  %d signatures (%d new): %s', result['signatures'],
+             result['created'], result['classes'])
+    return {'signatures': result['signatures'],
+            'signatures_new': result['created'],
+            'signature_classes': result['classes'],
+            'rows_lost_checked': result['rows_lost_checked']}
 
 
 def check(args):
@@ -417,9 +435,20 @@ def main():
     ap.add_argument('--dry-run', action='store_true', help='read and count, write nothing')
     ap.add_argument('--check', action='store_true',
                     help="compare the record's count for the window with swfdb's rows")
+    ap.add_argument('--signatures', action='store_true',
+                    help='rebuild the signatures of every task in the inventory, '
+                         'no job pass')
+    ap.add_argument('--no-signatures', action='store_true',
+                    help='the job pass only')
+    ap.add_argument('--no-rows-lost', action='store_true',
+                    help='skip the delivery lookup behind rows_lost')
+    ap.add_argument('--rows-lost-max-tasks', type=int, default=50,
+                    help='delivery lookups per pass, largest signatures first (default 50)')
     ap.add_argument('--instance', default='segfault-inventory',
                     help="the action's instance name ('catalog-sync' under the chain)")
     ap.add_argument('--created-by', default='', help='the action record\'s username')
+    ap.add_argument('--no-action', action='store_true',
+                    help='record no action (the ops agent records it under the chain)')
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, stream=sys.stderr,
                         format='%(asctime)s %(name)s %(levelname)s %(message)s')
@@ -429,26 +458,36 @@ def main():
         return 0 if result['match'] else 3
     t0 = time.monotonic()
     try:
-        summary, t0 = run(args)
+        if args.signatures:
+            summary = signature_pass(None, args)
+            summary['seconds'] = round(time.monotonic() - t0, 1)
+        else:
+            summary, t0 = run(args)
     except Exception as e:
         log.exception('segfault inventory failed')
-        log_epicprod_action(
-            args.instance, 'segfault_inventory', outcome='error',
-            duration_ms=int((time.monotonic() - t0) * 1000),
-            username=args.created_by, sublevel='normal', live_default=True,
-            level=logging.ERROR, message=f'segfault inventory failed: {str(e)[:200]}',
-            reason=str(e)[:300])
+        if not args.no_action:
+            log_epicprod_action(
+                args.instance, 'segfault_inventory', outcome='error',
+                duration_ms=int((time.monotonic() - t0) * 1000),
+                username=args.created_by, sublevel='normal', live_default=True,
+                level=logging.ERROR, message=f'segfault inventory failed: {str(e)[:200]}',
+                reason=str(e)[:300])
         print(json.dumps({'error': str(e)[:300]}))
         return 1
-    if not args.dry_run:
+    if not args.dry_run and not args.no_action:
         log_epicprod_action(
             args.instance, 'segfault_inventory', outcome='ok',
             duration_ms=int((time.monotonic() - t0) * 1000),
             username=args.created_by, sublevel='normal', live_default=True,
-            message=(f"segfault inventory since {summary['since'][:10]}: "
+            message=(f"segfault signatures rebuilt: {summary.get('signatures')} "
+                     f"({summary.get('signatures_new')} new) {summary.get('signature_classes')}"
+                     if args.signatures else
+                     f"segfault inventory since {summary['since'][:10]}: "
                      f"{summary['jobs_seen']} crashed jobs, {summary['rows_added']} rows added, "
                      f"{summary['rows_updated']} updated, {summary['rows_unresolved']} rows "
-                     f"unresolved, {summary['tasks']} tasks"),
+                     f"unresolved, {summary['tasks']} tasks, "
+                     f"{summary.get('signatures', 0)} signatures "
+                     f"({summary.get('signatures_new', 0)} new)"),
             **{k: v for k, v in summary.items() if isinstance(v, int) and not isinstance(v, bool)})
     print(json.dumps(summary))
     return 0

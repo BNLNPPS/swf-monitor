@@ -174,6 +174,9 @@ BATCH_LOG_CAPTURE_HOURS = os.environ.get("EPICPROD_BATCH_LOG_CAPTURE_HOURS", "26
 # chain so the day's logs are in it (docs/ERROR_ATTRIBUTION.md).
 BATCH_LOG_LEARN_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "batch-log-learn.py"
 BATCH_LOG_LEARN_TIMEOUT = int(os.environ.get("EPICPROD_BATCH_LOG_LEARN_TIMEOUT", "1800"))
+SEGFAULT_INVENTORY_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "segfault-inventory.py"
+SEGFAULT_INVENTORY_TIMEOUT = int(os.environ.get("EPICPROD_SEGFAULT_INVENTORY_TIMEOUT", "1800"))
+SEGFAULT_INVENTORY_DAYS = int(os.environ.get("EPICPROD_SEGFAULT_INVENTORY_DAYS", "3"))
 # The registrar (swf-epicprod docs/RUCIO_RESILIENCE.md, Measure 2): completes
 # the registrations the payload left pending, hourly, and holds the only
 # retry — one gentle attempt per job, then bounded attempts from one process.
@@ -308,6 +311,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "rucio_arrivals_sweep", "epic_prod_past_import",
                    "file_events_measure", "delivery_daily_rebuild",
                    "batch_log_capture", "batch_log_learn",
+                   "segfault_inventory",
                    "report_sweep", "outputs_ingest", "registrar",
                    "content_validate", "content_accept", "stash_drain",
                    "node_measure_ingest", "dataset_definitions_sweep",
@@ -1404,6 +1408,9 @@ class EpicProdOpsAgent(BaseAgent):
             # batch-layer evidence.
             ('batch_log_capture', self._do_batch_log_capture),
             ('batch_log_learn', self._do_batch_log_learn),
+            # Before the first Rucio step: a catalog stall must not cost the
+            # day's crash record (SEGFAULT_DIAGNOSIS.md, Inventory builder).
+            ('segfault_inventory', self._do_segfault_inventory),
             ('catalog_import_csv',
              lambda msg: self._do_catalog_import(dict(msg, source='csv'))),
             ('epic_prod_past_import', self._do_epic_prod_past_import),
@@ -2313,6 +2320,70 @@ class EpicProdOpsAgent(BaseAgent):
                          username=str(m.get('created_by') or ''),
                          sublevel='low', live_default=False,
                          summary=summary_line)
+
+    def _handle_segfault_inventory(self, m):
+        """Run the crash-class inventory off the receiver thread — normally a
+        catalog_sync chain step, also directly invokable (days=N, since=DATE)."""
+        self.run_in_background(
+            self._do_segfault_inventory, m,
+            dedup_key="segfault_inventory", label="segfault_inventory")
+
+    def _do_segfault_inventory(self, m):
+        """The nightly top-up of the segfault catalog (swf-epicprod
+        docs/SEGFAULT_DIAGNOSIS.md): payload crashes of the last days from
+        the PanDA record as EpicProdJob rows, then the record-level
+        signatures of the tasks touched. The doer logs no action of its
+        own under the chain; this records the one segfault_inventory
+        action with the doer's counts."""
+        cmd = [sys.executable, str(SEGFAULT_INVENTORY_SCRIPT), '--no-action',
+               '--created-by', str(m.get('created_by') or 'catalog_sync')]
+        if m.get('since'):
+            cmd += ['--since', str(m['since'])]
+        else:
+            cmd += ['--days', str(m.get('days') or SEGFAULT_INVENTORY_DAYS)]
+        self.logger.info("PRODOPS segfault_inventory: reading the crash record")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=SEGFAULT_INVENTORY_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS segfault_inventory TIMEOUT after {SEGFAULT_INVENTORY_TIMEOUT}s")
+            self._log_action('segfault_inventory', t0, outcome='timeout',
+                             reason=f'timed out after {SEGFAULT_INVENTORY_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='normal', live_default=True,
+                             level=logging.ERROR)
+            return
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  segfault-inventory: {line}")
+        summary = {}
+        try:
+            summary = json.loads(((p.stdout or '').strip().splitlines() or ['{}'])[-1])
+        except Exception as e:
+            self.logger.error(f"PRODOPS segfault_inventory: unreadable summary: {e}")
+        if p.returncode != 0 or summary.get('error'):
+            self.logger.error(f"PRODOPS segfault_inventory FAILED rc={p.returncode}")
+            self._log_action('segfault_inventory', t0, outcome='error',
+                             reason=str(summary.get('error') or self._derive_reason(p))[:300],
+                             username=str(m.get('created_by') or ''),
+                             sublevel='normal', live_default=True,
+                             level=logging.ERROR)
+            return
+        counts = {k: summary.get(k) for k in
+                  ('jobs_seen', 'rows_added', 'rows_updated', 'seq_unresolved',
+                   'rows_unresolved', 'tasks', 'signatures', 'signatures_new',
+                   'rows_lost_checked')}
+        self.logger.info(f"PRODOPS segfault_inventory done: {summary}")
+        self._log_action('segfault_inventory', t0,
+                         username=str(m.get('created_by') or ''),
+                         sublevel='normal', live_default=True,
+                         summary=(f"since {str(summary.get('since', ''))[:10]}: "
+                                  f"{counts['jobs_seen']} crashed jobs, "
+                                  f"{counts['rows_added']} rows added, "
+                                  f"{counts['signatures']} signatures "
+                                  f"({counts['signatures_new']} new)"),
+                         **{k: v for k, v in counts.items() if v is not None})
 
     def _handle_batch_log_capture(self, m):
         """Run the batch-record capture off the receiver thread — normally a

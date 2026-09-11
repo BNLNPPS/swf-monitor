@@ -1,0 +1,121 @@
+{% extends 'base.html' %}
+{% load swf_fmt %}
+
+{% block title %}Crash signature {{ sig.key }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <p class="mb-2"><a href="{% url 'monitor_app:panda_segfaults' %}">Segfault Catalog</a> &raquo; {{ sig.key }}</p>
+    <h1>{{ sig.class_label }}: exit {{ sig.exit_code }} ({{ sig.signal_name }}){% if sig.configuration.prod_task %}, {{ sig.configuration.prod_task }}{% endif %}</h1>
+    <p class="mb-3">
+        <strong>{{ sig.crashes }}</strong> crashed jobs{% if sig.rate_pct %}, <strong>{{ sig.rate_pct }}</strong> of the task's finished plus failed jobs{% endif %};
+        time to death p10 / p50 <strong>{{ sig.minutes_p10|default_if_none:'' }} / {{ sig.minutes_p50|default_if_none:'' }}</strong> min
+        {% if sig.data.minutes_p25 is not None %}(p25 {{ sig.data.minutes_p25 }}, p75 {{ sig.data.minutes_p75 }}){% endif %};
+        <strong>{{ sig.hosts|default_if_none:'' }}</strong> hosts; first seen {{ sig.first_seen|default:''|slice:":16" }}, last seen {{ sig.last_seen|default:''|slice:":16" }}.
+        Status <strong>{{ sig.status_label }}</strong>, level {{ sig.level }}.
+    </p>
+
+    <div class="row">
+        <div class="col-lg-6">
+            <h4>Tasks</h4>
+            <table class="table table-striped table-bordered table-sm align-middle w-auto">
+                <thead><tr><th>JEDI task</th><th>Task name</th><th>Crashes</th><th>Finished</th><th>Failed</th><th>First seen</th><th>Last seen</th></tr></thead>
+                <tbody>
+                {% for t in sig.tasks_detail %}
+                <tr>
+                    <td><a href="{% url 'monitor_app:panda_task_detail' jeditaskid=t.jeditaskid %}">{{ t.jeditaskid }}</a></td>
+                    <td>{{ t.taskname }}</td>
+                    <td>{{ t.crashes }}</td><td>{{ t.finished }}</td><td>{{ t.failed }}</td>
+                    <td>{{ t.first_seen|default:''|slice:":16" }}</td><td>{{ t.last_seen|default:''|slice:":16" }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+
+            <h4>Configuration</h4>
+            {% if sig.configuration %}
+            <table class="table table-bordered table-sm align-middle w-auto">
+                <tbody>
+                {% if sig.configuration.prod_task %}<tr><th>PCS task</th><td><a href="{% url 'pcs:prod_task_detail' name=sig.configuration.prod_task %}">{{ sig.configuration.prod_task }}</a></td></tr>{% endif %}
+                <tr><th>Campaign</th><td>{{ sig.configuration.campaign }}</td></tr>
+                <tr><th>Composed name</th><td>{{ sig.configuration.composed_name }}</td></tr>
+                <tr><th>Physics</th><td>{{ sig.configuration.process }}</td></tr>
+                <tr><th>Production configuration</th><td>{{ sig.configuration.prod_config }}</td></tr>
+                <tr><th>Container image</th><td>{{ sig.configuration.container_image }}</td></tr>
+                <tr><th>Detector version</th><td>{{ sig.configuration.detector_version }}</td></tr>
+                <tr><th>Payload version</th><td>{{ sig.configuration.payload_version }}</td></tr>
+                </tbody>
+            </table>
+            {% else %}
+            <p class="text-muted">No PCS task is associated with this PanDA task.</p>
+            {% endif %}
+
+            <h4>Sites</h4>
+            <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
+                <thead><tr><th>Site</th><th>Crashes</th><th>Hosts</th></tr></thead>
+                <tbody>
+                {% for s in sig.sites %}<tr><td>{{ s.site }}</td><td>{{ s.crashes }}</td><td>{{ s.hosts }}</td></tr>{% endfor %}
+                </tbody>
+            </table>
+
+            <h4>Loss</h4>
+            <p>
+                {% if sig.rows_lost is not None %}<strong>{{ sig.rows_lost }}</strong> crashed rows with no delivered output in any attempt, <strong>{{ sig.events_lost }}</strong> events; {% endif %}
+                {{ sig.data.rows_resolved }} of {{ sig.crashes }} crashed jobs have their manifest row resolved{% if sig.data.rows_unresolved %} ({{ sig.data.rows_unresolved }} unresolved){% endif %}.
+                <span class="text-muted">{{ sig.rows_lost_note }}</span>
+            </p>
+        </div>
+        <div class="col-lg-6">
+            <h4>Trace</h4>
+            {% if sig.trace.frames %}
+            <p>{{ sig.trace.program }}{% if sig.trace.stage %}, stage {{ sig.trace.stage }}{% endif %}; from job
+               <a href="{% url 'monitor_app:panda_job_detail' pandaid=sig.trace.source_pandaid %}">{{ sig.trace.source_pandaid }}</a></p>
+            <pre class="small">{% for line in sig.trace.frames %}{{ line }}
+{% endfor %}</pre>
+            {% else %}
+            <p class="text-muted">Trace status: {{ sig.trace_status }}. {% if sig.trace.reason %}{{ sig.trace.reason }}{% endif %}</p>
+            {% endif %}
+
+            <h4>Reproduction</h4>
+            {% if sig.reproduction %}
+            <table class="table table-striped table-bordered table-sm align-middle w-auto">
+                <thead><tr><th>Job</th><th>Queue</th><th>Canary task</th><th>Outcome</th><th>Minutes</th><th>Verdict time</th></tr></thead>
+                <tbody>
+                {% for r in sig.reproduction %}
+                <tr><td>{{ r.pandaid }}</td><td>{{ r.queue }}</td><td>{{ r.jedi_task_id }}</td><td>{{ r.outcome }}</td><td>{{ r.minutes }}</td><td>{{ r.verdict_time|default:''|slice:":16" }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="text-muted">No reproduction run yet.</p>
+            {% endif %}
+
+            <h4>Verdict</h4>
+            {% if sig.verdict %}<p>{{ sig.verdict }}</p>{% else %}<p class="text-muted">None yet.</p>{% endif %}
+            {% if sig.package.path %}<p>Reproduction package: {{ sig.package.path }} ({{ sig.package.built_at|default:'' }})</p>{% endif %}
+            {% if sig.assessment_ids %}<p>Assessments: {{ sig.assessment_ids|join:", " }}</p>{% endif %}
+        </div>
+    </div>
+
+    <h4>Crashed jobs{% if sig.jobs_total > sig.jobs|length %} <span class="text-muted">(latest {{ sig.jobs|length }} of {{ sig.jobs_total }})</span>{% endif %}</h4>
+    <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
+        <thead><tr><th>Job</th><th>Task</th><th>Seq</th><th>Row</th><th>Site</th><th>Host</th><th>Minutes</th><th>Max RSS (MB)</th><th>Stage</th><th>Ended</th></tr></thead>
+        <tbody>
+        {% for j in sig.jobs %}
+        <tr>
+            <td><a href="{% url 'monitor_app:panda_job_detail' pandaid=j.pandaid %}">{{ j.pandaid }}</a></td>
+            <td>{{ j.jeditaskid }}</td>
+            <td>{{ j.seq|default_if_none:'' }}</td>
+            <td>{{ j.row }}</td>
+            <td>{{ j.site }}</td>
+            <td>{{ j.host }}</td>
+            <td>{{ j.minutes|default_if_none:'' }}</td>
+            <td>{{ j.maxrss_mb|default_if_none:'' }}</td>
+            <td>{{ j.stage }}</td>
+            <td>{{ j.endtime|default:''|slice:":16" }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

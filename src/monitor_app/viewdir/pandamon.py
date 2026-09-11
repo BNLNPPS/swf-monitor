@@ -1104,6 +1104,11 @@ def panda_job_detail(request, pandaid):
     data.update(inventory_for_job_context(data))
     data['epicprod_diagnosis'] = diagnosis_for_study_data(
         data, epicprod_job=data.get('epicprod_job'))
+    # A crashed job's card names its segfault-catalog signature; swfdb only.
+    epicprod_job = data.get('epicprod_job')
+    if epicprod_job is not None and epicprod_job.phase == 'payload_crash':
+        from ..segfaults import signature_for_job
+        data['crash_signature'] = signature_for_job(pandaid)
     return render(request, 'monitor_app/panda_job_detail.html', data)
 
 
@@ -1714,6 +1719,48 @@ def panda_errors_list(request):
     context['clear_task_query'] = without_taskid.urlencode()
     context.update(_days_context(days))
     return render(request, 'monitor_app/panda_errors.html', context)
+
+
+def panda_segfaults(request):
+    """The segfault catalog (swf-epicprod docs/SEGFAULT_DIAGNOSIS.md):
+    one row per crash signature, from swfdb alone, with the inclusive
+    filter over class, exit code, site and status."""
+    from ..inclusive_filter import Facet, InclusiveFilter
+    from ..segfaults import CLASS_LABELS, CLASS_ORDER, STATUS_LABELS, catalog
+    rows, class_counts = catalog()
+    facets = [
+        Facet('class', 'Class', lambda r: r['class'],
+              display=lambda v: CLASS_LABELS.get(v, v), order=CLASS_ORDER),
+        Facet('exit', 'Exit code', lambda r: str(r['exit_code'])),
+        Facet('site', 'Site', lambda r: r['site_names'] or None),
+        Facet('status', 'Status', lambda r: r['status'],
+              display=lambda v: STATUS_LABELS.get(v, v)),
+        Facet('level', 'Level', lambda r: r['level']),
+    ]
+    flt = InclusiveFilter(request.GET)
+    shown = flt.annotate(rows, facets)
+    context = {
+        'rows': rows,
+        'shown': shown,
+        'total': len(rows),
+        'crashes_total': sum(r['crashes'] for r in rows),
+        'class_counts': [(CLASS_LABELS.get(c, c), class_counts.get(c, 0))
+                         for c in CLASS_ORDER],
+        'inclusive_filter': flt.context(rows, facets, request),
+    }
+    return render(request, 'monitor_app/panda_segfaults.html', context)
+
+
+def panda_segfault_detail(request, key):
+    """One crash signature: its tasks, configuration, sites, crashed jobs,
+    trace, reproductions, verdict and assessments."""
+    from django.http import Http404
+    from ..segfaults import signature_detail
+    detail = signature_detail(key)
+    if detail is None:
+        raise Http404(f'no crash signature {key}')
+    return render(request, 'monitor_app/panda_segfault_detail.html',
+                  {'sig': detail})
 
 
 def panda_errors_datatable_ajax(request):

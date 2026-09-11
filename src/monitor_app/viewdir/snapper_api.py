@@ -196,3 +196,39 @@ def snapper_context(request, scope):
     payload = result.as_dict()
     payload['references'] = annotate_references(payload['references'])
     return JsonResponse(payload, json_dumps_params={'default': str})
+
+
+def segfault_catalog_api(request):
+    """GET /api/segfaults/?status=&class=&limit=
+
+    The segfault catalog (swf-epicprod docs/SEGFAULT_DIAGNOSIS.md) for
+    out-of-process consumers, the payload of panda_segfault_catalog.
+    """
+    from ..segfaults import catalog
+    try:
+        limit = int(request.GET.get('limit') or 200)
+    except ValueError:
+        return JsonResponse({'error': 'limit must be an integer'}, status=400)
+    rows, counts = catalog(status=request.GET.get('status') or None,
+                           class_hint=request.GET.get('class') or None,
+                           limit=min(limit, 2000))
+    return JsonResponse({'class_counts': counts, 'total_count': len(rows),
+                         'signatures': rows},
+                        json_dumps_params={'default': str})
+
+
+def segfault_signature_api(request, key):
+    """GET /api/segfaults/<key>/?jobs_limit=
+
+    One crash signature with its crashed jobs, the payload of
+    panda_segfault_signature.
+    """
+    from ..segfaults import signature_detail
+    try:
+        jobs_limit = min(int(request.GET.get('jobs_limit') or 200), 5000)
+    except ValueError:
+        return JsonResponse({'error': 'jobs_limit must be an integer'}, status=400)
+    detail = signature_detail(key, jobs_limit=jobs_limit)
+    if detail is None:
+        return JsonResponse({'error': f'no crash signature {key}'}, status=404)
+    return JsonResponse(detail, json_dumps_params={'default': str})

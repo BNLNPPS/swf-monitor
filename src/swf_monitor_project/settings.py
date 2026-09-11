@@ -368,6 +368,8 @@ COMMON QUERIES:
 - Top errors? → panda_error_summary(days=7)
 - Errors in an exact window? → panda_error_summary(ended_after='2026-09-05T03:10', ended_before='2026-09-05T03:40') — job end time, ET unless an offset is given
 - Errors for a user? → panda_error_summary(username='someone')
+- Payload crashes (segfaults) by signature? → panda_segfault_catalog(class_hint='storm')
+- One crash signature and its jobs? → panda_segfault_signature(key='exit139:task38661')
 - Deep dive on a failed job? → panda_study_job(pandaid=130497)
 - EIC queues? → panda_list_queues(vo='eic')
 - Queue config? → panda_get_queue(panda_queue='NERSC_Perlmutter_epic')
