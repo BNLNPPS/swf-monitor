@@ -11,7 +11,7 @@
         <strong>{{ sig.crashes }}</strong> crashed jobs{% if sig.rate_pct %}, <strong>{{ sig.rate_pct }}</strong> of the task's finished plus failed jobs{% endif %};
         time to death p10 / p50 <strong>{{ sig.minutes_p10|default_if_none:'' }} / {{ sig.minutes_p50|default_if_none:'' }}</strong> min
         {% if sig.data.minutes_p25 is not None %}(p25 {{ sig.data.minutes_p25 }}, p75 {{ sig.data.minutes_p75 }}){% endif %};
-        <strong>{{ sig.hosts|default_if_none:'' }}</strong> hosts; first seen {{ sig.first_seen|default:''|slice:":16" }}, last seen {{ sig.last_seen|default:''|slice:":16" }}.
+        <strong>{{ sig.hosts|default_if_none:'' }}</strong> hosts; first seen {{ sig.first_seen|fmt_dt }}, last seen {{ sig.last_seen|fmt_dt }}.
         Status <strong>{{ sig.status_label }}</strong>, level {{ sig.level }}.
     </p>
 
@@ -26,7 +26,7 @@
                     <td><a href="{% url 'monitor_app:panda_task_detail' jeditaskid=t.jeditaskid %}">{{ t.jeditaskid }}</a></td>
                     <td>{{ t.taskname }}</td>
                     <td>{{ t.crashes }}</td><td>{{ t.finished }}</td><td>{{ t.failed }}</td>
-                    <td>{{ t.first_seen|default:''|slice:":16" }}</td><td>{{ t.last_seen|default:''|slice:":16" }}</td>
+                    <td>{{ t.first_seen|fmt_dt }}</td><td>{{ t.last_seen|fmt_dt }}</td>
                 </tr>
                 {% endfor %}
                 </tbody>
@@ -70,14 +70,14 @@
             {% if sig.trace.frames %}
             <p>{{ sig.trace.program }}{% if sig.trace.stage %}, stage {{ sig.trace.stage }}{% endif %}{% if sig.trace.events_processed is not None %}, {{ sig.trace.events_processed }} events processed{% endif %}; from job
                <a href="{% url 'monitor_app:panda_job_detail' pandaid=sig.trace.source_pandaid %}">{{ sig.trace.source_pandaid }}</a>
-               (<a href="{% url 'monitor_app:panda_payload_log' sig.trace.source_pandaid %}" target="_blank" rel="noopener">payload log</a>), read {{ sig.trace.dug_at|default:''|slice:":16" }}.
+               (<a href="{% url 'monitor_app:panda_payload_log' sig.trace.source_pandaid %}" target="_blank" rel="noopener">payload log</a>), read {{ sig.trace.dug_at|fmt_dt }}.
                Crashing frame: <strong>{{ sig.trace.frame }}</strong>{% if sig.trace.library %} in {{ sig.trace.library }}{% endif %}.</p>
             <pre class="small">{% for line in sig.trace.frames %}{{ line }}
 {% endfor %}</pre>
             {% if sig.trace.context %}<details><summary>The lines before the crash</summary><pre class="small">{% for line in sig.trace.context %}{{ line }}
 {% endfor %}</pre></details>{% endif %}
             {% else %}
-            <p class="text-muted">Trace status: {{ sig.trace_status }}.{% if sig.trace.reason %} {{ sig.trace.reason }}{% endif %}{% if sig.trace.source_pandaid %} (job {{ sig.trace.source_pandaid }}, read {{ sig.trace.dug_at|default:''|slice:":16" }}){% endif %}</p>
+            <p class="text-muted">Trace status: {{ sig.trace_status }}.{% if sig.trace.reason %} {{ sig.trace.reason }}{% endif %}{% if sig.trace.source_pandaid %} (job {{ sig.trace.source_pandaid }}, read {{ sig.trace.dug_at|fmt_dt }}){% endif %}</p>
             {% endif %}
             {% if sig.data.members %}<p class="text-muted">Members: {% for m in sig.data.members %}<a href="{% url 'monitor_app:panda_segfault_detail' key=m %}">{{ m }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}</p>{% endif %}
             {% if sig.data.member_of %}<p class="text-muted">Member of the trace-level signature <a href="{% url 'monitor_app:panda_segfault_detail' key=sig.data.member_of %}">{{ sig.data.member_of }}</a>.</p>{% endif %}
@@ -105,8 +105,8 @@
                     <td>{% if r.canary_pandaid %}<a href="{% url 'monitor_app:panda_job_detail' pandaid=r.canary_pandaid %}">{{ r.canary_pandaid }}</a>{% endif %}</td>
                     <td title="{{ r.reason|default:'' }}">{{ r.outcome }}{% if r.reason %} <span class="text-muted">({{ r.reason|truncatechars:80 }})</span>{% endif %}</td>
                     <td>{{ r.exit_code|default_if_none:'' }}</td>
-                    <td>{{ r.requested_at|default:''|slice:":16" }}</td>
-                    <td>{{ r.verdict_time|default:''|slice:":16" }}</td>
+                    <td>{{ r.requested_at|fmt_dt }}</td>
+                    <td>{{ r.verdict_time|fmt_dt }}</td>
                 </tr>
                 {% endfor %}
                 </tbody>
@@ -133,7 +133,7 @@
 
             <h4>Reproduction package</h4>
             {% if sig.package.tarball %}
-            <p><a href="{% url 'monitor_app:panda_segfault_package' key=sig.key %}">Download the package</a> for job {{ sig.package.pandaid }}, built {{ sig.package.built_at|default:''|slice:":16" }}: the run script, the payload, the row, the environment, the trace and the job records, for a software expert to run the crash again outside PanDA.</p>
+            <p><a href="{% url 'monitor_app:panda_segfault_package' key=sig.key %}">Download the package</a> for job {{ sig.package.pandaid }}, built {{ sig.package.built_at|fmt_dt }}: the run script, the payload, the row, the environment, the trace and the job records, for a software expert to run the crash again outside PanDA.</p>
             {% else %}
             <p class="text-muted">No package built yet.</p>
             {% endif %}
@@ -167,7 +167,7 @@
             <td>{{ j.minutes|default_if_none:'' }}</td>
             <td>{{ j.maxrss_mb|default_if_none:'' }}</td>
             <td>{{ j.stage }}</td>
-            <td>{{ j.endtime|default:''|slice:":16" }}</td>
+            <td>{{ j.endtime|fmt_dt }}</td>
         </tr>
         {% endfor %}
         </tbody>

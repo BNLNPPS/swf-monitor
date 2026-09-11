@@ -64,7 +64,7 @@
         <tbody>
             {% for r in rows %}
             <tr data-if="{{ r.if_attr }}"{% if r.if_hidden %} class="swf-if-hidden"{% endif %}>
-                <td data-order="{{ r.last_seen|default:'' }}">{% if r.last_seen %}{{ r.last_seen|slice:":16" }}{% endif %}</td>
+                <td data-order="{{ r.last_seen|default:'' }}">{{ r.last_seen|fmt_dt }}</td>
                 <td>{{ r.class_label }}</td>
                 <td class="sig-col"><a href="{% url 'monitor_app:panda_segfault_detail' key=r.key %}">{{ r.key }}</a><br>
                     exit {{ r.exit_code }}, {{ r.signal_name }}{% if r.frame %}; {{ r.frame }}{% endif %}</td>

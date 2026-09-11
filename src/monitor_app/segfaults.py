@@ -419,7 +419,9 @@ def signature_detail(key, jobs_limit=200):
                 'minutes': crash.get('minutes'),
                 'maxrss_mb': crash.get('maxrss_mb'),
                 'stage': crash.get('stage', ''),
-                'endtime': crash.get('endtime'),
+                # PanDA's times are naive UTC; stated with the zone so the
+                # house formatter shows them in Eastern.
+                'endtime': _iso(_parse_dt(crash.get('endtime'))),
             })
     detail['jobs'] = jobs
     return detail
