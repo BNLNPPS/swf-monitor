@@ -40,8 +40,8 @@
     <style>
       /* The signature and configuration cells wrap inside a bound, so the
          frame and the composed name do not set the table's width. */
-      #segfault-table td.sig-col { max-width: 20em; overflow-wrap: anywhere; }
-      #segfault-table td.cfg-col { max-width: 24em; overflow-wrap: anywhere; }
+      #segfault-table td.sig-col { width: 20em; min-width: 17em; max-width: 20em; overflow-wrap: anywhere; }
+      #segfault-table td.cfg-col { width: 24em; min-width: 18em; max-width: 24em; overflow-wrap: anywhere; }
       #segfault-table td.class-col { max-width: 7em; }
     </style>
     <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable" id="segfault-table" data-swf-order="0,desc">
