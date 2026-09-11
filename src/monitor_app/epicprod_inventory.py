@@ -710,7 +710,7 @@ def _stage_from_text(result, text):
 def _finish_trace(result, lines, start, frames, form):
     result['form'] = form
     result['frames'] = frames
-    named = next((f for f in frames if f['function'] and not f['function'].startswith('???')), None)
+    named = next((f for f in frames if f['function'] and not f['function'].startswith('?')), None)
     if named:
         lib = PurePosixPath(named['library']).name if named['library'] else ''
         result['frame'] = named['function'].split('(')[0].strip()
