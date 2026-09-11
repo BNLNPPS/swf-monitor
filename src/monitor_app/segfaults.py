@@ -847,84 +847,117 @@ def queue_diagnosis(key, requested_by):
 
 # --------------------------------------------------------------- findings
 
+FINDING_KIND = 'finding'
+FINDING_CONTEXT = 'segfault'
+FINDING_FIELDS = ('date', 'frame', 'stage', 'title', 'class', 'action', 'standing',
+                  'fix', 'notes', 'sources', 'signatures', 'model_reading')
+
+
+def _finding_context():
+    from .models import EntryContext
+    ctx, _ = EntryContext.objects.get_or_create(
+        name=FINDING_CONTEXT,
+        defaults={'title': 'Segfault findings',
+                  'description': 'The curated reading of the segfault catalog, one '
+                                 'entry per crashing frame (SEGFAULT_DIAGNOSIS.md, Findings).'})
+    return ctx
+
+
+def finding_entries():
+    """The findings as stored: Entry rows of kind finding in the segfault
+    context, not archived, newest date first."""
+    from .models import Entry
+    rows = list(Entry.objects.filter(kind=FINDING_KIND, context_id=FINDING_CONTEXT,
+                                     archived=False, deleted_at__isnull=True))
+    rows.sort(key=lambda e: (str((e.data or {}).get('date') or ''), e.timestamp_created), reverse=True)
+    return rows
+
+
+def set_finding(name, fields, changed_by):
+    """Create or update the finding named ``name`` (the frame's catalog key,
+    the trace-level entry's where one exists) with ``fields`` (FINDING_FIELDS
+    plus ``what``, the reading, as the entry's content). Every substantive
+    change leaves an EntryVersion stamped with ``changed_by``. Returns the
+    Entry and whether it was created."""
+    from .models import Entry
+    from .signals import set_changed_by
+    set_changed_by(changed_by or 'unknown')
+    ctx = _finding_context()
+    entry = Entry.objects.filter(kind=FINDING_KIND, context=ctx, name=name).first()
+    created = entry is None
+    if created:
+        entry = Entry(kind=FINDING_KIND, context=ctx, name=name, status='open')
+    data = dict(entry.data or {})
+    for key in FINDING_FIELDS:
+        if key in fields:
+            data[key] = fields[key]
+    data.setdefault('signatures', [name])
+    data['updated_by'] = changed_by
+    entry.data = data
+    if 'title' in fields:
+        entry.title = str(fields['title'] or '')
+    if 'what' in fields:
+        entry.content = str(fields['what'] or '')
+    if 'standing' in fields:
+        entry.status = str(fields['standing'] or 'open')
+    entry.timestamp_modified = __import__('time').time()
+    entry.save()
+    log_finding = __import__('monitor_app.epicprod_logging', fromlist=['log_epicprod_action']).log_epicprod_action
+    log_finding('web', 'segfault_finding_set', subject_type='crash_signature', subject_key=name,
+                username=changed_by, sublevel='normal', live_default=True,
+                message=f"segfault finding {'created' if created else 'updated'}: {name}: "
+                        f"{entry.title}"[:300], created=int(created))
+    return entry, created
+
+
 def findings():
-    """The curated findings (swf_epicprod/segfault/findings.yaml, one
-    entry per crashing frame), each joined live to its catalog entries:
-    the signatures it names, their crashes, configurations and loss.
-    Returns (entries, error); a file that cannot be read is an error
-    the page states, never an empty table."""
-    import os
-    try:
-        import yaml
-        import swf_epicprod
-        path = os.path.join(os.path.dirname(swf_epicprod.__file__), 'segfault', 'findings.yaml')
-        with open(path) as fh:
-            raw = yaml.safe_load(fh) or []
-    except Exception as e:                                    # noqa: BLE001
-        logger.error('segfault findings: cannot read findings.yaml: %s', e)
-        return [], f'the findings file could not be read: {e}'
+    """The findings joined live to the catalog: each entry with the
+    signatures it names, their crashes, tasks, configurations and loss.
+    Returns (entries, error)."""
     entries = []
-    for i, f in enumerate(raw):
-        keys = [str(k) for k in (f.get('signatures') or [])]
+    for i, e in enumerate(finding_entries()):
+        f = e.data or {}
+        keys = [str(k) for k in (f.get('signatures') or [e.name])]
         sigs = {s.key: s for s in CrashSignature.objects.filter(key__in=keys)}
-        rows = []
-        crashes = 0
-        prod_tasks = set()
-        rows_lost = events_lost = 0
+        rows, crashes, prod_tasks, rows_lost, events_lost = [], 0, set(), 0, 0
         for key in keys:
             s = sigs.get(key)
             if s is None:
                 rows.append({'key': key, 'missing': True})
                 continue
-            summary = signature_summary(s)
-            rows.append(summary)
+            rows.append(signature_summary(s))
             if s.level == 'trace' or len(keys) == 1:
                 crashes = max(crashes, s.crashes)
-                for t in (s.configuration or {}).get('prod_tasks') or ([s.configuration.get('prod_task')] if (s.configuration or {}).get('prod_task') else []):
+                cfg = s.configuration or {}
+                for t in cfg.get('prod_tasks') or ([cfg.get('prod_task')] if cfg.get('prod_task') else []):
                     prod_tasks.add(t)
                 rows_lost += s.rows_lost or 0
                 events_lost += s.events_lost or 0
         entries.append({
-            'n': i + 1,
-            'anchor': keys[0].replace(':', '-') if keys else f'finding-{i + 1}',
-            'date': str(f.get('date') or ''),
-            'frame': f.get('frame', ''),
-            'stage': f.get('stage', ''),
-            'title': f.get('title', ''),
-            'what': (f.get('what') or '').strip(),
-            'sources': f.get('sources') or [],
-            'class': f.get('class', ''),
-            'action': (f.get('action') or '').strip(),
-            'standing': f.get('standing', ''),
-            'fix': f.get('fix', ''),
-            'notes': (f.get('notes') or '').strip(),
-            'signatures': rows,
-            'crashes': crashes,
+            'n': i + 1, 'id': e.id, 'name': e.name,
+            'anchor': (keys[0] if keys else e.name).replace(':', '-'),
+            'date': str(f.get('date') or ''), 'frame': f.get('frame', ''),
+            'stage': f.get('stage', ''), 'title': e.title, 'what': (e.content or '').strip(),
+            'sources': f.get('sources') or [], 'class': f.get('class', ''),
+            'action': (f.get('action') or '').strip(), 'standing': e.status or f.get('standing', ''),
+            'fix': f.get('fix', ''), 'notes': (f.get('notes') or '').strip(),
+            'model_reading': bool(f.get('model_reading')),
+            'updated_by': f.get('updated_by', ''), 'updated_at': _iso(
+                datetime.fromtimestamp(e.timestamp_modified, tz=dt_timezone.utc)),
+            'signatures': rows, 'crashes': crashes,
             'tasks': len({t for r in rows for t in (r.get('task_ids') or [])}),
-            'configurations': sorted(prod_tasks),
-            'rows_lost': rows_lost,
-            'events_lost': events_lost,
+            'configurations': sorted(prod_tasks), 'rows_lost': rows_lost, 'events_lost': events_lost,
         })
     return entries, ''
 
 
 def finding_anchors():
     """{signature key: findings-page anchor} for every signature a finding
-    names, read from the findings file (no catalog join)."""
-    import os
-    try:
-        import yaml
-        import swf_epicprod
-        path = os.path.join(os.path.dirname(swf_epicprod.__file__), 'segfault', 'findings.yaml')
-        with open(path) as fh:
-            raw = yaml.safe_load(fh) or []
-    except Exception as e:                                    # noqa: BLE001
-        logger.error('segfault findings: cannot read findings.yaml: %s', e)
-        return {}
+    names."""
     out = {}
-    for i, f in enumerate(raw):
-        keys = [str(k) for k in (f.get('signatures') or [])]
-        anchor = keys[0].replace(':', '-') if keys else f'finding-{i + 1}'
+    for e in finding_entries():
+        keys = [str(k) for k in ((e.data or {}).get('signatures') or [e.name])]
+        anchor = (keys[0] if keys else e.name).replace(':', '-')
         for k in keys:
             out[k] = anchor
     return out

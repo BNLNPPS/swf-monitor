@@ -232,3 +232,46 @@ def segfault_signature_api(request, key):
     if detail is None:
         return JsonResponse({'error': f'no crash signature {key}'}, status=404)
     return JsonResponse(detail, json_dumps_params={'default': str})
+
+
+def segfault_findings_api(request):
+    """GET /api/segfaults/findings/ — the curated findings joined to the
+    catalog (the payload of panda_segfault_findings).
+    POST, under a token or a signed-in account with authority: create or
+    update one finding; JSON body {name, title, what, date, frame, stage,
+    class, action, standing, fix, notes, sources, signatures,
+    model_reading, changed_by}."""
+    import json as _json
+    from ..segfaults import findings, set_finding
+    if request.method == 'GET':
+        entries, error = findings()
+        return JsonResponse({'findings': entries, 'error': error or None},
+                            json_dumps_params={'default': str})
+    if request.method != 'POST':
+        return JsonResponse({'error': 'GET or POST'}, status=405)
+    token_ok = False
+    try:
+        from rest_framework.authentication import TokenAuthentication
+        auth = TokenAuthentication().authenticate(request)
+        token_ok = auth is not None
+    except Exception:                                         # noqa: BLE001
+        token_ok = False
+    if not token_ok and not request.user.is_authenticated:
+        return JsonResponse({'error': 'a token or a signed-in account is required'}, status=403)
+    try:
+        body = _json.loads(request.body or b'{}')
+    except ValueError:
+        return JsonResponse({'error': 'the body must be JSON'}, status=400)
+    name = str(body.get('name') or '').strip()
+    if not name:
+        return JsonResponse({'error': 'name is required'}, status=400)
+    fields = {k: body[k] for k in ('title', 'what', 'date', 'frame', 'stage', 'class', 'action',
+                                   'standing', 'fix', 'notes', 'sources', 'signatures',
+                                   'model_reading') if k in body}
+    if not fields:
+        return JsonResponse({'error': 'nothing to set'}, status=400)
+    who = (request.user.username if request.user.is_authenticated
+           else str(body.get('changed_by') or 'token'))
+    entry, created = set_finding(name, fields, who)
+    return JsonResponse({'name': name, 'created': created, 'versions': entry.versions.count(),
+                         'title': entry.title, 'standing': entry.status})

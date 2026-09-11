@@ -50,7 +50,8 @@ CALLER: contextvars.ContextVar = contextvars.ContextVar('mcp_caller', default=''
 AUTHORITY_GUARDED_TOOLS = frozenset({
     'ai_decide_proposal', 'ai_propose_ping', 'epic_register_ai_assessment',
     'pcs_dataset_intake', 'pcs_prodtask_intake', 'pcs_prodtask_link_input',
-    'pcs_prodtask_set_status', 'swf_kill_agent', 'swf_record_ai_memory',
+    'panda_segfault_finding_set', 'pcs_prodtask_set_status', 'swf_kill_agent',
+    'swf_record_ai_memory',
     'swf_send_message', 'swf_start_user_testbed', 'swf_start_workflow',
     'swf_stop_user_testbed', 'swf_stop_workflow',
 })
@@ -413,6 +414,16 @@ def get_available_tools_list() -> list:
             "name": "panda_segfault_signature",
             "description": "One crash signature in full: tasks, configuration, sites, loss, trace, reproductions, verdict and the crashed jobs behind it.",
             "parameters": ["key", "jobs_limit"],
+        },
+        {
+            "name": "panda_segfault_findings",
+            "description": "The segfault findings: the curated reading of the catalog, one entry per crashing frame, joined live to the catalog counts.",
+            "parameters": [],
+        },
+        {
+            "name": "panda_segfault_finding_set",
+            "description": "Create or update a segfault finding (versioned, stamped): the curated reading of one crashing frame.",
+            "parameters": ["name", "title", "what", "date", "frame", "stage", "class_hint", "action", "standing", "fix", "notes", "sources", "signatures", "model_reading", "changed_by"],
         },
         # Snapper state history (snapper-ai): coherent snapshots and the view products
         {

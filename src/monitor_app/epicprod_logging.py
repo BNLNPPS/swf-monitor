@@ -279,6 +279,13 @@ ACTION_DEFAULTS = {
                        "for the one bounded repair run, error for a "
                        "quarantined or failed run.",
     },
+    'segfault_finding_set': {
+        'sublevel': 'normal', 'live': True,
+        'description': "A segfault finding created or updated: the curated "
+                       "reading of one crashing frame in the entry store "
+                       "(kind finding, context segfault), versioned and "
+                       "stamped; through the MCP tool or REST.",
+    },
     'segfault_package': {
         'sublevel': 'normal', 'live': True,
         'description': "A crashed job's reproduction package built for a "

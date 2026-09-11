@@ -9,6 +9,7 @@ from asgiref.sync import sync_to_async
 from ai.assessments import ai_content_retrieval_guidance
 from monitor_app.epicprod_inventory import diagnosis_for_study_data
 from monitor_app.mcp import mcp
+from monitor_app.mcp.common import requires_authority
 from monitor_app.panda import queries
 
 
@@ -642,4 +643,98 @@ async def panda_segfault_signature(key: str, jobs_limit: int = 50) -> dict:
             return {'error': f'no crash signature {key}'}
         detail['monitor_url'] = f'/swf-monitor/panda/segfaults/{key}/'
         return detail
+    return await sync_to_async(_work)()
+
+
+@mcp.tool()
+async def panda_segfault_findings() -> dict:
+    """
+    The segfault findings: the curated reading of the segfault catalog, one
+    entry per crashing frame (swf-epicprod docs/SEGFAULT_DIAGNOSIS.md,
+    Findings), joined live to the catalog for the crashes, tasks and loss.
+
+    Returns:
+        findings: Each with name (the frame's catalog key), date, frame,
+            stage, title, what (the reading, with its sources), sources
+            (label, url), class, action (what production does), standing
+            (open, fix named, fixed, accepted), fix, notes, model_reading
+            (true when the entry is an LLM study's reading not yet checked
+            against its source), updated_by, updated_at, signatures (the
+            catalog entries with their counts), crashes, tasks, rows_lost,
+            events_lost.
+        monitor_url: The findings page.
+    """
+    from monitor_app.segfaults import findings
+
+    def _work():
+        entries, error = findings()
+        return {'findings': entries, 'error': error or None,
+                'monitor_url': '/swf-monitor/panda/segfaults/findings/'}
+    return await sync_to_async(_work)()
+
+
+@mcp.tool()
+@requires_authority
+async def panda_segfault_finding_set(
+    name: str,
+    title: str = None,
+    what: str = None,
+    date: str = None,
+    frame: str = None,
+    stage: str = None,
+    class_hint: str = None,
+    action: str = None,
+    standing: str = None,
+    fix: str = None,
+    notes: str = None,
+    sources: list = None,
+    signatures: list = None,
+    model_reading: bool = None,
+    changed_by: str = 'mcp',
+) -> dict:
+    """
+    Create or update a segfault finding: the curated reading of one
+    crashing frame (swf-epicprod docs/SEGFAULT_DIAGNOSIS.md, Findings).
+    The store is versioned: every substantive change keeps the previous
+    version stamped with changed_by, and each write is a
+    segfault_finding_set action.
+
+    Args:
+        name: The frame's catalog key, the trace-level entry's where one
+            exists (e.g. 'exit139:frame:0bb3bb652dac'); the finding's identity.
+        title: One line naming the crash.
+        what: The reading: what the crash is and its cause, citing sources.
+        date: The finding's date (YYYY-MM-DD).
+        frame: The crashing frame as the trace names it.
+        stage: simu or reco.
+        class_hint: The class as read (e.g. 'software defect, event-shaped in effect').
+        action: What production does about it.
+        standing: open | fix named | fixed | accepted.
+        fix: The image, release or commit that fixes it.
+        notes: Anything else, e.g. the study and its check.
+        sources: [{label, url}] the claims trace to.
+        signatures: The catalog keys the finding explains (default: name).
+        model_reading: True when the entry is an LLM study's reading not
+            yet checked against its source; cleared by whoever checks it.
+        changed_by: Who writes (the version stamp).
+
+    Returns:
+        name, created, version count, and the finding as stored.
+    """
+    from monitor_app.segfaults import set_finding
+
+    def _work():
+        fields = {}
+        for key, value in (('title', title), ('what', what), ('date', date), ('frame', frame),
+                           ('stage', stage), ('class', class_hint), ('action', action),
+                           ('standing', standing), ('fix', fix), ('notes', notes),
+                           ('sources', sources), ('signatures', signatures),
+                           ('model_reading', model_reading)):
+            if value is not None:
+                fields[key] = value
+        if not fields:
+            return {'error': 'nothing to set'}
+        entry, created = set_finding(name, fields, changed_by)
+        return {'name': name, 'created': created, 'versions': entry.versions.count(),
+                'title': entry.title, 'standing': entry.status, 'data': entry.data}
     return await sync_to_async(_work)()

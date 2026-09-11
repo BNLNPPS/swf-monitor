@@ -10,8 +10,9 @@
         The curated reading of the <a href="{% url 'monitor_app:panda_segfaults' %}">Segfault Catalog</a>: one entry per crashing
         frame, stating what the crash is, which configurations it hits and what they lost, and what production does about it.
         The catalog is the record, rebuilt from the production record nightly; this page is the reading of it, written by the
-        production operator after checking each claim against its source (the file swf_epicprod/segfault/findings.yaml, versioned in
-        git), and corrected as the experts who know the code weigh in. The crashes, configurations and loss are read live from the catalog.
+        production operator after checking each claim against its source, versioned with the editor's name on every change, and
+        corrected as the experts who know the code weigh in. An entry marked <em>model reading</em> is an LLM study's reading that has
+        not yet been checked. The crashes, configurations and loss are read live from the catalog.
     </p>
     {% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
 
@@ -37,13 +38,14 @@
                 <th>Standing</th>
                 <th>Fix</th>
                 <th>Notes</th>
+                <th>Updated</th>
             </tr>
         </thead>
         <tbody>
             {% for e in entries %}
             <tr id="{{ e.anchor }}">
                 <td>{{ e.date }}</td>
-                <td><strong>{{ e.title }}</strong><br>{{ e.frame }}</td>
+                <td><strong>{{ e.title }}</strong>{% if e.model_reading %} <span class="ai-attr">model reading</span>{% endif %}<br>{{ e.frame }}</td>
                 <td>{{ e.stage }}</td>
                 <td>{{ e.class }}</td>
                 <td class="sig-col">{% for s in e.signatures %}{% if s.missing %}{{ s.key }} (not in the catalog){% else %}<a href="{% url 'monitor_app:panda_segfault_detail' key=s.key %}">{{ s.key }}</a>{% if s.level == 'trace' %} ({{ s.tasks }} task{{ s.tasks|pluralize }}){% endif %}{% endif %}{% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
@@ -56,6 +58,7 @@
                 <td>{{ e.standing }}</td>
                 <td>{{ e.fix }}</td>
                 <td class="action-col">{{ e.notes }}</td>
+                <td>{% with t=e.updated_at|fmt_dt %}{{ t|slice:":8" }}<br>{{ t|slice:"9:" }}{% endwith %}<br>{{ e.updated_by }}</td>
             </tr>
             {% endfor %}
         </tbody>
