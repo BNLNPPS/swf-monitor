@@ -183,6 +183,8 @@ SEGFAULT_DIG_TIMEOUT = int(os.environ.get("EPICPROD_SEGFAULT_DIG_TIMEOUT", "3600
 # capped so a storm is not a thousand fetches (SEGFAULT_DIAGNOSIS.md).
 SEGFAULT_DIG_AUTO = int(os.environ.get("EPICPROD_SEGFAULT_DIG_AUTO", "10"))
 SEGFAULT_PACKAGE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "segfault-repro-package.py"
+SEGFAULT_DIAGNOSIS_TRIGGER_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "segfault-diagnosis-trigger.py"
+SEGFAULT_DIAGNOSIS_ENFORCE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "segfault-diagnosis-enforce.py"
 # The registrar (swf-epicprod docs/RUCIO_RESILIENCE.md, Measure 2): completes
 # the registrations the payload left pending, hourly, and holds the only
 # retry — one gentle attempt per job, then bounded attempts from one process.
@@ -318,6 +320,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "file_events_measure", "delivery_daily_rebuild",
                    "batch_log_capture", "batch_log_learn",
                    "segfault_inventory", "segfault_dig", "segfault_package",
+                   "segfault_diagnose", "segfault_diagnosis_completed",
                    "report_sweep", "outputs_ingest", "registrar",
                    "content_validate", "content_accept", "stash_drain",
                    "node_measure_ingest", "dataset_definitions_sweep",
@@ -2510,6 +2513,92 @@ class EpicProdOpsAgent(BaseAgent):
         self.send_message('/topic/epictopic', {
             'msg_type': 'segfault_package_done', 'key': key, 'pandaid': pandaid,
             'ok': True, 'tarball': summary.get('tarball')})
+
+    def _handle_segfault_diagnose(self, m):
+        """Submit a crash signature's LLM study (SEGFAULT_DIAGNOSIS.md,
+        Diagnosis): the Diagnose action, and the automatic trigger once a
+        signature reaches reproduced with a trace."""
+        key = str(m.get('key') or '')
+        if not key:
+            self.logger.error("PRODOPS segfault_diagnose: missing key")
+            return
+        self.run_in_background(
+            self._do_segfault_diagnose, m,
+            dedup_key=f"segfault_diagnose:{key}", label=f"segfault_diagnose {key}")
+
+    def _do_segfault_diagnose(self, m):
+        key = str(m.get('key') or '')
+        cmd = [sys.executable, str(SEGFAULT_DIAGNOSIS_TRIGGER_SCRIPT), '--key', key,
+               '--requested-by', str(m.get('requested_by') or m.get('created_by') or '')]
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        except subprocess.TimeoutExpired:
+            self.logger.error(f"PRODOPS segfault_diagnose {key} TIMEOUT")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'segfault_diagnose_queued', 'key': key, 'ok': False,
+                'reason': 'trigger timed out'})
+            return
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  segfault-diagnosis-trigger: {line[:300]}")
+        summary = {}
+        try:
+            summary = json.loads(((p.stdout or '').strip().splitlines() or ['{}'])[-1])
+        except Exception as e:
+            summary = {'error': f'unreadable summary: {e}'}
+        # The trigger records its own segfault_diagnosis_triggered action;
+        # the page hears whether the run is in flight.
+        ok = p.returncode == 0 and not summary.get('error')
+        self.logger.info(f"PRODOPS segfault_diagnose {key}: {'submitted' if ok else 'FAILED'} "
+                         f"{summary} in {time.monotonic() - t0:.1f}s")
+        self.send_message('/topic/epictopic', {
+            'msg_type': 'segfault_diagnose_queued', 'key': key, 'ok': ok,
+            'job_id': str(summary.get('job_id') or ''),
+            'reason': str(summary.get('error') or '')[:300]})
+
+    def _handle_segfault_diagnosis_completed(self, m):
+        """The corun completion callback for a segfault_diagnosis run:
+        enforce the artifact and register the diagnosis."""
+        job_id = str(m.get('job_id') or '')
+        if not job_id:
+            self.logger.warning("PRODOPS segfault_diagnosis_completed: no job_id, dropping")
+            return
+        self.run_in_background(
+            self._do_segfault_diagnosis_enforce, m,
+            dedup_key=f"segfault_diagnosis_enforce:{job_id}",
+            label="segfault_diagnosis_enforce")
+
+    def _do_segfault_diagnosis_enforce(self, m):
+        cmd = [sys.executable, str(SEGFAULT_DIAGNOSIS_ENFORCE_SCRIPT),
+               '--job-id', str(m.get('job_id') or ''),
+               '--prompt-group-id', str(m.get('prompt_group_id') or ''),
+               '--page-group-id', str(m.get('page_group_id') or ''),
+               '--status', str(m.get('status') or '')]
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=ASSESSMENT_ENFORCE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self._log_action('segfault_diagnosis', t0, outcome='timeout',
+                             reason=f'enforcement timed out after {ASSESSMENT_ENFORCE_TIMEOUT}s',
+                             sublevel='normal', live_default=True, level=logging.ERROR)
+            return
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  segfault-diagnosis-enforce: {line[:300]}")
+        summary = {}
+        try:
+            summary = json.loads(((p.stdout or '').strip().splitlines() or ['{}'])[-1])
+        except Exception:
+            pass
+        key = str(summary.get('key') or '')
+        # The enforcement records the segfault_diagnosis action itself; the
+        # page hears the outcome.
+        self.send_message('/topic/epictopic', {
+            'msg_type': 'segfault_diagnosis_done', 'key': key,
+            'ok': p.returncode == 0, 'outcome': str(summary.get('outcome') or ''),
+            'classification': str(summary.get('classification') or ''),
+            'reason': str(summary.get('error') or '')[:300]})
+        self.logger.info(f"PRODOPS segfault_diagnosis enforce {key}: {summary}")
 
     def _do_segfault_dig_auto(self, m):
         """The nightly automatic dig (catalog_sync chain step): the largest

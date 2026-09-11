@@ -252,6 +252,33 @@ ACTION_DEFAULTS = {
                        "not_reproduced, inconclusive) settles on the "
                        "signature from the runs' payload reports.",
     },
+    'segfault_diagnose_request': {
+        'sublevel': 'low', 'live': False,
+        'description': "Operator request of a crash signature's LLM study "
+                       "from its page, queued to the production operations "
+                       "agent; the submission is segfault_diagnosis_triggered "
+                       "and the result segfault_diagnosis.",
+    },
+    'segfault_diagnosis_triggered': {
+        'sublevel': 'normal', 'live': True,
+        'description': "A crash signature's LLM study submitted to corun-ai "
+                       "(scripts/segfault-diagnosis-trigger.py): the evidence "
+                       "bundle stored as a hidden page and the run created "
+                       "with the segfault_diagnosis definition; outcome error "
+                       "when the submission failed.",
+    },
+    'segfault_diagnosis': {
+        'sublevel': 'normal', 'live': True,
+        'description': "A crash signature's diagnosis enforced and registered "
+                       "(scripts/segfault-diagnosis-enforce.py): the "
+                       "classification (software_defect, configuration, "
+                       "event_shaped, platform, unresolved), the operator "
+                       "action and the narration, carrying severity for notice "
+                       "routing (warning for a software defect or a "
+                       "configuration finding, info otherwise); outcome repair "
+                       "for the one bounded repair run, error for a "
+                       "quarantined or failed run.",
+    },
     'segfault_package': {
         'sublevel': 'normal', 'live': True,
         'description': "A crashed job's reproduction package built for a "

@@ -177,12 +177,18 @@ def _dispatch_assessment(payload):
     # Matches campaign_assessment_daily / _weekly (one definition per
     # kind, each with its own system prompt; legacy _nightly also matches).
     definition_name = str(payload.get('definition_name') or '')
-    if not definition_name.startswith(
+    if definition_name == 'segfault_diagnosis':
+        # The segfault diagnosis rides the same harness with its own
+        # enforcement (SEGFAULT_DIAGNOSIS.md, Diagnosis).
+        msg_type = 'segfault_diagnosis_completed'
+    elif definition_name.startswith(
             config('CORUN_ASSESSMENT_DEFINITION_NAME',
                    default='campaign_assessment')):
+        msg_type = 'assessment_completed'
+    else:
         return False
     message = {
-        'msg_type': 'assessment_completed',
+        'msg_type': msg_type,
         'namespace': 'prodops',
         'job_id': str(payload.get('job_id') or ''),
         'prompt_group_id': str(payload.get('prompt_group_id') or ''),

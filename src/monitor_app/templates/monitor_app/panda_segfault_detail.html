@@ -146,9 +146,21 @@
             </form>
             {% endif %}
 
-            <h4>Verdict</h4>
-            {% if sig.verdict %}<p>{{ sig.verdict }}</p>{% else %}<p class="text-muted">None yet.</p>{% endif %}
-            {% if sig.assessment_ids %}<p>Assessments: {{ sig.assessment_ids|join:", " }}</p>{% endif %}
+            <h4>Diagnosis</h4>
+            {% if sig.verdict %}<p>Verdict: <strong>{{ sig.verdict }}</strong></p>{% endif %}
+            {% if sig.data.diagnosis %}
+            <p class="small">Study {{ sig.data.diagnosis.state }}{% if sig.data.diagnosis.job_id %}, corun job {{ sig.data.diagnosis.job_id }}{% endif %}{% if sig.data.diagnosis.submitted_at %}, submitted {{ sig.data.diagnosis.submitted_at|fmt_dt }}{% endif %}{% if sig.data.diagnosis.requested_by %} by {{ sig.data.diagnosis.requested_by }}{% endif %}{% if sig.data.diagnosis.reason %}: {{ sig.data.diagnosis.reason }}{% endif %}{% if sig.data.diagnosis.problems %}; problems: {{ sig.data.diagnosis.problems|join:"; " }}{% endif %}</p>
+            {% elif not sig.verdict %}
+            <p class="text-muted">No diagnosis yet. The study runs on its own once the signature is reproduced with a trace, or on request.</p>
+            {% endif %}
+            {% if sig.level == 'record' %}
+            <form id="diagnose-form" class="d-flex align-items-center gap-2 mb-3" method="post" action="{% url 'monitor_app:panda_segfault_diagnose' key=sig.key %}" data-key="{{ sig.key }}">
+                {% csrf_token %}
+                <button type="submit" id="diagnose-button" class="btn btn-sm btn-success" title="Submit the signature's LLM study (the codoc run over the trace, the code and the known issues) through the production operations agent">Diagnose</button>
+                <span id="diagnose-status" class="text-muted small"></span>
+            </form>
+            {% endif %}
+            {% ai_assessment_panel sig.data 'Diagnoses' %}
         </div>
     </div>
 
@@ -269,6 +281,47 @@
           .then(function(r) { if (!r.ok) finish(r.d.error || 'Could not queue the build.', true); })
           .catch(function() { finish('Could not queue the build.', true); });
         window.setTimeout(function() { if (!done) finish('Build still running or event not received; refresh to check.', true); }, 120000);
+    });
+})();
+
+(function() {
+    // The Diagnose action: queue the study; the page hears the submission
+    // (segfault_diagnose_queued) and, minutes later, the enforced result
+    // (segfault_diagnosis_done); the record shows the state meanwhile.
+    const form = document.getElementById('diagnose-form');
+    if (!form) return;
+    const button = document.getElementById('diagnose-button');
+    const status = document.getElementById('diagnose-status');
+    form.addEventListener('submit', function(ev) {
+        ev.preventDefault();
+        const key = String(form.dataset.key || '');
+        const token = form.querySelector('input[name="csrfmiddlewaretoken"]')?.value || '';
+        const streamUrl = "{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=segfault_diagnose_queued,segfault_diagnosis_done";
+        let done = false, es = null;
+        function finish(message, failed) {
+            done = true; if (es) es.close(); button.disabled = false;
+            status.textContent = message || ''; status.className = failed ? 'text-danger small' : 'text-muted small';
+        }
+        button.disabled = true; status.className = 'text-muted small'; status.textContent = 'Submitting the study...';
+        if (window.EventSource) {
+            es = new EventSource(streamUrl);
+            es.addEventListener('segfault_diagnose_queued', function(event) {
+                let data = {}; try { data = JSON.parse(event.data); } catch (e) { return; }
+                if (String(data.key || '') !== key) return;
+                if (data.ok) { status.textContent = 'Study submitted (corun job ' + (data.job_id || '') + '); the result lands here when the run is enforced, usually within twenty minutes.'; }
+                else finish(data.reason || 'Submission failed.', true);
+            });
+            es.addEventListener('segfault_diagnosis_done', function(event) {
+                let data = {}; try { data = JSON.parse(event.data); } catch (e) { return; }
+                if (String(data.key || '') !== key) return;
+                window.location.reload();
+            });
+        }
+        fetch(form.action, {method: 'POST', headers: {'X-CSRFToken': token, 'X-Requested-With': 'XMLHttpRequest'}})
+          .then(function(resp) { return resp.json().then(function(d) { return {ok: resp.ok, d: d}; }); })
+          .then(function(r) { if (!r.ok) finish(r.d.error || 'Could not queue the study.', true); })
+          .catch(function() { finish('Could not queue the study.', true); });
+        window.setTimeout(function() { if (!done) finish('Study still running or event not received; refresh to check.', true); }, 2400000);
     });
 })();
 

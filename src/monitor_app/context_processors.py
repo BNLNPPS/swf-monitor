@@ -253,6 +253,7 @@ def _active_nav(request):
             'panda_segfault_dig',
             'panda_segfault_reproduce',
             'panda_segfault_package',
+            'panda_segfault_diagnose',
         },
         'panda_diagnostics': namespace == 'monitor_app' and url_name in {
             'panda_diagnostics_list',

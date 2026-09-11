@@ -786,6 +786,12 @@ def reproduction_refresh(sig):
         data['reproduction_outcome'] = outcome
         data['reproduction_settled_at'] = _iso(timezone.now())
         sig.data = data
+        # Diagnosis runs on its own once a signature is reproduced with a
+        # trace (SEGFAULT_DIAGNOSIS.md, Diagnosis), once per settlement.
+        if (outcome in ('reproduced', 'site_dependent')
+                and (sig.trace or {}).get('trace_status') == 'found'
+                and not data.get('diagnosis')):
+            queue_diagnosis(sig.key, 'auto:reproduced')
         if outcome in ('reproduced', 'site_dependent') and sig.status in ('reproducing', 'traced', 'new'):
             sig.status = 'reproduced'
         elif outcome == 'not_reproduced' and sig.status == 'reproducing':
@@ -795,3 +801,21 @@ def reproduction_refresh(sig):
         sig.reproduction = entries
         sig.save(update_fields=['reproduction', 'status', 'data', 'updated_at'])
     return changed
+
+
+def queue_diagnosis(key, requested_by):
+    """Queue a signature's LLM study to the ops agent; reported, never
+    raised (a page read must not fail on the bus)."""
+    import json
+    from .activemq_connection import ActiveMQConnectionManager
+    try:
+        sent = ActiveMQConnectionManager().send_message(
+            '/queue/epicprod.ops',
+            json.dumps({'msg_type': 'segfault_diagnose', 'namespace': 'prodops',
+                        'key': key, 'requested_by': requested_by}))
+        if not sent:
+            logger.error('segfault %s: diagnosis not queued, bus unreachable', key)
+        return bool(sent)
+    except Exception as e:                                    # noqa: BLE001
+        logger.error('segfault %s: diagnosis not queued: %s', key, e)
+        return False

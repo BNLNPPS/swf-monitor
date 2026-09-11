@@ -1895,6 +1895,34 @@ def panda_segfault_package(request, key):
     return JsonResponse({'queued': True, 'key': key, 'pandaid': int(pandaid)})
 
 
+def panda_segfault_diagnose(request, key):
+    """The Diagnose action: queue the signature's LLM study to the
+    production operations agent (SEGFAULT_DIAGNOSIS.md, Diagnosis); the
+    page hears segfault_diagnose_queued when the run is submitted and
+    segfault_diagnosis_done when the result is enforced."""
+    from ..models import CrashSignature
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST only'}, status=405)
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'sign in to diagnose'}, status=403)
+    sig = CrashSignature.objects.filter(key=key).first()
+    if sig is None:
+        return JsonResponse({'error': f'no crash signature {key}'}, status=404)
+    msg = {'msg_type': 'segfault_diagnose', 'namespace': 'prodops', 'key': key,
+           'requested_by': request.user.username}
+    try:
+        queued = ActiveMQConnectionManager().send_message('/queue/epicprod.ops', json.dumps(msg))
+    except Exception as e:
+        logger.error(f"segfault diagnose trigger failed for {key}: {e}")
+        queued = False
+    if not queued:
+        return JsonResponse({'error': 'the ops-agent queue could not be reached'}, status=502)
+    log_epicprod_action('web', 'segfault_diagnose_request', subject_type='crash_signature',
+                        subject_key=key, username=request.user.username,
+                        sublevel='low', live_default=False)
+    return JsonResponse({'queued': True, 'key': key})
+
+
 def panda_errors_datatable_ajax(request):
     from ..cached_product import get_product
 
