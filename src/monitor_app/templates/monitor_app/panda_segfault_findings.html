@@ -6,6 +6,7 @@
 {% block content %}
 <div class="container-fluid">
     <h1>Segfault Findings</h1>
+    <div style="width: fit-content; max-width: 100%;">
     <p class="text-muted mb-3">
         The curated reading of the <a href="{% url 'monitor_app:panda_segfaults' %}">Segfault Catalog</a>: one entry per crashing
         frame, stating what the crash is, which configurations it hits and what they lost, and what production does about it.
@@ -71,5 +72,6 @@
             {% endfor %}
         </tbody>
     </table>
+    </div>
 </div>
 {% endblock %}
