@@ -695,6 +695,7 @@ def repro_environment(prod_task):
 
 PAYLOAD_REPO = 'https://github.com/BNLNPPS/swf-epicprod'
 PAYLOAD_PATH = 'swf_epicprod/payload/run.sh'
+PAYLOAD_VERSION_FILE = 'swf_epicprod/payload/VERSION'
 # The JLab door and base the payload streams EVGEN input from (run.sh,
 # XRDRURL and XRDRBASE defaults).
 INPUT_DOOR = 'root://dtn-eic.jlab.org//volatile/eic/EPIC'
@@ -721,6 +722,14 @@ def local_repro(sig, pandaid=None):
     if not container:
         cfg = job.prod_task.prod_config
         container = getattr(cfg, 'container_image', '') if cfg else ''
+    # The payload the job ran, from its attempt's submission record; a
+    # version was set by exactly one commit (the one that wrote it into
+    # payload/VERSION), which the clone resolves and checks out. An attempt
+    # without one is a legacy attempt: it ran the production team's script,
+    # not this payload.
+    from pcs.models import PandaTasks
+    attempt = PandaTasks.objects.filter(jedi_task_id=job.jeditaskid).only('metadata').first()
+    payload_version = str(((attempt.metadata if attempt else None) or {}).get('payload_version') or '')
     ichunk = int(row['ichunk'])
     nevents = int(row['nevents'])
     input_url = f"{INPUT_DOOR}/EVGEN/{row['file']}.{row['ext']}"
@@ -732,8 +741,20 @@ def local_repro(sig, pandaid=None):
         f"# Image: {container or '(not on record)'}",
         "# Inside the image (eic-shell, or: apptainer exec <image> bash), in an empty directory:",
         f"git clone {PAYLOAD_REPO}",
-        "cat > environment-manifest.sh <<'EOF'",
     ]
+    if payload_version:
+        lines += [
+            f"# The payload the job ran, {payload_version}: the commit that set that version",
+            f"git -C swf-epicprod checkout $(git -C swf-epicprod log -S'{payload_version}' "
+            f"--format=%H -- {PAYLOAD_VERSION_FILE} | tail -1)",
+        ]
+    else:
+        lines += [
+            "# No payload version on the attempt's record: a legacy attempt ran the production",
+            "# team's script (eic/job_submission_condor), not this payload; the current payload",
+            "# runs the same row through the same stages in the same image.",
+        ]
+    lines += ["cat > environment-manifest.sh <<'EOF'"]
     lines += [f'export {k}={v}' for k, v in env.items()]
     lines += [
         'EOF',
@@ -744,7 +765,8 @@ def local_repro(sig, pandaid=None):
     ]
     return {'pandaid': job.pandaid, 'jeditaskid': job.jeditaskid,
             'task': job.prod_task.name, 'container': container, 'row_text': row_text,
-            'input_url': input_url, 'environment': env, 'fragment': '\n'.join(lines)}
+            'payload_version': payload_version, 'input_url': input_url,
+            'environment': env, 'fragment': '\n'.join(lines)}
 
 
 def reproduction_plan(sig, pandaid=None):
