@@ -366,10 +366,6 @@ def signature_summary(sig):
         'status_label': STATUS_LABELS.get(sig.status, sig.status),
         'trace_status': (sig.trace or {}).get('trace_status', 'unknown'),
         'frame': (sig.trace or {}).get('frame', ''),
-        # The curated finding for this frame (the findings_segfault
-        # narrative, EPICPROD_NARRATIVES.md): its anchor is the trace-level
-        # key, set on the entry and its members when the finding is written.
-        'finding_anchor': (sig.data or {}).get('finding_anchor', ''),
         'first_seen': _iso(sig.first_seen),
         'last_seen': _iso(sig.last_seen),
         'updated_at': _iso(sig.updated_at),

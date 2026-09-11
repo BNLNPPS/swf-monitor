@@ -249,18 +249,11 @@ def ai_narratives(request):
     general_entries = sorted(
         (e for e in entries if e['name'].startswith('campaign_general')),
         key=lambda e: e['updated'], reverse=True)
-    # Findings documents (findings_<topic>): curated readings of what the
-    # diagnostic machinery concluded, e.g. findings_segfault beside the
-    # segfault catalog (EPICPROD_NARRATIVES.md, Naming).
-    finding_entries = sorted(
-        (e for e in entries if e['name'].startswith('findings_')),
-        key=lambda e: e['updated'], reverse=True)
     campaign_entries = sorted(
-        (e for e in entries if not e['name'].startswith(('campaign_general', 'findings_'))),
+        (e for e in entries if not e['name'].startswith('campaign_general')),
         key=lambda e: (_campaign_version_key(e), e['updated']), reverse=True)
     return render(request, 'ai/narratives.html',
                   {'general_entries': general_entries,
-                   'finding_entries': finding_entries,
                    'campaign_entries': campaign_entries,
                    'entries': entries, 'error': error})
 
