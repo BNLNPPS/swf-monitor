@@ -924,8 +924,8 @@ def finding_entries():
 
 
 def finding_id(serial):
-    """The finding's permanent id as shown: F-8."""
-    return f'F-{int(serial)}' if serial else ''
+    """The finding's permanent id as shown: f-8."""
+    return f'f-{int(serial)}' if serial else ''
 
 
 def _next_finding_serial(ctx):
@@ -944,7 +944,7 @@ def set_finding(name, fields, changed_by):
     """Create or update the finding named ``name`` (the frame's catalog key,
     the trace-level entry's where one exists) with ``fields`` (FINDING_FIELDS
     plus ``what``, the reading, as the entry's content). A new finding draws
-    the next permanent serial (``data['serial']``, shown as F-n). Every
+    the next permanent serial (``data['serial']``, shown as f-n). Every
     substantive change leaves an EntryVersion stamped with ``changed_by``.
     Returns the Entry and whether it was created."""
     from django.db import transaction

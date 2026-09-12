@@ -654,7 +654,7 @@ async def panda_segfault_findings() -> dict:
     Findings), joined live to the catalog for the crashes, tasks and loss.
 
     Returns:
-        findings: Each with fid (the permanent id, F-8, drawn once when
+        findings: Each with fid (the permanent id, f-8, drawn once when
             the finding is written; the list is newest first by it),
             name (the frame's catalog key), date, frame,
             stage, title, what (the reading, with its sources), sources

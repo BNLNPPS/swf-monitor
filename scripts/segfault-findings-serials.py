@@ -2,7 +2,7 @@
 """segfault-findings-serials.py — permanent ids for the findings written
 before serials existed.
 
-A finding draws its serial (data['serial'], shown as F-n) once, when it is
+A finding draws its serial (data['serial'], shown as f-n) once, when it is
 written (monitor_app/segfaults.py, set_finding). The findings written
 before 2026-09-12 have none; this assigns them in creation order and
 prints what it assigned. Idempotent: a finding with a serial is left as
