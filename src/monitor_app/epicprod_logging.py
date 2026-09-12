@@ -568,6 +568,16 @@ ACTION_DEFAULTS = {
                        "tags left because their corrected parameters equal "
                        "another tag's; one record per applying run.",
     },
+    'edition_fold': {
+        'sublevel': 'low', 'live': False,
+        'description': "One edition per identity restored where a physics "
+                       "tag was made twice (swf-epicprod "
+                       "scripts/fold_duplicate_tag_editions.py): placeholder "
+                       "editions folded into the editions of the same "
+                       "identity, the editions moved to the earlier tag, "
+                       "evgen tags corrected from the path; the record of a "
+                       "repair pass, one per run.",
+    },
     'edition_rebind': {
         'sublevel': 'low', 'live': False,
         'description': "Rebind a campaign family's editions from the import "
