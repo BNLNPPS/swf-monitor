@@ -45,12 +45,22 @@
             <li><strong>TTD</strong>, time to death: minutes from job start to the crash, the 10th and 50th percentile over the signature's crashed jobs.</li>
             <li><strong>Rate</strong>: the signature's crashes over the task's finished plus failed jobs.</li>
             <li><strong>Stage</strong>: where the payload died, simu (npsim) or reco (eicrecon), where the jobs' payload digest carries it.</li>
+            <li><strong>Reproduction</strong>, where the signature stands on running its crashed row again (the attempts themselves are on the Reproduction runs page):
+                <ul>
+                    <li><strong>Run needed</strong>: no attempt has settled it (none yet, or every run inconclusive) and a run can be formed: a crashed job has its manifest row and a PCS task to run under.</li>
+                    <li><strong>In progress</strong>: an attempt is queued or running.</li>
+                    <li><strong>Not runnable</strong>: no run can be formed yet; the row is unresolved (the attempt has no manifest record) or the task is not in PCS.</li>
+                    <li><strong>Reproduced</strong>, <strong>Site dependent</strong>, <strong>Not reproduced</strong>: settled by its own runs, or through another member of its frame. Runnability is read at the nightly record build.</li>
+                </ul>
+            </li>
         </ul>
     </details>
     <p class="mb-2">
         <strong class="swf-nf-shown">{{ shown }}</strong> of <strong>{{ total }}</strong> signatures,
         <strong>{{ crashes_total }}</strong> crashed jobs in the inventory{% if repro_counts.total %};
-        <strong>{{ repro_counts.active }}</strong> reproduction runs active, <strong>{{ repro_counts.ended }}</strong> ended{% endif %}.
+        <strong>{{ repro_counts.active }}</strong> reproduction runs active, <strong>{{ repro_counts.ended }}</strong> ended{% endif %};
+        <strong>{{ run_needed }}</strong> signature{{ run_needed|pluralize }} still need{{ run_needed|pluralize:"s," }} a run
+        (the Reproduction bar's <a href="{% url 'monitor_app:panda_segfaults' %}?reproduction=run_needed">run needed</a> selection).
     </p>
 
     {# Narrowing filter (monitor_app/narrowing_filter.py): one value per facet, rows are the intersection, every bar counts within the selection. #}
@@ -101,7 +111,7 @@
                 <td data-order="{{ r.rows_lost|default_if_none:'-1' }}" title="{{ r.rows_lost_note }}">{% if r.rows_lost is not None %}{{ r.rows_lost }}{% if r.events_lost %}<br>{{ r.events_lost }} ev{% endif %}{% endif %}</td>
                 <td>{% for stage, n in r.stages.items %}{{ stage }} ({{ n }}){% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
                 <td>{{ r.status_label }}</td>
-                <td data-order="{{ r.repro_active }}{{ r.repro_ended|stringformat:'04d' }}">{% if r.repro_active or r.repro_ended %}<a href="{% url 'monitor_app:panda_segfault_reproductions' %}?signature={{ r.key|urlencode }}">{% if r.repro_active %}{{ r.repro_active }} active{% endif %}{% if r.repro_active and r.repro_ended %}, {% endif %}{% if r.repro_ended %}{{ r.repro_ended }} ended{% endif %}</a>{% endif %}</td>
+                <td data-order="{{ r.repro_active }}{{ r.repro_ended|stringformat:'04d' }}">{{ r.repro_state_label }}{% if r.repro_active or r.repro_ended %}<br><a href="{% url 'monitor_app:panda_segfault_reproductions' %}?signature={{ r.key|urlencode }}">{% if r.repro_active %}{{ r.repro_active }} active{% endif %}{% if r.repro_active and r.repro_ended %}, {% endif %}{% if r.repro_ended %}{{ r.repro_ended }} ended{% endif %}</a>{% endif %}</td>
             </tr>
             {% endfor %}
         </tbody>

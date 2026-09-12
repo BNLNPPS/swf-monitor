@@ -368,6 +368,13 @@ def signature_summary(sig):
         'frame': (sig.trace or {}).get('frame', ''),
         'member_of': (sig.data or {}).get('member_of', ''),
         'members': list((sig.data or {}).get('members') or []),
+        # A reproduction can be formed when a crashed job has its manifest
+        # row and a PCS task to run under (crashed_run); both are read at
+        # the nightly record build, so a row resolved during the day counts
+        # from the next build.
+        'runnable': bool((sig.configuration or {}).get('prod_task')
+                         and ((sig.data or {}).get('rows_resolved') or 0) > 0),
+        'reproduction_outcome': (sig.data or {}).get('reproduction_outcome', ''),
         'finding_anchor': '',
         'first_seen': _iso(sig.first_seen),
         'last_seen': _iso(sig.last_seen),

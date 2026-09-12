@@ -400,6 +400,67 @@ def counts_by_signature(rows, members=None):
     return out
 
 
+# Where a signature stands on reproduction, for the catalog's facet: the
+# settled outcomes, the runs in progress, and for the rest whether a run
+# can be formed at all.
+REPRODUCTION_STATES = [
+    ('run_needed', 'Run needed'),
+    ('in_progress', 'In progress'),
+    ('not_runnable', 'Not runnable'),
+    ('reproduced', 'Reproduced'),
+    ('site_dependent', 'Site dependent'),
+    ('not_reproduced', 'Not reproduced'),
+]
+REPRODUCTION_STATE_LABELS = dict(REPRODUCTION_STATES)
+REPRODUCTION_STATE_ORDER = [k for k, _ in REPRODUCTION_STATES]
+SETTLED_OUTCOMES = ('reproduced', 'site_dependent', 'not_reproduced')
+
+
+def _settled(outcomes):
+    """One settled outcome for a set of them: a crash reproduced anywhere
+    settles the frame as reproduced."""
+    outcomes = [o for o in outcomes if o in SETTLED_OUTCOMES]
+    for o in SETTLED_OUTCOMES:
+        if o in outcomes:
+            return o
+    return ''
+
+
+def reproduction_states(sig_rows, counts):
+    """The reproduction state of every catalog row (signature_summary
+    rows carrying ``runnable``, ``reproduction_outcome``, ``member_of``
+    and ``members``), given the per-row attempt counts. A signature
+    settled by its own runs, or a member of a frame one of whose members
+    settled, is settled; a signature with an attempt still active is in
+    progress; otherwise a run is needed where one can be formed, and the
+    signature is not runnable where it cannot. Returns key -> state."""
+    by_key = {r['key']: r for r in sig_rows}
+    frame_outcome = {}
+    for r in sig_rows:
+        if r.get('level') == 'trace':
+            frame_outcome[r['key']] = _settled(
+                [r.get('reproduction_outcome', '')]
+                + [by_key[m].get('reproduction_outcome', '') for m in r.get('members') or [] if m in by_key])
+    out = {}
+    for r in sig_rows:
+        c = counts.get(r['key']) or {'active': 0, 'ended': 0}
+        own = r.get('reproduction_outcome', '')
+        settled = _settled([own])
+        if not settled and r.get('member_of') in frame_outcome:
+            settled = frame_outcome[r['member_of']]
+        if not settled and r.get('level') == 'trace':
+            settled = frame_outcome.get(r['key'], '')
+        if c['active']:
+            out[r['key']] = 'in_progress'
+        elif settled:
+            out[r['key']] = settled
+        else:
+            runnable = r.get('runnable') or any(
+                by_key[m].get('runnable') for m in r.get('members') or [] if m in by_key)
+            out[r['key']] = 'run_needed' if runnable else 'not_runnable'
+    return out
+
+
 def global_counts(rows):
     return {'active': sum(1 for r in rows if r['active']),
             'ended': sum(1 for r in rows if not r['active']),

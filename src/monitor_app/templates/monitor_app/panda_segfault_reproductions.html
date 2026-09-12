@@ -46,6 +46,13 @@
         <strong>{{ counts.active }}</strong> active, <strong>{{ counts.ended }}</strong> ended.
         {% if freshness.observed_at %}Last observation {{ freshness.observed_at|fmt_dt }} (<span data-relative-time="{{ freshness.observed_at }}">{{ freshness.observed_at|fmt_ago }}</span>).{% else %}No attempt has been observed by a collection yet.{% endif %}
     </p>
+    <p class="mb-2">
+        <strong>{{ run_needed }}</strong> signature{{ run_needed|pluralize }} still need{{ run_needed|pluralize:"s," }} a run:
+        <a href="{% url 'monitor_app:panda_segfaults' %}?reproduction=run_needed">the catalog's run-needed selection</a>.
+        A signature needs a run when no attempt has settled it (no run yet, or every run inconclusive) and a run can be formed,
+        that is a crashed job has its manifest row and a PCS task to run under; a member of a frame settled through another
+        member is settled too. Signatures that cannot be run yet are the catalog's "not runnable" selection.
+    </p>
 
     {# Narrowing filter (monitor_app/narrowing_filter.py): one value per facet, rows are the intersection, every bar counts within the selection. #}
     {% include 'monitor_app/_narrowing_filter.html' %}
