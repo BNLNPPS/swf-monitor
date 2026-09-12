@@ -33,6 +33,7 @@
                     <li><strong>Pending</strong>: the job has not ended.</li>
                     <li><strong>Awaiting report</strong>: the job ended; the next collection reads its report.</li>
                     <li><strong>Crash reproduced</strong>: the payload died on a signal (exit 134, 135, 136 or 139).</li>
+                    <li><strong>Crash observed</strong>: the stage log recorded a fatal signal, including when its handler stalled until a timeout. The signal and stage remain visible; this alone does not confirm the requested crashing frame.</li>
                     <li><strong>Completed without crash</strong>: the payload ran to exit 0.</li>
                     <li><strong>Inconclusive</strong>: the run says nothing about the crash; the reason is on the row (another payload exit, a missing report, a job failure before the payload, a failed submission).</li>
                 </ul>

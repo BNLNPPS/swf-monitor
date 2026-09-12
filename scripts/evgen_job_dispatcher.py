@@ -314,6 +314,7 @@ def run_payload_canary(csv_base, stamp, workdir):
         "dataset": f"epic:/{dataset}",
         "payload_version": payload_version(workdir),
         "payload_exit_code": rc,
+        "fatal": payload.get("fatal"),
         "manifest_row": row,
         "requested_events": requested,
         "events_processed": produced if isinstance(produced, int) else None,

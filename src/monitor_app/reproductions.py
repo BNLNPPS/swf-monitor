@@ -59,6 +59,7 @@ RESULTS = [
     ('pending', 'Pending'),
     ('awaiting_report', 'Awaiting report'),
     ('crashed', 'Crash reproduced'),
+    ('crash_observed', 'Crash observed'),
     ('completed', 'Completed without crash'),
     ('inconclusive', 'Inconclusive'),
 ]
@@ -69,6 +70,7 @@ RESULT_ORDER = [r for r, _ in RESULTS]
 # result cell takes, where its own word has no fill class.
 PHASE_STATE = {'queued_submission': 'waiting', 'submission_failed': 'failed'}
 RESULT_STATE = {'awaiting_report': 'pending', 'crashed': 'failed',
+                'crash_observed': 'failed',
                 'inconclusive': 'degraded'}
 
 # PanDA job states before the job runs; the raw state is kept beside
@@ -113,8 +115,19 @@ def _signature_runs(keys=None):
           .select_related('queue').order_by('submitted_at', 'id'))
     if keys is not None:
         qs = qs.filter(data__signature__in=list(keys))
+    runs = list(qs)
+    # Reports filed by the existing report sweep also carry fatal evidence
+    # when the pilot's last heartbeat predates the signal. Read in bulk;
+    # pages never fetch remote logs or mutate the canary store.
+    from .models import EpicProdJob
+    ids = [(r.data or {}).get('pandaid') for r in runs]
+    reports = {j.pandaid: ((j.data or {}).get('payload_report') or {}).get('report') or {}
+               for j in EpicProdJob.objects.filter(pandaid__in=[i for i in ids if i]).only('pandaid', 'data')}
     by_key = {}
-    for run in qs:
+    for run in runs:
+        fatal = reports.get((run.data or {}).get('pandaid'), {}).get('fatal')
+        if fatal:
+            run.data = dict(run.data or {}, fatal=fatal)
         key = (run.data or {}).get('signature')
         if key:
             by_key.setdefault(key, []).append(run)
@@ -224,6 +237,19 @@ def result_of(run, phase):
         reason = d.get('error') or (d.get('stderr') or d.get('stdout') or '').strip().splitlines()[-1:]
         reason = reason if isinstance(reason, str) else (reason[0] if reason else 'submission failed')
         return 'inconclusive', f'submission failed: {reason}'[:300], None
+    fatal = d.get('fatal') or {}
+    if fatal.get('signal') in (6, 7, 8, 11):
+        names = {6: 'SIGABRT', 7: 'SIGBUS', 8: 'SIGFPE', 11: 'SIGSEGV'}
+        reason = f"{names[fatal['signal']]} observed in {fatal.get('stage') or 'payload'}"
+        if fatal.get('terminated'):
+            reason += '; stalled after the signal; stage terminated by watchdog'
+        elif phase in ACTIVE_PHASES:
+            reason += '; execution has not ended'
+        else:
+            reason += '; execution ended separately'
+        # An observed signal is evidence, not an invented process exit or
+        # proof that the requested crashing frame was reached.
+        return 'crash_observed', reason, d.get('payload_exit_code')
     if phase in ACTIVE_PHASES:
         return 'pending', '', None
     if run.status == 'collected':
@@ -485,6 +511,8 @@ def _entry_outcome(row):
     """The request mirror's outcome word for an attempt row (the
     signature's own vocabulary: submitted, running, crashed, completed,
     inconclusive)."""
+    if row['result'] == 'crash_observed':
+        return 'running' if row['active'] else 'inconclusive'
     if row['result'] in ('crashed', 'completed', 'inconclusive'):
         return row['result']
     if row['phase'] in ('running', 'finishing', 'queued'):
