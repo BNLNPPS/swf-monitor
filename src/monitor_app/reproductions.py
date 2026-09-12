@@ -264,6 +264,17 @@ def _attempt(sig, entry, run, now):
     if started and not ended and phase in ('running', 'finishing'):
         running_for_s = int((now - started).total_seconds())
     observed = _parse_dt(d.get('observed_at')) or (run.modified_at if run is not None else None)
+    # Why the job itself failed, when it did: the pilot's or the DDM error
+    # the collection recorded, or the note of a collection from the digest.
+    execution_note = ''
+    if phase in ('failed', 'cancelled'):
+        errors = d.get('errors') or {}
+        parts = [f"{k} {v.get('code')}: {(v.get('diag') or '')[:80]}".rstrip(': ')
+                 for k, v in errors.items()] if isinstance(errors, dict) else []
+        note = d.get('collect_note') or ''
+        if note.startswith('payload outcome from the job digest; '):
+            note = note[len('payload outcome from the job digest; '):]
+        execution_note = '; '.join(parts) if parts else note
     requested = _parse_dt(entry.get('requested_at')) if entry else None
     if requested is None and run is not None:
         requested = run.submitted_at
@@ -292,6 +303,7 @@ def _attempt(sig, entry, run, now):
         'phase_state': PHASE_STATE.get(phase, phase),
         'job_status': job_status,
         'active': phase in ACTIVE_PHASES,
+        'execution_note': execution_note[:200],
         'result': result,
         'result_label': RESULT_LABELS.get(result, result),
         'result_state': RESULT_STATE.get(result, result),
