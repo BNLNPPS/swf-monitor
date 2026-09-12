@@ -5,8 +5,8 @@
 
 {% block content %}
 <div class="container-fluid">
-    <p class="mb-2"><a href="{% url 'monitor_app:panda_segfaults' %}">Segfault Catalog</a> &raquo; Reproduction runs</p>
     <h1>Segfault Reproduction Runs</h1>
+    {% with segfault_tab='reproductions' %}{% include 'monitor_app/_segfault_tabs.html' %}{% endwith %}
     <p class="text-muted mb-2" id="repro-desc">
         Every attempt to run a crashed row again: the operator's request from a signature page, the canary job the
         canary agent submitted for it on the production queue or the reference queue BNL_NPPS_GPU, and what the

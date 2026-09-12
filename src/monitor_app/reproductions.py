@@ -68,8 +68,8 @@ RESULT_ORDER = [r for r, _ in RESULTS]
 # The house state colours (static/css/state-colors.css) a phase or
 # result cell takes, where its own word has no fill class.
 PHASE_STATE = {'queued_submission': 'waiting', 'submission_failed': 'failed'}
-RESULT_STATE = {'awaiting_report': 'holding', 'crashed': 'critical',
-                'inconclusive': 'warning'}
+RESULT_STATE = {'awaiting_report': 'pending', 'crashed': 'failed',
+                'inconclusive': 'degraded'}
 
 # PanDA job states before the job runs; the raw state is kept beside
 # the phase.

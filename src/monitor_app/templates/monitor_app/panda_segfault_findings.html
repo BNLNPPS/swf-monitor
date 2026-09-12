@@ -6,8 +6,9 @@
 {% block content %}
 <div class="container-fluid">
     <h1>Segfault Findings</h1>
+    {% with segfault_tab='findings' %}{% include 'monitor_app/_segfault_tabs.html' %}{% endwith %}
     <p class="text-muted mb-3" id="findings-desc">
-        The curated reading of the <a href="{% url 'monitor_app:panda_segfaults' %}">Segfault Catalog</a>: one entry per crashing
+        The curated reading of the Segfault Catalog: one entry per crashing
         frame, stating what the crash is, which configurations it hits and what they lost, and what production does about it.
         The catalog is the record, rebuilt from the production record nightly; this page is the reading of it, written by the
         production operator after checking each claim against its source, versioned with the editor's name on every change, and

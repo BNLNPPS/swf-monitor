@@ -6,6 +6,7 @@
 {% block content %}
 <div class="container-fluid">
     <h1>Segfault Catalog</h1>
+    {% with segfault_tab='catalog' %}{% include 'monitor_app/_segfault_tabs.html' %}{% endwith %}
     <p class="text-muted mb-2">
         Payload crashes in ePIC production jobs, one row per crash signature: a job whose payload died on a signal
         (exit code 128 plus the signal: 139 SIGSEGV, 134 SIGABRT, 135 SIGBUS, 136 SIGFPE), found from the PanDA record
@@ -48,9 +49,8 @@
     </details>
     <p class="mb-2">
         <strong class="swf-nf-shown">{{ shown }}</strong> of <strong>{{ total }}</strong> signatures,
-        <strong>{{ crashes_total }}</strong> crashed jobs in the inventory.
-        The curated reading of the frames: <a href="{% url 'monitor_app:panda_segfault_findings' %}">Segfault Findings</a>.
-        Every rerun of a crashed row: <a href="{% url 'monitor_app:panda_segfault_reproductions' %}">All reproduction runs</a>{% if repro_counts.total %} ({{ repro_counts.active }} active, {{ repro_counts.ended }} ended){% endif %}.
+        <strong>{{ crashes_total }}</strong> crashed jobs in the inventory{% if repro_counts.total %};
+        <strong>{{ repro_counts.active }}</strong> reproduction runs active, <strong>{{ repro_counts.ended }}</strong> ended{% endif %}.
     </p>
 
     {# Narrowing filter (monitor_app/narrowing_filter.py): one value per facet, rows are the intersection, every bar counts within the selection. #}
