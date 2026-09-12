@@ -75,15 +75,15 @@
                     </details>
                     {% endif %}
                     <div class="finding-label">What it is</div>
-                    <p>{{ e.what }}</p>
+                    <p>{{ e.what|urlize }}</p>
                     {% if e.sources %}<div class="finding-label">Sources</div>
                     <p>{% for s in e.sources %}<a href="{{ s.url }}">{{ s.label }}</a>{% if not forloop.last %}<br>{% endif %}{% endfor %}</p>{% endif %}
                     {% if e.action %}<div class="finding-label">What production does</div>
-                    <p>{{ e.action }}</p>{% endif %}
+                    <p>{{ e.action|urlize }}</p>{% endif %}
                     {% if e.notes %}<div class="finding-label">Notes</div>
-                    <p>{{ e.notes }}</p>{% endif %}
+                    <p>{{ e.notes|urlize }}</p>{% endif %}
                     {% if e.fix %}<div class="finding-label">Fix</div>
-                    <p>{{ e.fix }}</p>{% endif %}
+                    <p>{{ e.fix|urlize }}</p>{% endif %}
                 </td>
             </tr>
             {% endfor %}
