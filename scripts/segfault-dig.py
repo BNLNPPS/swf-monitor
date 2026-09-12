@@ -76,6 +76,33 @@ def fetch_log(scope, lfn, jeditaskid, pandaid):
     return jobdir, ''
 
 
+def metatable_note(pandaid):
+    """The payload report's note of a finished job, from the PanDA metatable
+    (the pilot lifts jobReport.json there for finished jobs only; the
+    dispatcher carries the payload report under ``payload``). '' when the
+    job has none."""
+    from django.db import connections
+    from monitor_app.panda.constants import PANDA_SCHEMA
+    try:
+        with connections['panda'].cursor() as cur:
+            cur.execute(f'SELECT "metadata" FROM "{PANDA_SCHEMA}"."metatable" WHERE "pandaid" = %s',
+                        [int(pandaid)])
+            row = cur.fetchone()
+    except Exception as e:                                    # noqa: BLE001
+        log.error('job %s: metatable read failed: %s', pandaid, e)
+        return ''
+    if not row or not row[0]:
+        return ''
+    raw = row[0]
+    try:
+        meta = json.loads(raw) if isinstance(raw, str) else raw
+    except (ValueError, TypeError) as e:
+        log.error('job %s: metatable metadata unparsable: %s', pandaid, e)
+        return ''
+    payload = meta.get('payload') if isinstance(meta, dict) else None
+    return str((payload or {}).get('note') or '') if isinstance(payload, dict) else ''
+
+
 def dig(sig, pandaid=None):
     """One dig; returns the summary dict for the signature."""
     if pandaid is None:
@@ -100,13 +127,19 @@ def dig(sig, pandaid=None):
     from monitor_app.models import EpicProdJob as _Job
     filed = (_Job.objects.filter(pandaid=int(pandaid)).only('data').first() or _Job()).data or {}
     note = (((filed.get('payload_report') or {}).get('report') or {}).get('note') or '')
+    source = 'payload_report'
+    if not note.startswith('crash:'):
+        # A job that finished at the server (a reproduction on the reference
+        # queue, which carries no log dataset) has its report in the PanDA
+        # metatable, not in the sweep's filing.
+        note, source = metatable_note(pandaid), 'metatable'
     if note.startswith('crash:'):
         result = trace_extract([note])
         if result['trace_status'] == 'found':
-            log.info('%s: trace read from the filed payload report of job %s', sig.key, pandaid)
+            log.info('%s: trace read from the %s payload report of job %s', sig.key, source, pandaid)
             merged = record_trace(sig, result, pandaid, '')
             return {'key': sig.key, 'pandaid': pandaid, 'trace_status': 'found',
-                    'source': 'payload_report', 'program': result.get('program'),
+                    'source': source, 'program': result.get('program'),
                     'stage': result.get('stage'), 'frame': result.get('frame'),
                     'library': result.get('library'),
                     'events_processed': result.get('events_processed'), 'merged_into': merged}
