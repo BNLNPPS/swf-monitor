@@ -243,7 +243,7 @@ rsync -a --delete "$RELEASE_DIR/src/staticfiles/" "$DEPLOY_ROOT/shared/static/"
 
 # Run database migrations
 log "Running database migrations..."
-python manage.py migrate --settings=swf_monitor_project.settings
+python "$RELEASE_DIR/scripts/migrate-swfdb.py" --settings=swf_monitor_project.settings
 
 # Set ownership
 log "Setting ownership..."
