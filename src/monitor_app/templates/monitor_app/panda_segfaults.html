@@ -50,6 +50,7 @@
         <strong class="swf-nf-shown">{{ shown }}</strong> of <strong>{{ total }}</strong> signatures,
         <strong>{{ crashes_total }}</strong> crashed jobs in the inventory.
         The curated reading of the frames: <a href="{% url 'monitor_app:panda_segfault_findings' %}">Segfault Findings</a>.
+        Every rerun of a crashed row: <a href="{% url 'monitor_app:panda_segfault_reproductions' %}">All reproduction runs</a>{% if repro_counts.total %} ({{ repro_counts.active }} active, {{ repro_counts.ended }} ended){% endif %}.
     </p>
 
     {# Narrowing filter (monitor_app/narrowing_filter.py): one value per facet, rows are the intersection, every bar counts within the selection. #}
@@ -79,6 +80,7 @@
                 <th title="Crashed manifest rows with no delivered output in any attempt">Rows lost</th>
                 <th>Stage</th>
                 <th>Status</th>
+                <th title="Reruns of a crashed row as canary jobs: attempts still queued or running, and attempts ended; a trace-level row counts its members' attempts">Reproductions</th>
             </tr>
         </thead>
         <tbody>
@@ -99,6 +101,7 @@
                 <td data-order="{{ r.rows_lost|default_if_none:'-1' }}" title="{{ r.rows_lost_note }}">{% if r.rows_lost is not None %}{{ r.rows_lost }}{% if r.events_lost %}<br>{{ r.events_lost }} ev{% endif %}{% endif %}</td>
                 <td>{% for stage, n in r.stages.items %}{{ stage }} ({{ n }}){% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
                 <td>{{ r.status_label }}</td>
+                <td data-order="{{ r.repro_active }}{{ r.repro_ended|stringformat:'04d' }}">{% if r.repro_active or r.repro_ended %}<a href="{% url 'monitor_app:panda_segfault_reproductions' %}?signature={{ r.key|urlencode }}">{% if r.repro_active %}{{ r.repro_active }} active{% endif %}{% if r.repro_active and r.repro_ended %}, {% endif %}{% if r.repro_ended %}{{ r.repro_ended }} ended{% endif %}</a>{% endif %}</td>
             </tr>
             {% endfor %}
         </tbody>

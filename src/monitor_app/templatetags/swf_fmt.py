@@ -86,6 +86,28 @@ def fmt_value(value):
     return value
 
 
+@register.filter(name='fmt_duration')
+def fmt_duration(seconds):
+    """Format a number of seconds as a compact duration: ``45 s``,
+    ``12 min``, ``1 h 05 min``, ``2 d 3 h``; '' for None."""
+    if seconds is None or seconds == '':
+        return ''
+    try:
+        seconds = int(float(seconds))
+    except (TypeError, ValueError):
+        return str(seconds)
+    if seconds < 60:
+        return f'{seconds} s'
+    minutes = seconds // 60
+    if minutes < 60:
+        return f'{minutes} min'
+    hours, minutes = divmod(minutes, 60)
+    if hours < 48:
+        return f'{hours} h {minutes:02d} min'
+    days, hours = divmod(hours, 24)
+    return f'{days} d {hours} h'
+
+
 @register.filter(name='fmt_ago')
 def fmt_ago(value):
     """Format a datetime / ISO string as a compact relative age."""

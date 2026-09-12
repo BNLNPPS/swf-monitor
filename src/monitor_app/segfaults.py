@@ -367,6 +367,7 @@ def signature_summary(sig):
         'trace_status': (sig.trace or {}).get('trace_status', 'unknown'),
         'frame': (sig.trace or {}).get('frame', ''),
         'member_of': (sig.data or {}).get('member_of', ''),
+        'members': list((sig.data or {}).get('members') or []),
         'finding_anchor': '',
         'first_seen': _iso(sig.first_seen),
         'last_seen': _iso(sig.last_seen),
@@ -401,11 +402,6 @@ def signature_detail(key, jobs_limit=200):
     sig = CrashSignature.objects.filter(key=key).first()
     if sig is None:
         return None
-    if sig.reproduction:
-        try:
-            reproduction_refresh(sig)
-        except Exception as e:                                # noqa: BLE001
-            logger.error('segfault %s: reproduction refresh failed: %s', key, e)
     detail = signature_summary(sig)
     anchors = finding_anchors()
     detail['finding_anchor'] = anchors.get(sig.key) or anchors.get(detail['member_of'] or '') or ''
@@ -420,6 +416,14 @@ def signature_detail(key, jobs_limit=200):
         'data': sig.data or {},
         'local_repro': local_repro(sig),
     })
+    # The reproduction attempts, execution and result apart, from the
+    # shared read-only summary (monitor_app/reproductions.py); a
+    # trace-level signature shows its members' attempts too. Nothing is
+    # reconciled here: the canary agent does that after each collection.
+    from .reproductions import attempts as _attempts, global_counts
+    keys = [sig.key] + list((sig.data or {}).get('members') or [])
+    detail['attempts'] = _attempts(keys=keys)
+    detail['attempt_counts'] = global_counts(detail['attempts'])
     task_ids = [t.get('jeditaskid') for t in (sig.tasks or []) if t.get('jeditaskid')]
     jobs = []
     if task_ids:
@@ -794,19 +798,40 @@ def reproduction_plan(sig, pandaid=None):
             'maxrss_mb': maxrss_mb, 'job_maxrss_mb': crash.get('maxrss_mb')}
 
 
+def _append_reproduction(key, entry):
+    """Append one request entry to the signature under a row lock, so a
+    request recorded meanwhile by another writer is kept."""
+    from django.db import transaction
+    with transaction.atomic():
+        sig = CrashSignature.objects.select_for_update().get(key=key)
+        sig.reproduction = list(sig.reproduction or []) + [entry]
+        fields = ['reproduction', 'updated_at']
+        if sig.status in ('new', 'traced', 'digging'):
+            sig.status = 'reproducing'
+            fields.append('status')
+        sig.save(update_fields=fields)
+        return sig
+
+
 def reproduce(sig, pandaid, queues, mem_limits, username):
     """Queue one payload canary per queue to the canary agent for the
-    crashed job's row, and record the runs on the signature as submitted.
-    ``mem_limits`` maps queue -> MB or None. Returns the entries added."""
+    crashed job's row, and record each request on the signature as it is
+    sent, with the request identity the run will carry
+    (monitor_app/reproductions.py). ``mem_limits`` maps queue -> MB or
+    None. Returns the entries added; a send that fails after an earlier
+    one succeeded leaves the earlier request on record and raises."""
     import json
     from .activemq_connection import ActiveMQConnectionManager
+    from .reproductions import new_request_id
     plan = reproduction_plan(sig, pandaid)
     entries = []
     now = _iso(timezone.now())
     for queue in queues:
+        request_id = new_request_id()
         msg = {'msg_type': 'payload_canary', 'namespace': CANARY_NAMESPACE,
                'task': plan['task'], 'queue': queue, 'row_text': plan['row_text'],
                'signature': sig.key, 'pandaid': plan['pandaid'],
+               'request_id': request_id,
                'created_by': username or 'segfault_reproduce'}
         if plan.get('container'):
             msg['container'] = plan['container']
@@ -815,122 +840,33 @@ def reproduce(sig, pandaid, queues, mem_limits, username):
             msg['mem_limit_mb'] = int(limit)
         sent = ActiveMQConnectionManager().send_message(CANARY_QUEUE, json.dumps(msg))
         if not sent:
-            raise RuntimeError('the canary agent queue could not be reached')
-        entries.append({'pandaid': plan['pandaid'], 'queue': queue,
-                        'row_text': plan['row_text'], 'mem_limit_mb': limit,
-                        'container': plan.get('container') or '',
-                        'requested_at': now, 'requested_by': username,
-                        'outcome': 'submitted', 'jedi_task_id': None,
-                        'canary_pandaid': None, 'minutes': None,
-                        'verdict_time': None, 'exit_code': None})
-    sig.reproduction = list(sig.reproduction or []) + entries
-    if sig.status in ('new', 'traced', 'digging'):
-        sig.status = 'reproducing'
-    sig.save(update_fields=['reproduction', 'status', 'updated_at'])
+            raise RuntimeError(
+                'the canary agent queue could not be reached'
+                + (f" (the request for {', '.join(e['queue'] for e in entries)} was sent)"
+                   if entries else ''))
+        entry = {'request_id': request_id, 'run_id': None,
+                 'pandaid': plan['pandaid'], 'queue': queue,
+                 'row_text': plan['row_text'], 'mem_limit_mb': limit,
+                 'container': plan.get('container') or '',
+                 'requested_at': now, 'requested_by': username,
+                 'outcome': 'submitted', 'jedi_task_id': None,
+                 'canary_pandaid': None, 'minutes': None,
+                 'verdict_time': None, 'exit_code': None}
+        saved = _append_reproduction(sig.key, entry)
+        sig.reproduction, sig.status = saved.reproduction, saved.status
+        entries.append(entry)
     return entries
 
 
 def reproduction_refresh(sig):
-    """Bring the signature's reproduction entries up to date from the
-    canary runs (ProbeRun, kind payload, this signature), and settle the
-    outcome once a production run and a reference run have both
-    reported: reproduced (both crashed), site_dependent (production
-    only), not_reproduced (neither), inconclusive (a run failed for
-    another reason). swfdb only; returns True when anything changed."""
-    from canary.store.models import ProbeRun
-    entries = list(sig.reproduction or [])
-    if not entries:
-        return False
-    runs = list(ProbeRun.objects.filter(
-        data__kind='payload', data__signature=sig.key).select_related('queue')
-        .order_by('submitted_at'))
-    changed = False
-    from datetime import timedelta
-    claimed = set()
-    for e in entries:
-        if e.get('outcome') not in ('submitted', 'running', None):
-            continue
-        requested = _parse_dt(e.get('requested_at')) or datetime.min.replace(tzinfo=dt_timezone.utc)
-        # The run this request produced: same queue and crashed job, submitted
-        # from the request on, the earliest not yet claimed by another entry.
-        run = next((r for r in runs if r.queue.name == e['queue']
-                    and (r.data or {}).get('reproduction_of') == e['pandaid']
-                    and r.submitted_at >= requested - timedelta(seconds=5)
-                    and r.id not in claimed), None)
-        if run is None:
-            continue
-        claimed.add(run.id)
-        d = run.data or {}
-        before = dict(e)
-        e['jedi_task_id'] = run.jeditaskid
-        e['run_id'] = str(run.id)
-        e['canary_pandaid'] = d.get('pandaid')
-        if run.status == ProbeRun.Status.FAILED_SUBMIT:
-            e['outcome'] = 'inconclusive'
-            e['reason'] = 'submission failed: ' + str(d.get('error') or d.get('stderr') or '')[-200:]
-        elif run.status == ProbeRun.Status.COLLECTED:
-            rc = d.get('payload_exit_code')
-            e['exit_code'] = rc
-            e['minutes'] = d.get('run_seconds') / 60.0 if d.get('run_seconds') else e.get('minutes')
-            e['verdict_time'] = _iso(run.modified_at)
-            if rc in CRASH_EXITS:
-                e['outcome'] = 'crashed'
-            elif rc == 0:
-                e['outcome'] = 'completed'
-            else:
-                e['outcome'] = 'inconclusive'
-                e['reason'] = f'payload exited {rc}'
-        elif run.status == ProbeRun.Status.FAILED:
-            e['outcome'] = 'inconclusive'
-            e['reason'] = 'the canary job failed: ' + ', '.join(
-                str(x) for x in (d.get('errors') or [])[:3])
-            e['verdict_time'] = _iso(run.modified_at)
-        elif run.status == ProbeRun.Status.FINISHED:
-            e['outcome'] = 'inconclusive'
-            e['reason'] = d.get('collect_note') or 'finished without a payload report'
-        elif d.get('started_at') or d.get('wait_s') is not None:
-            e['outcome'] = 'running'
-        if e != before:
-            changed = True
-    # The pair settles the signature.
-    settled = [e for e in entries if e.get('outcome') in ('crashed', 'completed', 'inconclusive')]
-    prod = [e for e in settled if e['queue'] != REFERENCE_QUEUE]
-    ref = [e for e in settled if e['queue'] == REFERENCE_QUEUE]
-    outcome = None
-    if prod and ref:
-        p, r = prod[-1]['outcome'], ref[-1]['outcome']
-        if p == 'crashed' and r == 'crashed':
-            outcome = 'reproduced'
-        elif p == 'crashed' and r == 'completed':
-            outcome = 'site_dependent'
-        elif p == 'completed' and r == 'completed':
-            outcome = 'not_reproduced'
-        elif p == 'completed' and r == 'crashed':
-            outcome = 'reproduced'
-        else:
-            outcome = 'inconclusive'
-    elif ref and ref[-1]['outcome'] == 'crashed':
-        outcome = 'reproduced'
-    data = dict(sig.data or {})
-    if outcome and data.get('reproduction_outcome') != outcome:
-        data['reproduction_outcome'] = outcome
-        data['reproduction_settled_at'] = _iso(timezone.now())
-        sig.data = data
-        # Diagnosis runs on its own once a signature is reproduced with a
-        # trace (SEGFAULT_DIAGNOSIS.md, Diagnosis), once per settlement.
-        if (outcome in ('reproduced', 'site_dependent')
-                and (sig.trace or {}).get('trace_status') == 'found'
-                and not data.get('diagnosis')):
-            queue_diagnosis(sig.key, 'auto:reproduced')
-        if outcome in ('reproduced', 'site_dependent') and sig.status in ('reproducing', 'traced', 'new'):
-            sig.status = 'reproduced'
-        elif outcome == 'not_reproduced' and sig.status == 'reproducing':
-            sig.status = 'not_reproduced'
-        changed = True
-    if changed:
-        sig.reproduction = entries
-        sig.save(update_fields=['reproduction', 'status', 'data', 'updated_at'])
-    return changed
+    """Reconcile one signature's reproduction requests with their runs
+    (monitor_app/reproductions.py): the canary agent's step after each
+    collection, never a page read. Kept under its name for the callers
+    that have it; returns True when anything changed."""
+    from .reproductions import reconcile
+    changed = reconcile(sig.key, queue_diagnosis=queue_diagnosis)
+    sig.refresh_from_db()
+    return bool(changed.get('entries') or changed.get('outcome'))
 
 
 def queue_diagnosis(key, requested_by):

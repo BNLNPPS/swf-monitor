@@ -1742,14 +1742,61 @@ def panda_segfaults(request):
     # Every row is rendered with its facet values; the browser applies the
     # selection (the server's initial state covers links and no script).
     shown = flt.annotate(rows_all, facets)
+    # The reproduction attempts per row, active and ended, each attempt
+    # counted once; a trace-level row carries its members' attempts
+    # (monitor_app/reproductions.py). Stored data only.
+    from ..reproductions import attempts, counts_by_signature, global_counts
+    att = attempts()
+    members = {r['key']: [r['key']] + list(r.get('members') or []) for r in rows_all}
+    counts = counts_by_signature(att, members)
+    for r in rows_all:
+        c = counts.get(r['key']) or {'active': 0, 'ended': 0}
+        r['repro_active'], r['repro_ended'] = c['active'], c['ended']
     context = {
         'rows': rows_all,
         'shown': shown,
         'total': len(rows_all),
         'crashes_total': sum(r['crashes'] for r in rows_all if r['level'] == 'record'),
+        'repro_counts': global_counts(att),
         'narrowing_filter': flt.context(rows_all, facets, request),
     }
     return render(request, 'monitor_app/panda_segfaults.html', context)
+
+
+def panda_segfault_reproductions(request):
+    """Every reproduction attempt of the segfault catalog, one row each,
+    execution phase and reproduction result apart, from the signature
+    store and the canary store alone (monitor_app/reproductions.py);
+    under the narrowing filter, active attempts first. Nothing is
+    collected or reconciled on a read."""
+    from ..narrowing_filter import Facet, NarrowingFilter
+    from ..reproductions import (PHASE_LABELS, PHASE_ORDER, RESULT_LABELS, RESULT_ORDER,
+                                 attempts, freshness, global_counts)
+    rows_all = attempts()
+    facets = [
+        Facet('phase', 'Execution', lambda r: r['phase'],
+              display=lambda v: PHASE_LABELS.get(v, v), order=PHASE_ORDER),
+        Facet('result', 'Result', lambda r: r['result'],
+              display=lambda v: RESULT_LABELS.get(v, v), order=RESULT_ORDER),
+        Facet('queue', 'Queue', lambda r: r['queue'] or None),
+        Facet('role', 'Role', lambda r: r['role']),
+        # A record-level attempt answers to its own key and to the
+        # trace-level signature it is a member of, so the catalog's
+        # trace-level row links to its members' attempts.
+        Facet('signature', 'Signature',
+              lambda r: [r['signature']] + ([r['member_of']] if r.get('member_of') else [])),
+    ]
+    flt = NarrowingFilter(request.GET, facets)
+    shown = flt.annotate(rows_all, facets)
+    context = {
+        'rows': rows_all,
+        'shown': shown,
+        'total': len(rows_all),
+        'counts': global_counts(rows_all),
+        'freshness': freshness(rows_all),
+        'narrowing_filter': flt.context(rows_all, facets, request),
+    }
+    return render(request, 'monitor_app/panda_segfault_reproductions.html', context)
 
 
 def panda_segfault_findings(request):

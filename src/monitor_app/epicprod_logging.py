@@ -262,6 +262,17 @@ ACTION_DEFAULTS = {
                        "not_reproduced, inconclusive) settles on the "
                        "signature from the runs' payload reports.",
     },
+    'segfault_reproduction_reconcile': {
+        'sublevel': 'low', 'live': False,
+        'description': "Reproduction requests reconciled with their canary "
+                       "runs after a probe collection (the canary agent, "
+                       "scripts/segfault-reproductions-reconcile.py): each "
+                       "open request takes its run's identity and outcome, "
+                       "a reported production and reference pair settles the "
+                       "signature's reproduction outcome, and a settled "
+                       "reproduction with a trace queues its diagnosis once. "
+                       "Recorded when something changed.",
+    },
     'segfault_diagnose_request': {
         'sublevel': 'low', 'live': False,
         'description': "Operator request of a crash signature's LLM study "

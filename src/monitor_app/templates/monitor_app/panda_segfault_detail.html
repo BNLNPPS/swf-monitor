@@ -92,21 +92,23 @@
 
             <h4>Reproduction</h4>
             {% if sig.reproduction_outcome %}<p>Outcome: <strong>{{ sig.reproduction_outcome }}</strong> (reproduced: both runs crashed; site_dependent: the production run alone; not_reproduced: neither; inconclusive: a run failed for another reason).</p>{% endif %}
-            {% if sig.reproduction %}
-            <table class="table table-striped table-bordered table-sm align-middle w-auto">
-                <thead><tr><th>Crashed job</th><th>Queue</th><th>Memory limit</th><th>Canary task</th><th>Canary job</th><th>Outcome</th><th>Exit</th><th>Requested</th><th>Settled</th></tr></thead>
+            {% if sig.attempts %}
+            <p class="mb-1"><strong>{{ sig.attempt_counts.active }}</strong> active, <strong>{{ sig.attempt_counts.ended }}</strong> ended{% if sig.data.members %}, the members' attempts included{% endif %}; execution and result apart, read from the runs as last collected:
+               <a href="{% url 'monitor_app:panda_segfault_reproductions' %}?signature={{ sig.key|urlencode }}">these attempts among all reproduction runs</a>.</p>
+            <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable" data-swf-pin-columns="0">
+                <thead><tr><th>Requested</th><th>Crashed job</th><th>Queue</th><th>Execution</th><th>Ran</th><th>Result</th><th>Canary task</th><th>Canary job</th><th>Observed</th></tr></thead>
                 <tbody>
-                {% for r in sig.reproduction %}
+                {% for r in sig.attempts %}
                 <tr>
-                    <td><a href="{% url 'monitor_app:panda_job_detail' pandaid=r.pandaid %}">{{ r.pandaid }}</a></td>
-                    <td>{{ r.queue }}</td>
-                    <td>{% if r.mem_limit_mb %}{{ r.mem_limit_mb }} MB{% endif %}</td>
-                    <td>{% if r.jedi_task_id %}<a href="{% url 'monitor_app:panda_task_detail' jeditaskid=r.jedi_task_id %}">{{ r.jedi_task_id }}</a>{% endif %}</td>
+                    <td data-order="{{ r.requested_at|default:'' }}">{{ r.requested_at|fmt_dt }}{% if r.requested_by %}<br><span class="text-muted">{{ r.requested_by }}</span>{% endif %}</td>
+                    <td>{% if r.original_pandaid %}<a href="{% url 'monitor_app:panda_job_detail' pandaid=r.original_pandaid %}">{{ r.original_pandaid }}</a>{% endif %}{% if r.signature != sig.key %}<br><span class="text-muted">{{ r.signature }}</span>{% endif %}</td>
+                    <td>{{ r.queue }}{% if r.mem_limit_mb %}<br><span class="text-muted">{{ r.mem_limit_mb }} MB</span>{% endif %}</td>
+                    <td class="{{ r.phase_state|state_class }}" data-order="{{ r.phase }}">{{ r.phase_label }}{% if r.job_status and r.job_status != r.phase %}<br><span class="text-muted">{{ r.job_status }}</span>{% endif %}</td>
+                    <td data-order="{{ r.run_s|default_if_none:r.running_for_s|default_if_none:'-1' }}">{% if r.run_s is not None %}{{ r.run_s|fmt_duration }}{% elif r.running_for_s is not None %}{{ r.running_for_s|fmt_duration }} <span class="text-muted">so far</span>{% endif %}</td>
+                    <td class="{{ r.result_state|state_class }}" data-order="{{ r.result }}" style="max-width: 22em; overflow-wrap: anywhere;">{{ r.result_label }}{% if r.payload_exit_code is not None %} <span class="text-muted">(exit {{ r.payload_exit_code }}{% if r.payload_stage %}, {{ r.payload_stage }}{% endif %})</span>{% endif %}{% if r.reason %}<br><span class="text-muted">{{ r.reason|truncatechars:120 }}</span>{% endif %}</td>
+                    <td>{% if r.jeditaskid %}<a href="{% url 'monitor_app:panda_task_detail' jeditaskid=r.jeditaskid %}">{{ r.jeditaskid }}</a>{% endif %}</td>
                     <td>{% if r.canary_pandaid %}<a href="{% url 'monitor_app:panda_job_detail' pandaid=r.canary_pandaid %}">{{ r.canary_pandaid }}</a>{% endif %}</td>
-                    <td title="{{ r.reason|default:'' }}">{{ r.outcome }}{% if r.reason %} <span class="text-muted">({{ r.reason|truncatechars:80 }})</span>{% endif %}</td>
-                    <td>{{ r.exit_code|default_if_none:'' }}</td>
-                    <td>{{ r.requested_at|fmt_dt }}</td>
-                    <td>{{ r.verdict_time|fmt_dt }}</td>
+                    <td data-order="{{ r.observed_at|default:'' }}">{% if r.observed_at %}<span data-relative-time="{{ r.observed_at }}" title="{{ r.observed_at|fmt_dt }}">{{ r.observed_at|fmt_ago }}</span>{% endif %}</td>
                 </tr>
                 {% endfor %}
                 </tbody>

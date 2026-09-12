@@ -1,0 +1,99 @@
+{% extends 'base.html' %}
+{% load swf_fmt %}
+
+{% block title %}Segfault Reproduction Runs{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <p class="mb-2"><a href="{% url 'monitor_app:panda_segfaults' %}">Segfault Catalog</a> &raquo; Reproduction runs</p>
+    <h1>Segfault Reproduction Runs</h1>
+    <p class="text-muted mb-2" id="repro-desc">
+        Every attempt to run a crashed row again: the operator's request from a signature page, the canary job the
+        canary agent submitted for it on the production queue or the reference queue BNL_NPPS_GPU, and what the
+        payload did. One row per attempt, the queued and running ones first, then the ended ones newest first.
+        Execution and result are kept apart: a finished PanDA job is not a payload that ran clean, and a failed one
+        is not a crash; the result comes from the payload's own exit code in its report, or from the job digest when
+        the job failed after the payload ran.
+    </p>
+    <details class="mb-3">
+        <summary>Definitions</summary>
+        <ul class="mb-2 mt-1">
+            <li><strong>Execution</strong>, where the attempt is:
+                <ul>
+                    <li><strong>Queued for submission</strong>: the request is recorded, no canary run answers it yet; the agent has it, or its dispatch failed before a run was recorded.</li>
+                    <li><strong>Submitting</strong>: the agent accepted it, no PanDA task yet.</li>
+                    <li><strong>Queued</strong>: the task is submitted and the job has not started (the PanDA state is shown).</li>
+                    <li><strong>Running</strong>, <strong>Finishing</strong>: the job runs, or is past running (holding, transferring).</li>
+                    <li><strong>Finished</strong>, <strong>Failed</strong>, <strong>Cancelled</strong>: the job ended; the PanDA verdict on the job, not on the payload.</li>
+                    <li><strong>Submission failed</strong>: no task could be made; the reason is on the row.</li>
+                </ul>
+            </li>
+            <li><strong>Result</strong>, what the payload did:
+                <ul>
+                    <li><strong>Pending</strong>: the job has not ended.</li>
+                    <li><strong>Awaiting report</strong>: the job ended; the next collection reads its report.</li>
+                    <li><strong>Crash reproduced</strong>: the payload died on a signal (exit 134, 135, 136 or 139).</li>
+                    <li><strong>Completed without crash</strong>: the payload ran to exit 0.</li>
+                    <li><strong>Inconclusive</strong>: the run says nothing about the crash; the reason is on the row (another payload exit, a missing report, a job failure before the payload, a failed submission).</li>
+                </ul>
+            </li>
+            <li><strong>Waited</strong>: from the job's creation to its start. <strong>Ran</strong>: from start to end; for a job still running, the time so far, marked.</li>
+            <li><strong>Observed</strong>: when PanDA was last read for the attempt by the probe collection; a page reload does not read PanDA.</li>
+        </ul>
+    </details>
+    <p class="mb-2">
+        <strong class="swf-nf-shown">{{ shown }}</strong> of <strong>{{ total }}</strong> attempts:
+        <strong>{{ counts.active }}</strong> active, <strong>{{ counts.ended }}</strong> ended.
+        {% if freshness.observed_at %}Last observation {{ freshness.observed_at|fmt_dt }} (<span data-relative-time="{{ freshness.observed_at }}">{{ freshness.observed_at|fmt_ago }}</span>).{% else %}No attempt has been observed by a collection yet.{% endif %}
+    </p>
+
+    {# Narrowing filter (monitor_app/narrowing_filter.py): one value per facet, rows are the intersection, every bar counts within the selection. #}
+    {% include 'monitor_app/_narrowing_filter.html' %}
+
+    <style>
+      #repro-table td.sig-col { width: 18em; min-width: 14em; max-width: 18em; overflow-wrap: anywhere; }
+      #repro-table td.reason-col { max-width: 24em; overflow-wrap: anywhere; }
+    </style>
+    <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable" id="repro-table" data-swf-order="">
+        <thead>
+            <tr>
+                <th>Requested</th>
+                <th>Signature</th>
+                <th title="The crashed production job whose row is run again">Original job</th>
+                <th>Queue</th>
+                <th>Execution</th>
+                <th title="From the job's creation to its start">Waited</th>
+                <th title="From the job's start to its end; a running job shows the time so far">Ran</th>
+                <th>Result</th>
+                <th>Canary task</th>
+                <th>Canary job</th>
+                <th title="When PanDA was last read for this attempt">Observed</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rows %}
+            <tr data-nf="{{ r.nf_attr }}"{% if r.nf_hidden %} class="swf-nf-hidden"{% endif %}>
+                <td data-order="{{ r.requested_at|default:'' }}">{% with t=r.requested_at|fmt_dt %}{{ t|slice:":8" }}<br>{{ t|slice:"9:" }}{% endwith %}{% if r.requested_by %}<br><span class="text-muted">{{ r.requested_by }}</span>{% endif %}</td>
+                <td class="sig-col"><a href="{% url 'monitor_app:panda_segfault_detail' key=r.signature %}">{{ r.signature }}</a>{% if r.frame %}<br><span class="text-muted">{{ r.frame|truncatechars:60 }}</span>{% endif %}</td>
+                <td>{% if r.original_pandaid %}<a href="{% url 'monitor_app:panda_job_detail' pandaid=r.original_pandaid %}">{{ r.original_pandaid }}</a>{% endif %}</td>
+                <td>{{ r.queue }}<br><span class="text-muted">{{ r.role }}{% if r.mem_limit_mb %}, {{ r.mem_limit_mb }} MB{% endif %}</span></td>
+                <td class="{{ r.phase_state|state_class }}" data-order="{{ r.phase }}">{{ r.phase_label }}{% if r.job_status and r.job_status != r.phase %}<br><span class="text-muted">{{ r.job_status }}</span>{% endif %}</td>
+                <td data-order="{{ r.wait_s|default_if_none:'-1' }}">{{ r.wait_s|fmt_duration }}</td>
+                <td data-order="{{ r.run_s|default_if_none:r.running_for_s|default_if_none:'-1' }}">{% if r.run_s is not None %}{{ r.run_s|fmt_duration }}{% elif r.running_for_s is not None %}{{ r.running_for_s|fmt_duration }} <span class="text-muted">so far</span>{% endif %}</td>
+                <td class="reason-col {{ r.result_state|state_class }}" data-order="{{ r.result }}">{{ r.result_label }}{% if r.payload_exit_code is not None %} <span class="text-muted">(exit {{ r.payload_exit_code }}{% if r.payload_stage %}, {{ r.payload_stage }}{% endif %}{% if r.events_processed is not None %}, {{ r.events_processed }} ev{% endif %})</span>{% endif %}{% if r.reason %}<br><span class="text-muted">{{ r.reason }}</span>{% endif %}{% if r.collect_error %}<br><span class="text-danger">collection: {{ r.collect_error|truncatechars:120 }}</span>{% endif %}</td>
+                <td>{% if r.jeditaskid %}<a href="{% url 'monitor_app:panda_task_detail' jeditaskid=r.jeditaskid %}">{{ r.jeditaskid }}</a>{% endif %}</td>
+                <td>{% if r.canary_pandaid %}<a href="{% url 'monitor_app:panda_job_detail' pandaid=r.canary_pandaid %}">{{ r.canary_pandaid }}</a>{% if r.host %}<br><span class="text-muted">{{ r.host|truncatechars:28 }}</span>{% endif %}{% endif %}</td>
+                <td data-order="{{ r.observed_at|default:'' }}">{% if r.observed_at %}<span data-relative-time="{{ r.observed_at }}" title="{{ r.observed_at|fmt_dt }}">{{ r.observed_at|fmt_ago }}</span>{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<script>
+    // The description takes the table's width, no wider.
+    (function () {
+        var t = document.getElementById('repro-table'), d = document.getElementById('repro-desc');
+        if (t && d) { d.style.maxWidth = t.getBoundingClientRect().width + 'px'; }
+    })();
+</script>
+{% endblock %}

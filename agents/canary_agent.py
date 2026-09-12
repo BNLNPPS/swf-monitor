@@ -56,6 +56,12 @@ EVALUATE_TIMEOUT = int(os.environ.get("CANARY_EVALUATE_TIMEOUT", "120"))
 # Probe dispatch builds a sandbox and runs a client-API submission per
 # due queue; generous bound, one dispatch cycle at a time.
 PROBE_TIMEOUT = int(os.environ.get("CANARY_PROBE_TIMEOUT", "900"))
+# The reconciliation of reproduction requests with their runs after a
+# collection (swf-epicprod SEGFAULT_DIAGNOSIS.md, Reproduction): a few
+# signature rows in swfdb and at most one bus message per settled
+# signature.
+RECONCILE_TIMEOUT = int(os.environ.get("CANARY_RECONCILE_TIMEOUT", "120"))
+RECONCILE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "segfault-reproductions-reconcile.py"
 
 # Dedicated namespace config shipped beside the agent. A fixed 'canary'
 # namespace makes the singleton identifiable in the monitor and lets callers
@@ -147,8 +153,10 @@ class CanaryAgent(BaseAgent):
     def _handle_probe_dispatch(self, m):
         """Enqueue one probe-dispatch cycle: advance probe-run statuses
         and submit probes for due queues, or for a named queue when the
-        message carries one (the page's Run now). Deduped so an
-        overlapping cron tick and button press never double-submit."""
+        message carries one (the page's Run now); with ``collect_only``
+        the cycle collects the open runs and submits nothing (the
+        frequent tick while reproductions run). Deduped so an overlapping
+        cron tick and button press never double-submit."""
         self.run_in_background(
             self._do_probe_dispatch, m,
             dedup_key="probe_dispatch", label="probe_dispatch")
@@ -156,21 +164,54 @@ class CanaryAgent(BaseAgent):
     def _do_probe_dispatch(self, m):
         created_by = str(m.get("created_by") or "?")
         queue = str(m.get("queue") or "").strip()
+        collect_only = bool(m.get("collect_only"))
         args = ["probe-dispatch"]
         if queue:
             args += ["--queue", queue]
+        if collect_only:
+            args += ["--collect-only"]
         self.logger.info(
             f"CANARY probe_dispatch: starting (by {created_by})"
-            + (f" queue={queue}" if queue else ""))
+            + (f" queue={queue}" if queue else "")
+            + (" collect-only" if collect_only else ""))
         t0 = time.monotonic()
         ok = self._run_doer(args, PROBE_TIMEOUT)
         elapsed = time.monotonic() - t0
         self.logger.info(
             f"CANARY probe_dispatch {'done' if ok else 'FAILED'} "
             f"in {elapsed:.1f}s")
+        # Whatever the collection did, the reproduction requests are
+        # reconciled with their runs now, never on a page read.
+        self._reconcile_reproductions()
         self.send_message('/topic/epictopic', {
             "msg_type": "canary_probe_dispatch_complete", "ok": ok,
-            "queue": queue})
+            "queue": queue, "collect_only": collect_only})
+
+    def _reconcile_reproductions(self):
+        """Run the reconciliation script (monitor_app/reproductions.py):
+        each open reproduction request takes its run's identity and
+        outcome, a settled pair settles its signature, and a settled
+        reproduction with a trace queues its diagnosis once. Bounded;
+        every failure is logged, none stops the cycle."""
+        cmd = [sys.executable, str(RECONCILE_SCRIPT)]
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=RECONCILE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"CANARY reproduction reconcile TIMEOUT after {RECONCILE_TIMEOUT}s")
+            return
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  reconcile: {line[:300]}")
+        summary = (p.stdout or "").strip().splitlines()[-1:] or ["{}"]
+        if p.returncode != 0:
+            self.logger.error(
+                f"CANARY reproduction reconcile FAILED rc={p.returncode}: {summary[0][:300]}")
+            return
+        self.logger.info(
+            f"CANARY reproduction reconcile done in {time.monotonic() - t0:.1f}s: "
+            f"{summary[0][:300]}")
 
     def _handle_payload_canary(self, m):
         """Run one payload canary (site-canary IMPLEMENTATION.md, Payload
@@ -214,6 +255,8 @@ class CanaryAgent(BaseAgent):
             args += ["--pandaid", str(int(m["pandaid"]))]
         if m.get("container"):
             args += ["--container", str(m["container"])]
+        if m.get("request_id"):
+            args += ["--request-id", str(m["request_id"])]
         ok = self._run_doer(args, PROBE_TIMEOUT)
         self.logger.info(
             f"CANARY payload_canary {'submitted' if ok else 'FAILED'} "
