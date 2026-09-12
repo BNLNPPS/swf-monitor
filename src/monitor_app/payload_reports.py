@@ -109,12 +109,12 @@ def candidates(since, limit=None):
     """
     sql = f"""
         SELECT "pandaid", "computingsite", "transexitcode", "piloterrorcode",
-               "jobmetrics", "jeditaskid", "modificationhost"
+               "jobmetrics", "jeditaskid", "modificationhost", "processingtype"
         FROM "{PANDA_SCHEMA}"."jobsactive4"
         WHERE "jobstatus" = 'failed' AND "modificationtime" >= %s
         UNION
         SELECT "pandaid", "computingsite", "transexitcode", "piloterrorcode",
-               "jobmetrics", "jeditaskid", "modificationhost"
+               "jobmetrics", "jeditaskid", "modificationhost", "processingtype"
         FROM "{PANDA_SCHEMA}"."jobsarchived4"
         WHERE "jobstatus" = 'failed' AND "modificationtime" >= %s
     """
@@ -125,9 +125,10 @@ def candidates(since, limit=None):
         with connections['panda'].cursor() as cursor:
             cursor.execute(sql, [since, since])
             for (pandaid, site, transexit, piloterr, metrics, jeditaskid,
-                 node) in cursor.fetchall():
+                 node, processingtype) in cursor.fetchall():
                 rows.append({
                     'pandaid': int(pandaid),
+                    'processingtype': processingtype or '',
                     'site': site or '',
                     'transexitcode': str(transexit or ''),
                     'piloterrorcode': int(piloterr or 0),
@@ -330,6 +331,12 @@ def sweep(since, limit=None, per_signature=READ_PER_SIGNATURE, dry_run=False):
     for job in jobs:
         key = signature(job)
         seen[key] = seen.get(key, 0) + 1
+        # A canary or a reproduction is a one-off whose report is the
+        # product (SEGFAULT_DIAGNOSIS.md, Reproduction): read it whatever
+        # its signature's count. The bound is for storms.
+        if job.get('processingtype') == 'canary':
+            to_read.append(job)
+            continue
         (to_read if seen[key] <= per_signature else to_drop).append(job)
 
     filed, deleted_read, deleted_unread, errors = [], [], [], []

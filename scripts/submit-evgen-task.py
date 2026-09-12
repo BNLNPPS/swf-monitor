@@ -113,6 +113,12 @@ def _api_post_json(base, path, query, body, token, owner=None):
 
 REPORTING_ENV_FILE = os.environ.get(
     "JOB_REPORTING_ENV", os.path.expanduser("~/.epic-job-reporter.env"))
+# Queues whose log stage-out is an object store outside the Rucio catalog
+# (swf-epicprod docs/NPPS0_TEST_QUEUE.md): the pilot puts the log in S3, the
+# server then tries to register it at the queue's Rucio log storage and the
+# adder fails the job on that, whatever the payload did (DDM 200, 2026-09-11,
+# every reproduction on npps0). A task sent there carries no log dataset.
+OBJECT_STORE_LOG_QUEUES = {"BNL_NPPS_GPU"}
 REPORTING_KEYS = ("REPORT_OUT_BUCKET", "REPORT_OUT_REGION",
                   "REPORT_OUT_ACCESS_KEY_ID", "REPORT_OUT_SECRET_ACCESS_KEY",
                   "REPORT_OUT_ENDPOINT")
@@ -449,6 +455,10 @@ def main():
         _log(f"trial {spec['outDS']} on {spec.get('site') or '(brokered)'}: "
              f"{args.trial_events} events, outputs under "
              f"epic:/{args.trial_root}, lifetime {args.trial_lifetime_days}d")
+    if spec.get('site') in OBJECT_STORE_LOG_QUEUES:
+        # The kernel drops the log dataset on noLog (evgen_panda_submit.py).
+        spec['noLog'] = True
+        _log(f"site {spec['site']}: no log dataset (object-store log stage-out)")
     _log(f"EVGEN spec for {args.task_name}: outDS={spec['outDS']} "
          f"nJobs={spec.get('nJobs')} skipScout={spec.get('skipScout')}")
 
