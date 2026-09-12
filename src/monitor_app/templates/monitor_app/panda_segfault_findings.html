@@ -17,10 +17,10 @@
     </p>
     {% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
     {% if entries and not historical %}
-    <ol class="mb-3" id="findings-jump">
-        {% for e in entries %}<li><a href="#{{ e.anchor }}">{{ e.title }}</a>{% if e.model_reading %} <span class="ai-attr">model reading</span>{% endif %}</li>
+    <ul class="list-unstyled mb-3" id="findings-jump">
+        {% for e in entries %}<li><a href="#{{ e.anchor }}"><strong>{{ e.fid }}</strong>: {{ e.title }}</a>{% if e.model_reading %} <span class="ai-attr">model reading</span>{% endif %}</li>
         {% endfor %}
-    </ol>
+    </ul>
     {% endif %}
 
     <style>
@@ -64,7 +64,7 @@
             </tr>
             <tr>
                 <td class="finding-col" colspan="8">
-                    <h5>{{ e.title }}{% if e.model_reading %} <span class="ai-attr">model reading</span>{% endif %}</h5>
+                    <h5{% if e.serial %} id="f-{{ e.serial }}"{% endif %}>{% if e.fid %}{{ e.fid }}: {% endif %}{{ e.title }}{% if e.model_reading %} <span class="ai-attr">model reading</span>{% endif %}</h5>
                     {% if historical %}
                     <div class="alert alert-info py-2">
                         Previous version {{ e.version }}{% if e.updated_by %}, assessment by {{ e.updated_by }}{% endif %}.

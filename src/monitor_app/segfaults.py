@@ -914,49 +914,95 @@ def _finding_context():
 
 def finding_entries():
     """The findings as stored: Entry rows of kind finding in the segfault
-    context, not archived, newest date first."""
+    context, not archived, newest first by serial (the order they were
+    written; a finding without a serial yet sorts by its creation time)."""
     from .models import Entry
     rows = list(Entry.objects.filter(kind=FINDING_KIND, context_id=FINDING_CONTEXT,
                                      archived=False, deleted_at__isnull=True))
-    rows.sort(key=lambda e: (str((e.data or {}).get('date') or ''), e.timestamp_created), reverse=True)
+    rows.sort(key=lambda e: (int((e.data or {}).get('serial') or 0), e.timestamp_created), reverse=True)
     return rows
+
+
+def finding_id(serial):
+    """The finding's permanent id as shown: F-8."""
+    return f'F-{int(serial)}' if serial else ''
+
+
+def _next_finding_serial(ctx):
+    """The next free serial of the findings store, under the context row's
+    lock so two writers never draw the same number. Serials are assigned
+    once, at creation, and never reused: a finding keeps its id whatever
+    is written or retired around it."""
+    from .models import Entry, EntryContext
+    EntryContext.objects.select_for_update().get(pk=ctx.pk)
+    taken = [int((e.data or {}).get('serial') or 0)
+             for e in Entry.objects.filter(kind=FINDING_KIND, context=ctx).only('data')]
+    return max(taken, default=0) + 1
 
 
 def set_finding(name, fields, changed_by):
     """Create or update the finding named ``name`` (the frame's catalog key,
     the trace-level entry's where one exists) with ``fields`` (FINDING_FIELDS
-    plus ``what``, the reading, as the entry's content). Every substantive
-    change leaves an EntryVersion stamped with ``changed_by``. Returns the
-    Entry and whether it was created."""
+    plus ``what``, the reading, as the entry's content). A new finding draws
+    the next permanent serial (``data['serial']``, shown as F-n). Every
+    substantive change leaves an EntryVersion stamped with ``changed_by``.
+    Returns the Entry and whether it was created."""
+    from django.db import transaction
     from .models import Entry
     from .signals import set_changed_by
     set_changed_by(changed_by or 'unknown')
-    ctx = _finding_context()
-    entry = Entry.objects.filter(kind=FINDING_KIND, context=ctx, name=name).first()
-    created = entry is None
-    if created:
-        entry = Entry(kind=FINDING_KIND, context=ctx, name=name, status='open')
-    data = dict(entry.data or {})
-    for key in FINDING_FIELDS:
-        if key in fields:
-            data[key] = fields[key]
-    data.setdefault('signatures', [name])
-    data['updated_by'] = changed_by
-    entry.data = data
-    if 'title' in fields:
-        entry.title = str(fields['title'] or '')
-    if 'what' in fields:
-        entry.content = str(fields['what'] or '')
-    if 'standing' in fields:
-        entry.status = str(fields['standing'] or 'open')
-    entry.timestamp_modified = __import__('time').time()
-    entry.save()
+    with transaction.atomic():
+        ctx = _finding_context()
+        entry = Entry.objects.filter(kind=FINDING_KIND, context=ctx, name=name).first()
+        created = entry is None
+        if created:
+            entry = Entry(kind=FINDING_KIND, context=ctx, name=name, status='open')
+        data = dict(entry.data or {})
+        for key in FINDING_FIELDS:
+            if key in fields:
+                data[key] = fields[key]
+        data.setdefault('signatures', [name])
+        if not data.get('serial'):
+            data['serial'] = _next_finding_serial(ctx)
+        data['updated_by'] = changed_by
+        entry.data = data
+        if 'title' in fields:
+            entry.title = str(fields['title'] or '')
+        if 'what' in fields:
+            entry.content = str(fields['what'] or '')
+        if 'standing' in fields:
+            entry.status = str(fields['standing'] or 'open')
+        entry.timestamp_modified = __import__('time').time()
+        entry.save()
     log_finding = __import__('monitor_app.epicprod_logging', fromlist=['log_epicprod_action']).log_epicprod_action
     log_finding('web', 'segfault_finding_set', subject_type='crash_signature', subject_key=name,
                 username=changed_by, sublevel='normal', live_default=True,
                 message=f"segfault finding {'created' if created else 'updated'}: {name}: "
                         f"{entry.title}"[:300], created=int(created))
     return entry, created
+
+
+def assign_finding_serials(changed_by):
+    """Give every finding without a serial one, in creation order, so the
+    findings written before serials existed are numbered as they were
+    made. Returns [(name, serial)] assigned. Idempotent."""
+    from django.db import transaction
+    from .models import Entry
+    from .signals import set_changed_by
+    set_changed_by(changed_by or 'unknown')
+    assigned = []
+    with transaction.atomic():
+        ctx = _finding_context()
+        rows = [e for e in Entry.objects.filter(kind=FINDING_KIND, context=ctx)
+                if not (e.data or {}).get('serial')]
+        rows.sort(key=lambda e: (e.timestamp_created, e.id))
+        for e in rows:
+            data = dict(e.data or {})
+            data['serial'] = _next_finding_serial(ctx)
+            e.data = data
+            e.save()
+            assigned.append((e.name, data['serial']))
+    return assigned
 
 
 def findings(*, name=None, version=None, include_history=False):
@@ -1000,8 +1046,10 @@ def findings(*, name=None, version=None, include_history=False):
                     prod_tasks.add(t)
                 rows_lost += s.rows_lost or 0
                 events_lost += s.events_lost or 0
+        serial = (e.data or {}).get('serial') or 0
         entries.append({
             'n': i + 1, 'id': e.id, 'name': e.name,
+            'serial': serial, 'fid': finding_id(serial),
             'anchor': (keys[0] if keys else e.name).replace(':', '-'),
             'date': str(f.get('date') or ''), 'frame': f.get('frame', ''),
             'stage': f.get('stage', ''), 'title': source.title, 'what': (source.content or '').strip(),
