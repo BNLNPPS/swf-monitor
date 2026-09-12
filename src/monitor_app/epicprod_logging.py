@@ -559,6 +559,15 @@ ACTION_DEFAULTS = {
                        "tags to an edition at submission; rides with the "
                        "submission's own record.",
     },
+    'physics_tag_rederive': {
+        'sublevel': 'low', 'live': False,
+        'description': "Physics tags brought up to the path parser's reading "
+                       "of their datasets' task names "
+                       "(swf-epicprod tools/pcs/rederive-physics-tags.py): "
+                       "the tags corrected, with the axes added, and the "
+                       "tags left because their corrected parameters equal "
+                       "another tag's; one record per applying run.",
+    },
     'edition_rebind': {
         'sublevel': 'low', 'live': False,
         'description': "Rebind a campaign family's editions from the import "
