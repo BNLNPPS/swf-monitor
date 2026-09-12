@@ -162,13 +162,11 @@
             {% elif not sig.verdict %}
             <p class="text-muted">No diagnosis yet. The study runs on its own once the signature is reproduced with a trace, or on request.</p>
             {% endif %}
-            {% if sig.level == 'record' %}
             <form id="diagnose-form" class="d-flex align-items-center gap-2 mb-3" method="post" action="{% url 'monitor_app:panda_segfault_diagnose' key=sig.key %}" data-key="{{ sig.key }}">
                 {% csrf_token %}
                 <button type="submit" id="diagnose-button" class="btn btn-sm btn-success" title="Submit the signature's LLM study (the codoc run over the trace, the code and the known issues) through the production operations agent">Diagnose</button>
                 <span id="diagnose-status" class="text-muted small"></span>
             </form>
-            {% endif %}
             {% ai_assessment_panel sig.data 'Diagnoses' %}
         </div>
     </div>
