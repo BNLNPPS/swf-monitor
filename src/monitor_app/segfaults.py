@@ -1016,13 +1016,31 @@ def set_finding(name, fields, changed_by):
     return entry, created
 
 
-def findings():
+def findings(*, name=None, version=None, include_history=False):
     """The findings joined live to the catalog: each entry with the
     signatures it names, their crashes, tasks, configurations and loss.
-    Returns (entries, error)."""
+    Optional history is read from immutable EntryVersion snapshots. A
+    requested version must belong to the named, active segfault finding.
+    Returns (entries, error); raises ValueError for an unknown version."""
+    from .models import EntryVersion
+    current = [e for e in finding_entries() if name is None or e.name == name]
+    history = {}
+    if include_history:
+        for v in EntryVersion.objects.filter(entry_id__in=[e.id for e in current]).order_by('-version_num').values(
+                'entry_id', 'version_num', 'timestamp', 'changed_by'):
+            v['replaced_at'] = _iso(datetime.fromtimestamp(v['timestamp'], tz=dt_timezone.utc))
+            history.setdefault(v['entry_id'], []).append(v)
+    snapshot = None
+    if version is not None:
+        if name is None or not current:
+            raise ValueError('No such finding version')
+        snapshot = EntryVersion.objects.filter(entry=current[0], version_num=version).first()
+        if snapshot is None:
+            raise ValueError('No such finding version')
     entries = []
-    for i, e in enumerate(finding_entries()):
-        f = e.data or {}
+    for i, e in enumerate(current):
+        source = snapshot if snapshot is not None else e
+        f = source.data or {}
         keys = [str(k) for k in (f.get('signatures') or [e.name])]
         sigs = {s.key: s for s in CrashSignature.objects.filter(key__in=keys)}
         rows, crashes, prod_tasks, rows_lost, events_lost = [], 0, set(), 0, 0
@@ -1043,17 +1061,27 @@ def findings():
             'n': i + 1, 'id': e.id, 'name': e.name,
             'anchor': (keys[0] if keys else e.name).replace(':', '-'),
             'date': str(f.get('date') or ''), 'frame': f.get('frame', ''),
-            'stage': f.get('stage', ''), 'title': e.title, 'what': (e.content or '').strip(),
+            'stage': f.get('stage', ''), 'title': source.title, 'what': (source.content or '').strip(),
             'sources': f.get('sources') or [], 'class': f.get('class', ''),
-            'action': (f.get('action') or '').strip(), 'standing': e.status or f.get('standing', ''),
+            'action': (f.get('action') or '').strip(),
+            'standing': f.get('standing', '') if snapshot is not None else e.status or f.get('standing', ''),
             'fix': f.get('fix', ''), 'notes': (f.get('notes') or '').strip(),
             'model_reading': bool(f.get('model_reading')),
             'updated_by': f.get('updated_by', ''), 'updated_at': _iso(
-                datetime.fromtimestamp(e.timestamp_modified, tz=dt_timezone.utc)),
+                datetime.fromtimestamp(snapshot.timestamp if snapshot is not None else e.timestamp_modified,
+                                       tz=dt_timezone.utc)),
             'signatures': rows, 'crashes': crashes,
             'tasks': len({t for r in rows for t in (r.get('task_ids') or [])}),
             'configurations': sorted(prod_tasks), 'rows_lost': rows_lost, 'events_lost': events_lost,
         })
+        if include_history:
+            current_keys = (e.data or {}).get('signatures') or [e.name]
+            entries[-1].update({
+                'versions': history.get(e.id, []),
+                'version': snapshot.version_num if snapshot is not None else None,
+                'replaced_by': snapshot.changed_by if snapshot is not None else '',
+                'current_anchor': str(current_keys[0]).replace(':', '-'),
+            })
     return entries, ''
 
 

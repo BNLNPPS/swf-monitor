@@ -28,7 +28,7 @@
         <thead>
             <tr>
                 <th>Date</th>
-                <th>Updated</th>
+                <th>{% if historical %}Replaced{% else %}Updated{% endif %}</th>
                 <th>Crashing frame</th>
                 <th>Stage</th>
                 <th>Class</th>
@@ -43,7 +43,7 @@
             {% for e in entries %}
             <tr id="{{ e.anchor }}">
                 <td rowspan="2">{{ e.date }}</td>
-                <td rowspan="2">{% with t=e.updated_at|fmt_dt %}{{ t|slice:":8" }}<br>{{ t|slice:"9:" }}{% endwith %}<br>{{ e.updated_by }}</td>
+                <td rowspan="2">{% with t=e.updated_at|fmt_dt %}{{ t|slice:":8" }}<br>{{ t|slice:"9:" }}{% endwith %}<br>{% if historical %}{{ e.replaced_by }}{% else %}{{ e.updated_by }}{% endif %}</td>
                 <td class="frame-col">{{ e.frame }}</td>
                 <td>{{ e.stage }}</td>
                 <td>{{ e.class }}</td>
@@ -56,6 +56,24 @@
             <tr>
                 <td class="finding-col" colspan="8">
                     <h5>{{ e.title }}{% if e.model_reading %} <span class="ai-attr">model reading</span>{% endif %}</h5>
+                    {% if historical %}
+                    <div class="alert alert-info py-2">
+                        Previous version {{ e.version }}{% if e.updated_by %}, assessment by {{ e.updated_by }}{% endif %}.
+                        Catalog counts are live, not historical.
+                        <a href="{% url 'monitor_app:panda_segfault_findings' %}#{{ e.current_anchor }}">View current assessment</a>
+                    </div>
+                    {% endif %}
+                    {% if e.versions %}
+                    <details class="mb-2"{% if historical %} open{% endif %}>
+                        <summary>{{ e.versions|length }} previous version{{ e.versions|length|pluralize }}</summary>
+                        <ul class="mb-0">
+                        {% for v in e.versions %}
+                            <li>{% if v.version_num == e.version %}<strong>Version {{ v.version_num }} (viewing)</strong>{% else %}<a href="{% url 'monitor_app:panda_segfault_findings' %}?finding={{ e.name|urlencode }}&amp;version={{ v.version_num }}">Version {{ v.version_num }}</a>{% endif %}
+                                — replaced {{ v.replaced_at|fmt_dt }} by {{ v.changed_by }}</li>
+                        {% endfor %}
+                        </ul>
+                    </details>
+                    {% endif %}
                     <div class="finding-label">What it is</div>
                     <p>{{ e.what }}</p>
                     {% if e.sources %}<div class="finding-label">Sources</div>

@@ -1753,13 +1753,20 @@ def panda_segfaults(request):
 
 
 def panda_segfault_findings(request):
-    """Segfault findings: the curated reading of the catalog, one row per
-    crashing frame (swf_epicprod/segfault/findings.yaml), joined live to
-    the catalog entries each names."""
+    """Current findings or a saved assessment, joined to the live catalog."""
+    from django.http import Http404
     from ..segfaults import findings
-    entries, error = findings()
+    name = request.GET.get('finding')
+    version = request.GET.get('version')
+    try:
+        entries, error = findings(name=name, version=int(version) if version is not None else None,
+                                  include_history=True)
+    except ValueError:
+        raise Http404('No such finding version')
+    if name is not None and not entries:
+        raise Http404('No such finding')
     return render(request, 'monitor_app/panda_segfault_findings.html',
-                  {'entries': entries, 'error': error})
+                  {'entries': entries, 'error': error, 'historical': version is not None})
 
 
 def panda_segfault_detail(request, key):
