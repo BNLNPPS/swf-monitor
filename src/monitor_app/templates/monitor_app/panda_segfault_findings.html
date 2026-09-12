@@ -16,8 +16,16 @@
         not yet been checked. The crashes, configurations and loss are read live from the catalog.
     </p>
     {% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+    {% if entries and not historical %}
+    <ol class="mb-3" id="findings-jump">
+        {% for e in entries %}<li><a href="#{{ e.anchor }}">{{ e.title }}</a>{% if e.model_reading %} <span class="ai-attr">model reading</span>{% endif %}</li>
+        {% endfor %}
+    </ol>
+    {% endif %}
 
     <style>
+      /* A jump lands the row below the nav bar and the latched header. */
+      #findings-table tbody tr[id] { scroll-margin-top: calc(var(--swf-nav-height, 0px) + 3rem); }
       #findings-table td.sig-col { max-width: 16em; overflow-wrap: anywhere; }
       #findings-table td.frame-col { max-width: 18em; overflow-wrap: anywhere; }
       #findings-table td.finding-col { max-width: 70em; }
@@ -92,12 +100,16 @@
     </table>
 </div>
 <script>
-    // The description takes the table's width, no wider.
+    // The description and the jump list take the table's width, no wider.
     (function () {
         const desc = document.getElementById('findings-desc');
+        const jump = document.getElementById('findings-jump');
         const table = document.getElementById('findings-table');
         if (!desc || !table) return;
-        const fit = () => { desc.style.maxWidth = table.offsetWidth + 'px'; };
+        const fit = () => {
+            desc.style.maxWidth = table.offsetWidth + 'px';
+            if (jump) jump.style.maxWidth = table.offsetWidth + 'px';
+        };
         fit();
         window.addEventListener('resize', fit);
     })();
