@@ -121,19 +121,29 @@ def _window(args):
 
 # ------------------------------------------------------------- the record
 
+# The catalog is production's: only jobs of production tasks (processing
+# type epicproduction, the campaign's payload) are crash-class jobs here.
+# The testbed's streams (fast and prompt processing, EICFast) crash on
+# their own terms and never enter the production record (Torre,
+# 2026-09-13).
+PRODUCTION_PROCESSING_TYPE = 'epicproduction'
+
+
 def crashed_jobs(since, limit=None):
-    """Crash-class failed jobs in the window, oldest first, with the task name."""
+    """Crash-class failed jobs of production tasks in the window, oldest
+    first, with the task name."""
     fields = ', '.join(f'j."{f}"' for f in JOB_FIELDS)
     sql = f"""
         SELECT {fields}, t."taskname"
         FROM "{PANDA_SCHEMA}"."jobsarchived4" j
-        LEFT JOIN "{PANDA_SCHEMA}"."jedi_tasks" t ON t."jeditaskid" = j."jeditaskid"
+        JOIN "{PANDA_SCHEMA}"."jedi_tasks" t ON t."jeditaskid" = j."jeditaskid"
         WHERE j."jobstatus" = 'failed'
           AND j."transexitcode" = ANY(%s)
           AND j."modificationtime" > %s
+          AND t."processingtype" = %s
         ORDER BY j."modificationtime", j."pandaid"
     """
-    params = [list(CRASH_EXITS), since]
+    params = [list(CRASH_EXITS), since, PRODUCTION_PROCESSING_TYPE]
     if limit:
         sql += ' LIMIT %s'
         params.append(int(limit))
@@ -141,12 +151,14 @@ def crashed_jobs(since, limit=None):
 
 
 def record_count(since):
-    """The appendix count: crash-class failed jobs in the window."""
+    """The appendix count: crash-class failed jobs of production tasks in
+    the window."""
     rows = _panda(
-        f"""SELECT count(*) AS n FROM "{PANDA_SCHEMA}"."jobsarchived4"
-            WHERE "jobstatus" = 'failed' AND "transexitcode" = ANY(%s)
-              AND "modificationtime" > %s""",
-        [list(CRASH_EXITS), since])
+        f"""SELECT count(*) AS n FROM "{PANDA_SCHEMA}"."jobsarchived4" j
+            JOIN "{PANDA_SCHEMA}"."jedi_tasks" t ON t."jeditaskid" = j."jeditaskid"
+            WHERE j."jobstatus" = 'failed' AND j."transexitcode" = ANY(%s)
+              AND j."modificationtime" > %s AND t."processingtype" = %s""",
+        [list(CRASH_EXITS), since, PRODUCTION_PROCESSING_TYPE])
     return int(rows[0]['n'])
 
 
