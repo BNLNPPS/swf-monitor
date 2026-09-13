@@ -73,9 +73,16 @@ RESULTS = [
     ('crash_observed', 'Crash observed'),
     ('completed', 'Completed without crash'),
     ('inconclusive', 'Inconclusive'),
+    ('cancelled', 'Cancelled'),
 ]
 RESULT_LABELS = dict(RESULTS)
 RESULT_ORDER = [r for r, _ in RESULTS]
+# A request's outcome words once its run has ended (nothing moves them
+# back), and the subset that takes part in the pair settling the
+# signature's outcome: a cancelled run is a withdrawn request, not a
+# result, and counts for nothing.
+ENDED_OUTCOMES = ('crashed', 'completed', 'inconclusive', 'cancelled')
+PAIR_OUTCOMES = ('crashed', 'completed', 'inconclusive')
 
 # The house state colours (static/css/state-colors.css) a phase or
 # result cell takes, where its own word has no fill class.
@@ -261,6 +268,9 @@ def result_of(run, phase):
         # An observed signal is evidence, not an invented process exit or
         # proof that the requested crashing frame was reached.
         return 'crash_observed', reason, d.get('payload_exit_code')
+    if phase == 'cancelled':
+        # A killed run is a withdrawn request, not a result.
+        return 'cancelled', 'request withdrawn', None
     if phase in ACTIVE_PHASES:
         return 'pending', '', None
     if run.status == 'collected':
@@ -521,10 +531,10 @@ def freshness(rows):
 def _entry_outcome(row):
     """The request mirror's outcome word for an attempt row (the
     signature's own vocabulary: submitted, running, crashed, completed,
-    inconclusive)."""
+    inconclusive, cancelled)."""
     if row['result'] == 'crash_observed':
         return 'running' if row['active'] else 'inconclusive'
-    if row['result'] in ('crashed', 'completed', 'inconclusive'):
+    if row['result'] in ENDED_OUTCOMES:
         return row['result']
     if row['phase'] in ('running', 'finishing', 'queued'):
         return 'running' if row['phase'] != 'queued' else 'submitted'
@@ -567,11 +577,11 @@ def reconcile(sig_key, queue_diagnosis=None):
             entry['jedi_task_id'] = run.jeditaskid
             entry['canary_pandaid'] = row['canary_pandaid']
             outcome = _entry_outcome(row)
-            if before.get('outcome') in ('crashed', 'completed', 'inconclusive') and outcome in ('submitted', 'running'):
+            if before.get('outcome') in ENDED_OUTCOMES and outcome in ('submitted', 'running'):
                 # Never move a settled entry back on missing evidence.
                 outcome = before['outcome']
             entry['outcome'] = outcome
-            if outcome in ('crashed', 'completed', 'inconclusive'):
+            if outcome in ENDED_OUTCOMES:
                 entry['exit_code'] = row['payload_exit_code']
                 entry['minutes'] = (row['run_s'] / 60.0) if row['run_s'] else entry.get('minutes')
                 entry['verdict_time'] = entry.get('verdict_time') or _iso(now)
@@ -579,9 +589,10 @@ def reconcile(sig_key, queue_diagnosis=None):
             if entry != before:
                 changed['entries'] += 1
             entries[i] = entry
-        settled = [e for e in entries if e.get('outcome') in ('crashed', 'completed', 'inconclusive')]
+        settled = [e for e in entries if e.get('outcome') in PAIR_OUTCOMES]
         # The pair: the production run against the other run, whether on
-        # the reference queue or a second production-class queue.
+        # the reference queue or a second production-class queue; a
+        # cancelled request is not in it.
         prod = [e for e in settled if entry_role(e) == 'production']
         ref = [e for e in settled if entry_role(e) != 'production']
         outcome = None
@@ -666,7 +677,7 @@ def open_signature_keys():
     not yet mirrored: what a reconciliation pass visits."""
     keys = set()
     for sig in CrashSignature.objects.exclude(reproduction=[]).exclude(reproduction__isnull=True).only('key', 'reproduction'):
-        if any(e.get('outcome') not in ('crashed', 'completed', 'inconclusive')
+        if any(e.get('outcome') not in ENDED_OUTCOMES
                for e in (sig.reproduction or [])):
             keys.add(sig.key)
     return sorted(keys)
