@@ -214,7 +214,10 @@ REPORT_SWEEP_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "repo
 REPORT_SWEEP_TIMEOUT = int(os.environ.get("EPICPROD_REPORT_SWEEP_TIMEOUT", "900"))
 REPORT_SWEEP_HOURS = os.environ.get("EPICPROD_REPORT_SWEEP_HOURS", "6")
 STORAGE_SWEEP_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "storage-sweep.py"
-STORAGE_SWEEP_TIMEOUT = int(os.environ.get("EPICPROD_STORAGE_SWEEP_TIMEOUT", "3600"))
+# An incremental pass is about 36 minutes plus its sixth of the dataset
+# tier (about an hour at the pass's pacing, STORAGE.md); the nightly full
+# pass lists the target campaigns' files. Three hours holds either.
+STORAGE_SWEEP_TIMEOUT = int(os.environ.get("EPICPROD_STORAGE_SWEEP_TIMEOUT", "10800"))
 # The campaign configuration proposer (swf-monitor docs/PINGS.md, Pings
 # with a remedy): pings and remedies for editions without a Standard
 # Production configuration.
