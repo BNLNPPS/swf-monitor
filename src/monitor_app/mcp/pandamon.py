@@ -753,21 +753,25 @@ async def panda_segfault_reproduce(
     """
     Request the reproduction of a crash signature: the crashed row run
     again as one payload canary per queue, the production queue where the
-    crash happened and the reference queue BNL_NPPS_GPU (swf-epicprod
-    docs/SEGFAULT_DIAGNOSIS.md, Reproduction). The request is recorded on
-    the signature as it is sent and appears on the runs page
-    (/panda/segfaults/reproductions/) within a minute, which is how a
-    session that takes an item from the nightly notice claims it: check
-    the signature's attempts (panda_segfault_signature) before requesting,
-    so two sessions never submit the same row. The reference run carries
-    the production queue's memory limit.
+    crash happened and a second production-class queue (UM_GREX_PanDA_1,
+    or BNL_OSG_EPIC_PROD_1 for a crash at GREX), which together settle the
+    outcome (swf-epicprod docs/SEGFAULT_DIAGNOSIS.md, Reproduction). The
+    reference queue BNL_NPPS_GPU, one slot with known conditions, is named
+    in ``queues`` only when the reading needs the host (a memory ceiling, a
+    core dump, a stall watched live); it then carries the production
+    queue's memory limit. The request is recorded on the signature as it
+    is sent and appears on the runs page (/panda/segfaults/reproductions/)
+    within a minute, which is how a session that takes an item from the
+    nightly notice claims it: check the signature's attempts
+    (panda_segfault_signature) before requesting, so two sessions never
+    submit the same row.
 
     Args:
         key: The signature key, e.g. 'exit139:task38971'.
         pandaid: The crashed job to rerun (default: the representative
             with a resolved row).
         queues: The queues to run on (default: the production queue and
-            the reference queue).
+            the second queue; add 'BNL_NPPS_GPU' for the reference run).
         requested_by: Who requests (recorded on the signature and the
             action stream).
 
@@ -788,7 +792,7 @@ async def panda_segfault_reproduce(
         except ValueError as e:
             return {'error': str(e)}
         chosen = [q for q in (queues or []) if q] or [
-            q for q in (plan['production_queue'], REFERENCE_QUEUE) if q]
+            q for q in (plan['production_queue'], plan['elsewhere_queue']) if q]
         chosen = list(dict.fromkeys(chosen))
         mem_limits = {q: (plan['maxrss_mb'] if q == REFERENCE_QUEUE else None) for q in chosen}
         try:

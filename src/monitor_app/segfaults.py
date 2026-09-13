@@ -735,7 +735,31 @@ def dig_candidates(limit):
 CANARY_QUEUE = '/queue/canary.ops'
 CANARY_NAMESPACE = 'canary'
 REFERENCE_QUEUE = 'BNL_NPPS_GPU'
+# The second run of a reproduction is a second production-class queue
+# (SEGFAULT_DIAGNOSIS.md, Reproduction, 2026-09-13): the crash-or-not
+# verdict and the trace come from any queue since payload 0.14, and the
+# reference queue's one slot is asked for only when the reading needs
+# the host (a memory ceiling, a core dump, a stall watched live).
+ELSEWHERE_QUEUE = 'UM_GREX_PanDA_1'
+ELSEWHERE_FROM = {'UM_GREX_PanDA_1': 'BNL_OSG_EPIC_PROD_1'}
 CRASH_EXITS = {134, 135, 136, 139}
+
+
+def elsewhere_queue(origin):
+    """The default second queue for a crash that happened on ``origin``."""
+    return ELSEWHERE_FROM.get(origin or '', ELSEWHERE_QUEUE)
+
+
+def run_role(queue, origin):
+    """The role a run plays in a reproduction: ``production`` on the queue
+    the crash happened on, ``reference`` on the reference queue,
+    ``elsewhere`` on any other queue. The last two settle the outcome the
+    same way against the production run."""
+    if queue == REFERENCE_QUEUE:
+        return 'reference'
+    if origin and queue == origin:
+        return 'production'
+    return 'elsewhere'
 
 
 def crashed_run(sig, pandaid=None):
@@ -872,7 +896,8 @@ def reproduction_plan(sig, pandaid=None):
             maxrss_mb = None
     return {'pandaid': int(pandaid), 'task': job.prod_task.name, 'row_text': row_text,
             'container': crash.get('container') or '',
-            'production_queue': site, 'reference_queue': REFERENCE_QUEUE,
+            'production_queue': site, 'elsewhere_queue': elsewhere_queue(site),
+            'reference_queue': REFERENCE_QUEUE,
             'maxrss_mb': maxrss_mb, 'job_maxrss_mb': crash.get('maxrss_mb')}
 
 
@@ -924,6 +949,7 @@ def reproduce(sig, pandaid, queues, mem_limits, username):
                    if entries else ''))
         entry = {'request_id': request_id, 'run_id': None,
                  'pandaid': plan['pandaid'], 'queue': queue,
+                 'role': run_role(queue, plan['production_queue']),
                  'row_text': plan['row_text'], 'mem_limit_mb': limit,
                  'container': plan.get('container') or '',
                  'requested_at': now, 'requested_by': username,

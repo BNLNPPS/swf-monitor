@@ -38,6 +38,17 @@ logger = logging.getLogger(__name__)
 REFERENCE_QUEUE = 'BNL_NPPS_GPU'
 CRASH_EXITS = {134, 135, 136, 139}
 
+
+def entry_role(entry, sig=None):
+    """The role of a request's run: as recorded on the request (since
+    2026-09-13), else by the legacy rule, the reference queue against
+    everything else. ``production`` is the queue the crash happened on;
+    ``reference`` and ``elsewhere`` are the other run of the pair."""
+    role = (entry or {}).get('role')
+    if role:
+        return role
+    return 'reference' if (entry or {}).get('queue') == REFERENCE_QUEUE else 'production'
+
 # Execution phases, in the order the page lists them; active first.
 PHASES = [
     ('queued_submission', 'Queued for submission'),
@@ -319,7 +330,7 @@ def _attempt(sig, entry, run, now):
         'exit_code': sig.exit_code,
         'original_pandaid': (entry or {}).get('pandaid') or d.get('reproduction_of'),
         'queue': queue,
-        'role': 'reference' if queue == REFERENCE_QUEUE else 'production',
+        'role': entry_role(entry) if entry else ('reference' if queue == REFERENCE_QUEUE else 'production'),
         'requested_at': _iso(requested),
         'requested_by': (entry or {}).get('requested_by') or '',
         'jeditaskid': run.jeditaskid if run is not None else None,
@@ -526,10 +537,11 @@ def reconcile(sig_key, queue_diagnosis=None):
     """Write the join back onto one signature: each request entry gets
     its run's identity and outcome, and the pair settles the signature's
     reproduction outcome (reproduced, site_dependent, not_reproduced,
-    inconclusive) once a production run and a reference run have both
+    inconclusive) once the production run and the other run of the pair
+    (the reference queue or a second production-class queue) have both
     reported. A reproduced crash with no trace on record has its trace
-    read from the crashed run's payload report (the reference run first,
-    the queue of known conditions), so a reproduced crash yields its
+    read from the crashed run's payload report (the other run first,
+    the reference queue being the one of known conditions), so a reproduced crash yields its
     trace where the campaign's did not. The diagnosis is queued once
     when the outcome stands as reproduced or site dependent with a trace
     on record and no study yet. Runs under a row lock so a request
@@ -568,8 +580,10 @@ def reconcile(sig_key, queue_diagnosis=None):
                 changed['entries'] += 1
             entries[i] = entry
         settled = [e for e in entries if e.get('outcome') in ('crashed', 'completed', 'inconclusive')]
-        prod = [e for e in settled if e.get('queue') != REFERENCE_QUEUE]
-        ref = [e for e in settled if e.get('queue') == REFERENCE_QUEUE]
+        # The pair: the production run against the other run, whether on
+        # the reference queue or a second production-class queue.
+        prod = [e for e in settled if entry_role(e) == 'production']
+        ref = [e for e in settled if entry_role(e) != 'production']
         outcome = None
         if prod and ref:
             p, r = prod[-1]['outcome'], ref[-1]['outcome']

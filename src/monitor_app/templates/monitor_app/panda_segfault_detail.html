@@ -120,14 +120,15 @@
             <form id="repro-form" class="mb-3" method="post" action="{% url 'monitor_app:panda_segfault_reproduce' key=sig.key %}" data-key="{{ sig.key }}" data-plan-url="{% url 'monitor_app:panda_segfault_reproduce' key=sig.key %}">
                 {% csrf_token %}
                 <div class="d-flex align-items-center gap-2 flex-wrap">
-                    <button type="submit" id="repro-button" class="btn btn-sm btn-success" title="Run the crashed job's own manifest row again through the production payload as one-job canary tasks on the two queues below; the outcome is read from the payload reports when the runs finish">Reproduce</button>
+                    <button type="submit" id="repro-button" class="btn btn-sm btn-success" title="Run the crashed job's own manifest row again through the production payload as one-job canary tasks on the queues checked below (the production queue and a second one settle the outcome; the reference queue when the reading needs the host); the outcome is read from the payload reports when the runs finish">Reproduce</button>
                     <input type="text" name="pandaid" id="repro-pandaid" class="form-control form-control-sm" style="max-width: 10em;" placeholder="job (optional)" title="A chosen crashed job instead of the median one">
                     <span id="repro-status" class="text-muted small"></span>
                 </div>
                 <div id="repro-plan" class="small mt-1 text-muted"></div>
                 <div class="d-flex align-items-center gap-3 flex-wrap mt-1">
                     <label class="small"><input type="checkbox" name="queue" id="repro-prod-queue" value="" checked> production queue <span id="repro-prod-name"></span></label>
-                    <label class="small"><input type="checkbox" name="queue" value="BNL_NPPS_GPU" checked> reference queue BNL_NPPS_GPU, memory limit
+                    <label class="small"><input type="checkbox" name="queue" id="repro-elsewhere-queue" value="" checked> second queue <span id="repro-elsewhere-name"></span></label>
+                    <label class="small" title="The reference queue has one slot and known conditions (memory ceiling, core dumps, a debugger on the host); ask for it when the reading needs the host"><input type="checkbox" name="queue" value="BNL_NPPS_GPU"> reference queue BNL_NPPS_GPU, memory limit
                         <input type="text" id="repro-mem" class="form-control form-control-sm d-inline-block" style="max-width: 7em;" placeholder="MB" title="RLIMIT_AS on the payload for the reference run, set from the production queue's maxrss; clear it to run unlimited"></label>
                 </div>
             </form>
@@ -362,6 +363,8 @@
     const jobInput = document.getElementById('repro-pandaid');
     const prodQueue = document.getElementById('repro-prod-queue');
     const prodName = document.getElementById('repro-prod-name');
+    const elseQueue = document.getElementById('repro-elsewhere-queue');
+    const elseName = document.getElementById('repro-elsewhere-name');
     const memInput = document.getElementById('repro-mem');
     let plan = null;
     function loadPlan() {
@@ -380,6 +383,10 @@
               prodName.textContent = plan.production_queue || '(unknown)';
               prodQueue.disabled = !plan.production_queue;
               if (!plan.production_queue) prodQueue.checked = false;
+              elseQueue.value = plan.elsewhere_queue || '';
+              elseName.textContent = plan.elsewhere_queue || '(none)';
+              elseQueue.disabled = !plan.elsewhere_queue;
+              if (!plan.elsewhere_queue) elseQueue.checked = false;
               if (!memInput.value && plan.maxrss_mb) memInput.value = plan.maxrss_mb;
               button.disabled = false;
           }).catch(function() { planBox.textContent = 'Plan unavailable.'; });
