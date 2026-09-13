@@ -541,6 +541,77 @@ def resolve_log_did(pandaid, jeditaskid):
     return None, None
 
 
+def reproduction_entry(sig, pandaid):
+    """The signature's reproduction request whose canary job is
+    ``pandaid``, or None. A reproduction's job is not in the crash
+    inventory (the canary wrapper exits 0 to keep the report), so the
+    dig reaches it through this record."""
+    for entry in sig.reproduction or []:
+        if entry.get('canary_pandaid') and int(entry['canary_pandaid']) == int(pandaid):
+            return entry
+    return None
+
+
+def report_note(pandaid):
+    """(note, source) of a job's payload report: the sweep's filing on
+    the job's inventory row (``payload_report``), else the PanDA
+    metatable, where the pilot lifts jobReport.json for a job that
+    finished at the server (a reproduction on the reference queue
+    carries no log dataset, so its report reaches the record there and
+    nowhere else). ('', '') when the job has none. The dig's and the
+    reconciliation's call, never a page's."""
+    import json
+    from .panda.constants import PANDA_SCHEMA
+    job = EpicProdJob.objects.filter(pandaid=int(pandaid)).only('data').first()
+    filed = str(((((job.data if job else None) or {}).get('payload_report') or {})
+                 .get('report') or {}).get('note') or '')
+    if filed.startswith('crash:'):
+        return filed, 'payload_report'
+    try:
+        with connections['panda'].cursor() as cur:
+            cur.execute(f'SELECT "metadata" FROM "{PANDA_SCHEMA}"."metatable" WHERE "pandaid" = %s',
+                        [int(pandaid)])
+            row = cur.fetchone()
+    except Exception as e:                                    # noqa: BLE001
+        logger.error('job %s: metatable read failed: %s', pandaid, e)
+        return filed, 'payload_report' if filed else ''
+    meta = None
+    if row and row[0]:
+        try:
+            meta = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+        except (ValueError, TypeError) as e:
+            logger.error('job %s: metatable metadata unparsable: %s', pandaid, e)
+    payload = meta.get('payload') if isinstance(meta, dict) else None
+    note = str((payload or {}).get('note') or '') if isinstance(payload, dict) else ''
+    if note:
+        return note, 'metatable'
+    return filed, 'payload_report' if filed else ''
+
+
+def trace_from_report(sig, pandaid):
+    """Record on the signature the trace read from a job's payload report
+    when its note is a crash capture (payload 0.12 and later put the
+    crashing stage's log tail there, SEGFAULT_DIAGNOSIS.md, Traces going
+    forward): the dig's first source, and the reconciliation's for a
+    reproduced crash. Returns the dig summary, or None when the report
+    carries no crash note or no frame (the dig then falls back to the
+    log tarball)."""
+    from .epicprod_inventory import trace_extract
+    note, source = report_note(pandaid)
+    if not note.startswith('crash:'):
+        return None
+    result = trace_extract([note])
+    if result.get('trace_status') != 'found':
+        return None
+    merged = record_trace(sig, result, pandaid, '')
+    logger.info('segfault %s: trace read from the %s payload report of job %s',
+                sig.key, source, pandaid)
+    return {'key': sig.key, 'pandaid': pandaid, 'trace_status': 'found', 'source': source,
+            'program': result.get('program'), 'stage': result.get('stage'),
+            'frame': result.get('frame'), 'library': result.get('library'),
+            'events_processed': result.get('events_processed'), 'merged_into': merged}
+
+
 def frame_key(exit_code, program, frame):
     import hashlib
     digest = hashlib.sha256(f'{program}|{frame}'.encode()).hexdigest()[:12]
@@ -1086,3 +1157,17 @@ def finding_anchors():
         for k in keys:
             out[k] = anchor
     return out
+
+
+def covering_finding(sig):
+    """The finding that names this signature or the frame entry it merged
+    under: the reading of its crash exists, so no study is owed and the
+    signature is marked diagnosed by that finding once its reproduction
+    settles. {'fid', 'title', 'anchor'} or None."""
+    member_of = (sig.data or {}).get('member_of') or ''
+    for e in finding_entries():
+        keys = [str(k) for k in ((e.data or {}).get('signatures') or [e.name])]
+        if sig.key in keys or (member_of and member_of in keys):
+            return {'fid': finding_id((e.data or {}).get('serial')), 'title': e.title or '',
+                    'anchor': (keys[0] if keys else e.name).replace(':', '-')}
+    return None

@@ -159,7 +159,9 @@
             <h4>Diagnosis</h4>
             {% if sig.finding_anchor %}<p>The curated reading of this crashing frame: <a href="{% url 'monitor_app:panda_segfault_findings' %}#{{ sig.finding_anchor }}">Segfault Findings</a>.</p>{% endif %}
             {% if sig.verdict %}<p>Verdict: <strong>{{ sig.verdict }}</strong></p>{% endif %}
-            {% if sig.data.diagnosis %}
+            {% if sig.data.diagnosis.state == 'covered' %}
+            <p class="small">No study owed: the reading of this frame is finding <a href="{% url 'monitor_app:panda_segfault_findings' %}#{{ sig.data.diagnosis.anchor }}">{{ sig.data.diagnosis.finding }}</a>, and this signature was marked by it when its reproduction settled{% if sig.data.diagnosis.submitted_at %} ({{ sig.data.diagnosis.submitted_at|fmt_dt }}){% endif %}.</p>
+            {% elif sig.data.diagnosis %}
             <p class="small">Study {{ sig.data.diagnosis.state }}{% if sig.data.diagnosis.job_id %}, corun job {{ sig.data.diagnosis.job_id }}{% endif %}{% if sig.data.diagnosis.submitted_at %}, submitted {{ sig.data.diagnosis.submitted_at|fmt_dt }}{% endif %}{% if sig.data.diagnosis.requested_by %} by {{ sig.data.diagnosis.requested_by }}{% endif %}{% if sig.data.diagnosis.reason %}: {{ sig.data.diagnosis.reason }}{% endif %}{% if sig.data.diagnosis.problems %}; problems: {{ sig.data.diagnosis.problems|join:"; " }}{% endif %}</p>
             {% elif not sig.verdict %}
             <p class="text-muted">No diagnosis yet. The study runs on its own once the signature is reproduced with a trace, or on request.</p>

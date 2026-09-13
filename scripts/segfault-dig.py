@@ -24,7 +24,8 @@ account that holds the Rucio proxy::
 
     cd /data/wenauseic/github/swf-monitor/src
     ../../swf-testbed/.venv/bin/python ../scripts/segfault-dig.py --key exit139:task39623
-    ... --key K --pandaid P          # a chosen job instead of the median one
+    ... --key K --pandaid P          # a chosen job instead of the median one,
+                                     # or one of the signature's reproduction jobs
     ... --auto 10                    # the signatures never dug, largest first
 
 The last stdout line is a JSON summary; progress and errors go to stderr.
@@ -47,7 +48,7 @@ django.setup()
 from monitor_app.epicprod_inventory import trace_extract  # noqa: E402
 from monitor_app.models import CrashSignature  # noqa: E402
 from monitor_app.segfaults import (dig_candidates, record_trace, representative,  # noqa: E402
-                                   resolve_log_did)
+                                   reproduction_entry, resolve_log_did, trace_from_report)
 
 DOER = os.path.join(THIS_DIR, 'cache-payload-log.py')
 SWF_TMP_DIR = os.environ.get('SWF_TMP_DIR', '/data/swf-tmp')
@@ -76,33 +77,6 @@ def fetch_log(scope, lfn, jeditaskid, pandaid):
     return jobdir, ''
 
 
-def metatable_note(pandaid):
-    """The payload report's note of a finished job, from the PanDA metatable
-    (the pilot lifts jobReport.json there for finished jobs only; the
-    dispatcher carries the payload report under ``payload``). '' when the
-    job has none."""
-    from django.db import connections
-    from monitor_app.panda.constants import PANDA_SCHEMA
-    try:
-        with connections['panda'].cursor() as cur:
-            cur.execute(f'SELECT "metadata" FROM "{PANDA_SCHEMA}"."metatable" WHERE "pandaid" = %s',
-                        [int(pandaid)])
-            row = cur.fetchone()
-    except Exception as e:                                    # noqa: BLE001
-        log.error('job %s: metatable read failed: %s', pandaid, e)
-        return ''
-    if not row or not row[0]:
-        return ''
-    raw = row[0]
-    try:
-        meta = json.loads(raw) if isinstance(raw, str) else raw
-    except (ValueError, TypeError) as e:
-        log.error('job %s: metatable metadata unparsable: %s', pandaid, e)
-        return ''
-    payload = meta.get('payload') if isinstance(meta, dict) else None
-    return str((payload or {}).get('note') or '') if isinstance(payload, dict) else ''
-
-
 def dig(sig, pandaid=None):
     """One dig; returns the summary dict for the signature."""
     if pandaid is None:
@@ -116,33 +90,23 @@ def dig(sig, pandaid=None):
         job = EpicProdJob.objects.filter(pandaid=int(pandaid)).only('jeditaskid').first()
         jeditaskid = job.jeditaskid if job else None
         if not jeditaskid:
+            # A reproduction's canary job is not in the crash inventory; the
+            # signature's own reproduction record names it.
+            jeditaskid = (reproduction_entry(sig, pandaid) or {}).get('jedi_task_id')
+        if not jeditaskid:
             return {'key': sig.key, 'trace_status': 'log_unavailable',
-                    'reason': f'job {pandaid} is not in the crash inventory'}
+                    'reason': f'job {pandaid} is neither in the crash inventory '
+                              f'nor a reproduction of {sig.key}'}
     sig.status = 'digging' if sig.status == 'new' else sig.status
     sig.save(update_fields=['status', 'updated_at'])
     log.info('%s: representative job %s (task %s)', sig.key, pandaid, jeditaskid)
     # Payload 0.12 and later send the crashing stage's log tail in the
-    # report's note (SEGFAULT_DIAGNOSIS.md, Traces going forward); the
-    # sweep files it beside the job, so no tarball is fetched.
-    from monitor_app.models import EpicProdJob as _Job
-    filed = (_Job.objects.filter(pandaid=int(pandaid)).only('data').first() or _Job()).data or {}
-    note = (((filed.get('payload_report') or {}).get('report') or {}).get('note') or '')
-    source = 'payload_report'
-    if not note.startswith('crash:'):
-        # A job that finished at the server (a reproduction on the reference
-        # queue, which carries no log dataset) has its report in the PanDA
-        # metatable, not in the sweep's filing.
-        note, source = metatable_note(pandaid), 'metatable'
-    if note.startswith('crash:'):
-        result = trace_extract([note])
-        if result['trace_status'] == 'found':
-            log.info('%s: trace read from the %s payload report of job %s', sig.key, source, pandaid)
-            merged = record_trace(sig, result, pandaid, '')
-            return {'key': sig.key, 'pandaid': pandaid, 'trace_status': 'found',
-                    'source': source, 'program': result.get('program'),
-                    'stage': result.get('stage'), 'frame': result.get('frame'),
-                    'library': result.get('library'),
-                    'events_processed': result.get('events_processed'), 'merged_into': merged}
+    # report's note (SEGFAULT_DIAGNOSIS.md, Traces going forward), filed
+    # by the sweep beside the job or lifted into the PanDA metatable for
+    # a job that finished at the server; no tarball is fetched then.
+    found = trace_from_report(sig, pandaid)
+    if found:
+        return found
     scope, lfn = resolve_log_did(pandaid, jeditaskid)
     if not lfn:
         reason = 'no log file on the PanDA record'

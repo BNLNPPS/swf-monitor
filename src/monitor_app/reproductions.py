@@ -527,11 +527,16 @@ def reconcile(sig_key, queue_diagnosis=None):
     its run's identity and outcome, and the pair settles the signature's
     reproduction outcome (reproduced, site_dependent, not_reproduced,
     inconclusive) once a production run and a reference run have both
-    reported. The diagnosis is queued once when the outcome settles as
-    reproduced or site dependent with a trace on record and no study
-    yet. Runs under a row lock so a request appended meanwhile is kept;
-    the bus message goes out after the lock. Returns what changed."""
-    changed = {'entries': 0, 'outcome': None, 'diagnosis': False}
+    reported. A reproduced crash with no trace on record has its trace
+    read from the crashed run's payload report (the reference run first,
+    the queue of known conditions), so a reproduced crash yields its
+    trace where the campaign's did not. The diagnosis is queued once
+    when the outcome stands as reproduced or site dependent with a trace
+    on record and no study yet. Runs under a row lock so a request
+    appended meanwhile is kept; the bus message goes out after the lock.
+    Returns what changed."""
+    from .segfaults import covering_finding, trace_from_report
+    changed = {'entries': 0, 'outcome': None, 'trace': None, 'diagnosis': False, 'covered': None}
     to_queue = None
     with transaction.atomic():
         sig = CrashSignature.objects.select_for_update().filter(key=sig_key).first()
@@ -580,6 +585,16 @@ def reconcile(sig_key, queue_diagnosis=None):
                 outcome = 'inconclusive'
         elif ref and ref[-1]['outcome'] == 'crashed':
             outcome = 'reproduced'
+        if (outcome in ('reproduced', 'site_dependent')
+                and (sig.trace or {}).get('trace_status') != 'found'):
+            # The crashed run's report carries the stage's log tail
+            # (payload 0.12 and later); record_trace saves the trace and
+            # merges the frame under the lock held here.
+            for entry in ref[::-1] + prod[::-1]:
+                if entry.get('outcome') == 'crashed' and entry.get('canary_pandaid'):
+                    if trace_from_report(sig, entry['canary_pandaid']):
+                        changed['trace'] = entry['canary_pandaid']
+                        break
         data = dict(sig.data or {})
         fields = []
         if changed['entries']:
@@ -589,15 +604,6 @@ def reconcile(sig_key, queue_diagnosis=None):
             data['reproduction_outcome'] = outcome
             data['reproduction_settled_at'] = _iso(now)
             changed['outcome'] = outcome
-            if (outcome in ('reproduced', 'site_dependent')
-                    and (sig.trace or {}).get('trace_status') == 'found'
-                    and not data.get('diagnosis')):
-                # Marked before the message goes out, so a second pass
-                # never queues the study twice.
-                data['diagnosis'] = {'state': 'queued', 'requested_by': 'auto:reproduced',
-                                     'submitted_at': _iso(now)}
-                to_queue = sig.key
-                changed['diagnosis'] = True
             sig.data = data
             fields.append('data')
             if outcome in ('reproduced', 'site_dependent') and sig.status in ('reproducing', 'traced', 'new'):
@@ -606,6 +612,34 @@ def reconcile(sig_key, queue_diagnosis=None):
             elif outcome == 'not_reproduced' and sig.status == 'reproducing':
                 sig.status = 'not_reproduced'
                 fields.append('status')
+        if (data.get('reproduction_outcome') in ('reproduced', 'site_dependent')
+                and (sig.trace or {}).get('trace_status') == 'found'
+                and not data.get('diagnosis')):
+            # Marked before the message goes out, so a second pass never
+            # queues the study twice; the trace may arrive after the
+            # outcome settled, so this is checked on every pass. A frame
+            # whose reading already exists as a finding owes no study:
+            # the finding is the diagnosis and the signature is marked by
+            # it, so nothing further is ever asked of it.
+            finding = covering_finding(sig)
+            if finding:
+                data['diagnosis'] = {'state': 'covered', 'finding': finding['fid'],
+                                     'anchor': finding['anchor'], 'requested_by': 'auto:reproduced',
+                                     'submitted_at': _iso(now)}
+                sig.verdict = f"covered by finding {finding['fid']}: {finding['title']}".strip(': ')
+                sig.status = 'diagnosed'
+                for f in ('verdict', 'status'):
+                    if f not in fields:
+                        fields.append(f)
+                changed['covered'] = finding['fid']
+            else:
+                data['diagnosis'] = {'state': 'queued', 'requested_by': 'auto:reproduced',
+                                     'submitted_at': _iso(now)}
+                to_queue = sig.key
+                changed['diagnosis'] = True
+            sig.data = data
+            if 'data' not in fields:
+                fields.append('data')
         if fields:
             sig.save(update_fields=fields + ['updated_at'])
     if to_queue and queue_diagnosis is not None:

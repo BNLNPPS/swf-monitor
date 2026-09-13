@@ -6,10 +6,15 @@ The step the canary agent runs after each probe collection
 monitor_app/reproductions.py): every open reproduction request on a
 crash signature takes the identity and outcome of the canary run that
 answered it, a production run and a reference run that have both
-reported settle the signature's reproduction outcome, and a signature
+reported settle the signature's reproduction outcome, a reproduced
+crash with no trace on record has its trace read from the crashed
+run's payload report (the reference run first), and a signature
 settled as reproduced or site dependent with a trace on record has its
-diagnosis queued, once. Nothing here reaches PanDA: the runs' evidence
-is what the collection already wrote to the canary store.
+diagnosis queued, once, unless a finding already names it or its frame,
+in which case the finding is its diagnosis and it is marked diagnosed
+by it, so nothing further is asked of it. The runs' evidence is what the collection
+already wrote to the canary store; the one PanDA read is the report of
+a reproduction that finished at the server, which sits in the metatable.
 
 Django-bootstrap standalone script, by hand::
 
@@ -68,10 +73,13 @@ def main():
             results[key] = {'error': str(e)[:300]}
             errors += 1
     changed = {k: v for k, v in results.items()
-               if v.get('entries') or v.get('outcome') or v.get('error')}
+               if v.get('entries') or v.get('outcome') or v.get('trace') or v.get('covered')
+               or v.get('error')}
     if changed:
         settled = [k for k, v in changed.items() if v.get('outcome')]
         queued = [k for k, v in changed.items() if v.get('diagnosis')]
+        covered = [f"{k} by {v['covered']}" for k, v in changed.items() if v.get('covered')]
+        traced = [k for k, v in changed.items() if v.get('trace')]
         log_epicprod_action(
             'canary-agent', 'segfault_reproduction_reconcile',
             outcome='error' if errors else 'ok',
@@ -80,10 +88,12 @@ def main():
             duration_ms=int((time.monotonic() - t0) * 1000),
             message=(f"reproduction reconcile: {len(changed)} signature(s) changed"
                      + (f", settled {', '.join(settled)}" if settled else '')
+                     + (f", trace read for {', '.join(traced)}" if traced else '')
                      + (f", diagnosis queued for {', '.join(queued)}" if queued else '')
+                     + (f", covered by a finding: {', '.join(covered)}" if covered else '')
                      + (f", {errors} error(s)" if errors else '')),
             visited=len(keys), changed=len(changed), settled=len(settled),
-            diagnoses=len(queued), errors=errors)
+            diagnoses=len(queued), covered=len(covered), errors=errors)
     print(json.dumps({'visited': len(keys), 'changed': changed}, default=str))
     return 1 if errors else 0
 
