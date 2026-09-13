@@ -171,8 +171,11 @@ ACTION_DEFAULTS = {
         'description': "New files landed in JLab Rucio since the last "
                        "arrivals sweep, counted by campaign and location "
                        "across all versions — the signal behind the "
-                       "derived 'producing' campaign status. Emitted only "
-                       "when something arrived.",
+                       "derived 'producing' campaign status. Emitted on "
+                       "every sweep, so the assessment's arrival coverage "
+                       "reads a quiet interval as a measured zero; a sweep "
+                       "that found nothing is logged low and off the live "
+                       "view.",
     },
     'rucio_arrivals_sweep': {
         'sublevel': 'low', 'live': False,
