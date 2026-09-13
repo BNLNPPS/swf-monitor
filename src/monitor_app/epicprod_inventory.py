@@ -650,7 +650,10 @@ def trace_extract(texts):
                 i += 1
             _finish_trace(result, lines, start, frames, 'jana2')
             return result
-        # Geant4 / ROOT: the Break banner then gdb-style frames.
+        # Geant4 / ROOT: the Break banner then gdb-style frames. A banner
+        # with no frames (ROOT's "*** Break *** abort" after glibc aborts
+        # npsim on heap corruption) decides nothing; the DD4hep form below
+        # reads the G4Exception block that precedes the signal.
         start = next((i for i, l in enumerate(lines) if _TRACE_BREAK_RE.search(l)), None)
         if start is not None:
             frames = []
@@ -661,10 +664,13 @@ def trace_extract(texts):
                                    'library': m.group(3) or ''})
                     if len(frames) >= TRACE_MAX_FRAMES:
                         break
-            _finish_trace(result, lines, start, frames, 'root')
-            return result
+            if frames:
+                _finish_trace(result, lines, start, frames, 'root')
+                return result
         # DD4hep's signal handler (npsim): no frames; the last G4Exception
-        # block before it is the crashing frame's stand-in.
+        # block before it is the crashing frame's stand-in. The signal is
+        # 11 when the process faults after the event abort and 6 when glibc
+        # aborts it on heap corruption; the evidence is the same block.
         hit = next((i for i, l in enumerate(lines) if _TRACE_DD4HEP_RE.search(l)), None)
         if hit is not None:
             starts = [i for i, l in enumerate(lines[:hit]) if _TRACE_G4EXC_START_RE.search(l)]
@@ -683,6 +689,10 @@ def trace_extract(texts):
             _finish_trace(result, lines, hit, frames, 'dd4hep')
             if not result['program']:
                 result['program'], result['stage'] = 'npsim', 'simulation'
+            return result
+        if start is not None:
+            # The frameless Break banner alone: the context and the stage.
+            _finish_trace(result, lines, start, [], 'root')
             return result
     # No frames anywhere: the bare glibc line still names the stage.
     for text in texts:
