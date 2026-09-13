@@ -9,9 +9,16 @@ reads those jobs from ``jobsarchived4`` for a window and writes one
 ``EpicProdJob`` row per crashed job, ``phase = 'payload_crash'``, with the
 crash record under ``data['crash']``: exit code and signal, site and host,
 time to death, memory, the pilot label as stored, the task name, the
-sequence number and the manifest row it ran when the attempt's manifest
-record exists, and the stage from the payload digest when the job carried
-one.
+sequence number and the manifest row it ran, and the stage from the
+payload digest when the job carried one. The row comes from the attempt's
+manifest record; an attempt with no record (a legacy attempt whose
+sandbox was purged before the keepalive existed, the storm tasks among
+them) has its manifest established the way the residual rerun
+establishes it (``pcs.manifests.attempt_manifest``): the sandbox while
+the PanDA cache holds it, else the reconstruction from the definition's
+per-file event totals and the attempt's row count, verified against the
+delivered outputs and stored on the attempt as such, so the pass runs
+once per attempt and every later read is the record's.
 
 The record, as verified 2026-09-11 on one PCS job (2723039) and one storm
 job (1768411):
@@ -218,13 +225,48 @@ CONTAINER_RE = re.compile(r'"container_name":\s*"([^"]+)"')
 
 class ManifestRows:
     """The manifest rows of an attempt from its record on PandaTasks, by
-    JEDI task id, fetched once per task; None when no record exists. Also
-    the container image the task ran, from its PanDA task parameters."""
+    JEDI task id, fetched once per task; established and recorded when
+    no record exists (``_establish``); None with the reason kept when it
+    cannot be. Also the container image the task ran, from its PanDA
+    task parameters."""
 
-    def __init__(self):
+    def __init__(self, establish=True):
         self._rows = {}
         self._tasks = {}
         self._containers = {}
+        self._establish_manifests = establish
+        self.established = {}     # jeditaskid -> how the manifest was established
+        self.unavailable = {}     # jeditaskid -> why it could not be
+
+    def _establish(self, pt):
+        """The rows of an attempt with no manifest record, established as
+        the residual rerun establishes them (pcs/manifests.py,
+        ``attempt_manifest``): the sandbox while the PanDA cache holds it,
+        else the reconstruction from the definition's per-file totals and
+        the attempt's row count, verified against the delivered outputs
+        (one JLab Rucio listing per task) and stored on the attempt as
+        such. None, with the reason kept, when it cannot be: no PCS task,
+        no recorded outputs to verify against, an attempt cut by hand."""
+        from pcs.commands import _delivered_row_keys
+        from pcs.manifests import ManifestUnavailable, attempt_manifest
+        tid = int(pt.jedi_task_id)
+        task = pt.prod_task
+        try:
+            delivered = _delivered_row_keys(task)
+            if delivered[0] is None:
+                self.unavailable[tid] = 'no recorded RECO outputs to verify a reconstruction against'
+                return None
+            rows, info = attempt_manifest(task, pt, delivered_keys=delivered[0])
+        except ManifestUnavailable as e:
+            self.unavailable[tid] = str(e)[:300]
+            return None
+        except Exception as e:                                # noqa: BLE001
+            log.error('task %s: manifest establishment failed: %s', tid, e)
+            self.unavailable[tid] = f'establishment failed: {e}'[:300]
+            return None
+        self.established[tid] = str(info.get('source') or '')
+        log.info('task %s: manifest %s, %d rows', tid, info.get('source'), len(rows))
+        return [(f, e, int(n), int(c)) for f, e, n, c in rows]
 
     def container(self, jeditaskid):
         """The image the task ran (``container_name`` in its task
@@ -246,9 +288,15 @@ class ManifestRows:
         if not jeditaskid or not seq:
             return None
         if jeditaskid not in self._rows:
-            pt = PandaTasks.objects.filter(jedi_task_id=int(jeditaskid)).first()
+            pt = (PandaTasks.objects.filter(jedi_task_id=int(jeditaskid))
+                  .select_related('prod_task', 'prod_task__dataset').first())
             rec = record_of(pt) if pt else None
-            self._rows[jeditaskid] = expand(rec) if rec else None
+            rows = expand(rec) if rec else None
+            if rows is None and pt is not None and self._establish_manifests:
+                rows = self._establish(pt)
+            elif rows is None and pt is None:
+                self.unavailable[int(jeditaskid)] = 'no PCS task association'
+            self._rows[jeditaskid] = rows
         rows = self._rows[jeditaskid]
         if rows is None or seq < 1 or seq > len(rows):
             return None
@@ -394,10 +442,13 @@ def run(args):
              ' (dry run)' if args.dry_run else '')
     jobs = crashed_jobs(since, args.limit)
     log.info('%d crash-class jobs in the record', len(jobs))
-    manifests, chains = ManifestRows(), RetryChains()
+    manifests = ManifestRows(establish=not args.dry_run and not args.no_manifest_establish)
+    chains = RetryChains()
     for i in range(0, len(jobs), BATCH):
         write_batch(jobs[i:i + BATCH], manifests, chains, args.dry_run, counts)
         log.info('  %d/%d written', min(i + BATCH, len(jobs)), len(jobs))
+    for tid, reason in sorted(manifests.unavailable.items()):
+        log.info('task %s: manifest unavailable: %s', tid, reason)
     summary = {
         'since': since.isoformat(timespec='seconds'),
         'jobs_seen': counts['jobs_seen'],
@@ -406,6 +457,10 @@ def run(args):
         'seq_unresolved': counts['seq_unresolved'],
         'rows_unresolved': counts['rows_unresolved'],
         'tasks': len(counts['tasks']),
+        'manifests_established': len(manifests.established),
+        'manifests_unavailable': len(manifests.unavailable),
+        'manifests': {'established': manifests.established,
+                      'unavailable': manifests.unavailable},
         'dry_run': bool(args.dry_run),
     }
     if not args.dry_run and not args.no_signatures:
@@ -459,6 +514,8 @@ def main():
                     help='the job pass only')
     ap.add_argument('--no-rows-lost', action='store_true',
                     help='skip the delivery lookup behind rows_lost')
+    ap.add_argument('--no-manifest-establish', action='store_true',
+                    help='read manifest records only; establish none for attempts without one')
     ap.add_argument('--rows-lost-max-tasks', type=int, default=50,
                     help='delivery lookups per pass, largest signatures first (default 50)')
     ap.add_argument('--instance', default='segfault-inventory',
@@ -503,6 +560,8 @@ def main():
                      f"{summary['jobs_seen']} crashed jobs, {summary['rows_added']} rows added, "
                      f"{summary['rows_updated']} updated, {summary['rows_unresolved']} rows "
                      f"unresolved, {summary['tasks']} tasks, "
+                     f"{summary.get('manifests_established', 0)} manifests established "
+                     f"({summary.get('manifests_unavailable', 0)} unavailable), "
                      f"{summary.get('signatures', 0)} signatures "
                      f"({summary.get('signatures_new', 0)} new)"),
             **{k: v for k, v in summary.items() if isinstance(v, int) and not isinstance(v, bool)})
