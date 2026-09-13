@@ -740,3 +740,65 @@ async def panda_segfault_finding_set(
         return {'name': name, 'created': created, 'versions': entry.versions.count(),
                 'title': entry.title, 'standing': entry.status, 'data': entry.data}
     return await sync_to_async(_work)()
+
+
+@mcp.tool()
+@requires_authority
+async def panda_segfault_reproduce(
+    key: str,
+    pandaid: int = None,
+    queues: list = None,
+    requested_by: str = 'mcp',
+) -> dict:
+    """
+    Request the reproduction of a crash signature: the crashed row run
+    again as one payload canary per queue, the production queue where the
+    crash happened and the reference queue BNL_NPPS_GPU (swf-epicprod
+    docs/SEGFAULT_DIAGNOSIS.md, Reproduction). The request is recorded on
+    the signature as it is sent and appears on the runs page
+    (/panda/segfaults/reproductions/) within a minute, which is how a
+    session that takes an item from the nightly notice claims it: check
+    the signature's attempts (panda_segfault_signature) before requesting,
+    so two sessions never submit the same row. The reference run carries
+    the production queue's memory limit.
+
+    Args:
+        key: The signature key, e.g. 'exit139:task38971'.
+        pandaid: The crashed job to rerun (default: the representative
+            with a resolved row).
+        queues: The queues to run on (default: the production queue and
+            the reference queue).
+        requested_by: Who requests (recorded on the signature and the
+            action stream).
+
+    Returns:
+        key, the plan (job, row, task, queues) and the request entries
+        recorded, or {'error': ...} when the run cannot be formed.
+    """
+    from monitor_app.epicprod_logging import log_epicprod_action
+    from monitor_app.models import CrashSignature
+    from monitor_app.segfaults import REFERENCE_QUEUE, reproduce, reproduction_plan
+
+    def _work():
+        sig = CrashSignature.objects.filter(key=key).first()
+        if sig is None:
+            return {'error': f'no crash signature {key}'}
+        try:
+            plan = reproduction_plan(sig, pandaid)
+        except ValueError as e:
+            return {'error': str(e)}
+        chosen = [q for q in (queues or []) if q] or [
+            q for q in (plan['production_queue'], REFERENCE_QUEUE) if q]
+        chosen = list(dict.fromkeys(chosen))
+        mem_limits = {q: (plan['maxrss_mb'] if q == REFERENCE_QUEUE else None) for q in chosen}
+        try:
+            entries = reproduce(sig, plan['pandaid'], chosen, mem_limits, requested_by)
+        except (ValueError, RuntimeError) as e:
+            return {'error': str(e), 'plan': plan}
+        log_epicprod_action('mcp', 'segfault_reproduce', subject_type='crash_signature',
+                            subject_key=key, username=requested_by, sublevel='normal',
+                            live_default=True,
+                            message=f"segfault_reproduce {key}: job {plan['pandaid']} on "
+                                    f"{', '.join(chosen)}"[:300], queues=len(chosen))
+        return {'key': key, 'plan': plan, 'queues': chosen, 'requests': entries}
+    return await sync_to_async(_work)()

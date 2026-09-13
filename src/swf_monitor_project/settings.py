@@ -370,6 +370,8 @@ COMMON QUERIES:
 - Errors for a user? → panda_error_summary(username='someone')
 - Payload crashes (segfaults) by signature? → panda_segfault_catalog(class_hint='storm')
 - One crash signature and its jobs? → panda_segfault_signature(key='exit139:task38661')
+- The readings of the crashes? → panda_segfault_findings(); write one → panda_segfault_finding_set(name=...)
+- Reproduce a crash named by the nightly notice? → panda_segfault_reproduce(key='exit139:task38971')
 - Deep dive on a failed job? → panda_study_job(pandaid=130497)
 - EIC queues? → panda_list_queues(vo='eic')
 - Queue config? → panda_get_queue(panda_queue='NERSC_Perlmutter_epic')

@@ -179,6 +179,11 @@ SEGFAULT_INVENTORY_TIMEOUT = int(os.environ.get("EPICPROD_SEGFAULT_INVENTORY_TIM
 SEGFAULT_INVENTORY_DAYS = int(os.environ.get("EPICPROD_SEGFAULT_INVENTORY_DAYS", "3"))
 SEGFAULT_DIG_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "segfault-dig.py"
 SEGFAULT_DIG_TIMEOUT = int(os.environ.get("EPICPROD_SEGFAULT_DIG_TIMEOUT", "3600"))
+# The nightly notice to the swf sessions (SEGFAULT_DIAGNOSIS.md, Reproduction):
+# the catalog census and the signatures awaiting a decision, one TJAI
+# message after the inventory and the automatic dig.
+SEGFAULT_NOTICE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "segfault-nightly-notice.py"
+SEGFAULT_NOTICE_TIMEOUT = int(os.environ.get("EPICPROD_SEGFAULT_NOTICE_TIMEOUT", "300"))
 # The automatic dig per night: one representative log per new signature,
 # capped so a storm is not a thousand fetches (SEGFAULT_DIAGNOSIS.md).
 SEGFAULT_DIG_AUTO = int(os.environ.get("EPICPROD_SEGFAULT_DIG_AUTO", "10"))
@@ -322,7 +327,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "rucio_arrivals_sweep", "epic_prod_past_import",
                    "file_events_measure", "delivery_daily_rebuild",
                    "batch_log_capture", "batch_log_learn",
-                   "segfault_inventory", "segfault_dig", "segfault_package",
+                   "segfault_inventory", "segfault_dig", "segfault_notice", "segfault_package",
                    "segfault_diagnose", "segfault_diagnosis_completed",
                    "report_sweep", "outputs_ingest", "registrar",
                    "content_validate", "content_accept", "stash_drain",
@@ -1424,6 +1429,7 @@ class EpicProdOpsAgent(BaseAgent):
             # day's crash record (SEGFAULT_DIAGNOSIS.md, Inventory builder).
             ('segfault_inventory', self._do_segfault_inventory),
             ('segfault_dig', self._do_segfault_dig_auto),
+            ('segfault_notice', self._do_segfault_notice),
             ('catalog_import_csv',
              lambda msg: self._do_catalog_import(dict(msg, source='csv'))),
             ('epic_prod_past_import', self._do_epic_prod_past_import),
@@ -2624,6 +2630,55 @@ class EpicProdOpsAgent(BaseAgent):
                                   f"{summary.get('absent')} without a trace"),
                          digs=summary.get('digs'), found=summary.get('found'),
                          log_unavailable=summary.get('log_unavailable'))
+
+    def _handle_segfault_notice(self, m):
+        """The nightly notice to the swf sessions, directly invokable."""
+        self.run_in_background(
+            self._do_segfault_notice, m,
+            dedup_key="segfault_notice", label="segfault_notice")
+
+    def _do_segfault_notice(self, m):
+        """One TJAI message to the swf sessions with the catalog census and
+        the signatures awaiting a decision (scripts/segfault-nightly-notice.py);
+        nothing is submitted. The action carries the counts and the message id."""
+        cmd = [sys.executable, str(SEGFAULT_NOTICE_SCRIPT)]
+        self.logger.info("PRODOPS segfault_notice: composing")
+        t0 = time.monotonic()
+        username = str(m.get('created_by') or '')
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=SEGFAULT_NOTICE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(f"PRODOPS segfault_notice TIMEOUT after {SEGFAULT_NOTICE_TIMEOUT}s")
+            self._log_action('segfault_notice', t0, outcome='timeout',
+                             reason=f'timed out after {SEGFAULT_NOTICE_TIMEOUT}s',
+                             username=username, sublevel='normal', live_default=True,
+                             level=logging.ERROR)
+            return
+        summary = {}
+        for line in (p.stdout or '').splitlines():
+            if line.startswith('{'):
+                try:
+                    summary = json.loads(line)
+                except ValueError:
+                    summary = {}
+        counts = summary.get('counts') or {}
+        if p.returncode != 0 or summary.get('error'):
+            reason = str(summary.get('error') or (p.stderr or '').strip()[-300:] or f'rc={p.returncode}')
+            self.logger.error(f"PRODOPS segfault_notice FAILED: {reason}")
+            self._log_action('segfault_notice', t0, outcome='error', reason=reason,
+                             username=username, sublevel='normal', live_default=True,
+                             level=logging.ERROR, **{k: v for k, v in counts.items() if isinstance(v, int)})
+            return
+        self.logger.info(f"PRODOPS segfault_notice sent: {summary.get('message_id')}")
+        self._log_action('segfault_notice', t0, username=username, sublevel='normal',
+                         live_default=True,
+                         summary=(f"{counts.get('untraced_runnable')} need a reproduction, "
+                                  f"{counts.get('traced_unread')} traced unread, "
+                                  f"{counts.get('covered')} of {counts.get('signatures')} read; "
+                                  f"message {summary.get('message_id')} to {summary.get('resource')}"),
+                         message_id=str(summary.get('message_id') or ''),
+                         **{k: v for k, v in counts.items() if isinstance(v, int)})
 
     def _handle_batch_log_capture(self, m):
         """Run the batch-record capture off the receiver thread — normally a
