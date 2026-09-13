@@ -107,13 +107,16 @@ def census():
             continue
         s = signature_summary(sig)
         counts['crashes'] += s['crashes'] or 0
+        # In flight is counted whatever the signature's reading: a covered
+        # signature's verifying run is a run.
+        if active.get(sig.key):
+            counts['in_flight'] += 1
         fid = covering_finding(sig)
         if fid or sig.status in SETTLED:
             counts['covered'] += 1
             counts['covered_crashes'] += s['crashes'] or 0
             continue
         if active.get(sig.key):
-            counts['in_flight'] += 1
             continue
         row = {'key': sig.key, 'class': s['class'], 'crashes': s['crashes'],
                'queue': ', '.join(s['site_names'][:2]), 'last_seen': (s['last_seen'] or '')[:10],
