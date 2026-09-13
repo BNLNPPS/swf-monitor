@@ -947,6 +947,55 @@ def reproduction_refresh(sig):
     return bool(changed.get('entries') or changed.get('outcome'))
 
 
+def queue_traced_studies(limit, requested_by='auto:traced'):
+    """The nightly automatic study: a traced signature that no finding
+    reads and no study has been asked of is studied once, largest first,
+    at most ``limit`` a night, without waiting for a reproduction (a
+    reproduced one is queued by the reconciliation). Each is marked
+    queued before its message goes out, so a later pass never asks
+    twice; a frame a finding already reads is marked covered instead,
+    every night, outside the cap (no study, nothing to bound).
+    Returns {'queued': [keys], 'covered': [keys]}."""
+    from django.db import transaction
+    out = {'queued': [], 'covered': []}
+    candidates = (CrashSignature.objects.filter(level='record')
+                  .exclude(status__in=('diagnosed', 'handed_off', 'fixed', 'accepted'))
+                  .order_by('-crashes'))
+    now = _iso(timezone.now())
+    for sig in candidates:
+        if (sig.trace or {}).get('trace_status') != 'found' or (sig.data or {}).get('diagnosis'):
+            continue
+        with transaction.atomic():
+            sig = CrashSignature.objects.select_for_update().get(pk=sig.pk)
+            data = dict(sig.data or {})
+            if data.get('diagnosis'):
+                continue
+            finding = covering_finding(sig)
+            if not finding and len(out['queued']) >= limit:
+                continue
+            if finding:
+                data['diagnosis'] = {'state': 'covered', 'finding': finding['fid'],
+                                     'anchor': finding['anchor'], 'requested_by': requested_by,
+                                     'submitted_at': now}
+                sig.verdict = f"covered by finding {finding['fid']}: {finding['title']}".strip(': ')
+                sig.status = 'diagnosed'
+                sig.data = data
+                sig.save(update_fields=['data', 'verdict', 'status', 'updated_at'])
+                out['covered'].append(sig.key)
+                continue
+            data['diagnosis'] = {'state': 'queued', 'requested_by': requested_by,
+                                 'submitted_at': now}
+            sig.data = data
+            sig.save(update_fields=['data', 'updated_at'])
+        if queue_diagnosis(sig.key, requested_by):
+            out['queued'].append(sig.key)
+        else:
+            # The bus refused: unmark, so the next night asks again.
+            CrashSignature.objects.filter(pk=sig.pk).update(
+                data={k: v for k, v in (sig.data or {}).items() if k != 'diagnosis'})
+    return out
+
+
 def queue_diagnosis(key, requested_by):
     """Queue a signature's LLM study to the ops agent; reported, never
     raised (a page read must not fail on the bus)."""

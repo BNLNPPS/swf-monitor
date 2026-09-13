@@ -184,6 +184,11 @@ SEGFAULT_DIG_TIMEOUT = int(os.environ.get("EPICPROD_SEGFAULT_DIG_TIMEOUT", "3600
 # message after the inventory and the automatic dig.
 SEGFAULT_NOTICE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "segfault-nightly-notice.py"
 SEGFAULT_NOTICE_TIMEOUT = int(os.environ.get("EPICPROD_SEGFAULT_NOTICE_TIMEOUT", "300"))
+# The nightly automatic study (SEGFAULT_DIAGNOSIS.md, Diagnosis): a traced
+# signature no finding reads is studied once, largest first, this many a
+# night; a frame a finding reads is marked covered instead.
+SEGFAULT_STUDY_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "segfault-study-auto.py"
+SEGFAULT_STUDY_AUTO = int(os.environ.get("EPICPROD_SEGFAULT_STUDY_AUTO", "3"))
 # The automatic dig per night: one representative log per new signature,
 # capped so a storm is not a thousand fetches (SEGFAULT_DIAGNOSIS.md).
 SEGFAULT_DIG_AUTO = int(os.environ.get("EPICPROD_SEGFAULT_DIG_AUTO", "10"))
@@ -327,7 +332,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "rucio_arrivals_sweep", "epic_prod_past_import",
                    "file_events_measure", "delivery_daily_rebuild",
                    "batch_log_capture", "batch_log_learn",
-                   "segfault_inventory", "segfault_dig", "segfault_notice", "segfault_package",
+                   "segfault_inventory", "segfault_dig", "segfault_study", "segfault_notice", "segfault_package",
                    "segfault_diagnose", "segfault_diagnosis_completed",
                    "report_sweep", "outputs_ingest", "registrar",
                    "content_validate", "content_accept", "stash_drain",
@@ -1429,6 +1434,7 @@ class EpicProdOpsAgent(BaseAgent):
             # day's crash record (SEGFAULT_DIAGNOSIS.md, Inventory builder).
             ('segfault_inventory', self._do_segfault_inventory),
             ('segfault_dig', self._do_segfault_dig_auto),
+            ('segfault_study', self._do_segfault_study_auto),
             ('segfault_notice', self._do_segfault_notice),
             ('catalog_import_csv',
              lambda msg: self._do_catalog_import(dict(msg, source='csv'))),
@@ -2630,6 +2636,52 @@ class EpicProdOpsAgent(BaseAgent):
                                   f"{summary.get('absent')} without a trace"),
                          digs=summary.get('digs'), found=summary.get('found'),
                          log_unavailable=summary.get('log_unavailable'))
+
+    def _handle_segfault_study(self, m):
+        """The nightly automatic study, directly invokable."""
+        self.run_in_background(
+            self._do_segfault_study_auto, m,
+            dedup_key="segfault_study", label="segfault_study")
+
+    def _do_segfault_study_auto(self, m):
+        """Queue the study of traced signatures no finding reads, at most
+        SEGFAULT_STUDY_AUTO a night (scripts/segfault-study-auto.py); the
+        frames a finding reads are marked covered. Each study goes out as
+        a segfault_diagnose message, whose trigger records the run."""
+        limit = int(m.get('limit') or SEGFAULT_STUDY_AUTO)
+        cmd = [sys.executable, str(SEGFAULT_STUDY_SCRIPT), '--limit', str(limit)]
+        self.logger.info(f"PRODOPS segfault_study: automatic, up to {limit}")
+        t0 = time.monotonic()
+        username = str(m.get('created_by') or '')
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        except subprocess.TimeoutExpired:
+            self.logger.error("PRODOPS segfault_study TIMEOUT after 600s")
+            self._log_action('segfault_study', t0, outcome='timeout',
+                             reason='timed out after 600s', username=username,
+                             sublevel='normal', live_default=True, level=logging.ERROR)
+            return
+        summary = {}
+        for line in (p.stdout or '').splitlines():
+            if line.startswith('{'):
+                try:
+                    summary = json.loads(line)
+                except ValueError:
+                    summary = {}
+        if p.returncode != 0:
+            reason = (p.stderr or '').strip()[-300:] or f'rc={p.returncode}'
+            self.logger.error(f"PRODOPS segfault_study FAILED: {reason}")
+            self._log_action('segfault_study', t0, outcome='error', reason=reason,
+                             username=username, sublevel='normal', live_default=True,
+                             level=logging.ERROR)
+            return
+        queued, covered = summary.get('queued') or [], summary.get('covered') or []
+        self.logger.info(f"PRODOPS segfault_study: queued {queued}, covered {len(covered)}")
+        self._log_action('segfault_study', t0, username=username, sublevel='normal',
+                         live_default=True,
+                         summary=(f"{len(queued)} studies queued ({', '.join(queued)}); "
+                                  f"{len(covered)} traced signatures marked covered by a finding"),
+                         queued=len(queued), covered=len(covered))
 
     def _handle_segfault_notice(self, m):
         """The nightly notice to the swf sessions, directly invokable."""
