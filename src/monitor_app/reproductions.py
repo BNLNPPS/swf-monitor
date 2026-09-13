@@ -533,7 +533,12 @@ def _entry_outcome(row):
     signature's own vocabulary: submitted, running, crashed, completed,
     inconclusive, cancelled)."""
     if row['result'] == 'crash_observed':
-        return 'running' if row['active'] else 'inconclusive'
+        # A fatal signal the watchdog ended with the stage's exit in the
+        # crash class is the payload's crash (the trace comes from its
+        # report); a signal with no payload exit stays evidence only.
+        if row['active']:
+            return 'running'
+        return 'crashed' if row['payload_exit_code'] in CRASH_EXITS else 'inconclusive'
     if row['result'] in ENDED_OUTCOMES:
         return row['result']
     if row['phase'] in ('running', 'finishing', 'queued'):
@@ -619,6 +624,10 @@ def reconcile(sig_key, queue_diagnosis=None):
                 if entry.get('outcome') == 'crashed' and entry.get('canary_pandaid'):
                     if trace_from_report(sig, entry['canary_pandaid']):
                         changed['trace'] = entry['canary_pandaid']
+                        # The merge under a frame entry wrote member_of on
+                        # a fresh row instance; read it back so the
+                        # covering finding is seen on this pass.
+                        sig.refresh_from_db(fields=['data', 'status', 'trace'])
                         break
         data = dict(sig.data or {})
         fields = []
