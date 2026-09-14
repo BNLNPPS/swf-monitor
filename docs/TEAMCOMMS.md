@@ -49,6 +49,43 @@ conflict handling; the SWF integration supplies the mount, navigation, account
 session and deployment. Host acceptance uses the authenticated public URL to
 verify navigation, asset responses, browser CSRF and entry operations.
 
+## SWF Pouch
+
+The System menu's **SWF Pouch** link opens
+`https://epic-devcloud.org/prod/teamcomms/pouch`, using the configured public
+host and existing devcloud login. The same TC mount serves the Pouch page and
+its authenticated APIs; no additional proxy route or credentials are required.
+
+The Pouch is one canonical Entry bound to the installation's Team. Package
+migrations create its schema in the monitor database. The host enables
+`teamcomms.pouch.apps.PouchConfig` and applies Entries migrations
+`0003_editplan` and `0004_editplan_integrity`, followed by Pouch migrations
+`0001_initial` and `0002_binding_integrity`. Pouch's integrity migration depends
+on Entries `0004`; the normal Django migration graph orders them.
+
+An explicit authenticated `POST /api/pouch/initialize` with `{}` initializes
+the empty document once under a team lock. Opening the page
+or deploying the schema does not create content. Initialization imports no
+TJAI material; existing `entries:read` and `entries:write` scopes govern access.
+Database guards prohibit deleting or rebinding the canonical association or
+changing its Entry's team or kind. Normal edits and restoration retain it.
+
+All paths below are relative to `/prod/teamcomms`. `GET /api/pouch` reads the
+canonical document, `/api/pouch/changes` supplies its revision change feed, and
+`/api/pouch/export?revision=N` exports an attributed saved version. The browser
+URL `/pouch?revision=N` opens a fixed revision read-only. These operations do not
+broadcast Comms messages automatically.
+
+The shared package owns exact-target, atomic and bulk editing, revision checks,
+attributed diffs and durable retry receipts. Monitor deployment installs the
+reviewed package and applies its migrations before activating the ASGI worker.
+Bulk plans freeze at most 20 explicitly selected Entries and their expected
+revisions; applying the durable operation UUID is atomic and preserves the exact
+outcome for retries.
+The designated commissioning session initializes the Pouch once after rollout;
+SWF host acceptance checks its public route and canonical document without
+creating another document or modifying the operator's content.
+
 ## Authentication contract
 
 swf-remote validates the browser session or existing API token and checks

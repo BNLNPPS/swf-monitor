@@ -56,7 +56,7 @@ dependencies = [
     "rucio-clients",
     # MCP (official Python SDK) — explicit dep; provides FastMCP and pulls in Starlette.
     "mcp>=1.26.0,<2",
-    "teamcomms-ai @ git+https://github.com/wenaus/teamcomms-ai.git@45a6eb2ecf77000ca519d2accecb97388d1e95d6",
+    "teamcomms-ai @ git+https://github.com/wenaus/teamcomms-ai.git@132f669de68c57ec046dcd3e51610866c5904fa1",
     "httpx>=0.28,<1",
     # Starlette enters only via mcp. Pin past CVE-2026-48710 ("BadHost" Host-header
     # auth bypass; fixed in 1.0.1). See docs/MCP.md → Architecture.
