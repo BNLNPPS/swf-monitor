@@ -664,6 +664,16 @@ def trace_extract(texts):
                                    'library': m.group(3) or ''})
                     if len(frames) >= TRACE_MAX_FRAMES:
                         break
+            # ROOT's handler prints its own frames first (the stack-trace
+            # helper, wait4, DispatchSignals, then "<signal handler
+            # called>"); the crashing frame is the first named one after
+            # that marker (exit-135 jobs of task 37331: the frame is
+            # TStreamerInfoActions::VectorLooper::WriteBasicType under
+            # podio::ROOTWriter::writeFrame, not wait4).
+            marker = next((i for i, f in enumerate(frames)
+                           if 'signal handler called' in f['function']), None)
+            if marker is not None:
+                frames = frames[marker + 1:]
             if frames:
                 _finish_trace(result, lines, start, frames, 'root')
                 return result
