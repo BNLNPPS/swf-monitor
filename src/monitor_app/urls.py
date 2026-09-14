@@ -123,6 +123,7 @@ from .viewdir.system_status import (
 # Import iDDS database views from new dedicated module
 from .viewdir.analysis import analysis_view
 from .viewdir.panda_census import panda_queue_census_json
+from pcs.views import front_page as panda_front
 from .viewdir.idds_database import (
     idds_database_tables_list,
     idds_database_tables_datatable_ajax,
@@ -284,6 +285,10 @@ urlpatterns = [
 
     # PanDA Production Monitor
     path('panda/activity/', panda_activity, name='panda_activity'),
+    # The pressure front: what production does with the ready tasks PCS
+    # delivers (swf-epicprod docs/CONTINUOUS_PRODUCTION.md); the view is
+    # the production domain's, mounted here under the PanDA activity tree.
+    path('panda/front/', panda_front, name='panda_front'),
     path('panda/jobs/', panda_jobs_list, name='panda_jobs_list'),
     path('panda/jobs/datatable/', panda_jobs_datatable_ajax, name='panda_jobs_datatable_ajax'),
     path('panda/jobs/filter-counts/', panda_jobs_filter_counts, name='panda_jobs_filter_counts'),

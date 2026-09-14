@@ -679,7 +679,6 @@
                 <a href="{% url 'pcs:prod_configs_compose' %}" class="{% if active_nav.pcs_configs %}nav-active{% endif %}">Prod Configs</a>
                 <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks" class="{% if active_nav.pcs_tasks %}nav-active{% endif %}">Prod Tasks</a>
                 <a href="{% url 'pcs:trials_list' %}" class="{% if active_nav.pcs_trials %}nav-active{% endif %}">Prod trials</a>
-                <a href="{% url 'pcs:front_page' %}">Pressure front</a>
             </div>
         </div>
         <div class="dropdown">
@@ -720,6 +719,7 @@
                 <a href="{% url 'monitor_app:panda_activity' %}" class="{% if active_nav.panda_activity %}nav-active{% endif %}">Activity summary</a>
                 <a href="{% url 'monitor_app:panda_tasks_list' %}" class="{% if active_nav.panda_tasks %}nav-active{% endif %}">Tasks</a>
                 <a href="{% url 'monitor_app:panda_jobs_list' %}" class="{% if active_nav.panda_jobs %}nav-active{% endif %}">Jobs</a>
+                <a href="{% url 'monitor_app:panda_front' %}">Pressure front</a>
             </div>
         </div>
         <div class="dropdown">
