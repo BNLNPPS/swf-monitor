@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from uuid import UUID
 
-CONFIG = Path('/opt/swf-monitor/config/teamcomms')
+CONFIG = Path('/etc/swf-teamcomms')
 LIVE = Path('/opt/swf-monitor/current')
 CHECKOUT = Path('/data/wenauseic/github/swf-monitor')
 

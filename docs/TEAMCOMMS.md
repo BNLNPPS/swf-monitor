@@ -428,7 +428,7 @@ resources without reserving them; explicit claims establish reservations.
 
 ```sh
 sudo /opt/swf-monitor/current/.venv/bin/python \
-  /opt/swf-monitor/current/scripts/teamcomms-guarded-deploy.py \
+  /usr/local/libexec/swf-teamcomms-guarded-deploy.py \
   --claim-id UUID --generation N --check
 # For an authorized deployment, replace --check with branch infra/baseline-v43.
 ```
@@ -449,15 +449,22 @@ does not provision resources. The host command requires trusted database
 administration access and records the selected custodian as the audit identity;
 it does not grant that participant remote administration privileges.
 
-Root-private files live in `/opt/swf-monitor/config/teamcomms` (0700):
+Install the reviewed committed wrapper after deployment with `sudo install -o
+root -g root -m 0755 scripts/teamcomms-guarded-deploy.py
+/usr/local/libexec/swf-teamcomms-guarded-deploy.py`. This explicit host setup keeps
+the privileged entrypoint outside release ownership changes.
+
+Root-private files live in `/etc/swf-teamcomms` (0700):
 `connector.json`, `guard.json` and `program-token` (0600). The token is a local
 copy of the existing account-bound SWF program token, issued by devcloud. Keep
 both copies synchronized on rotation. It is never a service-introspection key.
 Connector fields are `url`, `token_file`, `host=swf-testbed`, `state_dir` and
 `greeting=false`. Guard fields are `host=swf-testbed`,
-`lock_dir=/opt/swf-monitor/shared/teamcomms-guards` and the explicit
+`lock_dir=/var/lib/swf-teamcomms/guards` and the explicit
 `resource_ids` allowlist, covering the checkout and deployment service.
 Every cooperating invocation uses the same root-owned lock directory and IDs.
+These paths are outside the release tree, whose ownership the normal deployment
+script resets to the application account.
 
 Coverage is exclusion between cooperating foreground invocations of this
 entrypoint on this host. Direct deploy scripts, raw shell commands, escaped
