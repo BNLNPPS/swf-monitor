@@ -45,15 +45,44 @@ _NERSC_PORTAL_BASE = "https://portal.nersc.gov/cfs/m3763/panda/jobs"
 # captured once and read from disk thereafter.
 _NERSC_PORTAL_FINAL_STATES = ('finished', 'failed', 'cancelled', 'closed')
 _PANDA_CLIENT_PROCESSING_RE = re.compile(r'^panda-client-[0-9][A-Za-z0-9._-]*-(jedi-.+)$')
-_PANDA_USER_EQUIVALENCES = {
-    # Canonical monitor display name -> equivalent login/name variants.
-    'Torre Wenaus': ('wenaus', 'wenauseic'),
+# One person, one name on every user facet and column. PanDA records a
+# task's owner as the OIDC display name ("Sakib Rahman"); PCS records the
+# login of the account that acted (srahman on pandaserver02, rahmans1 on
+# the external face), and the effective-owner substitution puts the login
+# on a PCS-submitted task. The equivalences live in SysConfig
+# (``panda_user_equivalences``: display name -> its logins), seeded with
+# what is known, edited on the System page as people arrive.
+PANDA_USER_EQUIVALENCES_KEY = 'panda_user_equivalences'
+_PANDA_USER_EQUIVALENCES_DEFAULT = {
+    'Torre Wenaus': ['wenaus', 'wenauseic'],
+    'Sakib Rahman': ['srahman', 'srahman1', 'rahmans1'],
 }
-_PANDA_USER_TO_CANONICAL = {
-    name: canonical
-    for canonical, names in _PANDA_USER_EQUIVALENCES.items()
-    for name in (canonical, *names)
-}
+_equivalences_cache = {'at': 0.0, 'forward': {}, 'reverse': {}}
+
+
+def _user_equivalences():
+    """{display name: [logins]} from SysConfig, read at most once a minute."""
+    import time
+    now = time.monotonic()
+    if now - _equivalences_cache['at'] < 60 and _equivalences_cache['forward']:
+        return _equivalences_cache['forward'], _equivalences_cache['reverse']
+    forward = dict(_PANDA_USER_EQUIVALENCES_DEFAULT)
+    try:
+        from monitor_app.models import SysConfig
+        value = SysConfig.get_setting(PANDA_USER_EQUIVALENCES_KEY,
+                                      _PANDA_USER_EQUIVALENCES_DEFAULT)
+        if isinstance(value, dict):
+            forward = {str(k): [str(v) for v in (vals or [])]
+                       for k, vals in value.items() if k}
+        else:
+            logger.error('%s is not a mapping of display name to logins: %r; '
+                         'using the defaults', PANDA_USER_EQUIVALENCES_KEY, value)
+    except Exception as e:                                    # noqa: BLE001
+        logger.warning('user equivalences unread: %s', e)
+    reverse = {name: canonical for canonical, names in forward.items()
+               for name in (canonical, *names)}
+    _equivalences_cache.update(at=now, forward=forward, reverse=reverse)
+    return forward, reverse
 
 
 def _display_processing_type(value):
@@ -86,13 +115,15 @@ def _aggregate_processing_type_counts(rows):
 
 
 def _canonical_user(value):
-    return _PANDA_USER_TO_CANONICAL.get(value, value)
+    _forward, reverse = _user_equivalences()
+    return reverse.get(value, value)
 
 
 def _user_filter_values(value):
+    forward, _reverse = _user_equivalences()
     canonical = _canonical_user(value)
     values = {canonical}
-    values.update(_PANDA_USER_EQUIVALENCES.get(canonical, ()))
+    values.update(forward.get(canonical, ()))
     return sorted(v for v in values if v)
 
 
