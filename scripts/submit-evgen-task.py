@@ -14,21 +14,25 @@ submission spec is *fetched* from the monitor's artifact endpoint
 
 Flow:
   1. GET the EVGEN spec for ``--task-name`` from the monitor.
-  2. Assemble the submission sandbox (the one-row-per-job CSV manifest, the
+  2. Create the output datasets in JLab Rucio, each with its replication
+     rule and metadata, so the jobs register files into datasets that
+     exist (swf-epicprod docs/RUCIO_REGISTRATION_CONTRACT.md § 2); the
+     created DIDs go on the submission record.
+  3. Assemble the submission sandbox (the one-row-per-job CSV manifest, the
      ``environment-*.sh`` the payload sources, the in-job dispatcher, and the
      JLab x509 proxy the payload uses to register output).
-  3. Run the submission kernel (scripts/evgen_panda_submit.py) in a shell that
+  4. Run the submission kernel (scripts/evgen_panda_submit.py) in a shell that
      has sourced the panda-client environment, reusing the cached OIDC token
      (never deleting it, which would force an interactive device flow).
-  4. Parse ``jediTaskID=<N>`` and POST it to
+  5. Parse ``jediTaskID=<N>`` and POST it to
      ``/pcs/api/prod-tasks/record-submission/`` so the ProdTask records its
      panda_task_id and flips to 'submitted'.
-  5. Best-effort: write expected output inventory from the exact submitted spec.
+  6. Best-effort: write expected output inventory from the exact submitted spec.
 
 Every failure is surfaced (stderr + non-zero exit); nothing is swallowed. Exit
 codes match submit-prod-task.py so the agent handler treats both doers alike:
-0 success, 7 submitted-but-unrecorded (idempotent re-record), other non-zero
-failure.
+0 success, 7 submitted-but-unrecorded (idempotent re-record), 8 output
+datasets not created (nothing submitted), other non-zero failure.
 
 Standalone:
     python scripts/submit-evgen-task.py --task-name <ProdTask.name> --proxy <x509>
@@ -254,6 +258,124 @@ def _sync_expected_inventory(task_name, spec_path):
         _log(f"WARNING: expected inventory sync failed rc={p.returncode}")
 
 
+def _load_sibling(name):
+    """A sibling script as a module (they have no package)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        name.replace('-', '_').replace('.py', ''), os.path.join(HERE, name))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _output_lifetime_s(spec, args):
+    """The lifetime of a run that has one: a canary's (the dispatcher's
+    payload-canary setting) or a trial's; None for production."""
+    if args.canary_stamp:
+        return int(_load_sibling("evgen_job_dispatcher.py").CANARY_LIFETIME_S)
+    if args.trial or spec.get('trial'):
+        return int(args.trial_lifetime_days) * 86400
+    return None
+
+
+def _outputs_to_create(spec, args):
+    """The datasets this submission's jobs register into. A production or
+    trial submission carries them on its spec (PCS composes them with
+    their metadata, swf_epicprod.output_datasets); a payload canary
+    writes everything into the one flat dataset the dispatcher's
+    payload-canary mode names, with no metadata, as the payload does."""
+    if args.canary_stamp:
+        d = _load_sibling("evgen_job_dispatcher.py")
+        return [{'level': 'CANARY', 'dataset': f"/{d.CANARY_DATASET_ROOT}/{args.canary_stamp}",
+                 'metadata': None}]
+    return list(spec.get('outputs') or [])
+
+
+def _precreate_outputs(spec, args):
+    """Create the submission's output datasets in JLab Rucio before the
+    task goes to PanDA (swf-epicprod docs/RUCIO_REGISTRATION_CONTRACT.md
+    § 2): each with one replication rule as the payload's upload made
+    it (the production account, one copy, the output RSE, DATASET
+    grouping, the run's lifetime where it has one) and its metadata. An
+    existing dataset is accepted: a missing rule is added, absent
+    metadata set, and metadata that differs from the task's stops the
+    submission, since the same output name would hold different
+    physics. Returns the record of what was done, one entry per
+    dataset, for the submission record; raises RuntimeError with the
+    reason when the submission must not proceed."""
+    outputs = _outputs_to_create(spec, args)
+    if not outputs:
+        raise RuntimeError("the spec names no output dataset to create")
+    from rucio.common.exception import DataIdentifierNotFound
+    from swf_epicprod.payload.register_to_rucio import validate_metadata
+    evgen = _load_sibling("register-evgen-rucio.py")
+    scope = evgen.RUCIO_SCOPE
+    rse = str((spec.get('env') or {}).get('OUT_RSE') or 'EIC-XRD')
+    lifetime = _output_lifetime_s(spec, args)
+    try:
+        client = evgen.rucio_client(args.proxy)
+    except Exception as e:                                    # noqa: BLE001
+        raise RuntimeError(f"JLab Rucio not reachable for the output datasets: {e}")
+    record = []
+    for out in outputs:
+        name = str(out['dataset'])
+        meta = out.get('metadata') or None
+        if meta:
+            validate_metadata(meta)
+        rule = {'account': client.account, 'copies': 1, 'rse_expression': rse,
+                'grouping': 'DATASET', 'lifetime': lifetime}
+        entry = {'dataset': f"{scope}:{name}", 'level': out.get('level'), 'rse': rse}
+        try:
+            # Existence is read first: the JLab server applies the metadata
+            # of an add_dataset call to a dataset that already exists before
+            # it answers that it exists, so creation is attempted only on a
+            # dataset that is not there.
+            try:
+                existing = client.get_metadata(scope, name, plugin='ALL')
+            except DataIdentifierNotFound:
+                existing = None
+            if existing is None:
+                client.add_dataset(scope=scope, name=name, meta=meta, rules=[rule], lifetime=lifetime)
+                entry.update(created=True, rule='added', metadata='set' if meta else 'none')
+                _log(f"output dataset {entry['dataset']}: created, rule added, "
+                     f"metadata {entry['metadata']}" + (f", lifetime {lifetime}s" if lifetime else ""))
+                record.append(entry)
+                continue
+            entry['created'] = False
+            rules = [r for r in client.list_did_rules(scope, name)
+                     if r.get('rse_expression') == rse]
+            if rules:
+                entry['rule'] = 'present'
+            else:
+                client.add_replication_rule([{'scope': scope, 'name': name}], copies=1,
+                                            rse_expression=rse, lifetime=lifetime,
+                                            grouping='DATASET')
+                entry['rule'] = 'added'
+            if meta:
+                absent = [k for k in meta if existing.get(k) is None]
+                differ = {k: (existing.get(k), v) for k, v in meta.items()
+                          if existing.get(k) is not None and existing.get(k) != v}
+                if differ:
+                    raise RuntimeError(
+                        f"output dataset {scope}:{name} exists with different metadata "
+                        f"than this task declares: " +
+                        ", ".join(f"{k}: dataset {a!r}, task {b!r}" for k, (a, b) in differ.items()))
+                for k in absent:
+                    client.set_metadata(scope, name, k, meta[k])
+                entry['metadata'] = f"filled:{','.join(absent)}" if absent else 'present'
+            else:
+                entry['metadata'] = 'none'
+        except RuntimeError:
+            raise
+        except Exception as e:                                # noqa: BLE001
+            raise RuntimeError(f"could not create output dataset {scope}:{name}: {e}")
+        _log(f"output dataset {entry['dataset']}: "
+             f"{'created' if entry['created'] else 'exists'}, rule {entry['rule']}, "
+             f"metadata {entry['metadata']}" + (f", lifetime {lifetime}s" if lifetime else ""))
+        record.append(entry)
+    return record
+
+
 def _record_submission_failure(args, reason):
     if not args.panda_tasks_id or not args.swf_monitor_url:
         return
@@ -462,7 +584,18 @@ def main():
     _log(f"EVGEN spec for {args.task_name}: outDS={spec['outDS']} "
          f"nJobs={spec.get('nJobs')} skipScout={spec.get('skipScout')}")
 
-    # 2. Assemble the sandbox.
+    # 2. The output datasets exist before the task does: created with
+    # their rule and metadata under the production account, so the jobs
+    # register files into them and carry no dataset-level work
+    # (swf-epicprod docs/RUCIO_REGISTRATION_CONTRACT.md § 2).
+    try:
+        spec['output_datasets'] = _precreate_outputs(spec, args)
+    except Exception as e:                                    # noqa: BLE001
+        _log(f"ERROR: output datasets not created: {e}")
+        _record_submission_failure(args, f"output datasets not created: {e}")
+        return 8
+
+    # 3. Assemble the sandbox.
     try:
         workdir = _assemble_sandbox(spec, args.proxy, SUBMIT_TMP_ROOT)
     except Exception as e:
@@ -471,7 +604,7 @@ def main():
         return 3
     _log(f"sandbox: {workdir}")
 
-    # 3. Run the kernel under the panda-client environment (cached OIDC token).
+    # 4. Run the kernel under the panda-client environment (cached OIDC token).
     runner = os.path.join(workdir, "run-submit.sh")
     with open(runner, "w") as f:
         f.write("#!/bin/bash\nset -e\n")
@@ -493,7 +626,7 @@ def main():
         _record_submission_failure(args, f"kernel exited rc={p.returncode}")
         return 5
 
-    # 4. Parse the JEDI task ID.
+    # 5. Parse the JEDI task ID.
     m = JEDITASKID_RE.search(out)
     if not m:
         _log("ERROR: submission succeeded but no jediTaskID in output")
@@ -507,7 +640,7 @@ def main():
         print(f"jediTaskID={jedi_task_id}")
         return 0
 
-    # 5. Record the outcome back to PCS (idempotent; retry a transient failure).
+    # 6. Record the outcome back to PCS (idempotent; retry a transient failure).
     last_err = None
     for attempt in range(1, RECORD_ATTEMPTS + 1):
         try:
@@ -520,6 +653,10 @@ def main():
                 body["residual"] = spec["residual"]
             if spec.get("payload_version"):
                 body["payload_version"] = spec["payload_version"]
+            if spec.get("output_datasets"):
+                # The datasets created for this submission: the explicit
+                # Rucio reference of its outputs, written at submission.
+                body["output_datasets"] = spec["output_datasets"]
             if spec.get("csvRows"):
                 # The rows this attempt runs, recorded compactly on the
                 # PandaTasks row (pcs/manifests.py): what a later residual
