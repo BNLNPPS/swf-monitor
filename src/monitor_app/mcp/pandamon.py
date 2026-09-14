@@ -571,6 +571,13 @@ async def panda_segfault_catalog(
     (swf-epicprod docs/SEGFAULT_DIAGNOSIS.md), as the catalog page shows
     them, from the monitor's own record (no PanDA query).
 
+    When Torre asks for segfault status or what to do: answer with clear
+    statements (what is established, what was decided, what was done) and
+    action proposals as questions, each with a recommended answer that a
+    yes settles; do what needs no decision of his without asking; never
+    make him ask where things stand (SEGFAULT_DIAGNOSIS.md, Production
+    disposition).
+
     A crash signature groups the failed jobs whose payload died on a signal
     (transexitcode 139 SIGSEGV, 134 SIGABRT, 135 SIGBUS, 136 SIGFPE) by
     exit code and PanDA task, promoted to trace level when the crashing
