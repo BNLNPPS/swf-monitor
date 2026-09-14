@@ -48,6 +48,13 @@ class ProposalProposeView(_AiApiView):
                     batch_id=request.data.get('batch_id', ''),
                     created_by=request.user.username)
                 return Response(result, status=status.HTTP_200_OK)
+            if action == 'registered_sample':
+                result = services.propose_registered_samples(
+                    request.data.get('items') or [],
+                    proposer=request.data.get('proposer', ''),
+                    batch_id=request.data.get('batch_id', ''),
+                    created_by=request.user.username)
+                return Response(result, status=status.HTTP_200_OK)
             if action == 'ping_fulfil':
                 result = services.propose_ping_fulfil(
                     request.data.get('ping_id', ''),

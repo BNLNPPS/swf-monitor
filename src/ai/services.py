@@ -632,6 +632,144 @@ def propose_standard_configs(items, *, proposer='', batch_id='',
             'invalid': invalid}
 
 
+def propose_registered_samples(items, *, proposer='', batch_id='',
+                               created_by='', rule=False):
+    """Propose the intake of registered EVGEN samples nobody asked for
+    (AI_PROPOSALS.md, category registered_sample; swf-epicprod
+    EPICPROD_EVGEN_INPUTS.md § From a registered sample to a task).
+    ``items``: [{did, campaign, comment, files, events, registered_at}].
+    A creation subject keyed on the DID with the campaign as
+    ``counterpart_key``; the payload carries the identity the path
+    derives (``derive_registered_sample``) and the three fields the
+    approval completes (requestor, nevents, priority) empty; the
+    precondition is that the record does not hold the sample
+    (``registered_sample_precondition``, all three lists empty). Denial
+    memory and identical-pending checks follow the subsystem conventions;
+    ``rule=True`` marks a rule proposer."""
+    from pcs.registered_samples import (derive_registered_sample,
+                                        registered_sample_precondition)
+    from monitor_app.epicprod_logging import log_epicprod_action
+
+    if not items:
+        raise ServiceError('no samples supplied')
+    now = _timezone.now()
+    proposed, noop, denied_skips, invalid = [], [], [], []
+    with transaction.atomic():
+        for item in items:
+            did = str(item.get('did') or '').strip()
+            campaign = str(item.get('campaign') or '').strip()
+            comment = (item.get('comment') or '').strip()
+            if not did or not campaign or not comment:
+                invalid.append(did or '(missing did)')
+                continue
+            identity, reason = derive_registered_sample(did)
+            if identity is None:
+                invalid.append(f'{did}: {reason}')
+                continue
+            held = registered_sample_precondition(did)
+            if held['matched_by'] or held['requested_by'] or held['tasks']:
+                noop.append(f'{did}: in the record')
+                continue
+            payload = {
+                'did': identity['did'], 'campaign': campaign,
+                'physics': identity['physics'], 'evgen': identity['evgen'],
+                'background': identity['background'], 'sample': identity['sample'],
+                'physics_tag': identity['physics_tag'], 'pc': identity['pc'],
+                'files': item.get('files'), 'events': item.get('events'),
+                'registered_at': item.get('registered_at') or '',
+                'requestor': '', 'nevents': None, 'priority': None,
+            }
+            input_hash = _proposal_input_hash(payload, comment)
+            base = Proposal.objects.filter(action='registered_sample',
+                                           subject_key=identity['did'])
+            if base.filter(status='denied', input_hash=input_hash).exists():
+                denied_skips.append(identity['did'])
+                continue
+            if base.filter(status='proposed', input_hash=input_hash).exists():
+                noop.append(identity['did'])
+                continue
+            base.filter(status='proposed').update(status='withdrawn',
+                                                  decided_at=now)
+            Proposal.objects.create(
+                action='registered_sample', subject_type='evgen_sample',
+                subject_key=identity['did'], counterpart_key=campaign,
+                payload=payload, comment=comment, proposer=proposer or '',
+                scan_version=1, batch_id=batch_id or '', executor='service',
+                precondition={'held': False}, input_hash=input_hash,
+                created_by=created_by or '')
+            proposed.append(identity['did'])
+    log_epicprod_action(
+        'web', 'proposal_created', username=created_by,
+        **_creation_record(rule),
+        message=(f'AI proposal: {len(proposed)} registered sample(s) '
+                 f'[{batch_id or "no batch"}]'),
+        proposed=len(proposed), noop=len(noop), denied=len(denied_skips),
+        invalid=len(invalid), proposer=proposer or '',
+        batch_id=batch_id or '', category='registered_sample',
+        url='/pcs/evgen/')
+    return {'proposed': proposed, 'noop': noop, 'denied': denied_skips,
+            'invalid': invalid}
+
+
+def _decide_registered_samples(rows, decision, decided_by, quality,
+                               amendments, now):
+    """Decide pending registered_sample proposals: stale once the record
+    holds the sample (matched, requested, or a task on the
+    configuration); the reviewer's requestor, nevents, priority and
+    campaign are recorded on the payload under ``amended`` and the
+    executor ``registered_sample_intake`` runs the amended values. An
+    approval without a requestor is refused with the reason."""
+    from pcs.registered_samples import (registered_sample_intake,
+                                        registered_sample_precondition)
+
+    amendments = {str(k): v for k, v in (amendments or {}).items()}
+    stale, denied, approved = [], [], []
+    for row in rows:
+        with transaction.atomic():
+            payload = dict(row.payload or {})
+            held = registered_sample_precondition(row.subject_key)
+            if held['matched_by'] or held['requested_by'] or held['tasks']:
+                _mark_decided(row, 'stale', decided_by, now)
+                stale.append(row.ref)
+                continue
+            if decision == 'deny':
+                _mark_decided(row, 'denied', decided_by, now, quality)
+                denied.append(row.ref)
+                continue
+            amended = amendments.get(str(row.pk)) or {}
+            changes = {}
+            for key in ('requestor', 'campaign'):
+                value = str(amended.get(key) or '').strip()
+                if value:
+                    changes[key] = value
+            for key in ('nevents', 'priority'):
+                if amended.get(key) not in (None, ''):
+                    try:
+                        changes[key] = int(amended[key])
+                    except (TypeError, ValueError):
+                        raise ServiceError(f'{row.ref}: {key} must be an integer; '
+                                           f'got {amended[key]!r}')
+            values = {**payload, **changes}
+            if not str(values.get('requestor') or '').strip():
+                raise ServiceError(f'{row.ref}: a requestor is required to approve')
+            if changes:
+                payload['amended'] = changes
+                row.payload = payload
+                row.save(update_fields=['payload'])
+            origin = {'kind': 'ai_proposal', 'ref': row.ref,
+                      'proposer': row.proposer, 'batch_id': row.batch_id,
+                      'proposed_at': row.created_at.isoformat()}
+            result = registered_sample_intake(
+                row.subject_key, values['campaign'],
+                requestor=values['requestor'], nevents=values.get('nevents'),
+                priority=values.get('priority'), changed_by=decided_by,
+                origin=origin, comment=row.comment)
+            _mark_decided(row, 'executed', decided_by, now, quality,
+                          result.get('log_id'))
+            approved.append(row.ref)
+    return approved, denied, stale
+
+
 def _mark_decided(row, status, decided_by, now, quality=None, log_id=None):
     row.status = status
     row.decided_by = decided_by
@@ -840,7 +978,7 @@ def proposal_decide(composed_names, decision, *, decided_by='',
 
     pending = Proposal.objects.filter(
         action__in=('propagation', 'campaign_plan', 'ping', 'ping_fulfil',
-                    'standard_config'),
+                    'standard_config', 'registered_sample'),
         status='proposed')
     selector = Q()
     if names:
@@ -854,6 +992,7 @@ def proposal_decide(composed_names, decision, *, decided_by='',
     plan_rows = [r for r in all_rows if r.action == 'campaign_plan']
     ping_rows = [r for r in all_rows if r.action in ('ping', 'ping_fulfil')]
     config_rows = [r for r in all_rows if r.action == 'standard_config']
+    sample_rows = [r for r in all_rows if r.action == 'registered_sample']
     found_names = {r.subject_key for r in all_rows}
     no_proposal = [n for n in names if n not in found_names]
 
@@ -941,6 +1080,13 @@ def proposal_decide(composed_names, decision, *, decided_by='',
         approved += cfg_approved
         denied += cfg_denied
         stale += cfg_stale
+
+    if sample_rows:
+        rs_approved, rs_denied, rs_stale = _decide_registered_samples(
+            sample_rows, decision, decided_by, quality, amendments, now)
+        approved += rs_approved
+        denied += rs_denied
+        stale += rs_stale
 
     if decision == 'deny':
         log_epicprod_action(

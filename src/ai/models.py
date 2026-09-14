@@ -18,6 +18,7 @@ ACTION_REF_PREFIXES = {
     'ping': 'pg',           # a ping to enter (PINGS.md)
     'ping_fulfil': 'pf',    # a ping to mark fulfilled (PINGS.md)
     'standard_config': 'sc',  # an edition's Standard Production configuration
+    'registered_sample': 'rs',  # a registered EVGEN sample nobody asked for
                               # to create; the remedy of a campaign
                               # configuration ping (PINGS.md)
 }

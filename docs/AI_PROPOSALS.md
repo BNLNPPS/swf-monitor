@@ -187,6 +187,34 @@ propagation pilot is the worked example of each item.
   Reversibility: mitigable, a configuration created in error is deleted
   while no task is bound to it.
 
+- **Registered sample** (`registered_sample`, ref `rs`) — a registered
+  EVGEN dataset nobody asked for (swf-epicprod EPICPROD_EVGEN_INPUTS.md
+  § From a registered sample to a task): proposes its intake into the
+  current production campaign as a physics configuration, request and
+  draft task. A creation subject keyed on the DID with the campaign as
+  `counterpart_key`; payload the identity the path derives (physics,
+  generator, background, sample, the physics tag and configuration when
+  they exist) and the three fields the approval completes. Precondition:
+  no PCS evgen dataset matches the DID, no request names the
+  configuration and no task runs it (`registered_sample_precondition`);
+  a sample taken in by another route is stale. Executor
+  `pcs.registered_samples.registered_sample_intake`, one transaction and
+  one `registered_sample_intake` event: the EVGEN-stage record with the
+  dataset's tail as source location, the production edition on the
+  campaign's release pair, the request and the draft task.
+  **Edit-then-approve**: requestor (required), target events, priority
+  and campaign, recorded under `amended`. Review surface: the EVGEN
+  inputs page's unmatched rows (the AI treatment with the fields and
+  approve/deny) and the proposals page; the bot relay lists the
+  proposal and points at the page, since approval needs the requestor.
+  Proposer `registered-sample` (swf-epicprod
+  `swf_epicprod/registered_sample_proposer.py`), rule-based, comments
+  wholly code-filled, run as the last step of the EVGEN assimilation
+  (nightly and on the Update button) with the scan heartbeat; switch
+  `ai_propose_registered_sample` in SysConfig. Reversibility: mitigable,
+  editions are permanent identities and a request or task made in error
+  is withdrawn.
+
 ## Review surfaces
 
 Proposals are **visible but inert** on the open face: anyone can see a

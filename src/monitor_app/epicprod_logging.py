@@ -104,6 +104,15 @@ ACTION_DEFAULTS = {
                        "an approved standard_config proposal, the remedy of "
                        "a campaign configuration ping.",
     },
+    'registered_sample_intake': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Take a registered EVGEN sample nobody requested into "
+                       "the record: its EVGEN-stage record, the production "
+                       "edition on the campaign's release pair, the request "
+                       "with requestor, target and priority, and the draft "
+                       "task, by hand or by an approved registered_sample "
+                       "proposal.",
+    },
     'prodtask_adopt': {
         'sublevel': 'normal', 'live': True,
         'description': "Move a name-matched legacy task into PCS: its latest "
