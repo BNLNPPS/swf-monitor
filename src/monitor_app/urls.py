@@ -122,6 +122,7 @@ from .viewdir.system_status import (
 
 # Import iDDS database views from new dedicated module
 from .viewdir.analysis import analysis_view
+from .viewdir.panda_census import panda_queue_census_json
 from .viewdir.idds_database import (
     idds_database_tables_list,
     idds_database_tables_datatable_ajax,
@@ -245,6 +246,10 @@ urlpatterns = [
     path('panda-queues/', panda_queues_list, name='panda_queues_list'),
     path('panda-queues/datatable/', panda_queues_datatable_ajax, name='panda_queues_datatable_ajax'),
     path('panda-queues/json/', panda_queues_all_json, name='panda_queues_all_json'),
+    # The per-queue job census: the dispatcher's pressure input
+    # (monitor_app/panda/census.py). Before the queue detail route so
+    # 'census' is never read as a queue name.
+    path('panda-queues/census/json/', panda_queue_census_json, name='panda_queue_census_json'),
     path('panda-queues/update-from-github/', update_panda_queues_from_github, name='update_panda_queues_from_github'),
     path('panda-queues/<str:queue_name>/', panda_queue_detail, name='panda_queue_detail'),
     path('panda-queues/<str:queue_name>/json/', panda_queue_json, name='panda_queue_json'),

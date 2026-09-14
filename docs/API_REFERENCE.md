@@ -276,6 +276,9 @@ Read-only JSON endpoints under `/swf-monitor/api/panda/` for external consumers 
 - `GET /api/panda/tasks/<jeditaskid>/` - Single task detail (same per-task schema as above)
 - `GET /api/panda/activity/` - Aggregate counts by task status and job status
   - Query params: `days` (default 1), `username`, `site`, `workinggroup`
+- `GET /panda-queues/census/json/` - The per-queue job census (`monitor_app/panda/census.py`): the pressure input of the production dispatcher (swf-epicprod CONTINUOUS_PRODUCTION.md, The dispatcher) and the ready-queue page's source. No authentication; plain JSON.
+  - Query params: `refresh=1` rebuilds the hourly calibration.
+  - Response: `{observed_at, calibration_built_at, calibration_days, queues: {<queue>: {...}}}`. Per queue: `by_status` (jobs, cores and the production subset per `jobsactive4` status), `not_started` (defined, waiting, assigned, activated, sent, starting), `not_started_production`, `running`, `finishing` (holding, transferring, merging), `calibration` (median and p90 finished walltime in hours of production jobs and their count over 14 days; `peak_running`, the peak concurrent running jobs of any type over 14 days), `ceiling` (the peak or the current running count, whichever is higher), `hours_at_capacity` (not started × median walltime ÷ ceiling; null without a calibration), and `gate` over the last six hours (`finished`, `failed`, `fast_failed` for failures under a quarter of the median walltime, `useful_rate_per_h`).
 
 Authentication: `TunnelAuthentication` (X-Remote-User via swf-remote proxy) + `SessionAuthentication` + `TokenAuthentication`. A localhost request without X-Remote-User carries no tunnel identity and falls through to session or token authentication; swf-remote's own service calls name their identity explicitly. Writes by a person are subject to the authority gate ([AUTHORITY.md](AUTHORITY.md)).
 
