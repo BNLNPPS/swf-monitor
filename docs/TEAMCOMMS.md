@@ -407,3 +407,61 @@ and activates the existing ASGI worker. Bounded acceptance checks the rendered
 System links, one explicitly created commissioning work item, source revision,
 completion evidence and saved history. No automatic TJAI task import, work
 execution, connector restart or additional native commissioning is required.
+
+## Claims, custody and guarded deployment
+
+Inflight migrations `0003`–`0005` add explicit offers, atomic multi-resource
+claims, retained custodians, immutable retry receipts and guarded-run records.
+The existing application and `inflight:read/write` scopes cover these APIs.
+No new authority, credential issuer, Apache route or automatic execution is added.
+
+An eligible authenticated participant claims offered work and its complete
+resource set. The accountable owner is retained. Renewal and completion check
+ownership generations; completion requires evidence and releases the set.
+Expiry shows lost contact and keeps resources held. A holder must stop and
+release its work, or the owner must record stopped-work evidence, before a new
+claim can acquire those resources. Custody stays assigned while idle and can
+change only through an accepted transfer. Work descriptions may associate
+resources without reserving them; explicit claims establish reservations.
+
+`scripts/teamcomms-guarded-deploy.py` is an optional protected entrypoint:
+
+```sh
+sudo /opt/swf-monitor/current/.venv/bin/python \
+  /opt/swf-monitor/current/scripts/teamcomms-guarded-deploy.py \
+  --claim-id UUID --generation N --check
+# For an authorized deployment, replace --check with branch infra/baseline-v43.
+```
+
+It runs the TC guard as root, takes all configured canonical resource locks,
+validates and renews the caller's existing claim, and invokes the committed
+release's normal deployment script. It records a durable command admission and
+confirmed stop; the caller then records completion or stopped/released work.
+`--check` uses the same admission path for one read-only checkout revision read.
+An unconfirmed prior run or failed renewal denies/stops protected work.
+A TC service outage therefore interrupts guarded work; recovery must inspect
+that work before recording stopped-work evidence and claiming again.
+
+Explicit host setup uses `provision_work_resource` to register the monitor
+project, verified checkout aliases and deployment service, with a named active
+custodian and `local_flock` protection on `swf-testbed`. Schema migration alone
+does not provision resources. The host command requires trusted database
+administration access and records the selected custodian as the audit identity;
+it does not grant that participant remote administration privileges.
+
+Root-private files live in `/opt/swf-monitor/config/teamcomms` (0700):
+`connector.json`, `guard.json` and `program-token` (0600). The token is a local
+copy of the existing account-bound SWF program token, issued by devcloud. Keep
+both copies synchronized on rotation. It is never a service-introspection key.
+Connector fields are `url`, `token_file`, `host=swf-testbed`, `state_dir` and
+`greeting=false`. Guard fields are `host=swf-testbed`,
+`lock_dir=/opt/swf-monitor/shared/teamcomms-guards` and the explicit
+`resource_ids` allowlist, covering the checkout and deployment service.
+Every cooperating invocation uses the same root-owned lock directory and IDs.
+
+Coverage is exclusion between cooperating foreground invocations of this
+entrypoint on this host. Direct deploy scripts, raw shell commands, escaped
+children and unrelated entrypoints remain outside it. Reservations do not confer
+production rights, and the wrapper does not replace commit/push, host coordination
+or the standard frozen-tree checks. Do not run privileged children beneath an
+unprivileged guard: it could not stop their process group on authority loss.
