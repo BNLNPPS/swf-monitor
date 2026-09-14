@@ -224,6 +224,11 @@ REPORT_SWEEP_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "repo
 REPORT_SWEEP_TIMEOUT = int(os.environ.get("EPICPROD_REPORT_SWEEP_TIMEOUT", "900"))
 REPORT_SWEEP_HOURS = os.environ.get("EPICPROD_REPORT_SWEEP_HOURS", "6")
 STORAGE_SWEEP_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "storage-sweep.py"
+# The pressure front's decision cycle (swf-epicprod
+# docs/CONTINUOUS_PRODUCTION.md, The dispatcher), five-minutely by cron
+# enqueue; shadow mode records decisions and submits nothing.
+FRONT_CYCLE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "front-cycle.py"
+FRONT_CYCLE_TIMEOUT = int(os.environ.get("EPICPROD_FRONT_CYCLE_TIMEOUT", "240"))
 # An incremental pass is about 36 minutes plus its sixth of the dataset
 # tier (about an hour at the pass's pacing, STORAGE.md); the nightly full
 # pass lists the target campaigns' files. Three hours holds either.
@@ -339,7 +344,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "node_measure_ingest", "dataset_definitions_sweep",
                    "storage_sweep", "campaign_config_propose",
                    "credential_ping_propose", "certificate_ping_propose",
-                   "assessment_completed",
+                   "assessment_completed", "front_cycle",
                    "health_ping", "shutdown"}
 
     def __init__(self):
@@ -2878,6 +2883,46 @@ class EpicProdOpsAgent(BaseAgent):
             self._log_action('storage_sweep', t0, outcome='ok', summary=text,
                              username=username, mode=mode,
                              sublevel='low', live_default=False, **counts)
+
+    def _handle_front_cycle(self, m):
+        """One decision cycle of the pressure front (swf-epicprod
+        docs/CONTINUOUS_PRODUCTION.md, The dispatcher): five-minutely by
+        cron enqueue, directly invokable. Deduped so a slow cycle is
+        never doubled."""
+        self.run_in_background(
+            self._do_front_cycle, m,
+            dedup_key="front_cycle", label="front_cycle")
+
+    def _do_front_cycle(self, m):
+        """Run the front-cycle doer; the per-queue decision records are
+        written by the doer itself (front_decision), so this records only
+        the cycle's outcome when it did not run to completion."""
+        username = str(m.get('created_by') or 'front')
+        cmd = [sys.executable, str(FRONT_CYCLE_SCRIPT), "--created-by", username]
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=FRONT_CYCLE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS front_cycle TIMEOUT after {FRONT_CYCLE_TIMEOUT}s")
+            self._log_action('front_cycle', t0, outcome='timeout',
+                             reason=f'timed out after {FRONT_CYCLE_TIMEOUT}s',
+                             username=username, sublevel='low',
+                             live_default=False, level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  front-cycle: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  front-cycle: {line}")
+        if p.returncode != 0:
+            reason = self._derive_reason(p)
+            self.logger.error(f"PRODOPS front_cycle FAILED rc={p.returncode}")
+            self._log_action('front_cycle', t0, outcome='error', reason=reason,
+                             username=username, sublevel='low',
+                             live_default=False, level=logging.ERROR)
+            return
+        self.logger.info("PRODOPS front_cycle done")
 
     def _handle_campaign_config_propose(self, m):
         """Run the campaign configuration proposer (swf-monitor

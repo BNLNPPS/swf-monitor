@@ -71,6 +71,20 @@ SUBLEVEL_ORDER = {'high': 2, 'normal': 1, 'low': 0}
 # log entry page and the live-policy page, so a stream reader is never left
 # guessing what an event was.
 ACTION_DEFAULTS = {
+    # the pressure front (swf-epicprod docs/CONTINUOUS_PRODUCTION.md,
+    # The dispatcher)
+    'front_decision': {
+        'sublevel': 'low', 'live': False,
+        'description': "One queue's decision of the pressure front's cycle: "
+                       "feed or hold, with the reason, the depth in hours, "
+                       "the set points and the gates; recorded on every "
+                       "feed, on a change of state or reason, and hourly.",
+    },
+    'front_cycle': {
+        'sublevel': 'low', 'live': False,
+        'description': "One cycle of the pressure front over the regulated "
+                       "queues, with each queue's state.",
+    },
     # alarm dashboard: pings (docs/PINGS.md)
     'ping_create': {
         'sublevel': 'normal', 'live': True,
