@@ -370,3 +370,40 @@ CSRF and request binding, authentication revocation during streams, reconnect
 replay, and selected live Claude/Codex sessions. TC's package-level suite has
 separate approval requirements in teamcomms-ai/AGENTS.md. Package fixture results
 do not establish live connector acceptance.
+
+## SWF Inflight
+
+The System menu groups TeamComms, SWF Pouch and **SWF Inflight**. Inflight opens
+`https://epic-devcloud.org/prod/teamcomms/inflight`, using the configured public
+host and existing devcloud login. The complete subtree is already proxied; no
+new Apache path, authentication reference format or browser credential is needed.
+
+Enable `teamcomms.inflight.apps.InflightConfig`. The pinned package's
+`0001_initial` and `0002_guards` migrations create work, dependency and immutable
+retry-receipt records in the monitor database, ordered after Entries integrity,
+Comms and service identity migrations. Deployment creates schema only.
+
+Authenticated collaboration members receive `inflight:read` and `inflight:write`
+alongside the existing component scopes. These permissions remain independent
+of production-action rights. The package additionally checks owner/executor or
+administrator authority for each mutation. A work item retains a stable
+participant owner across session disconnection. A named successor must accept
+an ownership handoff; executor assignment is separate. Revisions and ownership
+generations reject stale updates. Completion requires an outcome and evidence;
+closed work needs explicit reopening. Referenced resources are associations,
+not enforced reservations or permission to mutate production systems.
+
+Under the existing public TC prefix, `/api/inflight` creates and lists work,
+`/api/inflight/read` reads current or fixed revisions, `/api/inflight/mutate`
+handles explicit state/ownership changes, and `/api/inflight/changes` supplies
+bounded attributed history. The corresponding connector tools are `create_work`,
+`list_work`, `get_work`, `mutate_work` and `get_work_changes`. Mutations carry a
+stable operation UUID; retries keep the exact request and return its original
+outcome. Work uses the shared editor, source rendering and local draft recovery.
+Pouch's **Create work from this revision** preserves its saved source reference.
+
+Full deployment installs the pinned package, applies both Inflight migrations
+and activates the existing ASGI worker. Bounded acceptance checks the rendered
+System links, one explicitly created commissioning work item, source revision,
+completion evidence and saved history. No automatic TJAI task import, work
+execution, connector restart or additional native commissioning is required.
