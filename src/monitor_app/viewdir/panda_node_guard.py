@@ -45,6 +45,15 @@ def panda_node_guard(request):
             'tasks_finished_elsewhere': e.get('tasks_finished_elsewhere') or [],
             'other_nodes_finishing': e.get('other_nodes_finishing'),
             'first_end': e.get('first_end'), 'last_end': e.get('last_end'),
+            'site': e.get('site') or '', 'sites': e.get('sites') or [],
+            'durations': {k: (round(v / 60.0, 1) if v is not None else None)
+                          for k, v in (e.get('failed_duration_s') or {}).items()},
+            'error_codes': e.get('error_codes') or [],
+            'sample_jobs': e.get('sample_jobs') or [],
+            'elsewhere_hosts': sorted((e.get('tasks_finished_elsewhere_hosts') or {}).items()),
+            'median_finished_min': (round(e['median_finished_s'] / 60.0)
+                                    if e.get('median_finished_s') else None),
+            'fast_under_min': (round(e['fast_under_s'] / 60.0) if e.get('fast_under_s') else None),
         })
     # tripped first, then by queue and host
     nodes.sort(key=lambda n: (n['state'] == 'clear', n['queue'] or '', n['host'] or ''))
@@ -62,7 +71,7 @@ def panda_node_guard(request):
             'not_nodes': sorted((q.get('not_nodes') or {}).items()),
         })
     context = {
-        'active_nav': {'panda_node_guard': True},
+        'active_nav': {'panda_node_guard': True, 'sites': True},
         'state': state, 'never_run': not state,
         'cycle_at': state.get('cycle_at'),
         'mode': state.get('mode') or settings['mode'],

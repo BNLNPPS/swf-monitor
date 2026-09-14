@@ -84,12 +84,44 @@ def settings():
     return out
 
 
+def execute_site(dest_site, host):
+    """The actual site a job ran at: the pilot-reported glidein site when
+    the record carries one (the OSG pool queues, since 2026-08-13), else
+    the site the worker's domain names, else the domain itself; '' for a
+    bare host name (monitor_app.panda.queries, the execute-site key)."""
+    from canary.guard import normalize_host
+    from monitor_app.panda.queries import (EXECUTE_SITE_NAMES, PRIVATE_DOMAIN_TAILS)
+    if dest_site:
+        return str(dest_site)
+    h = normalize_host(host)
+    parts = h.split('.')
+    if len(parts) < 2 or parts[-1].lower() in PRIVATE_DOMAIN_TAILS:
+        return ''
+    key = '.'.join(parts[-2:]).lower()
+    return EXECUTE_SITE_NAMES.get(key, key)
+
+
+def error_label(pilot, exe, trans):
+    """One label for a failed job's error: the pilot error code when set,
+    else the payload's exit code, else the transformation's; 'no code'
+    when none is set."""
+    if pilot:
+        return f'pilot {pilot}'
+    if exe:
+        return f'exe {exe}'
+    if trans:
+        return f'trans {trans}'
+    return 'no code'
+
+
 def window_rows(window_h, queues=()):
     """The terminal production jobs of the last ``window_h`` hours, one
-    dict per job in the shape ``canary.guard.decide_nodes`` reads."""
+    dict per job in the shape ``canary.guard.decide_nodes`` reads, with
+    the actual site and the failure's error label resolved here."""
     sql = f"""
         SELECT "computingsite", "modificationhost", "jobstatus", "jeditaskid",
-               EXTRACT(EPOCH FROM ("endtime" - "starttime")), "endtime", "pandaid"
+               EXTRACT(EPOCH FROM ("endtime" - "starttime")), "endtime", "pandaid",
+               "destinationsite", "piloterrorcode", "exeerrorcode", "transexitcode"
         FROM "{PANDA_SCHEMA}"."jobsarchived4"
         WHERE "processingtype" = 'epicproduction'
           AND "endtime" > NOW() - INTERVAL %s
@@ -103,12 +135,15 @@ def window_rows(window_h, queues=()):
         cursor.execute(sql, params)
         rows = cursor.fetchall()
     out = []
-    for queue, host, status, task, seconds, end, pandaid in rows:
+    for (queue, host, status, task, seconds, end, pandaid,
+         dest_site, pilot, exe, trans) in rows:
         out.append({'queue': str(queue) if queue else None, 'host': host,
                     'jobstatus': status, 'jeditaskid': task,
                     'duration_s': float(seconds) if seconds is not None else None,
                     'endtime': end.isoformat() if end is not None else None,
-                    'pandaid': pandaid})
+                    'pandaid': pandaid,
+                    'site': execute_site(dest_site, host),
+                    'error': error_label(pilot, exe, trans) if status == 'failed' else ''})
     return out
 
 

@@ -720,7 +720,6 @@
                 <a href="{% url 'monitor_app:panda_tasks_list' %}" class="{% if active_nav.panda_tasks %}nav-active{% endif %}">Tasks</a>
                 <a href="{% url 'monitor_app:panda_jobs_list' %}" class="{% if active_nav.panda_jobs %}nav-active{% endif %}">Jobs</a>
                 <a href="{% url 'monitor_app:panda_front' %}">Pressure front</a>
-                <a href="{% url 'monitor_app:panda_node_guard' %}" class="{% if active_nav.panda_node_guard %}nav-active{% endif %}">Node guard</a>
             </div>
         </div>
         <div class="dropdown">
@@ -741,6 +740,7 @@
                 <a href="{% url 'monitor_app:compute_usage' %}" class="{% if active_nav.compute_usage %}nav-active{% endif %}">Site compute usage</a>
                 <a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='site' %}">Snapper site view</a>
                 <a href="{% url 'canary:probes_page' %}" class="{% if active_nav.canary %}nav-active{% endif %}">Canary probes</a>
+                <a href="{% url 'monitor_app:panda_node_guard' %}" class="{% if active_nav.panda_node_guard %}nav-active{% endif %}">Node guard</a>
             </div>
         </div>
         <a href="{% url 'monitor_app:analysis' %}" class="nav-analysis{% if active_nav.analysis %} nav-active{% endif %}">Analysis</a>
