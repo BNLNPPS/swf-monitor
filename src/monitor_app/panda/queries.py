@@ -353,6 +353,54 @@ def _nersc_portal_cache_path(pandaid):
     return os.path.join(root, 'nersc-portal', f'{pandaid}.json')
 
 
+_SERVER_CACHE_RETENTION_DAYS = 7      # pandaserver copyArchive.py purges the cache at 7 days
+_JOB_FINAL_STATES = ('finished', 'failed', 'cancelled', 'closed', 'merging')
+
+
+def _prune_dead_log_urls(job, log_urls):
+    """Keep only the log links whose file can exist, without asking any
+    host (none is called in the render path). Two forms are known:
+
+    - the PanDA server cache (``https://pandaserver01…/cache/…_gz.out``),
+      where harvester uploads a worker's stdout alone and the server
+      purges after seven days: the stderr and batch-log variants never
+      exist, and the stdout link dies with the purge;
+    - a condor submit host's ``condor_logs`` tree, where ``.out``,
+      ``.err`` and ``.log`` are copied when the job ends.
+
+    Returns (log_urls, note); the note says what was left out and why.
+    """
+    pruned = dict(log_urls)
+    notes = []
+    stdout = str(pruned.get('pilot_stdout') or '')
+    if '/cache/' in stdout and 'pandaserver' in stdout:
+        for key in ('pilot_stderr', 'batch_log'):
+            if '/cache/' in str(pruned.get(key) or ''):
+                pruned.pop(key, None)
+        modified = job.get('modificationtime') or job.get('endtime')
+        if isinstance(modified, str):
+            try:
+                modified = datetime.fromisoformat(modified.replace('Z', '+00:00'))
+            except ValueError:
+                modified = None
+        if modified is not None:
+            if modified.tzinfo is None:
+                modified = modified.replace(tzinfo=dt_timezone.utc)
+            age_days = (datetime.now(dt_timezone.utc) - modified).days
+            if age_days >= _SERVER_CACHE_RETENTION_DAYS:
+                pruned.pop('pilot_stdout', None)
+                notes.append(f"The harvester's stdout of this job was purged from the PanDA "
+                             f"server cache, which keeps it {_SERVER_CACHE_RETENTION_DAYS} days; "
+                             f"the job ended {age_days} days ago. Harvester uploads stdout only.")
+            else:
+                notes.append("Harvester uploads the worker's stdout only, kept "
+                             f"{_SERVER_CACHE_RETENTION_DAYS} days in the PanDA server cache.")
+    elif 'condor_logs' in stdout and str(job.get('jobstatus') or '') not in _JOB_FINAL_STATES:
+        notes.append("The condor logs are copied to the submit host when the job ends; "
+                     "until then these links answer 404.")
+    return pruned, ' '.join(notes)
+
+
 def _nersc_portal_log_urls(computingsite, pandaid, *, fetch=True, capture=False):
     """Perlmutter log URLs, from the captured listing or from the portal.
 
@@ -2902,6 +2950,15 @@ def study_job(pandaid, include_batch_reason=False, include_log_analysis=True,
                     _apply_effective_owners([task_info], 'username')
         except Exception as e:
             logger.error(f"study_job task query failed: {e}")
+
+    # A link is shown only where the file can be. Harvester uploads a
+    # worker's stdout alone to the PanDA server cache, which the server
+    # purges after seven days (copyArchive.py); the stderr and batch-log
+    # variants synthesized above never exist there. A condor log on the
+    # submit host is copied when the job ends.
+    log_urls, pruned_note = _prune_dead_log_urls(job, log_urls)
+    if pruned_note:
+        log_urls_note = f"{log_urls_note} {pruned_note}".strip()
 
     # Assemble result
     result = {
