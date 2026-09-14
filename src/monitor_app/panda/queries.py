@@ -353,20 +353,36 @@ def _nersc_portal_cache_path(pandaid):
     return os.path.join(root, 'nersc-portal', f'{pandaid}.json')
 
 
-_SERVER_CACHE_RETENTION_DAYS = 7      # pandaserver copyArchive.py purges the cache at 7 days
 _JOB_FINAL_STATES = ('finished', 'failed', 'cancelled', 'closed', 'merging')
+_LOG_CHECK_TIMEOUT_S = 2
+
+
+def _log_url_present(url):
+    """Whether the file behind a log link is there: True, False (the host
+    answered 404), or None (no answer within the bound). One HEAD, two
+    seconds, so a slow or dead host costs the page that and no more."""
+    import requests
+    try:
+        r = requests.head(url, timeout=_LOG_CHECK_TIMEOUT_S, allow_redirects=True)
+    except requests.RequestException:
+        return None
+    if r.status_code == 404:
+        return False
+    if r.status_code < 400:
+        return True
+    return None
 
 
 def _prune_dead_log_urls(job, log_urls):
-    """Keep only the log links whose file can exist, without asking any
-    host (none is called in the render path). Two forms are known:
+    """Keep only the log links whose file is there. Two forms are known:
 
     - the PanDA server cache (``https://pandaserver01…/cache/…_gz.out``),
       where harvester uploads a worker's stdout alone and the server
-      purges after seven days: the stderr and batch-log variants never
-      exist, and the stdout link dies with the purge;
+      times files out of the cache: the stderr and batch-log variants
+      never exist there, and the stdout link is asked for;
     - a condor submit host's ``condor_logs`` tree, where ``.out``,
-      ``.err`` and ``.log`` are copied when the job ends.
+      ``.err`` and ``.log`` are copied when the job ends, and are asked
+      for once the job has.
 
     Returns (log_urls, note); the note says what was left out and why.
     """
@@ -377,27 +393,31 @@ def _prune_dead_log_urls(job, log_urls):
         for key in ('pilot_stderr', 'batch_log'):
             if '/cache/' in str(pruned.get(key) or ''):
                 pruned.pop(key, None)
-        modified = job.get('modificationtime') or job.get('endtime')
-        if isinstance(modified, str):
-            try:
-                modified = datetime.fromisoformat(modified.replace('Z', '+00:00'))
-            except ValueError:
-                modified = None
-        if modified is not None:
-            if modified.tzinfo is None:
-                modified = modified.replace(tzinfo=dt_timezone.utc)
-            age_days = (datetime.now(dt_timezone.utc) - modified).days
-            if age_days >= _SERVER_CACHE_RETENTION_DAYS:
-                pruned.pop('pilot_stdout', None)
-                notes.append(f"The harvester's stdout of this job was purged from the PanDA "
-                             f"server cache, which keeps it {_SERVER_CACHE_RETENTION_DAYS} days; "
-                             f"the job ended {age_days} days ago. Harvester uploads stdout only.")
-            else:
-                notes.append("Harvester uploads the worker's stdout only, kept "
-                             f"{_SERVER_CACHE_RETENTION_DAYS} days in the PanDA server cache.")
-    elif 'condor_logs' in stdout and str(job.get('jobstatus') or '') not in _JOB_FINAL_STATES:
-        notes.append("The condor logs are copied to the submit host when the job ends; "
-                     "until then these links answer 404.")
+        present = _log_url_present(stdout)
+        if present is False:
+            pruned.pop('pilot_stdout', None)
+            notes.append("The harvester's stdout of this job has timed out of the PanDA "
+                         "server cache and is no longer on the server. Harvester uploads "
+                         "stdout only.")
+        elif present is None:
+            notes.append("The PanDA server did not answer whether the harvester's stdout is "
+                         "still in its cache; the link may have timed out. Harvester uploads "
+                         "stdout only.")
+        else:
+            notes.append("Harvester uploads the worker's stdout only; the server times it "
+                         "out of its cache after a retention period.")
+    elif 'condor_logs' in stdout:
+        if str(job.get('jobstatus') or '') not in _JOB_FINAL_STATES:
+            notes.append("The condor logs are copied to the submit host when the job ends; "
+                         "until then these links answer 404.")
+        else:
+            gone = [k for k in ('pilot_stdout', 'pilot_stderr', 'batch_log')
+                    if pruned.get(k) and _log_url_present(pruned[k]) is False]
+            for k in gone:
+                pruned.pop(k, None)
+            if gone:
+                notes.append("The condor logs of this job are no longer on the submit host "
+                             "(timed out of its log directory).")
     return pruned, ' '.join(notes)
 
 
