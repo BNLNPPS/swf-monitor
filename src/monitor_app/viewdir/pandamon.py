@@ -1099,7 +1099,10 @@ def panda_job_detail(request, pandaid):
         # element is a link; the rest stays as text beside it.
         if item['label'] == 'Pilot ID' and '|' in str(item['value']):
             url, _, rest = str(item['value']).partition('|')
-            if url.startswith(('http://', 'https://')):
+            if url in (data.get('dead_log_urls') or []):
+                # The file behind it is purged or never existed: text, no link.
+                item['dead'] = True
+            elif url.startswith(('http://', 'https://')):
                 item['url'] = url
                 item['rest'] = '|' + rest
     data.update(inventory_for_job_context(data))

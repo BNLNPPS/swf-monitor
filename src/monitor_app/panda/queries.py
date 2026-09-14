@@ -2956,7 +2956,9 @@ def study_job(pandaid, include_batch_reason=False, include_log_analysis=True,
     # purges after seven days (copyArchive.py); the stderr and batch-log
     # variants synthesized above never exist there. A condor log on the
     # submit host is copied when the job ends.
-    log_urls, pruned_note = _prune_dead_log_urls(job, log_urls)
+    kept, pruned_note = _prune_dead_log_urls(job, log_urls)
+    dead_log_urls = sorted(set(log_urls.values()) - set(kept.values()))
+    log_urls = kept
     if pruned_note:
         log_urls_note = f"{log_urls_note} {pruned_note}".strip()
 
@@ -2967,6 +2969,9 @@ def study_job(pandaid, include_batch_reason=False, include_log_analysis=True,
         "job_record": full_job,
         "files": files,
         "log_urls": log_urls,
+        # Links the page must not draw anywhere else either (the pilot id,
+        # the harvester record): the file behind them is gone or never was.
+        "dead_log_urls": dead_log_urls,
     }
     if log_urls_note:
         result["log_urls_note"] = log_urls_note

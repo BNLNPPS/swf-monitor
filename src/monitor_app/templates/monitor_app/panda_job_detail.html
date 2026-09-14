@@ -471,7 +471,9 @@
                 <tr>
                     <td><strong>{{ key }}</strong></td>
                     <td style="word-break:break-all;">
-                        {% if val|is_url %}
+                        {% if val in dead_log_urls %}
+                        {{ val }} <span class="text-muted">(no longer on the server; see Log URLs)</span>
+                        {% elif val|is_url %}
                         <a href="{{ val }}" target="_blank" rel="noopener">{{ val }}</a>
                         {% else %}
                         {{ val|fmt_value }}
@@ -494,7 +496,9 @@
                 <tr>
                     <td style="width:16rem;"><strong>{{ item.label }}</strong></td>
                     <td style="word-break:break-word; overflow-wrap:anywhere;">
-                        {% if item.url %}
+                        {% if item.dead %}
+                        {{ item.value }} <span class="text-muted">(the file behind this link is no longer on the server; see Log URLs)</span>
+                        {% elif item.url %}
                         <a href="{{ item.url }}" target="_blank" rel="noopener">{{ item.url }}</a>{{ item.rest }}
                         {% elif item.value|is_url %}
                         <a href="{{ item.value }}" target="_blank" rel="noopener">{{ item.value }}</a>
