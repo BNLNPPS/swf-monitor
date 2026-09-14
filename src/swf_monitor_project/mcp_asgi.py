@@ -51,6 +51,17 @@ from django.conf import settings  # noqa: E402
 from monitor_app.mcp import mcp  # noqa: E402
 from monitor_app.mcp.common import CALLER  # noqa: E402
 
+_teamcomms_application = None
+_teamcomms_auth = None
+_teamcomms_proxy = None
+if settings.SWF_TEAMCOMMS_ENABLED:
+    from teamcomms.service.asgi import create_app
+    from monitor_app.teamcomms_auth import PUBLIC_PREFIX, RemoteAuthentication, TrustedProxy
+
+    _teamcomms_auth = RemoteAuthentication()
+    _teamcomms_application = create_app(host_auth=_teamcomms_auth, mount_path=PUBLIC_PREFIX)
+    _teamcomms_proxy = TrustedProxy(_teamcomms_application)
+
 _LOCALHOST = ("127.0.0.1", "::1")
 
 
@@ -205,7 +216,13 @@ class MCPRequestGuard:
 
 @contextlib.asynccontextmanager
 async def lifespan(app: Starlette):
-    async with mcp.session_manager.run():
+    async with contextlib.AsyncExitStack() as stack:
+        if _teamcomms_auth is not None:
+            stack.push_async_callback(_teamcomms_auth.client.aclose)
+        await stack.enter_async_context(mcp.session_manager.run())
+        if _teamcomms_application is not None:
+            await stack.enter_async_context(
+                _teamcomms_application.router.lifespan_context(_teamcomms_application))
         yield
 
 
@@ -227,14 +244,21 @@ _SSE_STREAM_PATHS = (
 
 
 class StreamRouter:
-    """Route the SSE stream to the Django ASGI app; everything else —
-    including lifespan, which FastMCP owns — to the MCP app."""
+    """Route embedded TC and Django SSE, with a shared process lifespan."""
 
     def __init__(self, django_app, mcp_app):
         self.django_app = django_app
         self.mcp_app = mcp_app
 
     async def __call__(self, scope, receive, send):
+        path = scope.get("path", "")
+        if scope.get("type") == "http" and (
+                path == "/swf-monitor/teamcomms" or path.startswith("/swf-monitor/teamcomms/")):
+            if _teamcomms_proxy is None:
+                await _send_json(send, 503, {"error": "TeamComms is not enabled"})
+            else:
+                await _teamcomms_proxy(scope, receive, send)
+            return
         if scope.get("type") == "http" and scope.get("path", "") in _SSE_STREAM_PATHS:
             await self.django_app(scope, receive, send)
             return

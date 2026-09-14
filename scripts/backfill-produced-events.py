@@ -7,13 +7,14 @@ backfill).
 The produced datasets are the RECO and FULL datasets of the campaign
 snapshots (``$SWF_TMP_DIR/rucio-snapshots/current-*.json``). For each,
 the files are listed from JLab Rucio with their ``events`` attribute;
-a file without one is counted through the JLab door as the entry count
-of the podio ``events`` tree (the tree header carries it; no event
-bytes move), and the count is written as the file's ``events``
-attribute, as the payload writes it for new files. A dataset's derived
-total is read back once every file of it is counted, and held to the
-sum. A file that cannot be counted is reported by name and left as it
-is; nothing is invented.
+a file without one is read at its disk replica (BNL-XRD, epicxrd1
+inside SCDF, per Rucio's replica record; a tape-only file is left
+out) as the entry count of the podio ``events`` tree (the tree header
+carries it; no event bytes move), and the count is written as the
+file's ``events`` attribute, as the payload writes it for new files. A
+dataset's derived total is read back once every file of it is counted,
+and held to the sum. A file that cannot be counted is reported by name
+and left as it is; nothing is invented.
 
 Modes:
   --scan            list the files without a count and stop (Rucio reads only)
@@ -118,12 +119,43 @@ def count_one(pfn, timeout):
         return int(fh[EVENTS_TREE].num_entries), ''
 
 
+# Where a produced file is read from: its disk replica, never tape. The
+# campaign's outputs sit on BNL-XRD (epicxrd1, inside SCDF, read directly
+# from this host) with a tape copy at JLAB-TAPE-SE; the JLab door holds
+# the EVGEN inputs, not these.
+TAPE_RSES = {'JLAB-TAPE-SE'}
+RSE_PREFERENCE = ('BNL-XRD', 'EIC-XRD')
+
+
+def replica_pfns(client, scope, name, wanted):
+    """{file name: pfn} for the wanted files of a dataset, from Rucio's
+    replica record, a disk replica preferred in RSE_PREFERENCE order and
+    a root:// PFN over any other; a file with only a tape replica is
+    left out (reported by the caller)."""
+    out = {}
+    wanted = set(wanted)
+    for rep in client.list_replicas([{'scope': scope, 'name': name}]):
+        fname = rep.get('name')
+        if fname not in wanted:
+            continue
+        rses = {rse: pfns for rse, pfns in (rep.get('rses') or {}).items()
+                if pfns and rse not in TAPE_RSES}
+        ordered = [r for r in RSE_PREFERENCE if r in rses] + [r for r in rses if r not in RSE_PREFERENCE]
+        for rse in ordered:
+            pfns = rses[rse]
+            pfn = next((p for p in pfns if p.startswith('root://')), pfns[0])
+            out[fname] = pfn
+            break
+    return out
+
+
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('--scan', action='store_true', help='list files without a count; no door reads')
     ap.add_argument('--apply', action='store_true', help='write the counts to Rucio')
     ap.add_argument('--limit-datasets', type=int, default=0, help='datasets to count in this run (0 = all)')
     ap.add_argument('--campaign', help='count one campaign only, by version prefix, e.g. 26.07 (takes 26.07.0, .1 and .2)')
+    ap.add_argument('--dataset', help='one dataset name only (a check run; skips the snapshot listing)')
     ap.add_argument('--workers', type=int, default=int(os.environ.get('EVGEN_EVENTS_WORKERS', '4')))
     ap.add_argument('--timeout', type=int, default=int(os.environ.get('EVGEN_EVENTS_TIMEOUT', '120')), help='seconds per file')
     ap.add_argument('--env-file', help='KEY=VALUE file to load (the agent environment)')
@@ -143,7 +175,7 @@ def main(argv):
     scope, door, base = doer.RUCIO_SCOPE, doer.XRD_DOOR, doer.XRD_BASE
     t0 = time.monotonic()
     state = load_state()
-    names = produced_datasets()
+    names = [args.dataset] if args.dataset else produced_datasets()
     log.info('%d produced datasets across the snapshots', len(names))
 
     # The worklist: every file of a produced dataset without a count,
@@ -195,8 +227,16 @@ def main(argv):
         if args.limit_datasets and datasets_done >= args.limit_datasets:
             break
         counts, errors = {}, {}
+        try:
+            pfns = replica_pfns(client, scope, name, missing)
+        except Exception as e:                                # noqa: BLE001
+            log.error('%s: replica listing failed: %s', name, e)
+            continue
+        for f in missing:
+            if f not in pfns:
+                errors[f] = 'no disk replica (tape only, or none)'
         with ThreadPoolExecutor(max_workers=args.workers) as pool:
-            futures = {pool.submit(count_one, f'{door}/{base}/{f}', args.timeout): f for f in missing}
+            futures = {pool.submit(count_one, pfns[f], args.timeout): f for f in missing if f in pfns}
             for fut, f in futures.items():
                 try:
                     n, why = fut.result(timeout=args.timeout + 30)

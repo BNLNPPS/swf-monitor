@@ -118,6 +118,9 @@ INSTALLED_APPS = [
     "pcs",  # Physics Configuration System
     "ai",  # AI proposals and human-in-the-loop automation
     "monitor_app",  # Changed from "swf_monitor_project.monitor_app"
+    "teamcomms.service.apps.ServiceConfig",
+    "teamcomms.entries.apps.EntriesConfig",
+    "teamcomms.comms.apps.CommsConfig",
     "django_dbml",  # For schema diagram generation
     # Third-party apps
     "rest_framework",
@@ -128,6 +131,15 @@ INSTALLED_APPS = [
     "django_seed",
     "django_extensions",
 ]
+
+# Embedded TeamComms shares this database; devcloud remains its authentication
+# authority. The route is enabled only in installations with the proxy configured.
+SWF_TEAMCOMMS_ENABLED = config("SWF_TEAMCOMMS_ENABLED", default=False, cast=bool)
+SWF_TEAMCOMMS_PUBLIC_HOST = config("SWF_TEAMCOMMS_PUBLIC_HOST", default="epic-devcloud.org")
+SWF_TEAMCOMMS_INTROSPECTION_URL = config("SWF_TEAMCOMMS_INTROSPECTION_URL", default="")
+SWF_TEAMCOMMS_SERVICE_TOKEN_FILE = config("SWF_TEAMCOMMS_SERVICE_TOKEN_FILE", default="")
+if SWF_TEAMCOMMS_ENABLED and SWF_TEAMCOMMS_PUBLIC_HOST not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(SWF_TEAMCOMMS_PUBLIC_HOST)
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
