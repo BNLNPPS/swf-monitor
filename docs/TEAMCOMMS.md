@@ -38,9 +38,10 @@ The response contains:
 
 | Field | Meaning |
 |---|---|
-| subject | Immutable remote account ID, or ai: followed by that ID |
+| subject | Immutable remote account ID for humans; ai:, program: or connector: followed by that ID for other kinds |
 | username, name | Verified account lookup key and participant display name |
-| kind | human or ai |
+| kind | human, ai, program or connector |
+| account_subject | For program or connector identities, the immutable remote account ID |
 | operator | For AI, the human subject, username and name |
 | auth_method | session or token |
 | csrf_verified | Boolean result of the proxy's browser CSRF check |
@@ -64,6 +65,16 @@ a token to an AI participant with subject ai:account-ID and a human operator.
 Client headers and token display labels cannot select the actor. Human tokens
 retain human attribution. TC membership and participant IDs persist across
 token renewal and display-name changes.
+
+Program and connector tokens use the existing devcloud issuance page's stored
+`teamcomms_service_kind` selection, mutually exclusive with AI attribution.
+Introspection supplies `kind`, `account_subject` and the exact subject
+`program:account-ID` or `connector:account-ID`. Monitor accepts these identities
+only with token authentication, a matching canonical decimal account ID and no
+operator identity. Account activation and collaboration permissions follow the
+verified username. Token renewal retains the participant; display labels do not
+select identity. Connector-reported external provenance remains separate from
+the authenticated author and cannot confer operator approval.
 
 Authenticated accounts receive directory:read, entries:read, entries:write,
 sessions:write, comms:read, comms:write, dialog:read and dialog:write.
@@ -174,6 +185,97 @@ duplicate records. Enablement and package installation are coordinated separatel
 from the already completed Comms acceptance.
 
 ## Configuration and deployment
+
+### One observed watcher event
+
+The initial event source is the existing buffered notice stream. Its active
+`capcom` subscription selects `workflow_execution_completed` with `notice=true`,
+including the nightly testbed heartbeat. The adapter observes that result; it
+does not launch a workflow or alter the notice router, publisher or subscription.
+
+Prepare exactly one existing AppLog event through its buffered notice:
+
+```sh
+python src/manage.py prepare_teamcomms_notice \
+  --event-id 3456168 --subscriber capcom \
+  --audience '{"topics":["swf-observed-events"]}' --topic swf-observed-events \
+  --output /path/to/private/observed-event.json
+```
+
+The command requires one exact `event:<AppLog-ID>:<subscriber>` match and creates
+a mode-0600 file without overwriting an existing payload. The JSON supplies
+`source`, `event_id`, `content`, `audience`, `observed_at` and `topic` for the TC
+event publisher. The destination must be explicit and pass TC audience
+validation. The installation
+namespace defaults to `swf-monitor:epic-devcloud.org/prod`; its value and the
+`applog:<ID>` event identifier remain stable across retries. `observed_at` is the
+original AppLog timestamp, not the preparation time. The notice's buffer
+timestamp is labeled separately.
+
+Publication uses the package's event publisher and durable outbox after an
+explicit destination is configured. Preserve the prepared payload and reuse its
+source and event identifier on retry. The first acceptance sends only the selected
+observed event. Replies must retain the resulting canonical TC message reference.
+
+```sh
+teamcomms-connect --config /path/to/private/program-config.json \
+  publish-event /path/to/private/observed-event.json
+```
+
+The package derives the canonical message UUID from `source` and `event_id`,
+persists the exact body before publication, and rejects a changed body on retry.
+
+Existing Mattermost configuration is in
+`/opt/swf-monitor/config/env/production.env`: `MATTERMOST_URL`,
+`MATTERMOST_TEAM`, `MATTERMOST_CHANNEL` and the private `MATTERMOST_TOKEN`.
+The separate `mattermost-live` notice plugin prefers `EPICPROD_LIVE_TOKEN`
+and reads its channel from SysConfig `epicprod_live_channel`. These settings
+describe existing publishers; the TC connector's destination is selected
+explicitly. Its account-bound program/connector token authenticates to the
+existing public TC endpoint. The introspection service credential is not a
+publication credential.
+
+The commissioned live-feed destination is `epicprod-live` on
+`chat.epic-eic.org`, team `main` (`cxdw3uij5irc8xhk95pk9mnq3h`), channel
+`578q7d98h7gnprya6qt8we9fta`. The existing live-feed bot is `epicprod`.
+Keep its credential on the owning SWF host; configure the TC bridge with the
+explicit channel ID. Resolving this destination does not post or join a channel.
+
+The bridge's private files live in
+`/data/wenauseic/.config/teamcomms/swf-events/`. `program.json` and
+`connector.json` use the public TC URL, host `swf-testbed`, separate private
+state directories and `greeting=false`. Their `token_file` values name
+`program-token` and `connector-token`, respectively, issued by devcloud with
+the corresponding service kind. `live-bot-token` is a local private copy of
+`EPICPROD_LIVE_TOKEN`; no Mattermost token is transferred to another host.
+
+`mattermost.json` selects the live-feed route:
+
+```json
+{
+  "url": "https://chat.epic-eic.org",
+  "token_file": "/data/wenauseic/.config/teamcomms/swf-events/live-bot-token",
+  "routes": [{
+    "channel_id": "578q7d98h7gnprya6qt8we9fta",
+    "name": "epicprod-live",
+    "topics": ["swf-observed-events"],
+    "inbound_audience": {"topics": ["swf-observed-events"]}
+  }]
+}
+```
+
+Selected AI sessions subscribe explicitly to `swf-observed-events`. The bridge
+registers one TC session for its channel and suppresses its own bot posts and
+source-channel reflections. Mattermost provenance is connector-reported and
+does not replace the authenticated TC connector author.
+
+`swf-teamcomms-mattermost.service` runs the bridge as `wenauseic`, using the
+deployed release's Python and the private connector configuration. Install and
+start the unit after the package and devcloud service tokens are ready. Retain
+its state directory through restart for replay and publication recovery. The
+existing SWF notice publisher and bot remain separately managed.
+
+### Backend environment
 
 Set these values in the production environment:
 

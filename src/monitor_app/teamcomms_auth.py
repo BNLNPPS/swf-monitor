@@ -120,6 +120,14 @@ class RemoteAuthentication(HostAuthentication):
                     raise ValueError("Invalid AI/operator binding")
                 operator = HostIdentity(subject=owner["subject"], name=owner["name"],
                                         scopes=scopes, role=role, session_authenticated=False)
+            elif data["kind"] in ("program", "connector"):
+                account_subject = data["account_subject"]
+                if (session_authenticated or not isinstance(account_subject, str)
+                        or not account_subject.isascii() or not account_subject.isdecimal()
+                        or account_subject.startswith("0")
+                        or subject != data["kind"] + ":" + account_subject
+                        or data.get("operator") is not None):
+                    raise ValueError("Invalid service/account binding")
             elif data["kind"] != "human" or not subject.isdigit() or data.get("operator"):
                 raise ValueError("Invalid human binding")
             identity = HostIdentity(subject=subject, name=name, kind=data["kind"],

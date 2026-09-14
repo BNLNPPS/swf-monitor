@@ -85,6 +85,24 @@ async def main():
                 assert identity.operator.subject == "12" and not identity.session_authenticated
                 current["operator"]["username"] = "someone-else"
                 await expect_denied(lambda: auth.resolve_request(deepcopy(scope)), 503)
+                for kind in ("program", "connector"):
+                    service = {**record, "kind": kind, "subject": kind + ":12",
+                               "account_subject": "12", "auth_method": "token"}
+                    current = deepcopy(service)
+                    identity = await auth.resolve_request(deepcopy(scope))
+                    assert identity.kind == kind and identity.subject == kind + ":12"
+                    assert identity.operator is None and not identity.session_authenticated
+                    assert identity.scopes == READ_SCOPES | WRITE_SCOPES
+                    for key, value in [("auth_method", "session"), ("subject", kind + ":13"),
+                                       ("subject", "ai:12"), ("account_subject", "13"),
+                                       ("account_subject", "012"), ("account_subject", "１２"),
+                                       ("account_subject", "0"), ("account_subject", 12),
+                                       ("operator", {})]:
+                        current = {**service, key: value}
+                        await expect_denied(lambda: auth.resolve_request(deepcopy(scope)), 503)
+                    current = {key: value for key, value in service.items()
+                               if key != "account_subject"}
+                    await expect_denied(lambda: auth.resolve_request(deepcopy(scope)), 503)
                 current = record
                 for remote_status in (401, 403, 503):
                     await expect_denied(lambda: auth.revalidate_request(deepcopy(scope), identity), remote_status)
