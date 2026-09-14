@@ -6,8 +6,12 @@
   .guard-section { background-color: #e7f1fb; padding: 0.4rem 0.6rem;
                    border-radius: 0.25rem; margin-top: 1.6rem;
                    margin-bottom: 0.8rem; }
-  .guard-state-would_exclude, .guard-state-excluded { background-color: #f8d7da; }
+  .guard-state-would_exclude, .guard-state-excluded, .guard-state-black_hole { background-color: #f8d7da; }
+  .guard-state-half_open { background-color: #fff3cd; }
+  .guard-state-pinned { background-color: #e2e3e5; }
   .guard-state-clear { background-color: #f1f1f1; }
+  .guard-controls form { display: inline; }
+  .guard-controls button { margin-right: 0.3rem; }
   .guard-evidence summary { cursor: pointer; white-space: nowrap; }
   .guard-evidence ul { margin: 0.3rem 0 0.2rem 0; padding-left: 1.1rem; }
 </style>
@@ -35,7 +39,8 @@
             <li><strong>First</strong>, <strong>Last</strong>: the end times of the node's first and last job in the window, Eastern.</li>
             <li><strong>Evidence</strong>: the triangle on each row opens the node's evidence: the tasks it failed with the nodes they finished on, how long its failures ran, their error codes, and its most recent failed jobs.</li>
             <li><strong>Judged</strong>: a node with at least {{ settings.min_jobs }} finished or failed production jobs in the window. Nodes with fewer are counted, not judged.</li>
-            <li><strong>State</strong>: <strong>would exclude</strong> (shadow mode) or <strong>excluded</strong> (live): the node is a black hole; <strong>clear</strong>: it is not, for the reason shown.</li>
+            <li><strong>State</strong> of a cycle's reading: <strong>would exclude</strong> (shadow mode) or <strong>excluded</strong> (live): the node read as a black hole this cycle; <strong>clear</strong>: it did not, for the reason shown.</li>
+            <li><strong>Record</strong>: the node's standing in the node map. <strong>black hole</strong>: tripped, and held for {{ settings.expiry_h }} h from the trip whatever later cycles read; <strong>half open</strong>: the hold expired, one job may land there, a clean landing clears the node and a fast failure reopens it for twice as long; <strong>pinned</strong>: a person's decision, the guard never changes it; a cleared node leaves the record.</li>
             <li><strong>Black hole</strong>: at least {{ settings.failed_fraction|floatformat:"-2" }} of the node's jobs failed, at least {{ settings.fast_fraction|floatformat:"-2" }} of the failures were fast, and at least one task the node failed finished on another node of the queue in the last {{ settings.attribution_h }} h.</li>
             <li><strong>Fast</strong>: a failure shorter than {{ settings.fast_ratio|floatformat:"-2" }} of the queue's median finished walltime (the queue table shows the minutes). A failure with no recorded duration counts against tripping.</li>
             <li><strong>Reason</strong> for a clear node:
@@ -60,7 +65,57 @@
     </div>
     {% endif %}
 
-    <h2 id="black-holes" class="guard-section">Black holes</h2>
+    <h2 id="record" class="guard-section">Record</h2>
+    <p class="mb-2">The nodes the guard holds in the node map: black holes, half open, pinned.
+        {% if operable %}Clear ends a hold now (the guard may trip the node again); Pin holds the node as it stands until unpinned; Open marks a black hole by hand, with no expiry.{% else %}{% if is_tunnel %}<span class="text-muted">(use <a href="https://pandaserver02.sdcc.bnl.gov/swf-monitor{{ request.path_info }}" target="_blank" rel="noopener">pandaserver02</a> to act on a node)</span>{% endif %}{% endif %}</p>
+    {% if record %}
+    <table class="table table-striped table-bordered table-sm align-middle w-auto mb-3 swf-sortable">
+        <thead><tr>
+            <th>Queue</th><th>Site</th><th>Node</th><th>Record</th><th>Since</th><th>Until</th><th>Reopened</th><th>Trips</th>
+            <th>Last cycle</th><th>Jobs</th><th>Failed</th><th>Fast</th><th>Evidence</th><th>History</th>{% if operable %}<th>Act</th>{% endif %}
+        </tr></thead>
+        <tbody>
+        {% for n in record %}
+            <tr>
+                <td><a href="{% url 'monitor_app:epic_queue_detail' queue_name=n.queue %}">{{ n.queue }}</a></td>
+                <td class="text-nowrap">{{ n.site }}</td>
+                <td class="text-nowrap">{{ n.host }}</td>
+                <td class="guard-state-{{ n.status }}">{{ n.status_label }}</td>
+                <td class="text-nowrap">{{ n.opened_at|fmt_dt }}</td>
+                <td class="text-nowrap">{{ n.expires_at|fmt_dt }}</td>
+                <td class="text-end">{{ n.reopened }}</td>
+                <td class="text-end">{{ n.trips }}</td>
+                <td class="text-nowrap">{{ n.last_verdict_at|fmt_dt }}{% if n.last_tripped %} tripped{% elif n.last_verdict_at %} not tripped{% endif %}</td>
+                <td class="text-end">{{ n.jobs|default_if_none:"" }}</td>
+                <td class="text-end">{% if n.failed != None %}{{ n.failed }} ({{ n.failed_pct }}%){% endif %}</td>
+                <td class="text-end">{% if n.fast_failed != None %}{{ n.fast_failed }} ({{ n.fast_pct }}%){% endif %}</td>
+                <td>{% if n.jobs %}{% include 'monitor_app/panda_node_guard_evidence.html' with n=n %}{% else %}<span class="text-muted">none held</span>{% endif %}</td>
+                <td class="text-end"><a href="{% url 'monitor_app:log_list' %}?app_name=epicprod&amp;instance_name=node-guard" title="the guard's decisions on the action stream">{{ n.changes }} change{{ n.changes|pluralize }}</a></td>
+                {% if operable %}
+                <td class="guard-controls text-nowrap">
+                    {% if n.status != 'pinned' %}<form method="post" action="{% url 'monitor_app:panda_node_guard_set' %}">{% csrf_token %}<input type="hidden" name="queue" value="{{ n.queue }}"><input type="hidden" name="host" value="{{ n.host }}"><input type="hidden" name="action" value="clear"><button type="submit" class="btn btn-sm btn-outline-secondary">Clear</button></form>{% endif %}
+                    {% if n.status == 'pinned' %}<form method="post" action="{% url 'monitor_app:panda_node_guard_set' %}">{% csrf_token %}<input type="hidden" name="queue" value="{{ n.queue }}"><input type="hidden" name="host" value="{{ n.host }}"><input type="hidden" name="action" value="unpin"><button type="submit" class="btn btn-sm btn-outline-secondary">Unpin</button></form>{% else %}<form method="post" action="{% url 'monitor_app:panda_node_guard_set' %}">{% csrf_token %}<input type="hidden" name="queue" value="{{ n.queue }}"><input type="hidden" name="host" value="{{ n.host }}"><input type="hidden" name="action" value="pin"><button type="submit" class="btn btn-sm btn-outline-secondary">Pin</button></form>{% endif %}
+                </td>
+                {% endif %}
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="mb-3">No node is held.</p>
+    {% endif %}
+    {% if operable %}
+    <form method="post" action="{% url 'monitor_app:panda_node_guard_set' %}" class="mb-3">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="open">
+        <label>Open a black hole by hand: queue <input type="text" name="queue" size="22" required></label>
+        <label>node <input type="text" name="host" size="30" required></label>
+        <label>note <input type="text" name="note" size="40"></label>
+        <button type="submit" class="btn btn-sm btn-outline-danger">Open</button>
+    </form>
+    {% endif %}
+
+    <h2 id="black-holes" class="guard-section">This cycle's black holes</h2>
     {% if tripped %}
     <table class="table table-striped table-bordered table-sm align-middle w-auto mb-3 swf-sortable">
         <thead><tr>

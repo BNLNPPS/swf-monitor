@@ -100,6 +100,12 @@ ACTION_DEFAULTS = {
                        "terminal production jobs: jobs, hosts, judged and "
                        "tripped, and any queue read as a storm.",
     },
+    'node_guard_set': {
+        'sublevel': 'normal', 'live': True,
+        'description': "A person's decision on one node of the guard's "
+                       "record: clear, pin, unpin, or a black hole opened "
+                       "by hand.",
+    },
     # alarm dashboard: pings (docs/PINGS.md)
     'ping_create': {
         'sublevel': 'normal', 'live': True,

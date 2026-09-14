@@ -15,11 +15,15 @@ Settings live in SysConfig under ``node_guard.*`` and are seeded at
 their defaults on first read, so every knob is visible on the System
 page (the table in NODE_GUARD.md, Modes and settings).
 
-Decision records: one ``node_guard_decision`` per node whose verdict
-changed since the last record for it (tripped, or cleared after a
-trip), and hourly as a heartbeat while tripped; one ``node_guard_cycle``
-per cycle. Every read is fenced: a failed window read or calibration is
-recorded as the cycle's error and the cycle goes on with what it has.
+The verdicts go to the node record in the canary store
+(``canary.store.nodes.apply``): a trip opens a black hole that stays
+latched until it expires into half open, where one landing decides;
+a person may clear or pin. Decision records: one ``node_guard_decision``
+per change of a node's record (a black hole opened or reopened, expired
+into half open, cleared by a clean landing), and hourly as a heartbeat
+for each standing black hole; one ``node_guard_cycle`` per cycle. Every
+read is fenced: a failed window read or calibration is recorded as the
+cycle's error and the cycle goes on with what it has.
 """
 import logging
 
@@ -51,6 +55,9 @@ DEFAULTS = {
 DECISION_KEYS = ('min_jobs', 'failed_fraction', 'fast_fraction', 'fast_ratio',
                  'storm_nodes', 'not_nodes')
 TRIPPED_STATES = {'shadow': 'would_exclude', 'live': 'excluded'}
+# The record's status as the decision record names it, per mode.
+RECORD_STATES = {'black_hole': TRIPPED_STATES, 'half_open': {'shadow': 'half_open', 'live': 'half_open'},
+                 'clear': {'shadow': 'clear', 'live': 'clear'}}
 
 
 def _safe(label, fn, fallback):
@@ -196,6 +203,52 @@ def _last_decision(queue, host):
             .order_by('-timestamp').values('id', 'timestamp', 'extra_data').first())
 
 
+def _window_counts(rows, calib, fast_ratio):
+    """Per (queue, host): the window's finished jobs and fast failures,
+    for the nodes the record holds that did not reach the floor."""
+    from canary.guard import normalize_host
+    out = {}
+    for r in rows or ():
+        host = normalize_host(r.get('host'))
+        if not r.get('queue') or not host:
+            continue
+        c = out.setdefault((r['queue'], host), {'finished': 0, 'fast_failed': 0, 'failed': 0})
+        if r.get('jobstatus') == 'finished':
+            c['finished'] += 1
+        elif r.get('jobstatus') == 'failed':
+            c['failed'] += 1
+            med = calib.get(r['queue'])
+            d = r.get('duration_s')
+            if med and d is not None and float(d) < med * fast_ratio:
+                c['fast_failed'] += 1
+    return out
+
+
+def _readings(verdicts, rows, calib, cfg):
+    """What the record is told this cycle: every judged node's verdict,
+    and for every node holding a record that was not judged, its window
+    counts (zero when it had no job)."""
+    from canary.store.models import NodeState
+    counts = _window_counts(rows, calib, cfg['fast_ratio'])
+    readings = {}
+    for queue, q in verdicts['queues'].items():
+        for host, v in q['nodes'].items():
+            e = v['evidence']
+            readings[(queue, host)] = {
+                'tripped': v['state'] == 'tripped', 'reason': v['reason'], 'evidence': e,
+                'finished': e.get('finished', 0), 'fast_failed': e.get('fast_failed', 0),
+                'site': e.get('site', '')}
+    for queue_name, host in (NodeState.objects.exclude(status='clear')
+                             .values_list('queue__name', 'host')):
+        key = (queue_name, host)
+        if key in readings:
+            continue
+        c = counts.get(key, {'finished': 0, 'fast_failed': 0, 'failed': 0})
+        readings[key] = {'tripped': False, 'reason': '', 'evidence': {},
+                         'finished': c['finished'], 'fast_failed': c['fast_failed'], 'site': ''}
+    return readings
+
+
 def run_cycle(*, dry_run=False, created_by='node-guard'):
     """One cycle. Returns (nodes, summary): the judged nodes with their
     verdicts as shown, and the cycle summary; writes the records and
@@ -239,43 +292,71 @@ def run_cycle(*, dry_run=False, created_by='node-guard'):
                             'hosts': 0, 'jobs': 0, 'malformed': 0}
 
     nodes = []
-    written = 0
     for queue, q in sorted(verdicts['queues'].items()):
         for host, v in sorted(q['nodes'].items()):
             tripped = v['state'] == 'tripped'
-            state = tripped_state if tripped else 'clear'
-            shown = {'queue': queue, 'host': host, 'state': state,
-                     'reason': v['reason'], 'evidence': v['evidence'],
-                     'recorded': False, 'log_id': None}
-            nodes.append(shown)
-            if dry_run:
-                continue
-            last = _safe(f'{queue}/{host} last decision',
-                         lambda: _last_decision(queue, host), None)
-            last_extra = (last or {}).get('extra_data') or {}
-            last_state = last_extra.get('state')
-            stale = (last is not None
-                     and (t0 - last['timestamp']).total_seconds() >= HEARTBEAT_S)
-            # A trip is always news; a clear is news only after a trip.
-            changed = (last_state != state) if (tripped or last_state in TRIPPED_STATES.values()) else False
-            recorded = bool(changed or (tripped and stale))
-            shown['recorded'] = recorded
-            if not recorded:
-                shown['log_id'] = (last or {}).get('id')
-                continue
-            e = v['evidence']
-            shown['log_id'] = _safe(f'{queue}/{host} record', lambda: log_epicprod_action(
+            nodes.append({'queue': queue, 'host': host,
+                          'state': tripped_state if tripped else 'clear',
+                          'reason': v['reason'], 'evidence': v['evidence'],
+                          'recorded': False, 'log_id': None})
+
+    # The record: the verdicts applied to the node map, with latch,
+    # expiry and half open; the changes are the decisions recorded.
+    written = 0
+    changes, trips = [], []
+    if enabled and rows is not None and not dry_run:
+        from canary.store import nodes as node_record
+        readings = _safe('readings', lambda: _readings(verdicts, rows, calib, cfg),
+                         failed('readings'))
+        if readings is not None:
+            applied = _safe('record', lambda: node_record.apply(
+                readings, now=t0, expiry_h=float(cfg['expiry_h']), mode=mode,
+                username=created_by), failed('record'))
+            if applied is not None:
+                changes, trips = applied
+        by_key = {(n['queue'], n['host']): n for n in nodes}
+        for queue, host, old, new, why in changes:
+            state = RECORD_STATES.get(new, {}).get(mode, new)
+            shown = by_key.get((queue, host))
+            e = (shown or {}).get('evidence') or {}
+            log_id = _safe(f'{queue}/{host} record', lambda: log_epicprod_action(
                 'node-guard', 'node_guard_decision', subject_type='panda_node',
                 subject_key=f'{queue}/{host}', username=created_by, outcome=state,
-                sublevel='normal' if tripped else 'low', live_default=tripped,
-                level=logging.WARNING if tripped else logging.INFO,
-                message=(f'node guard {queue} {host}: {state} ({v["reason"]}); '
-                         f'{e["failed"]} of {e["jobs"]} jobs failed, {e["fast_failed"]} fast, '
-                         f'in the last {cfg["window_h"]} h; '
-                         f'{len(e["tasks_finished_elsewhere"])} of {len(e["tasks_failed"])} '
-                         f'failed tasks finish on other nodes'),
-                state=state, reason=v['reason'], mode=mode, host=host, queue=queue,
+                sublevel='normal' if new == 'black_hole' else 'low',
+                live_default=new == 'black_hole',
+                level=logging.WARNING if new == 'black_hole' else logging.INFO,
+                message=(f'node guard {queue} {host}: {state} ({why}), was {old}'
+                         + (f'; {e["failed"]} of {e["jobs"]} jobs failed, {e["fast_failed"]} fast, '
+                            f'in the last {cfg["window_h"]} h; '
+                            f'{len(e["tasks_finished_elsewhere"])} of {len(e["tasks_failed"])} '
+                            f'failed tasks finish on other nodes' if e else '')),
+                state=state, old_state=old, reason=why, mode=mode, host=host, queue=queue,
                 window_h=cfg['window_h'], **e), failed(f'{queue}/{host} record'))
+            if shown is not None:
+                shown['recorded'] = True
+                shown['log_id'] = log_id
+            written += 1
+        # Hourly heartbeat for each standing black hole with a verdict
+        # this cycle and no change recorded.
+        changed = {(q, h) for q, h, _, _, _ in changes}
+        for shown in nodes:
+            key = (shown['queue'], shown['host'])
+            if shown['state'] == 'clear' or key in changed:
+                continue
+            last = _safe(f'{key} last decision', lambda: _last_decision(*key), None)
+            if last is None or (t0 - last['timestamp']).total_seconds() < HEARTBEAT_S:
+                shown['log_id'] = (last or {}).get('id')
+                continue
+            e = shown['evidence']
+            shown['recorded'] = True
+            shown['log_id'] = _safe(f'{key} heartbeat', lambda: log_epicprod_action(
+                'node-guard', 'node_guard_decision', subject_type='panda_node',
+                subject_key=f'{key[0]}/{key[1]}', username=created_by, outcome=shown['state'],
+                sublevel='low', live_default=False,
+                message=(f'node guard {key[0]} {key[1]}: {shown["state"]} standing; '
+                         f'{e["failed"]} of {e["jobs"]} jobs failed in the last {cfg["window_h"]} h'),
+                state=shown['state'], reason=shown['reason'], mode=mode, host=key[1],
+                queue=key[0], window_h=cfg['window_h'], **e), failed(f'{key} heartbeat'))
             written += 1
 
     tripped_nodes = [n for n in nodes if n['state'] in TRIPPED_STATES.values()]
@@ -283,6 +364,7 @@ def run_cycle(*, dry_run=False, created_by='node-guard'):
                'enabled': enabled, 'window_h': cfg['window_h'],
                'jobs': verdicts['jobs'], 'hosts': verdicts['hosts'],
                'judged': verdicts['judged'], 'tripped': len(tripped_nodes),
+               'opened': len(trips), 'record_changes': len(changes),
                'malformed': verdicts['malformed'], 'decisions_recorded': written,
                'errors': errors,
                'duration_s': round((timezone.now() - t0).total_seconds(), 1)}
@@ -314,6 +396,8 @@ def run_cycle(*, dry_run=False, created_by='node-guard'):
                      f'hosts, {summary["judged"]} judged, {summary["tripped"]} tripped'
                      + (': ' + ', '.join(f'{q} {h}' for q, h in state_payload['tripped'])
                         if tripped_nodes else '')
+                     + (f'; {len(trips)} black hole{"s" if len(trips) != 1 else ""} opened'
+                        if trips else '')
                      + ''.join(f'; {q} storm on {s["storm_hosts"]} hosts, the queue\'s event'
                                for q, s in queues_state.items() if s.get('queue_event'))
                      + (f'; errors: {"; ".join(errors)}' if errors else '')),
