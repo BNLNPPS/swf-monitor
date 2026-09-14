@@ -472,3 +472,35 @@ children and unrelated entrypoints remain outside it. Reservations do not confer
 production rights, and the wrapper does not replace commit/push, host coordination
 or the standard frozen-tree checks. Do not run privileged children beneath an
 unprivileged guard: it could not stop their process group on authority loss.
+
+## Topical Capcom
+
+The System menu opens `/prod/teamcomms/capcom` within the existing authenticated
+subtree. Add `teamcomms.capcom.apps.CapcomConfig` and grant ordinary members
+`capcom:read` and `capcom:write`, independently of production rights. The package's
+Capcom `0001_initial`, `0002_integrity` and `0003_conversationread` migrations
+create topics, notices,
+explicit decisions, personal read/follow state, immutable mutation receipts and
+per-session presentation policies. Existing Inflight and component apps remain
+installed; migration creates schema only.
+
+Topics reference current Inflight work, fixed document versions, selected Dialog
+records and existing exact-topic Comms conversations. Private message access stays
+with its original audience. Events and sampled state carry distinct labels and
+observation times; old blockers cannot replace current task state. Reading, marking
+a topic read, native receipt, model consideration and decision resolution are
+separate operations. There is no automatic source import, watcher subscription,
+Mattermost post or production action.
+
+Receiver attention controls require explicit `attention_controls=true` in the
+selected connector configuration and a receiver advertising `attention-v1`.
+Session-owned policies choose immediate, recorded-only or batched machine routine
+notifications, with optional quiet deadlines. Deferred and coalesced dispositions
+remain visible beside independent transport receipts. Alarms, human instructions,
+conversations and offers bypass routine filtering. Existing connectors keep their
+current delivery behavior until explicitly enabled; runtime/TJAI settings and the
+live-feed bridge are preserved.
+
+Package installation, mandatory host checks and full deployment precede bounded
+public navigation/topic/reference checks. A commissioning pull session may exercise
+publication and attention bookkeeping without a model or native client launch.

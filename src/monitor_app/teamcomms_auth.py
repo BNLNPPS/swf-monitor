@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)
 BACKEND_PREFIX = "/swf-monitor/teamcomms"
 PUBLIC_PREFIX = "/prod/teamcomms"
 TEAM_ID = "8873a572-a319-4a90-bfc9-76a9b76e30fb"
-READ_SCOPES = frozenset({"directory:read", "entries:read", "comms:read", "dialog:read", "inflight:read"})
-WRITE_SCOPES = frozenset({"entries:write", "sessions:write", "comms:write", "dialog:write", "inflight:write"})
+READ_SCOPES = frozenset({"directory:read", "entries:read", "comms:read", "dialog:read", "inflight:read", "capcom:read"})
+WRITE_SCOPES = frozenset({"entries:write", "sessions:write", "comms:write", "dialog:write", "inflight:write", "capcom:write"})
 
 
 def one_header(scope, name):

@@ -124,6 +124,7 @@ INSTALLED_APPS = [
     "teamcomms.dialog.apps.DialogConfig",
     "teamcomms.pouch.apps.PouchConfig",
     "teamcomms.inflight.apps.InflightConfig",
+    "teamcomms.capcom.apps.CapcomConfig",
     "django_dbml",  # For schema diagram generation
     # Third-party apps
     "rest_framework",
