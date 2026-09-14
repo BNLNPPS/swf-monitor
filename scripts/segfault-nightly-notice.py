@@ -8,11 +8,14 @@ automatic dig, one TJAI peer message to the swf sessions on this host
 (the host:swf-testbed group) carrying the census of the catalog and the
 signatures that need a decision a person or an LLM makes: the ones with
 no trace and a runnable row and no attempt in flight (a reproduction is
-the only extraction left), and the traced ones no finding reads. A
-session takes an item by requesting the reproduction on the record
-(the signature page's Reproduce, or the MCP tool
-panda_segfault_reproduce), which every session sees on the runs page,
-so two never submit the same row. Nothing is submitted here.
+the only extraction left), the traced ones no finding reads, and the
+ones whose reproduction has settled (the row ran clean, or crashed
+without a trace) that no finding reads: those are read from the record
+into a finding, never run again. A session takes a reproduction item
+by requesting it on the record (the signature page's Reproduce, or the
+MCP tool panda_segfault_reproduce), which every session sees on the
+runs page, so two never submit the same row; a reading is written with
+panda_segfault_finding_set. Nothing is submitted here.
 
 The sender is a registered TJAI session of its own (client epicprod,
 name epicprod-nightly), stable across runs. Registration and sending
@@ -43,7 +46,7 @@ import django  # noqa: E402
 django.setup()
 
 from monitor_app.models import CrashSignature  # noqa: E402
-from monitor_app.reproductions import attempts  # noqa: E402
+from monitor_app.reproductions import SETTLED_OUTCOMES, attempts  # noqa: E402
 from monitor_app.segfaults import covering_finding, signature_summary  # noqa: E402
 
 TJAI_MCP_URL = os.environ.get('TJAI_MCP_URL', 'https://etaverse.com/tjai/mcp/')
@@ -91,7 +94,7 @@ def mcp_call(tool, arguments, timeout=60):
 
 
 def census():
-    """The catalog read for the notice: counts and the two decision lists."""
+    """The catalog read for the notice: counts and the three decision lists."""
     active = {}
     for a in attempts():
         if a.get('active'):
@@ -99,9 +102,9 @@ def census():
             active[a['signature']] += 1
     sigs = list(CrashSignature.objects.all())
     counts = {'signatures': len(sigs), 'crashes': 0, 'covered': 0, 'covered_crashes': 0,
-              'traced_unread': 0, 'untraced_runnable': 0, 'untraced_unrunnable': 0,
-              'in_flight': 0}
-    need_run, need_read = [], []
+              'traced_unread': 0, 'settled_unread': 0, 'untraced_runnable': 0,
+              'untraced_unrunnable': 0, 'in_flight': 0}
+    need_run, need_read, need_reading = [], [], []
     for sig in sigs:
         if sig.level == 'trace':
             continue
@@ -121,10 +124,16 @@ def census():
         row = {'key': sig.key, 'class': s['class'], 'crashes': s['crashes'],
                'queue': ', '.join(s['site_names'][:2]), 'last_seen': (s['last_seen'] or '')[:10],
                'frame': s['frame'], 'trace_status': s['trace_status'],
-               'runnable': s['runnable']}
+               'runnable': s['runnable'], 'outcome': s.get('reproduction_outcome') or ''}
         if s['trace_status'] == 'found':
             counts['traced_unread'] += 1
             need_read.append(row)
+        elif row['outcome'] in SETTLED_OUTCOMES:
+            # The pair has run and settled it without a trace: the reading
+            # comes from the record (the per-host and per-day shape), not
+            # from another run of the same row.
+            counts['settled_unread'] += 1
+            need_reading.append(row)
         elif s['runnable']:
             counts['untraced_runnable'] += 1
             need_run.append(row)
@@ -132,10 +141,11 @@ def census():
             counts['untraced_unrunnable'] += 1
     need_run.sort(key=lambda r: -(r['crashes'] or 0))
     need_read.sort(key=lambda r: -(r['crashes'] or 0))
-    return counts, need_run, need_read
+    need_reading.sort(key=lambda r: -(r['crashes'] or 0))
+    return counts, need_run, need_read, need_reading
 
 
-def compose(counts, need_run, need_read, limit):
+def compose(counts, need_run, need_read, need_reading, limit):
     c = counts
     lines = [
         f"Segfault catalog, nightly: {c['signatures']} signatures, {c['crashes']:,} crashes; "
@@ -143,6 +153,7 @@ def compose(counts, need_run, need_read, limit):
         f"{c['in_flight']} with a reproduction in flight; "
         f"{c['untraced_runnable']} with no trace and a runnable row; "
         f"{c['traced_unread']} traced with no reading; "
+        f"{c['settled_unread']} settled by a reproduction with no trace and no reading; "
         f"{c['untraced_unrunnable']} with no trace and no runnable row (manifest reconstruction).",
     ]
     if need_run:
@@ -153,10 +164,16 @@ def compose(counts, need_run, need_read, limit):
         lines.append(f"Traced, no finding reads them ({min(len(need_read), limit)} of {len(need_read)}):")
         for r in need_read[:limit]:
             lines.append(f"  {r['key']}  {r['class']}  {r['crashes']:,} crashes  {r['frame'][:70]}")
+    if need_reading:
+        lines.append(
+            f"Settled by a reproduction, no trace, no finding reads them: a reading from the record "
+            f"(per host and per day), not another run ({min(len(need_reading), limit)} of {len(need_reading)}):")
+        for r in need_reading[:limit]:
+            lines.append(f"  {r['key']}  {r['class']}  {r['crashes']:,} crashes  {r['outcome']}  {r['queue']}  last {r['last_seen']}")
     lines.append(
         "Someone swf take it: a reproduction is requested on the record with panda_segfault_reproduce(key) "
         "or the signature page's Reproduce; the runs page shows what is already requested, so check it "
-        f"before submitting. {CATALOG_URL}")
+        f"before submitting. A reading is written with panda_segfault_finding_set. {CATALOG_URL}")
     return '\n'.join(lines)
 
 
@@ -179,10 +196,11 @@ def main():
     ap.add_argument('--dry-run', action='store_true', help='compose and print, send nothing')
     ap.add_argument('--limit', type=int, default=12, help='signatures listed per list')
     args = ap.parse_args()
-    counts, need_run, need_read = census()
-    text = compose(counts, need_run, need_read, args.limit)
+    counts, need_run, need_read, need_reading = census()
+    text = compose(counts, need_run, need_read, need_reading, args.limit)
     out = {'counts': counts, 'listed_run': [r['key'] for r in need_run[:args.limit]],
            'listed_read': [r['key'] for r in need_read[:args.limit]],
+           'listed_settled': [r['key'] for r in need_reading[:args.limit]],
            'host': socket.gethostname()}
     if args.dry_run:
         out['message'] = text
