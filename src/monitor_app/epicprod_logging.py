@@ -85,6 +85,21 @@ ACTION_DEFAULTS = {
         'description': "One cycle of the pressure front over the regulated "
                        "queues, with each queue's state.",
     },
+    # the node guard (site-canary docs/NODE_GUARD.md)
+    'node_guard_decision': {
+        'sublevel': 'normal', 'live': True,
+        'description': "One node's verdict from the node guard's cycle: a "
+                       "black hole tripped (would_exclude in shadow mode, "
+                       "excluded live) or cleared after a trip, with the "
+                       "evidence; recorded on a trip, on the clear after "
+                       "one, and hourly while tripped.",
+    },
+    'node_guard_cycle': {
+        'sublevel': 'low', 'live': False,
+        'description': "One cycle of the node guard over the window's "
+                       "terminal production jobs: jobs, hosts, judged and "
+                       "tripped, and any queue read as a storm.",
+    },
     # alarm dashboard: pings (docs/PINGS.md)
     'ping_create': {
         'sublevel': 'normal', 'live': True,

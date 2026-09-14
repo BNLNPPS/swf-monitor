@@ -1,0 +1,143 @@
+{% extends 'base.html' %}
+{% load swf_fmt %}
+{% block title %}Node guard{% endblock %}
+{% block content %}
+<style>
+  .guard-section { background-color: #e7f1fb; padding: 0.4rem 0.6rem;
+                   border-radius: 0.25rem; margin-top: 1.6rem;
+                   margin-bottom: 0.8rem; }
+  .guard-state-would_exclude, .guard-state-excluded { background-color: #f8d7da; }
+  .guard-state-clear { background-color: #f1f1f1; }
+</style>
+<div class="container-fluid">
+    <h1>Node guard</h1>
+
+    <p class="mb-3">
+        The guard finds a node that takes production jobs and kills them fast: every few minutes it reads the
+        window's finished and failed jobs per queue and host, and a host whose jobs mostly fail, fail fast, and
+        belong to tasks that finish on the queue's other nodes is a black hole.
+        Mode <strong>{{ mode }}</strong>{% if mode == 'shadow' %} (judges, records and announces; excludes nothing){% endif %};
+        guard <strong>{% if enabled %}on{% else %}off{% endif %}</strong>.
+        {% if never_run %}No cycle has run yet.{% else %}Last cycle <span data-relative-time="{{ cycle_at }}">{{ cycle_at }}</span>
+        ({{ state.duration_s }} s), every five minutes, over the last {{ settings.window_h }} h.{% endif %}
+        The switches and thresholds are the node_guard settings on the
+        <a href="{% url 'monitor_app:system_status' %}#sysconfig-view">System page</a>;
+        the verdicts are on the <a href="{% url 'monitor_app:log_list' %}?app_name=epicprod&amp;instance_name=node-guard">action stream</a>;
+        the plan is <a href="https://github.com/BNLNPPS/site-canary/blob/main/docs/NODE_GUARD.md">NODE_GUARD.md</a>.
+    </p>
+    <details class="mb-3" id="definitions">
+        <summary>Definitions</summary>
+        <ul class="mb-2 mt-1">
+            <li><strong>Node</strong>: the batch host a job ran on, as the job record names it, within its queue. A node's slots are one node.</li>
+            <li><strong>Judged</strong>: a node with at least {{ settings.min_jobs }} finished or failed production jobs in the window. Nodes with fewer are counted, not judged.</li>
+            <li><strong>State</strong>: <strong>would exclude</strong> (shadow mode) or <strong>excluded</strong> (live): the node is a black hole; <strong>clear</strong>: it is not, for the reason shown.</li>
+            <li><strong>Black hole</strong>: at least {{ settings.failed_fraction|floatformat:"-2" }} of the node's jobs failed, at least {{ settings.fast_fraction|floatformat:"-2" }} of the failures were fast, and at least one task the node failed finished on another node of the queue in the last {{ settings.attribution_h }} h.</li>
+            <li><strong>Fast</strong>: a failure shorter than {{ settings.fast_ratio|floatformat:"-2" }} of the queue's median finished walltime (the queue table shows the minutes). A failure with no recorded duration counts against tripping.</li>
+            <li><strong>Reason</strong> for a clear node:
+                <ul>
+                    <li><strong>failed share under the threshold</strong>: the node finishes enough of its jobs.</li>
+                    <li><strong>failures not fast</strong>: the node's jobs fail, but late; not a black hole.</li>
+                    <li><strong>its tasks finish nowhere on the queue</strong>: the queue's other nodes finish other work but none of these tasks; the task's condition.</li>
+                    <li><strong>no other node on the queue</strong>: nothing finished on any other node of the queue in the attribution window, so node and queue are one thing here; the queue's failure detectors are the instrument.</li>
+                    <li><strong>the queue's event</strong>: more than {{ settings.storm_nodes }} nodes of the queue tripped at once; a storm, the queue's condition, not the nodes'.</li>
+                    <li><strong>no calibration for the queue</strong>: the queue finished no production job in 14 days, so fast cannot be defined.</li>
+                </ul>
+            </li>
+            <li><strong>Not a node</strong>: a submit host a job dies on before it lands ({{ settings.not_nodes|join:", " }}); never judged, its outcomes shown beside the queue.</li>
+            <li>A trip is always recorded on the action stream; a clear after a trip, and a standing trip hourly.</li>
+        </ul>
+    </details>
+
+    {% if errors %}
+    <div class="alert mb-3">
+        The last cycle reported {{ errors|length }} error{{ errors|length|pluralize }}:
+        <ul class="mb-0">{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+
+    <h2 id="black-holes" class="guard-section">Black holes</h2>
+    {% if tripped %}
+    <table class="table table-striped table-bordered table-sm align-middle w-auto mb-3 swf-sortable">
+        <thead><tr>
+            <th>Queue</th><th>Node</th><th>State</th><th>Jobs</th><th>Failed</th><th>Fast</th>
+            <th>Tasks failed</th><th>Finish elsewhere</th><th>First</th><th>Last</th><th>Record</th>
+        </tr></thead>
+        <tbody>
+        {% for n in tripped %}
+            <tr>
+                <td><a href="{% url 'monitor_app:epic_queue_detail' queue_name=n.queue %}">{{ n.queue }}</a></td>
+                <td class="text-nowrap">{{ n.host }}</td>
+                <td class="guard-state-{{ n.state }}">{{ n.state_label }}</td>
+                <td class="text-end">{{ n.jobs }}</td>
+                <td class="text-end">{{ n.failed }} ({{ n.failed_pct }}%)</td>
+                <td class="text-end">{{ n.fast_failed }} ({{ n.fast_pct }}%)</td>
+                <td class="text-end">{{ n.tasks_failed|length }}</td>
+                <td class="text-end">{{ n.tasks_finished_elsewhere|length }}</td>
+                <td class="text-nowrap"><span data-relative-time="{{ n.first_end }}">{{ n.first_end }}</span></td>
+                <td class="text-nowrap"><span data-relative-time="{{ n.last_end }}">{{ n.last_end }}</span></td>
+                <td>{% if n.log_id %}<a href="{% url 'monitor_app:log_detail' log_id=n.log_id %}">record</a>{% endif %}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% elif never_run %}
+    <p class="text-muted mb-3">No cycle has run yet.</p>
+    {% else %}
+    <p class="mb-3">None on the last cycle.</p>
+    {% endif %}
+
+    <h2 id="queues" class="guard-section">Queues</h2>
+    <table class="table table-striped table-bordered table-sm align-middle w-auto mb-3 swf-sortable">
+        <thead><tr>
+            <th>Queue</th><th>Jobs</th><th>Nodes</th><th>Judged</th><th>Black holes</th>
+            <th>Median finished (min)</th><th>Fast under (min)</th><th>Storm</th><th>Not nodes</th>
+        </tr></thead>
+        <tbody>
+        {% for q in queues %}
+            <tr>
+                <td><a href="{% url 'monitor_app:epic_queue_detail' queue_name=q.queue %}">{{ q.queue }}</a></td>
+                <td class="text-end">{{ q.jobs }}</td>
+                <td class="text-end">{{ q.hosts }}</td>
+                <td class="text-end">{{ q.judged }}</td>
+                <td class="text-end">{{ q.tripped }}</td>
+                <td class="text-end">{{ q.median_finished_min|default_if_none:"" }}</td>
+                <td class="text-end">{{ q.fast_under_min|default_if_none:"" }}</td>
+                <td>{% if q.queue_event %}<strong>{{ q.storm_hosts }} nodes tripped at once: the queue's event</strong>{% endif %}</td>
+                <td class="small">{% for host, c in q.not_nodes %}{{ host }}: {{ c.failed }} failed, {{ c.finished }} finished{% if not forloop.last %}; {% endif %}{% endfor %}</td>
+            </tr>
+        {% empty %}
+            <tr><td colspan="9" class="text-muted">{% if never_run %}No cycle has run yet.{% else %}No production job ended in the window.{% endif %}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <h2 id="judged" class="guard-section">Judged nodes</h2>
+    <p class="mb-2">Every node at or above the job floor on the last cycle, black holes first.</p>
+    <table class="table table-striped table-bordered table-sm align-middle w-auto mb-3 swf-sortable">
+        <thead><tr>
+            <th>Queue</th><th>Node</th><th>State</th><th>Reason</th><th>Jobs</th><th>Failed</th><th>Fast</th>
+            <th>No duration</th><th>Tasks failed</th><th>Finish elsewhere</th><th>Other nodes finishing</th><th>Record</th>
+        </tr></thead>
+        <tbody>
+        {% for n in nodes %}
+            <tr>
+                <td><a href="{% url 'monitor_app:epic_queue_detail' queue_name=n.queue %}">{{ n.queue }}</a></td>
+                <td class="text-nowrap">{{ n.host }}</td>
+                <td class="guard-state-{{ n.state }}">{{ n.state_label }}</td>
+                <td>{{ n.reason_label }}</td>
+                <td class="text-end">{{ n.jobs }}</td>
+                <td class="text-end">{{ n.failed }} ({{ n.failed_pct }}%)</td>
+                <td class="text-end">{{ n.fast_failed }} ({{ n.fast_pct }}%)</td>
+                <td class="text-end">{{ n.failed_no_duration }}</td>
+                <td class="text-end">{{ n.tasks_failed|length }}</td>
+                <td class="text-end">{{ n.tasks_finished_elsewhere|length }}</td>
+                <td class="text-end">{{ n.other_nodes_finishing }}</td>
+                <td>{% if n.log_id %}<a href="{% url 'monitor_app:log_detail' log_id=n.log_id %}">record</a>{% endif %}</td>
+            </tr>
+        {% empty %}
+            <tr><td colspan="12" class="text-muted">{% if never_run %}No cycle has run yet.{% else %}No node reached the job floor in the window.{% endif %}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

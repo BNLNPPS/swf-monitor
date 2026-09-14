@@ -61,6 +61,11 @@ Capabilities:
   node_measure_ingest — fold every finished job's per-stage measures into
                        the node measurement store, behind a cursor (hourly;
                        site-canary docs/MEASUREMENTS.md).
+  node_guard_cycle   — one cycle of the node guard: the window's terminal
+                       production jobs per queue and host judged for black
+                       holes, recorded as node_guard_decision; shadow mode
+                       acts on nothing (five-minutely; site-canary
+                       docs/NODE_GUARD.md).
   dataset_definitions_sweep — the definitions sweep on demand: pull the
                        simulation_campaign_datasets clone, then the same
                        sweep the nightly chain runs (the PC ingest page's
@@ -228,6 +233,8 @@ STORAGE_SWEEP_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "sto
 # docs/CONTINUOUS_PRODUCTION.md, The dispatcher), five-minutely by cron
 # enqueue; shadow mode records decisions and submits nothing.
 FRONT_CYCLE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "front-cycle.py"
+NODE_GUARD_TIMEOUT = int(os.environ.get("EPICPROD_NODE_GUARD_TIMEOUT", "240"))
+NODE_GUARD_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "node-guard-cycle.py"
 FRONT_CYCLE_TIMEOUT = int(os.environ.get("EPICPROD_FRONT_CYCLE_TIMEOUT", "240"))
 # An incremental pass is about 36 minutes plus its sixth of the dataset
 # tier (about an hour at the pass's pacing, STORAGE.md); the nightly full
@@ -344,7 +351,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "node_measure_ingest", "dataset_definitions_sweep",
                    "storage_sweep", "campaign_config_propose",
                    "credential_ping_propose", "certificate_ping_propose",
-                   "assessment_completed", "front_cycle",
+                   "assessment_completed", "front_cycle", "node_guard_cycle",
                    "health_ping", "shutdown"}
 
     def __init__(self):
@@ -2923,6 +2930,45 @@ class EpicProdOpsAgent(BaseAgent):
                              live_default=False, level=logging.ERROR)
             return
         self.logger.info("PRODOPS front_cycle done")
+
+    def _handle_node_guard_cycle(self, m):
+        """One cycle of the node guard (site-canary docs/NODE_GUARD.md):
+        five-minutely by cron enqueue, directly invokable. Deduped so a
+        slow cycle is never doubled."""
+        self.run_in_background(
+            self._do_node_guard_cycle, m,
+            dedup_key="node_guard_cycle", label="node_guard_cycle")
+
+    def _do_node_guard_cycle(self, m):
+        """Run the node-guard-cycle doer; the per-node records and the
+        cycle record are written by the doer itself, so this records only
+        a cycle that did not run to completion."""
+        username = str(m.get('created_by') or 'node-guard')
+        cmd = [sys.executable, str(NODE_GUARD_SCRIPT), "--created-by", username]
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=NODE_GUARD_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS node_guard_cycle TIMEOUT after {NODE_GUARD_TIMEOUT}s")
+            self._log_action('node_guard_cycle', t0, outcome='timeout',
+                             reason=f'timed out after {NODE_GUARD_TIMEOUT}s',
+                             username=username, sublevel='low',
+                             live_default=False, level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  node-guard-cycle: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  node-guard-cycle: {line}")
+        if p.returncode != 0:
+            reason = self._derive_reason(p)
+            self.logger.error(f"PRODOPS node_guard_cycle FAILED rc={p.returncode}")
+            self._log_action('node_guard_cycle', t0, outcome='error', reason=reason,
+                             username=username, sublevel='low',
+                             live_default=False, level=logging.ERROR)
+            return
+        self.logger.info("PRODOPS node_guard_cycle done")
 
     def _handle_campaign_config_propose(self, m):
         """Run the campaign configuration proposer (swf-monitor
