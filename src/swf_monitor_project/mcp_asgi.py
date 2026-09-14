@@ -59,7 +59,10 @@ if settings.SWF_TEAMCOMMS_ENABLED:
     from monitor_app.teamcomms_auth import PUBLIC_PREFIX, RemoteAuthentication, TrustedProxy
 
     _teamcomms_auth = RemoteAuthentication()
-    _teamcomms_application = create_app(host_auth=_teamcomms_auth, mount_path=PUBLIC_PREFIX)
+    _teamcomms_application = create_app(
+        host_auth=_teamcomms_auth, mount_path=PUBLIC_PREFIX,
+        browser_csrf_url=PUBLIC_PREFIX + "/browser-csrf",
+    )
     _teamcomms_proxy = TrustedProxy(_teamcomms_application)
 
 _LOCALHOST = ("127.0.0.1", "::1")

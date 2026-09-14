@@ -19,6 +19,36 @@ database reads and after an idle interval of at most five seconds. Apache
 disables caching and compression for this route; swf-remote relays chunks
 without buffering.
 
+## Browser interface
+
+When TC is enabled, the monitor's System menu links to its public browser
+interface at `https://epic-devcloud.org/prod/teamcomms/`. The link uses
+`SWF_TEAMCOMMS_PUBLIC_HOST`, including on the BNL face, so browser access uses
+the existing devcloud account session. The UI provides the shared overview,
+Entries list at `/entries` and editor at `/entries/<UUID>` beneath that prefix.
+
+The application is constructed with
+`browser_csrf_url="/prod/teamcomms/browser-csrf"`. Devcloud serves this
+authenticated browser-only GET locally and returns a masked Django CSRF token
+and its header name. The browser obtains the token from that endpoint and sends
+it with same-origin cookie requests to the existing mutation APIs. The monitor
+continues to verify devcloud's request-bound CSRF attestation; it does not issue
+the browser's CSRF token. Tokens are not placed in URLs or rendered HTML.
+
+UI links and asset URLs derive from the ASGI mount prefix. Packaged assets under
+`/assets` travel through the same authenticated TC route; they need no Apache
+static alias or Django `collectstatic` integration. The TC wheel contains the
+licensed editor and rendering assets. The host installs the pinned package and
+its Markdown, nh3 and pymdown-extensions dependencies before full deployment.
+Devcloud preserves the UI response security headers through its relay.
+
+`POST /api/entries/render` supplies sanitized preview through the same
+authentication and CSRF guard. Existing entry operations retain their revision
+preconditions. The shared package owns editor behavior, draft recovery and
+conflict handling; the SWF integration supplies the mount, navigation, account
+session and deployment. Host acceptance uses the authenticated public URL to
+verify navigation, asset responses, browser CSRF and entry operations.
+
 ## Authentication contract
 
 swf-remote validates the browser session or existing API token and checks

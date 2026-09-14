@@ -1,5 +1,7 @@
 """Global template context for lightweight monitor state."""
 
+from django.conf import settings
+
 from .models import external_face_base_url
 from .system_status import status_summary
 
@@ -324,6 +326,10 @@ def system_status_nav(request):
         'system_status_reason': summary.get('overall_reason', ''),
         'system_status_latest_checked_at': summary.get('latest_checked_at'),
         'external_face_base_url': external_face_base_url(),
+        'teamcomms_url': (
+            f'https://{settings.SWF_TEAMCOMMS_PUBLIC_HOST}/prod/teamcomms/'
+            if settings.SWF_TEAMCOMMS_ENABLED else ''
+        ),
         # The User admin entry appears only for those who may use it
         # (docs/AUTHORITY.md).
         'may_administer_users': may_administer(getattr(request, 'user', None)),
