@@ -20,6 +20,8 @@ RECORD_LABELS = {'black_hole': 'black hole', 'half_open': 'half open', 'pinned':
                  'clear': 'clear'}
 REASON_LABELS = {
     'black_hole': 'black hole',
+    'fixed_time': 'fixed-time kill',
+    'below_floor': 'under the job floor',
     'failed_fraction': 'failed share under the threshold',
     'not_fast': 'failures not fast',
     'no_calibration': 'no calibration for the queue',
@@ -46,6 +48,7 @@ def _evidence_view(e):
                       for k, v in (e.get('failed_duration_s') or {}).items()},
         'error_codes': e.get('error_codes') or [],
         'sample_jobs': e.get('sample_jobs') or [],
+        'duration_spread': e.get('duration_spread'), 'fixed_time': bool(e.get('fixed_time')),
         'elsewhere_hosts': sorted((e.get('tasks_finished_elsewhere_hosts') or {}).items()),
         'median_finished_min': (round(e['median_finished_s'] / 60.0)
                                 if e.get('median_finished_s') else None),
