@@ -17,6 +17,8 @@
     <p class="mb-2">On this page:
         <a href="#description">Description</a>
         <span class="text-muted mx-1">&middot;</span>
+        <a href="#declared">Declared state</a>
+        <span class="text-muted mx-1">&middot;</span>
         <a href="#pool">Batch pool</a>
         <span class="text-muted mx-1">&middot;</span>
         <a href="#submission">Submission</a>
@@ -68,6 +70,46 @@
                 <span class="text-muted ms-2">last edited by {{ panda_queue_metadata.description_updated_by }}</span>
                 {% endif %}
             </form>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="card mb-3" id="declared">
+        <div class="card-header queue-section-header">
+            <strong>Declared state</strong>
+            <span class="ms-2 text-muted">what CRIC declares for this queue: status rules and downtime windows, read by the ops agent every ten minutes</span>
+        </div>
+        <div class="card-body p-0">
+            {% if declared_now.active or declared_now.future %}
+            <table class="table table-sm mb-0 align-middle">
+                <tbody>
+                {% for r in declared_now.active %}
+                <tr><td class="fw-bold {{ 'offline'|state_class }}" style="width:12%">In force</td>
+                    <td>{{ r.line }}</td></tr>
+                {% endfor %}
+                {% for r in declared_now.future %}
+                <tr><td class="fw-bold {{ 'pending'|state_class }}" style="width:12%">Coming</td>
+                    <td>{{ r.line }}{% if r.info_url %} <a href="{{ r.info_url }}">details</a>{% endif %}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="mb-0 p-2 text-muted">Nothing declared for this queue now.</p>
+            {% endif %}
+            {% if declared_history %}
+            <table class="table table-sm table-striped mb-0 align-middle swf-sortable">
+                <thead><tr><th>Declared</th><th>By</th><th>Rule or window</th><th>Standing</th></tr></thead>
+                <tbody>
+                {% for r in declared_history %}
+                <tr>
+                    <td class="text-nowrap">{{ r.when }}</td>
+                    <td>{{ r.declared_by }}</td>
+                    <td>{{ r.line }}</td>
+                    <td class="{{ r.standing_class }}">{{ r.standing }}{% if r.cleared_when %} {{ r.cleared_when }}{% endif %}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
             {% endif %}
         </div>
     </div>

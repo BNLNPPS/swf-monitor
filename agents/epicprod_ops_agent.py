@@ -71,6 +71,12 @@ Capabilities:
                        holes, recorded as node_guard_decision; shadow mode
                        acts on nothing (five-minutely; site-canary
                        docs/NODE_GUARD.md).
+  cric_declared_state — the declared record from CRIC: the PanDA queue
+                       status rules, the DDM endpoint status rules and the
+                       downtime windows of the EIC queues, endpoints and
+                       sites, kept in the entry store with their standing
+                       (ten-minutely; swf-epicprod
+                       docs/CONTINUOUS_PRODUCTION.md, Declared downtime).
   dataset_definitions_sweep — the definitions sweep on demand: pull the
                        simulation_campaign_datasets clone, then the same
                        sweep the nightly chain runs (the PC ingest page's
@@ -242,6 +248,10 @@ STORAGE_SWEEP_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "sto
 FRONT_CYCLE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "front-cycle.py"
 NODE_GUARD_TIMEOUT = int(os.environ.get("EPICPROD_NODE_GUARD_TIMEOUT", "240"))
 NODE_GUARD_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "node-guard-cycle.py"
+# The declared record from CRIC: four bounded CRIC reads with the proxy
+# and a few entry rows (CONTINUOUS_PRODUCTION.md, Declared downtime).
+DECLARED_STATE_TIMEOUT = int(os.environ.get("EPICPROD_DECLARED_STATE_TIMEOUT", "300"))
+DECLARED_STATE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "cric-declared-state.py"
 FRONT_CYCLE_TIMEOUT = int(os.environ.get("EPICPROD_FRONT_CYCLE_TIMEOUT", "240"))
 # An incremental pass is about 36 minutes plus its sixth of the dataset
 # tier (about an hour at the pass's pacing, STORAGE.md); the nightly full
@@ -359,7 +369,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "storage_sweep", "campaign_config_propose",
                    "credential_ping_propose", "certificate_ping_propose",
                    "assessment_completed", "front_cycle", "node_guard_cycle",
-                   "harvester_stdout_capture",
+                   "harvester_stdout_capture", "cric_declared_state",
                    "health_ping", "shutdown"}
 
     def __init__(self):
@@ -3024,6 +3034,42 @@ class EpicProdOpsAgent(BaseAgent):
                              live_default=False, level=logging.ERROR)
             return
         self.logger.info("PRODOPS node_guard_cycle done")
+
+    def _handle_cric_declared_state(self, m):
+        """The declared record from CRIC (swf-epicprod
+        docs/CONTINUOUS_PRODUCTION.md, Declared downtime): ten-minutely
+        by cron enqueue, directly invokable. Deduped so a slow read is
+        never doubled."""
+        self.run_in_background(
+            self._do_cric_declared_state, m,
+            dedup_key="cric_declared_state", label="cric_declared_state")
+
+    def _do_cric_declared_state(self, m):
+        """Run the declared-state doer; it writes the record and its own
+        declared_state_sync action, so this records only a run that did
+        not complete."""
+        username = str(m.get('created_by') or 'cric_declared_state')
+        cmd = [sys.executable, str(DECLARED_STATE_SCRIPT), "--created-by", username]
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=DECLARED_STATE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS cric_declared_state TIMEOUT after {DECLARED_STATE_TIMEOUT}s")
+            self._log_action('cric_declared_state', t0, outcome='timeout',
+                             reason=f'timed out after {DECLARED_STATE_TIMEOUT}s',
+                             username=username, sublevel='low',
+                             live_default=False, level=logging.ERROR)
+            return
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  cric-declared-state: {line[:300]}")
+        summary = (p.stdout or "").strip().splitlines()[-1:] or ["{}"]
+        if p.returncode != 0:
+            self.logger.error(
+                f"PRODOPS cric_declared_state FAILED rc={p.returncode}: {summary[0][:300]}")
+            return
+        self.logger.info(f"PRODOPS cric_declared_state done: {summary[0][:300]}")
 
     def _handle_campaign_config_propose(self, m):
         """Run the campaign configuration proposer (swf-monitor

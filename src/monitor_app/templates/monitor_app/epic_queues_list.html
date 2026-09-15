@@ -58,6 +58,7 @@
                 <tr>
                     <th>Queue</th>
                     <th>Status</th>
+                    <th title="What CRIC declares for the queue: the status rule in force (offline, brokeroff, test, with its expiry, reason and who set it) or the next declared downtime window; blank when nothing is declared">Declared</th>
                     <th>Canary</th>
                     <th>Last use</th>
                     <th title="Share of the batch pool this queue's workers wait in that is already claimed, from the pool's own collector">Pool<br>full</th>
@@ -79,6 +80,7 @@
                 <tr>
                     <td><a href="{% url 'monitor_app:epic_queue_detail' q.panda_queue %}">{{ q.panda_queue }}</a></td>
                     <td class="{{ q.status|state_class }}">{{ q.status|default:"—" }}</td>
+                    <td class="{% if q.declared_state == 'active' %}{{ 'offline'|state_class }}{% elif q.declared_state == 'future' %}{{ 'pending'|state_class }}{% endif %}">{{ q.declared }}</td>
                     {% if q.canary == 'unknown' or q.canary == 'insufficient' %}
                     <td></td>
                     {% else %}

@@ -2531,10 +2531,19 @@ def epic_queues_list(request):
     spark_data = (spark_product or {}).get('value') or {}
     spark_sites = spark_data.get('sites') or {}
     declines = _landing_declines_product()
+    # What CRIC declares for the queue: the rule in force or the next
+    # window, from the declared record (CONTINUOUS_PRODUCTION.md,
+    # Declared downtime); one read for the page.
+    from ..declared import declared_for
+    declared = declared_for('queue')
     for queue in queues:
         name = queue.get('panda_queue')
         meta = local.get(name, {})
         queue['declines'] = declines.get(name)
+        queue['declared'] = (declared.get(name) or {}).get('line', '')
+        queue['declared_state'] = ('active' if (declared.get(name) or {}).get('active')
+                                   else 'future' if (declared.get(name) or {}).get('future')
+                                   else '')
         queue['description'] = meta.get('description', '')
         queue['tier'] = meta.get('tier') or queue.get('tier') or ''
         queue['canary'] = canary_health.get(name, 'unknown')
@@ -2752,10 +2761,16 @@ def epic_queue_detail(request, queue_name):
                 'snapper site graphics failed for queue detail: %s', e)
             snapper_embed = {'scope': 'epicprod', 'error': str(e)}
 
+    # What CRIC declares for the queue, in force and coming, and the
+    # history (CONTINUOUS_PRODUCTION.md, Declared downtime).
+    from ..declared import for_detail_page
+    declared_now, declared_history = for_detail_page('queue', queue_name)
     return render(request, 'monitor_app/epic_queue_detail.html', {
         'queue_name': queue_name,
         'panda_queue_metadata': (panda_queue.metadata if panda_queue else {}),
         'description': ((panda_queue.metadata if panda_queue else {}) or {}).get('description', ''),
+        'declared_now': declared_now,
+        'declared_history': declared_history,
         'sections': sections,
         'other': other,
         'config_json': json_mod.dumps(config, indent=2, default=str),

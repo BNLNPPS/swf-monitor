@@ -45,6 +45,7 @@ from django.apps import apps
 from django.db import connection, transaction
 from django.utils import timezone
 from django.conf import settings as django_settings
+import html
 import logging
 import os
 import re
@@ -3104,6 +3105,7 @@ def rucio_endpoints_list(request):
         {'name': 'endpoint_type', 'title': 'Type', 'orderable': True},
         {'name': 'is_tape', 'title': 'Tape', 'orderable': True},
         {'name': 'is_active', 'title': 'Active', 'orderable': True},
+        {'name': 'declared', 'title': 'Declared', 'orderable': False},
         {'name': 'updated_at', 'title': 'Updated', 'orderable': True},
         {'name': 'json', 'title': 'JSON', 'orderable': False},
     ]
@@ -3125,8 +3127,12 @@ def rucio_endpoints_datatable_ajax(request):
     from .utils import DataTablesProcessor, format_datetime
     
     # Initialize DataTables processor
-    columns = ['endpoint_name', 'site', 'endpoint_type', 'is_tape', 'is_active', 'updated_at', 'json']
+    columns = ['endpoint_name', 'site', 'endpoint_type', 'is_tape', 'is_active', 'declared', 'updated_at', 'json']
     dt = DataTablesProcessor(request, columns, default_order_column=0, default_order_direction='asc')
+    # What CRIC declares per endpoint: the rule in force or the next
+    # window (CONTINUOUS_PRODUCTION.md, Declared downtime).
+    from .declared import declared_for
+    declared = declared_for('endpoint')
     
     # Build base queryset
     queryset = RucioEndpoint.objects.all()
@@ -3158,9 +3164,15 @@ def rucio_endpoints_datatable_ajax(request):
         updated_str = format_datetime(endpoint.updated_at)
         json_link = f'<a href="{reverse("monitor_app:rucio_endpoint_json", args=[endpoint.endpoint_name])}">View JSON</a>'
         
+        slot = declared.get(endpoint.endpoint_name) or {}
+        declared_cell = html.escape(slot.get('line', ''))
+        if slot.get('active'):
+            declared_cell = f'<span class="offline_fill d-block px-1">{declared_cell}</span>'
+        elif slot.get('future'):
+            declared_cell = f'<span class="pending_fill d-block px-1">{declared_cell}</span>'
         data.append([
             endpoint_name_link, endpoint.site or '', endpoint.endpoint_type or '',
-            is_tape_badge, is_active_badge, updated_str, json_link
+            is_tape_badge, is_active_badge, declared_cell, updated_str, json_link
         ])
     
     return dt.create_response(data, records_total, records_filtered)
@@ -3183,9 +3195,15 @@ def rucio_endpoint_detail(request, endpoint_name):
             resource = endpoint.config_data['resource']
             summary_fields['resource_endpoint'] = resource.get('endpoint', '')
     
+    # What CRIC declares for the endpoint, in force and coming, and the
+    # history (CONTINUOUS_PRODUCTION.md, Declared downtime).
+    from .declared import for_detail_page
+    declared_now, declared_history = for_detail_page('endpoint', endpoint_name)
     context = {
         'endpoint': endpoint,
         'summary_fields': summary_fields,
+        'declared_now': declared_now,
+        'declared_history': declared_history,
     }
     return render(request, 'monitor_app/rucio_endpoint_detail.html', context)
 
