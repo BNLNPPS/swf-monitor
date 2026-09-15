@@ -1840,9 +1840,17 @@ def panda_segfault_detail(request, key):
     """One crash signature: its tasks, configuration, sites, crashed jobs,
     trace, reproductions, verdict and assessments."""
     from django.http import Http404
+    from django.shortcuts import redirect
+    from ..models import CrashSignature
     from ..segfaults import signature_detail
     detail = signature_detail(key)
     if detail is None:
+        # A retired plain key of a task whose crashes split by stage: the
+        # link lands on the largest stage entry, whose page lists the rest.
+        stage_entry = (CrashSignature.objects.filter(key__startswith=f'{key}:')
+                       .order_by('-crashes', 'key').first()) if key.count(':') == 1 else None
+        if stage_entry is not None:
+            return redirect('monitor_app:panda_segfault_detail', key=stage_entry.key)
         raise Http404(f'no crash signature {key}')
     return render(request, 'monitor_app/panda_segfault_detail.html',
                   {'sig': detail})
