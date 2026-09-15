@@ -3007,6 +3007,20 @@ def study_job(pandaid, include_batch_reason=False, include_log_analysis=True,
     # purges after seven days (copyArchive.py); the stderr and batch-log
     # variants synthesized above never exist there. A condor log on the
     # submit host is copied when the job ends.
+    # Our copy of the harvester's stdout, for a cache-stdout queue: read
+    # before the live link is judged, since the copy outlives the cache
+    # (monitor_app.harvester_stdout).
+    if '/cache/' in str(log_urls.get('pilot_stdout') or ''):
+        try:
+            from monitor_app import harvester_stdout
+            copy = harvester_stdout.stored(pandaid, job.get('jeditaskid'))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('harvester stdout copy unreadable for %s: %s', pandaid, exc)
+            copy = None
+        if copy:
+            result['harvester_stdout'] = {k: copy[k] for k in ('status', 'bytes', 'captured_at', 'source')}
+            if copy['status'] == 'failed':
+                result['harvester_stdout']['reason'] = copy['body'].strip().splitlines()[0] if copy['body'] else ''
     kept, pruned_note = _prune_dead_log_urls(job, log_urls)
     dead_log_urls = sorted(set(log_urls.values()) - set(kept.values()))
     log_urls = kept

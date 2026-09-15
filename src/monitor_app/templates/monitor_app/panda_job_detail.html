@@ -304,6 +304,19 @@
                     <td><a href="{{ url }}" target="_blank" rel="noopener">{{ url }}</a></td>
                 </tr>
                 {% endfor %}
+                {# The PanDA cache purges the harvester's stdout after seven days; our copy stays. #}
+                {% if harvester_stdout.status == 'captured' %}
+                <tr>
+                    <td><strong>harvester_stdout</strong></td>
+                    <td><a href="{% url 'monitor_app:panda_harvester_stdout' pandaid=job.pandaid %}">our copy, whole</a>
+                        <span class="text-muted ms-2">captured {{ harvester_stdout.captured_at|fmt_dt }}, {{ harvester_stdout.bytes }} bytes</span></td>
+                </tr>
+                {% elif harvester_stdout.status == 'failed' %}
+                <tr>
+                    <td><strong>harvester_stdout</strong></td>
+                    <td><span class="text-muted">not captured: {{ harvester_stdout.reason }}</span></td>
+                </tr>
+                {% endif %}
                 {# The harvester's own copy expires in about eighteen days; ours does not. #}
                 {% if batch_record.captured %}
                 <tr>

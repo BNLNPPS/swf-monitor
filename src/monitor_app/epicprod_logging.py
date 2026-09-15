@@ -100,6 +100,13 @@ ACTION_DEFAULTS = {
                        "terminal production jobs: jobs, hosts, judged and "
                        "tripped, and any queue read as a storm.",
     },
+    'harvester_stdout_capture': {
+        'sublevel': 'low', 'live': False,
+        'description': "One pass copying the harvester's stdout of the jobs "
+                       "worth keeping at the cache-stdout queues into our "
+                       "store before the PanDA cache purges it: candidates, "
+                       "captured, gone, failed, skipped.",
+    },
     'node_guard_set': {
         'sublevel': 'normal', 'live': True,
         'description': "A person's decision on one node of the guard's "

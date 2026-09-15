@@ -1524,6 +1524,28 @@ def panda_batch_record(request, pandaid):
                         content_type='text/plain; charset=utf-8')
 
 
+def panda_harvester_stdout(request, pandaid):
+    """Our copy of the harvester's stdout of a job at a cache-stdout
+    queue, whole: the only log such a job leaves, copied before the PanDA
+    server's seven-day cache purge (docs/EPICPROD_OPS.md, Harvester
+    stdout records)."""
+    from monitor_app import harvester_stdout
+    record = harvester_stdout.stored(int(pandaid))
+    if not record:
+        return HttpResponse(
+            f"job {pandaid}: no harvester stdout copy. The capture keeps failed jobs of the "
+            f"cache-stdout queues (finished jobs when switched on), hourly; a job older than the "
+            f"capture, or one the cache had already let go, has none.\n",
+            status=404, content_type='text/plain; charset=utf-8')
+    if record['status'] != 'captured':
+        return HttpResponse(f"job {pandaid}: capture failed: {record['body']}\n",
+                            status=404, content_type='text/plain; charset=utf-8')
+    header = (f"# harvester stdout of PanDA job {pandaid}, our copy\n"
+              f"# source: {record.get('source')}\n# captured: {record.get('captured_at')}\n"
+              f"# bytes: {record['bytes']}\n\n")
+    return HttpResponse(header + record['body'], content_type='text/plain; charset=utf-8')
+
+
 # ── Task detail ──────────────────────────────────────────────────────────────
 
 def panda_task_detail(request, jeditaskid):

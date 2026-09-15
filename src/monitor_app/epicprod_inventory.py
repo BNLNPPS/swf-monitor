@@ -462,7 +462,20 @@ def cached_payload_log_parts(jeditaskid, pandaid):
 
 
 def cached_payload_log_texts(jeditaskid, pandaid):
-    return [part['text'] for part in cached_payload_log_parts(jeditaskid, pandaid)]
+    texts = [part['text'] for part in cached_payload_log_parts(jeditaskid, pandaid)]
+    if texts:
+        return texts
+    # A cache-stdout queue's job has no log tarball; our copy of the
+    # harvester's stdout is what there is (monitor_app.harvester_stdout).
+    try:
+        from monitor_app import harvester_stdout
+        copy = harvester_stdout.stored(pandaid, jeditaskid)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('harvester stdout copy unreadable for %s: %s', pandaid, exc)
+        copy = None
+    if copy and copy['status'] == 'captured':
+        return [copy['body']]
+    return []
 
 
 _WORKER_ENDED_RE = re.compile(

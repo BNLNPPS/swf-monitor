@@ -61,6 +61,11 @@ Capabilities:
   node_measure_ingest — fold every finished job's per-stage measures into
                        the node measurement store, behind a cursor (hourly;
                        site-canary docs/MEASUREMENTS.md).
+  harvester_stdout_capture — copy the harvester's stdout of every failed
+                       job at a cache-stdout queue (BNL_ePIC_GOOGLE) into
+                       our store before the PanDA cache's seven-day purge;
+                       finished jobs behind a switch (hourly;
+                       docs/EPICPROD_OPS.md, Harvester stdout records).
   node_guard_cycle   — one cycle of the node guard: the window's terminal
                        production jobs per queue and host judged for black
                        holes, recorded as node_guard_decision; shadow mode
@@ -174,6 +179,8 @@ DELIVERY_DAILY_TIMEOUT = int(os.environ.get("EPICPROD_DELIVERY_DAILY_TIMEOUT", "
 # chain's own day with two hours of overlap.
 BATCH_LOG_CAPTURE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "batch-log-capture.py"
 BATCH_LOG_CAPTURE_TIMEOUT = int(os.environ.get("EPICPROD_BATCH_LOG_CAPTURE_TIMEOUT", "1800"))
+HARVESTER_STDOUT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "harvester-stdout-capture.py"
+HARVESTER_STDOUT_TIMEOUT = int(os.environ.get("EPICPROD_HARVESTER_STDOUT_TIMEOUT", "1800"))
 BATCH_LOG_CAPTURE_HOURS = os.environ.get("EPICPROD_BATCH_LOG_CAPTURE_HOURS", "26")
 # The learning pass over the captured corpus, after the capture in the same
 # chain so the day's logs are in it (docs/ERROR_ATTRIBUTION.md).
@@ -352,6 +359,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "storage_sweep", "campaign_config_propose",
                    "credential_ping_propose", "certificate_ping_propose",
                    "assessment_completed", "front_cycle", "node_guard_cycle",
+                   "harvester_stdout_capture",
                    "health_ping", "shutdown"}
 
     def __init__(self):
@@ -2930,6 +2938,53 @@ class EpicProdOpsAgent(BaseAgent):
                              live_default=False, level=logging.ERROR)
             return
         self.logger.info("PRODOPS front_cycle done")
+
+    def _handle_harvester_stdout_capture(self, m):
+        """Copy the harvester's stdout of the jobs worth keeping while the
+        PanDA cache holds it (docs/EPICPROD_OPS.md, Harvester stdout
+        records): hourly by cron enqueue, directly invokable."""
+        self.run_in_background(
+            self._do_harvester_stdout_capture, m,
+            dedup_key="harvester_stdout_capture", label="harvester_stdout_capture")
+
+    def _do_harvester_stdout_capture(self, m):
+        cmd = [sys.executable, str(HARVESTER_STDOUT_SCRIPT), '--prune']
+        if m.get('days'):
+            cmd += ['--days', str(m['days'])]
+        username = str(m.get('created_by') or '')
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=HARVESTER_STDOUT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(f"PRODOPS harvester_stdout_capture TIMEOUT after {HARVESTER_STDOUT_TIMEOUT}s")
+            self._log_action('harvester_stdout_capture', t0, outcome='timeout',
+                             reason=f'timed out after {HARVESTER_STDOUT_TIMEOUT}s',
+                             username=username, sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  harvester-stdout-capture: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  harvester-stdout-capture: {line}")
+        if p.returncode != 0:
+            reason = self._derive_reason(p)
+            self.logger.error(f"PRODOPS harvester_stdout_capture FAILED rc={p.returncode}")
+            self._log_action('harvester_stdout_capture', t0, outcome='error', reason=reason,
+                             username=username, sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        counts = next((ln for ln in (p.stdout or '').splitlines()
+                       if ln.startswith('candidates=')), '')
+        parsed = {}
+        for tok in counts.split():
+            k, _, v = tok.partition('=')
+            if v.isdigit():
+                parsed[k] = int(v)
+        self.logger.info("PRODOPS harvester_stdout_capture done")
+        self._log_action('harvester_stdout_capture', t0, username=username,
+                         sublevel='normal' if parsed.get('captured') or parsed.get('gone') else 'low',
+                         live_default=False, summary=counts or 'capture complete', **parsed)
 
     def _handle_node_guard_cycle(self, m):
         """One cycle of the node guard (site-canary docs/NODE_GUARD.md):
