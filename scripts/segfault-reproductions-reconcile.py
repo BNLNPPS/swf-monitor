@@ -39,7 +39,7 @@ import django  # noqa: E402
 django.setup()
 
 from monitor_app.epicprod_logging import log_epicprod_action  # noqa: E402
-from monitor_app.reproductions import attempts, open_signature_keys, reconcile  # noqa: E402
+from monitor_app.reproductions import attempts, open_signature_keys, reconcile, withdraw_request  # noqa: E402
 from monitor_app.segfaults import queue_diagnosis  # noqa: E402
 
 log = logging.getLogger('segfault-reproductions-reconcile')
@@ -50,10 +50,33 @@ def main():
     ap.add_argument('--key', help='one signature instead of every open one')
     ap.add_argument('--dry-run', action='store_true',
                     help='show the attempts of the open signatures, write nothing')
+    ap.add_argument('--withdraw', metavar='REQUEST_ID',
+                    help='record that the agent did not run this request of --key '
+                         '(a duplicate it dropped, or with --failed a dispatch that '
+                         'failed before a run existed), with --reason; nothing else runs')
+    ap.add_argument('--failed', action='store_true',
+                    help='--withdraw: the dispatch failed (reads as a failed submission)')
+    ap.add_argument('--reason', default='',
+                    help='--withdraw: why, as the runs page shows it')
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, stream=sys.stderr,
                         format='%(asctime)s %(name)s %(levelname)s %(message)s')
     t0 = time.monotonic()
+    if args.withdraw:
+        if not args.key:
+            ap.error('--withdraw needs --key')
+        result = withdraw_request(args.key, args.withdraw, args.reason, failed=args.failed)
+        log_epicprod_action(
+            'canary-agent', 'segfault_reproduction_withdraw',
+            outcome='ok' if result == 'withdrawn' else 'noop',
+            sublevel='low', live_default=False,
+            duration_ms=int((time.monotonic() - t0) * 1000),
+            message=(f"reproduction request {args.withdraw} on {args.key} "
+                     f"{'withdrawn' if result == 'withdrawn' else 'not withdrawn: ' + result}"
+                     + (f" ({args.reason})" if args.reason else '')),
+            key=args.key, request_id=args.withdraw, result=result, failed=args.failed)
+        print(json.dumps({'key': args.key, 'request_id': args.withdraw, 'result': result}))
+        return 0 if result in ('withdrawn', 'run exists', 'already ended') else 1
     keys = [args.key] if args.key else open_signature_keys()
     if args.dry_run:
         rows = attempts(keys=keys)

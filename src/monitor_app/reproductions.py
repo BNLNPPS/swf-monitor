@@ -292,11 +292,28 @@ def result_of(run, phase):
 
 # ---------------------------------------------------------------- the rows
 
+def withdrawn_phase(entry):
+    """The phase and result of a request the agent did not run, as the
+    agent recorded on the entry (``withdraw_request``): ``cancelled`` for
+    a duplicate it dropped, ``submission_failed`` for a dispatch that
+    failed before a run existed. None for a request still in the
+    agent's hands."""
+    withdrawn = (entry or {}).get('withdrawn')
+    if not withdrawn or entry.get('outcome') != 'cancelled':
+        return None
+    if withdrawn == 'dispatch_failed':
+        return 'submission_failed', 'inconclusive', entry.get('reason') or 'submission failed'
+    return 'cancelled', 'cancelled', entry.get('reason') or 'request withdrawn'
+
+
 def _attempt(sig, entry, run, now):
     """One attempt row from a request entry, its run, or both."""
     d = (run.data or {}) if run is not None else {}
     phase, job_status = phase_of(run)
     result, reason, rc = result_of(run, phase)
+    withdrawn = withdrawn_phase(entry) if run is None else None
+    if withdrawn:
+        phase, result, reason = withdrawn
     queue = (run.queue.name if run is not None else entry.get('queue')) or ''
     started = _parse_dt(d.get('started_at'))
     ended = _parse_dt(d.get('ended_at'))
@@ -679,6 +696,44 @@ def reconcile(sig_key, queue_diagnosis=None):
     if to_queue and queue_diagnosis is not None:
         queue_diagnosis(to_queue, 'auto:reproduced')
     return changed
+
+
+def withdraw_request(sig_key, request_id, reason, failed=False):
+    """Record on the signature that the canary agent did not run a
+    request: dropped as a duplicate of a submission already in flight
+    for the same row and queue, or a dispatch that failed before a run
+    was recorded (``failed=True``). Either way the entry's outcome is
+    ``cancelled``, a withdrawn request that counts for nothing in the
+    pair; ``withdrawn`` says which (``duplicate`` or
+    ``dispatch_failed``), and the runs page reads the second as a failed
+    submission with the reason. Without this the request would read
+    "queued for submission" forever and keep its signature open to every
+    reconciliation pass. Nothing is written when a run already carries
+    the request id: the run is the record then, and the reconciliation
+    reads it. Returns what happened: ``withdrawn``, ``run exists``,
+    ``already ended``, or ``no such request``."""
+    with transaction.atomic():
+        sig = CrashSignature.objects.select_for_update().filter(key=sig_key).first()
+        if sig is None or not sig.reproduction:
+            return 'no such request'
+        entries = list(sig.reproduction)
+        idx = next((i for i, e in enumerate(entries) if e.get('request_id') == request_id), None)
+        if idx is None:
+            return 'no such request'
+        if entries[idx].get('outcome') in ENDED_OUTCOMES:
+            return 'already ended'
+        runs = _signature_runs(keys=[sig.key]).get(sig.key, [])
+        if any((r.data or {}).get('request_id') == request_id for r in runs):
+            return 'run exists'
+        entry = dict(entries[idx])
+        entry['outcome'] = 'cancelled'
+        entry['reason'] = (reason or '')[:300]
+        entry['withdrawn'] = 'dispatch_failed' if failed else 'duplicate'
+        entry['verdict_time'] = _iso(timezone.now())
+        entries[idx] = entry
+        sig.reproduction = entries
+        sig.save(update_fields=['reproduction', 'updated_at'])
+    return 'withdrawn'
 
 
 def open_signature_keys():
