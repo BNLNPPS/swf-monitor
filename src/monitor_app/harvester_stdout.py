@@ -22,8 +22,8 @@ so the thirty-day prune of ``panda-logs`` never touches it. Layout::
     <root>/<jeditaskid>/<pandaid>.json     source, fetched, bytes, status
     <root>/<jeditaskid>/<pandaid>.error    why the fetch failed
 
-Lifetime: kept until ``harvester_stdout.keep_days`` says otherwise
-(0, the default, keeps them); the prune runs with the nightly chain.
+Lifetime: ``harvester_stdout.keep_days``, 30 by default (0 keeps them);
+the hourly pass prunes copies older than that by their capture time.
 """
 import gzip
 import json
@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 # reaches it is recorded as capped rather than silently shortened.
 FETCH_MAX_BYTES = 64 * 1024 * 1024
 FETCH_TIMEOUT_S = 60
-DEFAULTS = {'finished': False, 'keep_days': 0, 'backfill_days': 7}
+DEFAULTS = {'finished': False, 'keep_days': 30, 'backfill_days': 7}
 
 
 def store_root():
