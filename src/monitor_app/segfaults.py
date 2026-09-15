@@ -37,6 +37,42 @@ CLASS_LABELS = {
     'sparse': 'Sparse', 'abort': 'Abort', 'mixed': 'Mixed',
 }
 STAGE_LABELS = {'simulation': 'simu', 'reconstruction': 'reco'}
+
+
+def stage_label(stage):
+    """The short stage a key carries: simu, reco, another stage's own
+    name, or '' for a crash whose stage the record does not know."""
+    stage = str(stage or '')
+    return STAGE_LABELS.get(stage, stage)
+
+
+def record_key(exit_code, jeditaskid, stage=''):
+    """A record-level key: exit code by task, and by stage when the task's
+    crashes split by stage (SEGFAULT_DIAGNOSIS.md, Signature record)."""
+    key = f'exit{int(exit_code)}:task{int(jeditaskid)}'
+    return f'{key}:{stage}' if stage else key
+
+
+def job_filter(sig):
+    """The Q that selects a signature's own crashed jobs: its tasks, its
+    exit code, and its stage where the entry is a stage entry; for a
+    trace-level entry, its members' filters joined."""
+    from django.db.models import Q
+    if sig.level == 'trace':
+        members = CrashSignature.objects.filter(key__in=list((sig.data or {}).get('members') or []))
+        q = Q(pk__in=[])
+        for m in members:
+            q |= job_filter(m)
+        return q
+    task_ids = [t.get('jeditaskid') for t in (sig.tasks or []) if t.get('jeditaskid')]
+    q = Q(phase=PHASE, jeditaskid__in=task_ids, data__crash__exit_code=sig.exit_code)
+    stage = (sig.data or {}).get('stage')
+    if (sig.data or {}).get('split'):
+        if stage:
+            q &= Q(data__crash__stage__in=[k for k, v in STAGE_LABELS.items() if v == stage] + [stage])
+        else:
+            q &= (Q(data__crash__stage='') | Q(data__crash__stage__isnull=True))
+    return q
 CLASS_ORDER = ['storm', 'configuration_dead', 'mixed', 'sparse', 'abort']
 STATUS_LABELS = dict(CrashSignature.STATUSES)
 
@@ -197,16 +233,30 @@ def build_record_signatures(jeditaskids=None, rows_lost=True,
     qs = EpicProdJob.objects.filter(phase=PHASE)
     if jeditaskids:
         qs = qs.filter(jeditaskid__in=[int(t) for t in jeditaskids])
+    # A task whose crashes carry two or more known stages splits by
+    # stage: one entry per stage, the stage on the key, and the crashes
+    # with no stage under the plain key (SEGFAULT_DIAGNOSIS.md, Signature
+    # record). Every other task keeps its plain key.
+    stages_by_task = defaultdict(set)
+    for job in qs.only('jeditaskid', 'data').iterator(chunk_size=5000):
+        crash = (job.data or {}).get('crash') or {}
+        label = stage_label(crash.get('stage'))
+        if label:
+            stages_by_task[(int(crash.get('exit_code') or 0),
+                            int(job.jeditaskid) if job.jeditaskid else 0)].add(label)
+    split_tasks = {k for k, v in stages_by_task.items() if len(v) >= 2}
     groups = {}
     for job in qs.only('pandaid', 'jeditaskid', 'prod_task_id', 'seq_number',
                        'data').iterator(chunk_size=5000):
         crash = (job.data or {}).get('crash') or {}
         exit_code = int(crash.get('exit_code') or 0)
         tid = int(job.jeditaskid) if job.jeditaskid else 0
-        g = groups.get((exit_code, tid))
+        stage = stage_label(crash.get('stage')) if (exit_code, tid) in split_tasks else ''
+        g = groups.get((exit_code, tid, stage))
         if g is None:
-            g = groups[(exit_code, tid)] = {
-                'exit_code': exit_code, 'jeditaskid': tid,
+            g = groups[(exit_code, tid, stage)] = {
+                'exit_code': exit_code, 'jeditaskid': tid, 'stage': stage,
+                'split': (exit_code, tid) in split_tasks,
                 'taskname': crash.get('taskname') or '',
                 'prod_task_id': job.prod_task_id, 'crashes': 0,
                 'minutes': [], 'sites': defaultdict(lambda: {'crashes': 0, 'hosts': set()}),
@@ -253,18 +303,24 @@ def build_record_signatures(jeditaskids=None, rows_lost=True,
     summary = {'signatures': 0, 'created': 0, 'classes': defaultdict(int),
                'rows_lost_checked': 0}
     now = timezone.now()
-    for (exit_code, tid), g in sorted(groups.items(),
-                                      key=lambda kv: -kv[1]['crashes']):
+    split_keys = defaultdict(list)
+    for (exit_code, tid, stage) in groups:
+        if (exit_code, tid) in split_tasks:
+            split_keys[(exit_code, tid)].append(record_key(exit_code, tid, stage))
+    for (exit_code, tid, stage), g in sorted(groups.items(),
+                                             key=lambda kv: -kv[1]['crashes']):
         tot = totals.get(tid, {'finished': 0, 'failed': 0})
         denom = tot['finished'] + tot['failed']
         rate = g['crashes'] / denom if denom else None
         class_hint = classify(exit_code, rate, g['minutes'], th)
         prod_task = prod_tasks.get(tid)
-        key = f'exit{exit_code}:task{tid}'
+        key = record_key(exit_code, tid, stage)
         sig = CrashSignature.objects.filter(key=key).first()
         created = sig is None
         if created:
             sig = CrashSignature(key=key, status='new')
+            if g['split'] and stage:
+                _inherit_from_plain(sig, exit_code, tid, stage)
         lost_note = (sig.data or {}).get('rows_lost_note') or 'not checked'
         lost, events_lost = sig.rows_lost, sig.events_lost
         if lost_budget > 0 and prod_task is not None and g['rows']:
@@ -309,6 +365,9 @@ def build_record_signatures(jeditaskids=None, rows_lost=True,
             'stages': dict(g['stages']),
             'rows_lost_note': lost_note,
             'record_built_at': _iso(now),
+            'stage': stage,
+            'split': g['split'],
+            'split_keys': sorted(split_keys.get((exit_code, tid), [])),
         })
         sig.data = data
         sig.updated_at = now
@@ -316,8 +375,73 @@ def build_record_signatures(jeditaskids=None, rows_lost=True,
         summary['signatures'] += 1
         summary['created'] += int(created)
         summary['classes'][class_hint] += 1
+    # A split task's plain entry that holds no crash any more (every job
+    # carries a stage) is retired: its fields have moved to the stage
+    # entries; the findings that named it name the stage entries.
+    retired = 0
+    for (exit_code, tid) in split_tasks:
+        if (exit_code, tid, '') in groups:
+            continue
+        plain = CrashSignature.objects.filter(key=record_key(exit_code, tid)).first()
+        if plain is not None:
+            _retire_plain(plain, sorted(split_keys[(exit_code, tid)]))
+            retired += 1
+    summary['retired'] = retired
     summary['classes'] = dict(summary['classes'])
     return summary
+
+
+def _inherit_from_plain(sig, exit_code, tid, stage):
+    """A new stage entry takes from the task's plain entry what belongs
+    to its stage: the trace when the trace's stage is this one; the
+    reproductions of jobs whose stage is this one, with the outcome, the
+    verdict, the diagnosis marking, the assessments and the package that
+    followed them."""
+    plain = CrashSignature.objects.filter(key=record_key(exit_code, tid)).first()
+    if plain is None:
+        return
+    pdata = plain.data or {}
+    trace = plain.trace or {}
+    if trace.get('trace_status') and stage_label(trace.get('stage')) == stage:
+        sig.trace = dict(trace)
+        sig.status = 'traced' if trace.get('trace_status') == 'found' else 'new'
+    repro = []
+    for entry in (plain.reproduction or []):
+        job = EpicProdJob.objects.filter(pandaid=entry.get('pandaid'), phase=PHASE).only('data').first()
+        job_stage = stage_label(((job.data if job else None) or {}).get('crash', {}).get('stage'))
+        if job_stage == stage:
+            repro.append(entry)
+    if repro:
+        sig.reproduction = repro
+        sig.verdict = plain.verdict
+        sig.status = plain.status if plain.status not in ('new', 'digging', 'traced') else sig.status
+        sig.assessment_ids = list(plain.assessment_ids or [])
+        sig.package = dict(plain.package or {})
+        data = dict(sig.data or {})
+        for k in ('reproduction_outcome', 'reproduction_settled_at', 'diagnosis'):
+            if k in pdata:
+                data[k] = pdata[k]
+        sig.data = data
+
+
+def _retire_plain(plain, stage_keys):
+    """Retire a split task's plain entry: leave its frame group, hand its
+    name in the findings to the stage entries, delete it."""
+    for e in finding_entries():
+        edata = e.data or {}
+        keys = [str(k) for k in (edata.get('signatures') or [e.name])]
+        if plain.key not in keys:
+            continue
+        fstage = stage_label(edata.get('stage'))
+        take = [k for k in stage_keys if not fstage or k.endswith(':' + fstage)] or stage_keys
+        new_keys = [k for k in keys if k != plain.key] + [k for k in take if k not in keys]
+        set_finding(e.name, {'signatures': new_keys}, changed_by='inventory:split')
+    frame_key_ = (plain.data or {}).get('member_of')
+    plain.delete()
+    if frame_key_:
+        frame = CrashSignature.objects.filter(key=frame_key_).first()
+        if frame is not None:
+            remerge_frame(frame)
 
 
 # ---------------------------------------------------------- the reading
@@ -368,6 +492,9 @@ def signature_summary(sig):
         'frame': (sig.trace or {}).get('frame', ''),
         'member_of': (sig.data or {}).get('member_of', ''),
         'members': list((sig.data or {}).get('members') or []),
+        'stage': (sig.data or {}).get('stage', ''),
+        'split_keys': [k for k in ((sig.data or {}).get('split_keys') or []) if k != sig.key],
+        'left_frame': (sig.data or {}).get('left_frame') or {},
         # A reproduction can be formed when a crashed job has its manifest
         # row and a PCS task to run under (crashed_run); both are read at
         # the nightly record build, so a row resolved during the day counts
@@ -433,10 +560,8 @@ def signature_detail(key, jobs_limit=200):
     detail['attempt_counts'] = global_counts(detail['attempts'])
     task_ids = [t.get('jeditaskid') for t in (sig.tasks or []) if t.get('jeditaskid')]
     jobs = []
-    if task_ids:
-        qs = (EpicProdJob.objects
-              .filter(phase=PHASE, jeditaskid__in=task_ids,
-                      data__crash__exit_code=sig.exit_code)
+    if task_ids or sig.level == 'trace':
+        qs = (EpicProdJob.objects.filter(job_filter(sig))
               .only('pandaid', 'jeditaskid', 'seq_number', 'data')
               .order_by('-pandaid'))
         detail['jobs_total'] = qs.count()
@@ -475,7 +600,9 @@ def signature_for_job(pandaid):
     if not exit_code:
         return None
     sig = CrashSignature.objects.filter(
-        key=f'exit{int(exit_code)}:task{int(job.jeditaskid)}').first()
+        key=record_key(exit_code, job.jeditaskid, stage_label(crash.get('stage')))).first()
+    if sig is None:
+        sig = CrashSignature.objects.filter(key=record_key(exit_code, job.jeditaskid)).first()
     if sig is None:
         # A trace-level merge keeps the record entry as a member.
         sig = CrashSignature.objects.filter(
@@ -497,9 +624,7 @@ def representative(sig, runnable=False):
     if not task_ids:
         return None
     timed = []
-    qs = (EpicProdJob.objects
-          .filter(phase=PHASE, jeditaskid__in=task_ids,
-                  data__crash__exit_code=sig.exit_code)
+    qs = (EpicProdJob.objects.filter(job_filter(sig))
           .only('pandaid', 'jeditaskid', 'data'))
     if runnable:
         qs = qs.filter(prod_task__isnull=False, data__crash__row__isnull=False)
@@ -657,17 +782,64 @@ def merge_trace_level(sig):
     frame, program = (sig.trace or {}).get('frame'), (sig.trace or {}).get('program')
     if not frame:
         return None
-    members = [s for s in CrashSignature.objects.filter(
+    key = frame_key(sig.exit_code, program, frame)
+    candidates = [s for s in CrashSignature.objects.filter(
         level='record', exit_code=sig.exit_code, trace__frame=frame,
         trace__program=program)]
-    if len(members) < 2:
-        return None
-    key = frame_key(sig.exit_code, program, frame)
+    # A member whose reproduction settled it under another finding than
+    # the frame's is that finding's crash, whatever frame its one trace
+    # read (task 38864: the trace of one row's reconstruction crash, the
+    # reproduced rows the dRICH simulation crash); it leaves the frame.
     merged = CrashSignature.objects.filter(key=key).first()
+    frame_finding = covering_finding(merged) if merged is not None else None
+    frame_fid = (frame_finding or {}).get('fid')
+    members, left = [], []
+    for m in candidates:
+        diag = (m.data or {}).get('diagnosis') or {}
+        if (diag.get('state') == 'covered' and diag.get('finding')
+                and frame_fid and diag['finding'] != frame_fid):
+            left.append(m)
+        else:
+            members.append(m)
+    for m in left:
+        mdata = dict(m.data or {})
+        if mdata.get('member_of') == key:
+            mdata['member_of'] = ''
+            mdata['left_frame'] = {'key': key, 'finding': (m.data or {}).get('diagnosis', {}).get('finding')}
+            m.data = mdata
+            m.save(update_fields=['data', 'updated_at'])
+    if len(members) < 2:
+        if merged is not None and left:
+            # the frame survives with what remains, or goes with its last member
+            if len(members) == 1:
+                _refresh_frame(merged, members)
+                return key
+            merged.delete()
+        return None
     created = merged is None
     if created:
         merged = CrashSignature(key=key, level='trace', status='traced',
                                 exit_code=sig.exit_code, signal=sig.signal)
+    _refresh_frame(merged, members, sig)
+    return key
+
+
+def remerge_frame(frame):
+    """Recompute a trace-level entry from its members as they stand now
+    (after a split, a retirement, or a member leaving for another
+    finding). Returns the key, or None when the frame is gone."""
+    members = [m for m in CrashSignature.objects.filter(
+        key__in=list((frame.data or {}).get('members') or []))]
+    if not members:
+        frame.delete()
+        return None
+    return merge_trace_level(members[0])
+
+
+def _refresh_frame(merged, members, sig=None):
+    """The frame entry's counts, tasks, sites and stages from its members."""
+    sig = sig or members[0]
+    key = merged.key
     tasks, sites, minutes = [], defaultdict(lambda: {'crashes': 0, 'hosts': 0}), []
     for m in members:
         tasks.extend(m.tasks or [])
@@ -720,6 +892,18 @@ def merge_trace_level(sig):
             m.data = mdata
             m.save(update_fields=['data', 'updated_at'])
     return key
+
+
+def remerge_frames():
+    """Every trace-level entry recomputed from its members: the nightly
+    pass after the record build. Returns the keys kept and gone."""
+    kept, gone = [], []
+    for frame in list(CrashSignature.objects.filter(level='trace')):
+        if remerge_frame(frame):
+            kept.append(frame.key)
+        else:
+            gone.append(frame.key)
+    return {'kept': kept, 'gone': gone}
 
 
 def dig_candidates(limit):

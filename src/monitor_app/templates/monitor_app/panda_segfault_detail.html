@@ -81,6 +81,8 @@
             {% endif %}
             {% if sig.data.members %}<p class="text-muted">Members: {% for m in sig.data.members %}<a href="{% url 'monitor_app:panda_segfault_detail' key=m %}">{{ m }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}</p>{% endif %}
             {% if sig.data.member_of %}<p class="text-muted">Member of the trace-level signature <a href="{% url 'monitor_app:panda_segfault_detail' key=sig.data.member_of %}">{{ sig.data.member_of }}</a>.</p>{% endif %}
+            {% if sig.data.split %}<p class="text-muted">This task's crashes split by stage: this entry holds its {% if sig.stage %}{{ sig.stage }}{% else %}crashes of no recorded stage{% endif %}{% if sig.split_keys %}; the rest: {% for k in sig.split_keys %}<a href="{% url 'monitor_app:panda_segfault_detail' key=k %}">{{ k }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}.</p>{% endif %}
+            {% if sig.left_frame.key %}<p class="text-muted">Left the trace-level signature <a href="{% url 'monitor_app:panda_segfault_detail' key=sig.left_frame.key %}">{{ sig.left_frame.key }}</a>: its reproduction settled it under finding {{ sig.left_frame.finding }}, another crash than the frame its one trace read; its crashes no longer count there.</p>{% endif %}
             {% if sig.level == 'record' %}
             <form id="dig-form" class="d-flex align-items-center gap-2 mb-3" method="post" action="{% url 'monitor_app:panda_segfault_dig' key=sig.key %}" data-key="{{ sig.key }}">
                 {% csrf_token %}

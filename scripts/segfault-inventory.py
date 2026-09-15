@@ -484,17 +484,24 @@ def run(args):
 def signature_pass(jeditaskids, args):
     """The record-level signatures of the tasks touched (or of every task
     in the inventory when ``jeditaskids`` is None)."""
-    from monitor_app.segfaults import build_record_signatures
+    from monitor_app.segfaults import build_record_signatures, remerge_frames
     log.info('signatures for %s', f'{len(jeditaskids)} tasks' if jeditaskids else 'every task')
     result = build_record_signatures(
         jeditaskids=jeditaskids, rows_lost=not args.no_rows_lost,
         rows_lost_max_tasks=args.rows_lost_max_tasks)
-    log.info('  %d signatures (%d new): %s', result['signatures'],
-             result['created'], result['classes'])
+    log.info('  %d signatures (%d new, %d retired): %s', result['signatures'],
+             result['created'], result.get('retired', 0), result['classes'])
+    # The frame entries recomputed from their members as they stand: a
+    # split, a retirement, or a member that a reproduction settled under
+    # another finding changes what a frame counts.
+    frames = remerge_frames()
+    log.info('  frames: %d kept, %d gone', len(frames['kept']), len(frames['gone']))
     return {'signatures': result['signatures'],
             'signatures_new': result['created'],
+            'signatures_retired': result.get('retired', 0),
             'signature_classes': result['classes'],
-            'rows_lost_checked': result['rows_lost_checked']}
+            'rows_lost_checked': result['rows_lost_checked'],
+            'frames_kept': len(frames['kept']), 'frames_gone': len(frames['gone'])}
 
 
 def check(args):
