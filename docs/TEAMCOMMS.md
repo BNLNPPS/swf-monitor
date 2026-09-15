@@ -504,3 +504,26 @@ live-feed bridge are preserved.
 Package installation, mandatory host checks and full deployment precede bounded
 public navigation/topic/reference checks. A commissioning pull session may exercise
 publication and attention bookkeeping without a model or native client launch.
+
+## Explicit wrangle-ai execution
+
+The pinned wrangle-ai dependency supplies the shared worker loop; TeamComms
+supplies the central offer/claim Bullpen and authenticated offer stream Bell.
+Inflight migrations 0006_executionrun and 0007_execution_integrity retain admitted
+runs and immutable stopped results. Existing Inflight scopes apply. No worker is
+started by migration or deployment.
+
+A private worker profile names an absolute workspace, trusted foreground command,
+permissions, timeout and model/spending policy. Headless fallback requires an
+explicit offer execution profile and a reached headless_after timestamp. It races
+interactive claims through the same atomic authority. Notifications, alarms and
+Comms receipts do not enqueue work. The worker renews its claim and publishes
+results against its original generation; an uncertain launch is held for explicit
+stopped-work reconciliation. Saved results can retry without repeating execution.
+
+Use the existing program connector credential with a separate worker state
+location. The first SWF commissioning profile reads installed package provenance,
+uses no model and mutates no production resource. It runs one explicit offer and
+marks its dedicated worker session offline on completion. Existing agents, native
+sessions, TJAI, recorders and Mattermost routes retain their launch/configuration.
+The Inflight page shows execution profile, state and result alongside ownership.
