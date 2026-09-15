@@ -421,6 +421,14 @@
     <div class="card mb-3">
         <div class="card-header" style="background:#f8d7da;"><strong>Errors</strong></div>
         <div class="card-body">
+            {% with declared=job.errors.0.declared %}
+            {% if declared %}
+            <p class="mb-2 p-2 {{ 'offline'|state_class }}" title="The queue was under a declared downtime when this job ended, or within the ten minutes the pilot's cached queuedata lags a rule's expiration; the failure reads as the declaration, not the site">
+                <strong>Declared downtime:</strong> {{ declared.line }}
+                (<a href="{% url 'monitor_app:epic_queue_detail' declared.queue %}#declared" style="color: inherit;">{{ declared.queue }}</a>)
+            </p>
+            {% endif %}
+            {% endwith %}
             <table class="table table-sm table-bordered mb-0">
                 <thead><tr><th>Component</th><th>Code</th><th>Diagnostic</th></tr></thead>
                 <tbody>

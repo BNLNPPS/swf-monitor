@@ -26,6 +26,11 @@
     <strong>Terminal state:</strong>
     <span class="text-muted">loading…</span>
 </div>
+<!-- Failures under a declared downtime of their queue (or the pilot's
+     cache lag after it): the declaration is their reading, not the
+     site. Filled from the table response; absent when nothing was
+     declared in the window. -->
+<div style="margin-bottom:1em;" id="panda-errors-declared" hidden></div>
 {% endblock %}
 
 {% block extra_scripts %}
@@ -63,6 +68,24 @@ $('#main-table').on('xhr.dt', function (e, settings, json) {
                          : 'Click to include ' + name + ' jobs';
         box.appendChild(a);
     });
+    // Failures under a declared downtime, one line per declaration.
+    const declaredBox = document.getElementById('panda-errors-declared');
+    const declared = json.declared;
+    if (declaredBox && declared && declared.count) {
+        declaredBox.innerHTML = '';
+        const head = document.createElement('strong');
+        head.textContent = 'Under declared downtime: ' + declared.count.toLocaleString() + ' of these failures. ';
+        declaredBox.appendChild(head);
+        (declared.windows || []).forEach(function (w) {
+            const span = document.createElement('span');
+            span.className = 'offline_fill px-1 me-2';
+            span.textContent = w.queue + ': ' + w.line + ' (' + w.count.toLocaleString() + ')';
+            declaredBox.appendChild(span);
+        });
+        declaredBox.hidden = false;
+    } else if (declaredBox) {
+        declaredBox.hidden = true;
+    }
 });
 {% endblock %}
 

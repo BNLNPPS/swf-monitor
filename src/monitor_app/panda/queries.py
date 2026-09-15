@@ -1143,6 +1143,57 @@ def _error_distribution_views(site_task_counts):
     }
 
 
+def _declared_failures(conn, time_filter, time_params, dest_join, destse_params,
+                       extra_params, filters, status_filter, status_params,
+                       window_after, window_before):
+    """The faulty jobs of the summary's population that ended inside a
+    declared downtime of their queue, or the pilot's cache lag after it,
+    counted per declaration (monitor_app/declared.py windows_between).
+    Returns ``{'count': n, 'windows': [{queue, line, count}]}``; an
+    empty block when nothing was declared in the window, None when the
+    read failed (logged)."""
+    from ..declared import windows_between
+    try:
+        spans = windows_between(window_after, window_before, kind='queue')
+    except Exception as e:                                    # noqa: BLE001
+        logger.error(f"declared failures: windows read failed: {e}")
+        return None
+    if not spans:
+        return {'count': 0, 'windows': []}
+    windows, count = [], 0
+    for queue, start, stop, line in spans:
+        span_filter = 'j."computingsite" = %s AND j."endtime" >= %s'
+        span_params = [queue, start]
+        if stop is not None:
+            span_filter += ' AND j."endtime" < %s'
+            span_params.append(stop)
+        parts, params = [], []
+        for table in ['jobsactive4', 'jobsarchived4']:
+            parts.append(f"""
+                SELECT COUNT(*)
+                FROM "{PANDA_SCHEMA}"."{table}" j
+                {dest_join}
+                WHERE {time_filter}
+                  AND {status_filter}
+                  AND {span_filter}
+                  {filters}
+            """)
+            params.extend(destse_params + time_params + status_params + span_params + extra_params)
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(' UNION ALL '.join(parts), params)
+                n = sum(int(r[0] or 0) for r in cursor.fetchall())
+        except Exception as e:                                # noqa: BLE001
+            logger.error(f"declared failures count failed for {queue}: {e}")
+            return None
+        if n:
+            windows.append({'queue': queue, 'line': line, 'count': n,
+                            'start': start.isoformat(timespec='seconds'),
+                            'stop': stop.isoformat(timespec='seconds') if stop else None})
+            count += n
+    return {'count': count, 'windows': windows}
+
+
 def error_summary(days=10, username=None, site=None, destinationse=None,
                   taskid=None, error_source=None, limit=20,
                   ended_after=None, ended_before=None, status=None,
@@ -1403,6 +1454,17 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
         logger.error(f"error_summary status counts failed: {e}")
         return {"error": str(e)}
 
+    # The failures that fell under a declared downtime of their queue
+    # (or the pilot's cache lag after it), per declaration, under the
+    # same filters and status selection: the declaration is their
+    # reading (swf-epicprod CONTINUOUS_PRODUCTION.md, Declared
+    # downtime). A failed read logs and the block is absent, never a
+    # failed summary.
+    declared = _declared_failures(
+        conn, time_filter, time_params, dest_join, destse_params,
+        extra_params, filters, status_filter, status_params,
+        ended_after or (timezone.now() - timedelta(days=days)), ended_before)
+
     errors = []
     total = 0
     for row in rows:
@@ -1447,6 +1509,8 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
         # restriction applied — the basis of the status filter chips,
         # and the visibility of whatever the filter excludes.
         "status_counts": status_counts,
+        # The failures under a declared downtime, per declaration.
+        "declared": declared,
         "filters": {
             "days": days,
             "username": username,

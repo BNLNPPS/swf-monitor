@@ -2061,7 +2061,7 @@ def panda_errors_datatable_ajax(request):
     # full faulty-job population (multi-second under failure churn), so
     # requests serve the stored summary and rebuilds run behind them.
     product = get_product(
-        f'panda_errors:v5:{days}:{username or ""}:{site or ""}'
+        f'panda_errors:v6:{days}:{username or ""}:{site or ""}'
         f':{error_source or ""}:{status or ""}:{int(classified)}:'
         f'{taskid or ""}:'
         f'{ended_after.isoformat() if ended_after else ""}:'
@@ -2085,6 +2085,8 @@ def panda_errors_datatable_ajax(request):
         # population, and the selection this response was built under.
         'status_counts': result.get('status_counts') or {},
         'status_selected': status,
+        # The failures under a declared downtime, per declaration.
+        'declared': result.get('declared'),
     }
 
     if 'error' in result:
@@ -2195,6 +2197,11 @@ def panda_diagnostics_datatable_ajax(request):
             if len(diag) > 80:
                 diag = diag[:77] + '...'
             errors_html.append(f'<strong>{err["component"]}</strong>:{err["code"]} {diag}')
+        declared = (job.get('errors') or [{}])[0].get('declared') if job.get('errors') else None
+        if declared:
+            # The declaration leads: the job ended under a declared
+            # downtime of its queue (or the cache lag after it).
+            errors_html.insert(0, f'<span class="offline_fill px-1">declared downtime: {escape(declared["line"])}</span>')
 
         data.append([
             f'<a href="{job_url}">{job["pandaid"]}</a>',

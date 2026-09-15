@@ -51,14 +51,15 @@ def cric_get(url, proxy, ca_dir):
 
 def scope(queues_doc):
     """The EIC queues, the endpoints they name (astorages) and the
-    resource centres behind them, from the pandaqueue document."""
+    resource centres behind them (each with its queues, so a site's
+    window reaches the queue readers), from the pandaqueue document."""
     queues = set(queues_doc or {})
-    endpoints, rcsites = set(), set()
-    for q in (queues_doc or {}).values():
+    endpoints, rcsites = set(), {}
+    for name, q in (queues_doc or {}).items():
         for names in ((q or {}).get('astorages') or {}).values():
             endpoints.update(names or [])
         if (q or {}).get('rc_site'):
-            rcsites.add(q['rc_site'])
+            rcsites.setdefault(q['rc_site'], set()).add(name)
     return queues, endpoints, rcsites
 
 

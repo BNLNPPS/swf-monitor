@@ -120,8 +120,12 @@ def rules_from_ddmendpointstatus(doc, endpoints):
 def windows_from_downtime(doc, rcsites):
     """The downtime windows of ``rcsites`` in a ``downtime`` document (a
     dict or list of downtime objects). One record per downtime, on the
-    resource centre; the affected services ride along."""
+    resource centre; the affected services ride along. ``rcsites`` is a
+    set of names, or a mapping of name to the queues behind it, which
+    the record then carries as ``queues`` so a queue's readers find the
+    site's windows."""
     items = list(doc.values()) if isinstance(doc, dict) else list(doc or [])
+    queues_of = rcsites if isinstance(rcsites, dict) else {}
     out = []
     for d in items:
         if not isinstance(d, dict):
@@ -133,6 +137,7 @@ def windows_from_downtime(doc, rcsites):
         out.append({
             'name': f'site:{rc}:{ident}',
             'kind': 'site', 'target': rc,
+            'queues': sorted(queues_of.get(rc) or []),
             'source': 'cric:downtime',
             'value': str(d.get('severity') or 'OUTAGE').upper(),
             'activity': '', 'probe': d.get('provider') or '',
@@ -165,15 +170,26 @@ def standing_of(record, now):
     return 'active'
 
 
+def _concerns(record, kind, target):
+    """Whether a record is about ``target`` of ``kind``: its own target,
+    or, for a queue, a site window whose ``queues`` name it."""
+    if kind and record.get('kind') != kind:
+        if not (kind == 'queue' and record.get('kind') == 'site'
+                and target and target in (record.get('queues') or [])):
+            return False
+        return True
+    if target and record.get('target') != target:
+        return False
+    return True
+
+
 def declared_at(records, when, kind=None, target=None, lag=CACHE_LAG):
     """The records that covered ``when`` (an aware datetime): in force
     then, or ended within ``lag`` before it. Pure; for the attribution
     of a failure to a declaration."""
     out = []
     for r in records:
-        if kind and r.get('kind') != kind:
-            continue
-        if target and r.get('target') != target:
+        if not _concerns(r, kind, target):
             continue
         start = _dt(r.get('start')) or _dt(r.get('declared_at'))
         end = _dt(r.get('end'))
@@ -216,6 +232,103 @@ def records():
         d['standing'] = e.status or ''
         out.append(d)
     return out
+
+
+_RECORDS_TTL_S = 60.0
+_cache = {'records': None, 'at': 0.0}
+
+
+def cached_records():
+    """The declared records, read at most once a minute: the job error
+    root and the job lists read them per job. A failed read logs and
+    serves the last copy (or nothing), never raises into a page."""
+    import time as time_mod
+    now = time_mod.monotonic()
+    if _cache['records'] is None or now - _cache['at'] > _RECORDS_TTL_S:
+        try:
+            _cache['records'] = records()
+            _cache['at'] = now
+        except Exception as e:                                # noqa: BLE001
+            logger.error('declared records read failed: %s', e)
+            return _cache['records'] or []
+    return _cache['records']
+
+
+# ------------------------------------------------------ the record's readers
+
+def job_declared(computingsite, endtime):
+    """The declaration a failed job fell under, for the per-job error
+    root: the queue's rule or its site's window in force at the job's
+    end, or ended within CACHE_LAG before it (the pilot's cached
+    queuedata lags a rule's expiration). Returns ``{'label', 'line',
+    'queue', 'record', 'grade'}`` or None."""
+    when = _dt(endtime)
+    if not computingsite or when is None:
+        return None
+    hits = declared_at(cached_records(), when, kind='queue', target=str(computingsite))
+    if not hits:
+        return None
+    r = hits[0]
+    return {'label': 'declared downtime', 'line': summary_line(r),
+            'queue': str(computingsite), 'record': r.get('name', ''),
+            'grade': 'declared record (CRIC)'}
+
+
+def windows_between(after, before, kind='queue', lag=CACHE_LAG):
+    """The (target, start, stop) spans of ``kind`` that overlap
+    [after, before): a rule from its declared instant to its end or
+    clearing plus the lag, a window from its start; for the summary's
+    count of failures under declaration. Site windows are given per
+    queue."""
+    out = []
+    for r in cached_records():
+        targets = []
+        if r.get('kind') == kind:
+            targets = [r['target']]
+        elif kind == 'queue' and r.get('kind') == 'site':
+            targets = list(r.get('queues') or [])
+        if not targets:
+            continue
+        start = _dt(r.get('start')) or _dt(r.get('declared_at'))
+        end, cleared = _dt(r.get('end')), _dt(r.get('cleared_at'))
+        stop = min(t for t in (end, cleared) if t) if (end or cleared) else None
+        stop = stop + lag if stop else None
+        if start is None:
+            continue
+        if before is not None and start >= before:
+            continue
+        if stop is not None and after is not None and stop <= after:
+            continue
+        for target in targets:
+            out.append((target, start, stop, summary_line(r)))
+    return out
+
+
+def gate_for_queue(queue, horizon_h, now=None):
+    """The front's declared gate for one queue: red with the rule in
+    force, or a window starting within ``horizon_h`` hours; the reason is
+    the record's line. Pure over the cached records."""
+    from django.utils import timezone
+    now = now or timezone.now()
+    horizon = now + timedelta(hours=float(horizon_h or 0))
+    in_force, coming = [], []
+    for r in cached_records():
+        if r.get('standing') == 'cleared' or not _concerns(r, 'queue', queue):
+            continue
+        standing = standing_of(r, now)
+        if standing == 'active':
+            in_force.append(r)
+        elif standing == 'future':
+            start = _dt(r.get('start'))
+            if start and start <= horizon:
+                coming.append(r)
+    in_force.sort(key=lambda r: r.get('end') or '')
+    coming.sort(key=lambda r: r.get('start') or '')
+    if in_force:
+        return {'red': True, 'state': 'in_force', 'reason': summary_line(in_force[0])}
+    if coming:
+        return {'red': True, 'state': 'coming', 'reason': summary_line(coming[0])}
+    return {'red': False, 'state': '', 'reason': ''}
 
 
 def sync(found, now, changed_by='cric_declared_state'):
@@ -324,14 +437,22 @@ def declared_for(kind, now=None):
     from django.utils import timezone
     now = now or timezone.now()
     out = {}
-    for r in records():
-        if r.get('kind') != kind or r.get('standing') == 'cleared':
+    for r in cached_records():
+        if r.get('standing') == 'cleared':
+            continue
+        if r.get('kind') == kind:
+            targets = [r['target']]
+        elif kind == 'queue' and r.get('kind') == 'site':
+            # A site's window is every queue's behind it.
+            targets = list(r.get('queues') or [])
+        else:
             continue
         standing = standing_of(r, now)
         if standing == 'expired':
             continue
-        slot = out.setdefault(r['target'], {'active': [], 'future': [], 'line': ''})
-        slot[standing].append(r)
+        for target in targets:
+            slot = out.setdefault(target, {'active': [], 'future': [], 'line': ''})
+            slot[standing].append(r)
     for target, slot in out.items():
         slot['active'].sort(key=lambda r: r.get('end') or '')
         slot['future'].sort(key=lambda r: r.get('start') or '')

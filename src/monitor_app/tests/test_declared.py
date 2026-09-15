@@ -75,6 +75,17 @@ def test_endpoint_rule_and_downtime_window():
     assert wins[0]['start'] == '2026-09-20T08:00:00+00:00' and wins[0]['services'] == ['BNL-CE-1']
 
 
+def test_a_site_window_reaches_its_queues():
+    w = windows_from_downtime(
+        {'1': {'id': 1, 'rc_site': 'BNL-OSG', 'severity': 'OUTAGE',
+               'start_time': '2026-09-20T08:00:00', 'end_time': '2026-09-20T16:00:00'}},
+        {'BNL-OSG': {'BNL_OSG_PanDA_1', 'BNL_OSG_EPIC_PROD_1'}})[0]
+    assert w['queues'] == ['BNL_OSG_EPIC_PROD_1', 'BNL_OSG_PanDA_1']
+    assert declared_at([w], _t('2026-09-20T09:00:00'), kind='queue', target='BNL_OSG_PanDA_1')
+    assert not declared_at([w], _t('2026-09-20T09:00:00'), kind='queue', target='E1_BNL')
+    assert not declared_at([w], _t('2026-09-20T09:00:00'), kind='endpoint', target='BNL_OSG_PanDA_1')
+
+
 def test_summary_lines_read_as_an_operator_would():
     r = rules_from_pandaqueuestatus(PQS, {'E1_BNL'})[0]
     assert summary_line(r) == 'offline until 09/15 00:21 UTC: scheduled downtime (xzhao@bnl.gov)'

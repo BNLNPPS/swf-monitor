@@ -8,6 +8,7 @@ No database I/O — callers execute the returned (sql, params) tuples.
 import logging
 
 from .constants import PANDA_SCHEMA, ERROR_COMPONENTS, JOB_STATUS_CATEGORIES
+from ..declared import job_declared
 from ..error_corrections import correction, match
 
 logger = logging.getLogger(__name__)
@@ -140,6 +141,19 @@ def extract_errors(job_dict):
             logger.error('error-correction decoration failed for job %s '
                          '%s:%s: %s', job_dict.get('pandaid'),
                          err['component'], err['code'], e)
+    # A job that ended under a declared downtime of its queue, or within
+    # the pilot's cache lag after it, carries the declaration on every
+    # error entry (swf-epicprod CONTINUOUS_PRODUCTION.md, Declared
+    # downtime): the reading is the declaration, not the site.
+    if errors:
+        try:
+            declared = job_declared(job_dict.get('computingsite'), job_dict.get('endtime'))
+            if declared:
+                for err in errors:
+                    err['declared'] = declared
+        except Exception as e:
+            logger.error('declared-downtime attribution failed for job %s: %s',
+                         job_dict.get('pandaid'), e)
     return errors
 
 
