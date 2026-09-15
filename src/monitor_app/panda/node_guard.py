@@ -278,9 +278,20 @@ def run_cycle(*, dry_run=False, created_by='node-guard'):
     tripped_state = TRIPPED_STATES[mode]
 
     rows = calib = elsewhere = None
+    set_aside = {}
     if enabled:
         rows = _safe('window', lambda: window_rows(cfg['window_h'], cfg['queues']),
                      failed('window'))
+        if rows is not None:
+            # Jobs that ended under a declared downtime of their queue
+            # are set aside before judgment: a node is not a black hole
+            # for a downtime's deaths (swf-epicprod
+            # CONTINUOUS_PRODUCTION.md, Declared downtime). An unreadable
+            # record sets nothing aside.
+            from monitor_app.declared import set_aside_declared
+            kept = _safe('declared', lambda: set_aside_declared(rows), failed('declared'))
+            if kept is not None:
+                rows, set_aside = kept
         calib = _safe('calibration', median_finished_s, failed('calibration')) or {}
         elsewhere = _safe('attribution',
                           lambda: finished_elsewhere(cfg['attribution_h'], cfg['queues']),
@@ -368,6 +379,7 @@ def run_cycle(*, dry_run=False, created_by='node-guard'):
                'judged': verdicts['judged'], 'tripped': len(tripped_nodes),
                'opened': len(trips), 'record_changes': len(changes),
                'malformed': verdicts['malformed'], 'decisions_recorded': written,
+               'under_declaration': sum(set_aside.values()),
                'errors': errors,
                'duration_s': round((timezone.now() - t0).total_seconds(), 1)}
     if not dry_run:
@@ -382,6 +394,7 @@ def run_cycle(*, dry_run=False, created_by='node-guard'):
                          'settings': {k: cfg[k] for k in DEFAULTS},
                          'queues': queues_state, 'nodes': nodes,
                          'tripped': [(n['queue'], n['host']) for n in tripped_nodes],
+                         'under_declaration': set_aside,
                          'errors': errors, 'duration_s': summary['duration_s']}
         from monitor_app.cached_product import get_product
         _safe('state store', lambda: get_product(
@@ -400,6 +413,9 @@ def run_cycle(*, dry_run=False, created_by='node-guard'):
                         if tripped_nodes else '')
                      + (f'; {len(trips)} black hole{"s" if len(trips) != 1 else ""} opened'
                         if trips else '')
+                     + (f'; {summary["under_declaration"]} jobs under a declared downtime set aside ('
+                        + ', '.join(f'{q} {n}' for q, n in sorted(set_aside.items())) + ')'
+                        if set_aside else '')
                      + ''.join(f'; {q} storm on {s["storm_hosts"]} hosts, the queue\'s event'
                                for q, s in queues_state.items() if s.get('queue_event'))
                      + (f'; errors: {"; ".join(errors)}' if errors else '')),

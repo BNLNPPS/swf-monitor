@@ -81,7 +81,9 @@
                     <td><a href="{% url 'monitor_app:epic_queue_detail' q.panda_queue %}">{{ q.panda_queue }}</a></td>
                     <td class="{{ q.status|state_class }}">{{ q.status|default:"—" }}</td>
                     <td class="{% if q.declared_state == 'active' %}{{ 'offline'|state_class }}{% elif q.declared_state == 'future' %}{{ 'pending'|state_class }}{% endif %}">{{ q.declared }}</td>
-                    {% if q.canary == 'unknown' or q.canary == 'insufficient' %}
+                    {% if q.declared_state == 'active' %}
+                    <td class="{{ 'offline'|state_class }}" title="A downtime is declared for this queue; the canary sends no probe and moves no verdict until it ends">declared</td>
+                    {% elif q.canary == 'unknown' or q.canary == 'insufficient' %}
                     <td></td>
                     {% else %}
                     <td class="{{ q.canary|state_class }}"><a href="{% url 'canary:probe_runs' queue_name=q.panda_queue %}" style="color: inherit;" title="This queue's canary probe runs">{{ q.canary }}{% if q.canary_pct %} {{ q.canary_pct }}{% endif %}</a></td>

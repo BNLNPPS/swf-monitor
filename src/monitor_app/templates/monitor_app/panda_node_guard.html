@@ -26,6 +26,8 @@
         guard <strong>{% if enabled %}on{% else %}off{% endif %}</strong>.
         {% if never_run %}No cycle has run yet.{% else %}Last cycle <span data-relative-time="{{ cycle_at }}">{{ cycle_at }}</span>
         ({{ state.duration_s }} s), every five minutes, over the last {{ settings.window_h }} h.{% endif %}
+        {% if state.under_declaration %}Set aside before judgment, ended under a <a href="{% url 'monitor_app:epic_queues_list' %}">declared downtime</a> of their queue:
+        {% for queue, n in state.under_declaration.items %}{{ queue }} {{ n }}{% if not forloop.last %}, {% endif %}{% endfor %} jobs.{% endif %}
         The switches and thresholds are the node_guard settings on the
         <a href="{% url 'monitor_app:system_status' %}#sysconfig-view">System page</a>;
         the verdicts are on the <a href="{% url 'monitor_app:log_list' %}?app_name=epicprod&amp;instance_name=node-guard">action stream</a>;

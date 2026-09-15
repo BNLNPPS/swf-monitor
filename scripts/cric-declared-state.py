@@ -111,6 +111,30 @@ def main():
         return 0
     changes = declared.sync(found, now, changed_by=args.created_by)
     moved = {k: v for k, v in changes.items() if k != 'unchanged' and v}
+    # One incident per change for notice routing (swf-monitor
+    # docs/NOTICE_ROUTING.md): a rule or window that appeared, changed,
+    # expired or cleared, with its line as the summary and the target's
+    # page as the url, so a subscriber sees a downtime when it is set.
+    by_name = {r['name']: r for r in found}
+    stored = {r['name']: r for r in declared.records()}
+    for kind_of_change in ('appeared', 'changed', 'expired', 'cleared'):
+        for name in changes.get(kind_of_change) or []:
+            r = by_name.get(name) or stored.get(name) or {}
+            target = r.get('target') or name
+            kind = r.get('kind') or ''
+            url = (f'/panda/epic-queues/{target}/#declared' if kind == 'queue'
+                   else f'/rucio-endpoints/{target}/' if kind == 'endpoint'
+                   else '/panda/epic-queues/')
+            log_epicprod_action(
+                'prodops-agent', 'declared_state_changed',
+                subject_type={'queue': 'panda_queue', 'endpoint': 'ddm_endpoint'}.get(kind, 'rc_site'),
+                subject_key=target, username=args.created_by,
+                outcome=kind_of_change, sublevel='normal', live_default=True,
+                message=f"declared state {kind_of_change}: {target}: {declared.summary_line(r)}"[:300],
+                summary=declared.summary_line(r), url=url,
+                severity='warning' if kind_of_change in ('appeared', 'changed') else 'info',
+                kind=kind, record=name, declared_by=r.get('declared_by', ''),
+                end=r.get('end'), start=r.get('start'))
     log_epicprod_action(
         'prodops-agent', 'declared_state_sync',
         outcome='ok', username=args.created_by,

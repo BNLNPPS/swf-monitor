@@ -20,6 +20,7 @@ from .viewdir.user_admin import user_rights_set
 from .viewdir.capcom import (capcom_notice_ingest, capcom_notices,
                              capcom_state, capcom_user_state,
                              NoticeSubscriptionViewSet)
+from .viewdir.declared_api import declared_state
 from .viewdir.snapper_api import (snapper_changes_between,
                                   snapper_component_history, snapper_context,
                                   snapper_cut_summary, snapper_latest,
@@ -123,6 +124,9 @@ urlpatterns = [
     path('capcom/state/', capcom_state, name='capcom-state'),
     path('capcom/user-state/', capcom_user_state, name='capcom-user-state'),
     path('capcom/notices/', capcom_notices, name='capcom-notices'),
+    # The declared record for out-of-process readers (the site canary's
+    # provider): CONTINUOUS_PRODUCTION.md, Declared downtime.
+    path('declared/', declared_state, name='declared-state'),
     path('capcom/notices/ingest/', capcom_notice_ingest,
          name='capcom-notice-ingest'),
     path('messages/stream/', sse_message_stream, name='sse-message-stream'),

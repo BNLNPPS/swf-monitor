@@ -3467,6 +3467,10 @@ def prod_hub(request):
     summary = {
         'campaign_summary_lines': summary_product['value'] or [],
         'campaign_summary_built_at': summary_product['built_at'],
+        # What CRIC declares, in force or coming, one line per target;
+        # nothing when nothing is declared (CONTINUOUS_PRODUCTION.md,
+        # Declared downtime). The record is read at most once a minute.
+        'declared_lines': _declared_lines(),
     }
     # The production root in the user view is the user view home
     # (docs/USER_VIEW.md): https://epic-devcloud.org/prod/?user_view=1.
@@ -3502,6 +3506,27 @@ def prod_hub(request):
         status='proposed').count()
     context['campaign_narratives_count'] = corun_counts['narratives']
     return render(request, 'monitor_app/prod_hub_workflow.html', context)
+
+
+def _declared_lines():
+    """The home's declared-downtime line: every queue and endpoint with
+    a rule in force or a window coming, as ``[{target, kind, state,
+    line}]``, in force first; empty when nothing is declared. A failed
+    read logs and shows nothing."""
+    from .declared import declared_for
+    out = []
+    try:
+        for kind in ('queue', 'endpoint'):
+            for target, slot in sorted(declared_for(kind).items()):
+                state = 'in force' if slot.get('active') else 'coming' if slot.get('future') else ''
+                if state:
+                    out.append({'target': target, 'kind': kind, 'state': state,
+                                'line': slot.get('line', '')})
+    except Exception as e:                                    # noqa: BLE001
+        logger.error('declared lines for the home failed: %s', e)
+        return []
+    out.sort(key=lambda r: (r['state'] != 'in force', r['kind'], r['target']))
+    return out
 
 
 def _campaign_completion_lines():

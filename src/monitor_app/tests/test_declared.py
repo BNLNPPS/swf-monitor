@@ -86,6 +86,38 @@ def test_a_site_window_reaches_its_queues():
     assert not declared_at([w], _t('2026-09-20T09:00:00'), kind='endpoint', target='BNL_OSG_PanDA_1')
 
 
+def test_node_guard_rows_under_a_declaration_are_set_aside():
+    from monitor_app.declared import set_aside_declared
+    r = rules_from_pandaqueuestatus(PQS, {'E1_BNL'})[0]
+    rows = [{'queue': 'E1_BNL', 'host': 'a', 'endtime': '2026-09-14T12:00:00'},
+            {'queue': 'E1_BNL', 'host': 'b', 'endtime': '2026-09-15T00:25:00'},
+            {'queue': 'E1_BNL', 'host': 'c', 'endtime': '2026-09-15T02:00:00'},
+            {'queue': 'E1_JLAB', 'host': 'd', 'endtime': '2026-09-14T12:00:00'}]
+    kept, aside = set_aside_declared(rows, records=[r])
+    assert [x['host'] for x in kept] == ['c', 'd']
+    assert aside == {'E1_BNL': 2}
+    assert set_aside_declared(rows, records=[]) == (rows, {})
+
+
+def test_the_canary_provider_answers_per_queue():
+    from monitor_app import declared as mod
+    r = rules_from_pandaqueuestatus(PQS, {'E1_BNL'})[0]
+    r['standing'] = 'active'
+    mod._cache['records'] = [r]
+    mod._cache['at'] = float('inf')
+    try:
+        info = mod.canary_declared(['E1_BNL', 'E1_JLAB'], _t('2026-09-14T12:00:00'))
+        assert set(info) == {'E1_BNL'}
+        assert info['E1_BNL']['in_force'].startswith('offline until 09/15 00:21 UTC')
+        assert info['E1_BNL']['spans'] == [('2026-09-14T02:20:19+00:00', '2026-09-15T00:31:00+00:00')]
+        assert info['E1_BNL']['last_end'] == '2026-09-15T00:31:00+00:00'
+        later = mod.canary_declared(['E1_BNL'], _t('2026-09-15T02:00:00'))
+        assert later['E1_BNL']['in_force'] == ''
+    finally:
+        mod._cache['records'] = None
+        mod._cache['at'] = 0.0
+
+
 def test_summary_lines_read_as_an_operator_would():
     r = rules_from_pandaqueuestatus(PQS, {'E1_BNL'})[0]
     assert summary_line(r) == 'offline until 09/15 00:21 UTC: scheduled downtime (xzhao@bnl.gov)'

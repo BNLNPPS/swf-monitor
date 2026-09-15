@@ -304,6 +304,64 @@ def windows_between(after, before, kind='queue', lag=CACHE_LAG):
     return out
 
 
+def set_aside_declared(rows, records=None, lag=CACHE_LAG):
+    """The node guard's rows with those that ended under a declared
+    downtime of their queue (or the cache lag after it) set aside: a
+    node is not judged on a downtime's deaths. Rows carry ``queue`` and
+    ``endtime`` (ISO). Returns (kept, set_aside_by_queue); pure over
+    ``records`` (the cached records when None)."""
+    records = cached_records() if records is None else records
+    by_queue = {}
+    if not records:
+        return list(rows), by_queue
+    kept = []
+    for row in rows:
+        when = _dt(row.get('endtime'))
+        queue = row.get('queue')
+        if when is not None and queue and declared_at(records, when, kind='queue',
+                                                      target=str(queue), lag=lag):
+            by_queue[str(queue)] = by_queue.get(str(queue), 0) + 1
+            continue
+        kept.append(row)
+    return kept, by_queue
+
+
+def canary_declared(queue_names, now, lag=CACHE_LAG):
+    """What the site canary reads per queue (site-canary
+    canary/declared.py, over GET /api/declared/): the rule in force now
+    with its line, the spans it was declared over (start to end or
+    clearing plus the cache lag) and the latest span end. ``queue_names``
+    None means every queue on the record."""
+    out = {}
+    names = set(queue_names) if queue_names is not None else None
+    for r in cached_records():
+        if r.get('kind') == 'queue':
+            targets = [r['target']]
+        elif r.get('kind') == 'site':
+            targets = list(r.get('queues') or [])
+        else:
+            continue
+        if names is not None:
+            targets = [t for t in targets if t in names]
+        if not targets:
+            continue
+        start = _dt(r.get('start')) or _dt(r.get('declared_at'))
+        end, cleared = _dt(r.get('end')), _dt(r.get('cleared_at'))
+        stop = min(t for t in (end, cleared) if t) if (end or cleared) else None
+        stop_lagged = stop + lag if stop else None
+        in_force = (r.get('standing') != 'cleared' and standing_of(r, now) == 'active')
+        for target in targets:
+            slot = out.setdefault(target, {'in_force': '', 'spans': [], 'last_end': None})
+            if in_force and not slot['in_force']:
+                slot['in_force'] = summary_line(r)
+            if start is not None:
+                slot['spans'].append((_iso(start), _iso(stop_lagged)))
+            if stop_lagged is not None and (slot['last_end'] is None
+                                            or _iso(stop_lagged) > slot['last_end']):
+                slot['last_end'] = _iso(stop_lagged)
+    return out
+
+
 def gate_for_queue(queue, horizon_h, now=None):
     """The front's declared gate for one queue: red with the rule in
     force, or a window starting within ``horizon_h`` hours; the reason is

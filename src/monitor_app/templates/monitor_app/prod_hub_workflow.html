@@ -138,6 +138,12 @@
         <h1>epicprod - ePIC Production {% if active_tab == 'ops' %}Operations{% else %}System{% endif %}</h1>
         <p>ePIC experiment production requests, configuration, management and monitoring<br>
         <a href="{% url 'monitor_app:prod_hub' %}?user_view=1"><strong>A simplified interface for non-expert users is available.</strong></a></p>
+        {% if declared_lines %}
+        <p class="prod-summary-strip" title="Declared downtime from CRIC: status rules in force and downtime windows coming, for the production queues and storage endpoints">
+            Declared downtime:
+            {% for d in declared_lines %}<span class="{% if d.state == 'in force' %}{{ 'offline'|state_class }}{% else %}{{ 'pending'|state_class }}{% endif %} px-1">{% if d.kind == 'queue' %}<a href="{% url 'monitor_app:epic_queue_detail' d.target %}#declared" style="color: inherit;">{{ d.target }}</a>{% else %}{{ d.target }}{% endif %} {{ d.line }}</span>{% if not forloop.last %} {% endif %}{% endfor %}
+        </p>
+        {% endif %}
         {% include 'monitor_app/_campaign_completion_panel.html' %}
     </div>
 
