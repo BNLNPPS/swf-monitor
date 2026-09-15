@@ -3010,6 +3010,7 @@ def study_job(pandaid, include_batch_reason=False, include_log_analysis=True,
     # Our copy of the harvester's stdout, for a cache-stdout queue: read
     # before the live link is judged, since the copy outlives the cache
     # (monitor_app.harvester_stdout).
+    harvester_copy = None
     if '/cache/' in str(log_urls.get('pilot_stdout') or ''):
         try:
             from monitor_app import harvester_stdout
@@ -3018,9 +3019,9 @@ def study_job(pandaid, include_batch_reason=False, include_log_analysis=True,
             logger.warning('harvester stdout copy unreadable for %s: %s', pandaid, exc)
             copy = None
         if copy:
-            result['harvester_stdout'] = {k: copy[k] for k in ('status', 'bytes', 'captured_at', 'source')}
+            harvester_copy = {k: copy[k] for k in ('status', 'bytes', 'captured_at', 'source')}
             if copy['status'] == 'failed':
-                result['harvester_stdout']['reason'] = copy['body'].strip().splitlines()[0] if copy['body'] else ''
+                harvester_copy['reason'] = copy['body'].strip().splitlines()[0] if copy['body'] else ''
     kept, pruned_note = _prune_dead_log_urls(job, log_urls)
     dead_log_urls = sorted(set(log_urls.values()) - set(kept.values()))
     log_urls = kept
@@ -3040,6 +3041,8 @@ def study_job(pandaid, include_batch_reason=False, include_log_analysis=True,
     }
     if log_urls_note:
         result["log_urls_note"] = log_urls_note
+    if harvester_copy:
+        result["harvester_stdout"] = harvester_copy
 
     if log_file:
         result["log_file"] = log_file
