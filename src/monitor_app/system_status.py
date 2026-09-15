@@ -28,6 +28,13 @@ GITHUB_REPOS = ['BNLNPPS/swf-monitor', 'BNLNPPS/swf-epicprod',
 _GH_FAIL_CONCLUSIONS = {'failure', 'startup_failure', 'timed_out'}
 
 
+#: Checks that read the streaming-workflow testbed's own state. They are
+#: collected and listed on the System page like every other check, and
+#: they never enter the global health verdict or the production
+#: assessment: a testbed workflow stage is not a production condition.
+TESTBED_CHECKS = frozenset({'stale-state', 'snapper-testbed-scheduler'})
+
+
 def _status(name, category, status, summary, data=None, checked_at=None):
     return {
         'name': name,
@@ -388,7 +395,7 @@ def _snapper_scheduler(scope):
             raise ValueError
     except (TypeError, ValueError):
         return _status(
-            f'snapper-{scope}-scheduler', 'agents', 'error',
+            f'snapper-{scope}-scheduler', 'testbed' if scope == 'testbed' else 'agents', 'error',
             f'Snapper {scope} scheduler configuration is invalid.',
             {
                 'scope': scope,
@@ -400,7 +407,7 @@ def _snapper_scheduler(scope):
     cursor = CaptureCursor.objects.filter(scope=scope).first()
     if cursor is None:
         return _status(
-            f'snapper-{scope}-scheduler', 'agents', 'unknown',
+            f'snapper-{scope}-scheduler', 'testbed' if scope == 'testbed' else 'agents', 'unknown',
             f'Snapper {scope} scheduler has no capture cursor.',
             {
                 'scope': scope,
@@ -439,23 +446,23 @@ def _snapper_scheduler(scope):
     }
     if cursor.consecutive_failures:
         return _status(
-            f'snapper-{scope}-scheduler', 'agents', 'error',
+            f'snapper-{scope}-scheduler', 'testbed' if scope == 'testbed' else 'agents', 'error',
             f'Snapper {scope} scheduler has consecutive capture failures.', data)
     if cursor.coverage_gap_started_at:
         return _status(
-            f'snapper-{scope}-scheduler', 'agents', 'error',
+            f'snapper-{scope}-scheduler', 'testbed' if scope == 'testbed' else 'agents', 'error',
             f'Snapper {scope} scheduler has an open coverage gap.', data)
     if heartbeat_age is None or heartbeat_age > heartbeat_limit.total_seconds():
         return _status(
-            f'snapper-{scope}-scheduler', 'agents', 'error',
+            f'snapper-{scope}-scheduler', 'testbed' if scope == 'testbed' else 'agents', 'error',
             f'Snapper {scope} scheduler heartbeat is stale.', data)
     outcome = (cursor.scheduler_result or {}).get('outcome') or 'unknown'
     if outcome == 'failed':
         return _status(
-            f'snapper-{scope}-scheduler', 'agents', 'error',
+            f'snapper-{scope}-scheduler', 'testbed' if scope == 'testbed' else 'agents', 'error',
             f'Snapper {scope} scheduler latest capture failed.', data)
     return _status(
-        f'snapper-{scope}-scheduler', 'agents', 'ok',
+        f'snapper-{scope}-scheduler', 'testbed' if scope == 'testbed' else 'agents', 'ok',
         f'Snapper {scope} scheduler is evaluating boundaries; '
         f'latest outcome is {outcome}.', data)
 
@@ -628,11 +635,11 @@ def _stale_state():
         problems.append(f'{len(stale_runs)} run state(s) non-terminal '
                         'and stale')
     if problems:
-        return _status('stale-state', 'agents', 'warning',
+        return _status('stale-state', 'testbed', 'warning',
                        '; '.join(problems)
                        + f' (older than {hours:.0f}h) — a writer is '
                          'abandoning state; fix the source', data)
-    return _status('stale-state', 'agents', 'ok',
+    return _status('stale-state', 'testbed', 'ok',
                    'no state record claims unbacked activity', data)
 
 
@@ -746,15 +753,22 @@ def grouped_current_status():
 def status_summary(exclude_names=None):
     """Summarize cached checks, optionally omitting named check rows.
 
-    The System page calls this without exclusions. Narrow consumers such as
-    Capcom can deliberately summarize only the checks in their own scope
-    without changing collection or hiding rows from the System page.
+    The global verdict is over the production checks: the testbed checks
+    (``TESTBED_CHECKS``) stay listed on the System page and are reported
+    in ``testbed_non_ok``, and they never move ``overall_status``. Narrow
+    consumers such as Capcom can deliberately summarize only the checks
+    in their own scope without changing collection or hiding rows from
+    the System page.
     """
     now = timezone.now()
     try:
         queryset = SystemStatus.objects.all()
         if exclude_names:
             queryset = queryset.exclude(name__in=exclude_names)
+        testbed_non_ok = sorted(
+            queryset.filter(name__in=TESTBED_CHECKS)
+            .exclude(status='ok').values_list('name', flat=True))
+        queryset = queryset.exclude(name__in=TESTBED_CHECKS)
         rows = list(queryset)
     except (OperationalError, ProgrammingError):
         return {
@@ -776,6 +790,7 @@ def status_summary(exclude_names=None):
             checked.append(row.checked_at)
     counts['total'] = len(rows)
     counts['latest_checked_at'] = max(checked) if checked else None
+    counts['testbed_non_ok'] = testbed_non_ok
     counts['oldest_checked_at'] = min(checked) if checked else None
     if not rows:
         counts['overall_status'] = 'unknown'
