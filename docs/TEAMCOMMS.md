@@ -22,7 +22,8 @@ without buffering.
 ## Browser interface
 
 When TC is enabled, the monitor's System menu links to its public browser
-interface at `https://epic-devcloud.org/prod/teamcomms/`. The link uses
+interface at `https://epic-devcloud.org/prod/teamcomms/`. Individual components
+remain in TeamComms navigation rather than separate System-menu entries. The link uses
 `SWF_TEAMCOMMS_PUBLIC_HOST`, including on the BNL face, so browser access uses
 the existing devcloud account session. The UI provides the shared overview,
 Entries list at `/entries` and editor at `/entries/<UUID>` beneath that prefix.
@@ -51,7 +52,7 @@ verify navigation, asset responses, browser CSRF and entry operations.
 
 ## SWF Pouch
 
-The System menu's **SWF Pouch** link opens
+TeamComms's internal **Pouch** link opens
 `https://epic-devcloud.org/prod/teamcomms/pouch`, using the configured public
 host and existing devcloud login. The same TC mount serves the Pouch page and
 its authenticated APIs; no additional proxy route or credentials are required.
@@ -333,7 +334,9 @@ the corresponding service kind. `live-bot-token` is a local private copy of
 
 Selected AI sessions subscribe explicitly to `swf-observed-events`. The bridge
 registers one TC session for its channel and suppresses its own bot posts and
-source-channel reflections. Mattermost provenance is connector-reported and
+source-channel reflections. Ordinary feed posts do not publish to AI inboxes;
+only explicit **Notify LLM** posts enter the configured inbound audience.
+Mattermost provenance is connector-reported and
 does not replace the authenticated TC connector author.
 
 `swf-teamcomms-mattermost.service` runs the bridge as `wenauseic`, using the
@@ -373,7 +376,7 @@ do not establish live connector acceptance.
 
 ## SWF Inflight
 
-The System menu groups TeamComms, SWF Pouch and **SWF Inflight**. Inflight opens
+The System menu contains one **TeamComms** link. Its internal **Inflight** link opens
 `https://epic-devcloud.org/prod/teamcomms/inflight`, using the configured public
 host and existing devcloud login. The complete subtree is already proxied; no
 new Apache path, authentication reference format or browser credential is needed.
@@ -475,7 +478,7 @@ unprivileged guard: it could not stop their process group on authority loss.
 
 ## Topical Capcom
 
-The System menu opens `/prod/teamcomms/capcom` within the existing authenticated
+TeamComms navigation opens `/prod/teamcomms/capcom` within the existing authenticated
 subtree. Add `teamcomms.capcom.apps.CapcomConfig` and grant ordinary members
 `capcom:read` and `capcom:write`, independently of production rights. The package's
 Capcom `0001_initial`, `0002_integrity` and `0003_conversationread` migrations
@@ -527,3 +530,46 @@ uses no model and mutates no production resource. It runs one explicit offer and
 marks its dedicated worker session offline on completion. Existing agents, native
 sessions, TJAI, recorders and Mattermost routes retain their launch/configuration.
 The Inflight page shows execution profile, state and result alongside ownership.
+
+## Notify LLM
+
+**Notify LLM** is the explicit, sparse category for requesting model attention.
+Severity does not select it: routine notices, completion events and alarms remain
+available in their existing feeds without waking subscribed AI sessions.
+
+Scripts use `teamcomms.connectors.watcher.notify_llm` with the existing devcloud
+program configuration and private outgoing store. Required fields are source,
+event_id, reason, content, explicit audience and original observed_at; topic is
+optional. The helper freezes a source-derived UUID and exact body before sending.
+Retries reuse that body, while changed content conflicts. The package documents
+the callable and runnable example in docs/notify-llm.md and examples/notify-llm.py.
+
+```sh
+teamcomms-connect --config /path/to/private/program.json \
+  notify-llm /path/to/private/notification.json
+```
+
+The prepared SWF event JSON can supply source/event/time/content/audience/topic;
+add a deliberate reason and use notify-llm only when model consideration is
+intended. Ordinary publish-event excludes AI destinations while retaining the
+bridge destination. No new subscription, continuous watcher or source import is
+enabled. Existing exact publication retries retain their original deliveries.
+
+Capcom's notice composer has an initially unchecked **Notify LLM** control with
+explicit recipients and reason. The corresponding API fields are notify_llm and
+notify_llm_reason; notice identity supplies the stable source. The existing
+comms:write and capcom:write scopes apply independently of production rights.
+
+On epicprod-live, a new post selects the category with leading text `Notify LLM:`
+or boolean post property notify_llm=true. The bridge uses its configured inbound
+audience and verified post/user provenance; it advances past ordinary posts
+without TC publication. Own bot posts and reflections remain excluded. Scripts
+using the same epicprod bot call the helper directly, including the bridge in
+the explicit audience if a visible feed post is desired. No other live-feed
+publisher or DISpatcher route changes.
+
+A package upgrade requires restarting only swf-teamcomms-mattermost.service after
+full deployment to activate inbound selection, preserving private state. No new
+migrations, credentials or native client restarts are required. The package also
+applies the saved browser theme before deferred UI scripts to prevent a light
+flash during dark-mode navigation.

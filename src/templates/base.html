@@ -763,9 +763,6 @@
                 <a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='platform' %}">Platform status</a>
                 {% if teamcomms_url %}
                     <a href="{{ teamcomms_url }}">TeamComms</a>
-                    <a href="{{ teamcomms_url }}pouch">SWF Pouch</a>
-                    <a href="{{ teamcomms_url }}inflight">SWF Inflight</a>
-                    <a href="{{ teamcomms_url }}capcom">SWF Capcom</a>
                 {% endif %}
                 {% if may_administer_users %}
                     <a href="{% url 'monitor_app:user_admin' %}"
