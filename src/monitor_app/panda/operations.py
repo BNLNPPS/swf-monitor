@@ -243,7 +243,10 @@ def retry_parameters(raw):
         if ram < 100 or ram > 1000000:
             raise PandaTaskOperationError('RAM per core must be between 100 and 1000000 MB.')
         params['ramCount'] = ram
-        params['ramUnit'] = 'MBPerCore'
+        # Fixed, as the submission sets it (scripts/evgen_panda_submit.py):
+        # a memory the operator sets is not for JEDI's scout-data pass to
+        # reset from the finished jobs' PSS.
+        params['ramUnit'] = 'MBPerCoreFixed'
     hours = raw.get('walltime_hours')
     if hours not in (None, ''):
         try:

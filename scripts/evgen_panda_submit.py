@@ -115,7 +115,14 @@ def build_task_params(spec, archive_name):
         'sourceURL': _source_url(),
         'coreCount': int(spec.get('nCore', 1)),
         'ramCount': int(spec.get('memory', 4096)),
-        'ramUnit': 'MBPerCore',                      # producer envelope (commands.py)
+        # Fixed: JEDI's watchdog scout-data pass resets a MBPerCore task's
+        # ramCount from its first finished jobs' PSS (75th percentile plus
+        # 10 percent), and the job request is 0.9 of that; task 39951's
+        # retries went out asking 2,556 MB against a 2,790 MB RSS footprint
+        # and died where the glidein polices request_memory (segfault
+        # finding f-12). MBPerCoreFixed keeps the submitted memory through
+        # the run; a job's own memory retry still climbs.
+        'ramUnit': 'MBPerCoreFixed',
         'nEvents': int(spec.get('nJobs', 1)),       # one job per manifest row
         'nEventsPerJob': int(spec.get('nEventsPerJob', 1)),
         'jobParameters': [
