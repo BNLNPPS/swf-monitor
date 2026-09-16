@@ -715,6 +715,7 @@ def _epicprod_curve_values(state):
     values.update(_delivery_curve_values(state))
     values.update(_platform_curve_values(state))
     values.update(_storage_curve_values(state))
+    values.update(_catalog_curve_values(state))
     return values
 
 
@@ -1014,6 +1015,8 @@ def _epicprod_curve_color(curve_id):
 
     if curve_id.startswith('sto'):
         return _storage_curve_color(curve_id)
+    if curve_id.startswith('cat'):
+        return _catalog_curve_color(curve_id)
     # Operator-set colors on every jobs panel: the running pair reads
     # as blues — cores dark, running jobs lighter — and activated is
     # grey context rather than health/completion green.
@@ -1177,6 +1180,8 @@ def _epicprod_curve_label(curve_id):
     # ambiguous.
     if curve_id.startswith('sto'):
         return _storage_curve_label(curve_id)
+    if curve_id.startswith('cat'):
+        return _catalog_curve_label(curve_id)
     if curve_id in _PLATFORM_LABELS:
         return _PLATFORM_LABELS[curve_id]
     if curve_id.startswith('plss_'):
@@ -1770,7 +1775,8 @@ def _epicprod_groups():
     callable form) so new campaigns and sites appear without an app
     restart."""
     return (EPICPROD_GROUPS + _delivery_groups() + _site_groups()
-            + _errors_groups() + _platform_groups() + _storage_groups())
+            + _errors_groups() + _platform_groups() + _storage_groups()
+            + _catalog_groups())
 
 
 # The Platform view's families in panel order — load, platform,
@@ -5818,7 +5824,7 @@ def _series_cache(key, builder, refresh=False):
     # that advance every refresh cycle, and the Storage focus (param
     # 'rse') a record that advances with every storage pass.
     if (':focus:task:' in key or ':focus:platform:' in key
-            or ':focus:rse:' in key):
+            or ':focus:rse:' in key or ':focus:catalog:' in key):
         ttl_seconds = 90
     else:
         ttl_seconds = 6 * 3600 if ':focus:' in key else 90
@@ -5833,6 +5839,215 @@ def _series_cache(key, builder, refresh=False):
         'refreshing': product['refreshing'],
         'built_at': product['built_at'],
         'age_seconds': product['age_seconds'],
+    }
+
+
+# ── Catalog view (docs/SNAPPER_CATALOG.md) ──────────────────────────────
+
+_CATALOG_OUTCOME_ORDER = ('registered', 'diverted', 'pending', 'start',
+                          'failed', 'not_reached', 'none')
+_CATALOG_OUTCOME_LABELS = {
+    'registered': 'registered', 'diverted': 'diverted (clash)',
+    'pending': 'pending (catalog unreachable)',
+    'start': 'unfinished (died or stashed in registration)',
+    'failed': 'failed (registration lost)',
+    'not_reached': 'not reached', 'none': 'no digest',
+}
+_CATALOG_OUTCOME_COLORS = {
+    'registered': '#1565c0', 'diverted': '#8ab6e8', 'pending': '#f9a825',
+    'start': '#78909c', 'failed': '#c62828', 'not_reached': '#c7c7c7',
+    'none': '#e0e0e0',
+}
+_CATALOG_PROBE_LABELS = {'tls': 'TLS handshake', 'ping': '/ping',
+                         'read': 'authenticated read'}
+_CATALOG_PROBE_COLORS = {'tls': '#7e57c2', 'ping': '#1565c0', 'read': '#2e7d32'}
+_CATALOG_EXIT_COLORS = {'1': '#c62828', '81': '#ef6c00', '78': '#b71c1c',
+                        '84': '#8e24aa', 'unknown': '#78909c'}
+
+
+def _catalog_curve_values(state):
+    """Curves from the catalog component (docs/SNAPPER_CATALOG.md): the
+    interval's registrations by outcome (catrg_), the failed split by
+    payload exit code (catfx_), the probe timings in ms (catpr_), the
+    registration stage's wall seconds (catlt_), the pending backlog
+    (catrr_). A group that recorded a read failure emits no curves."""
+    values = {}
+    cat = component_data(state, 'catalog')
+    if not cat:
+        return values
+    reg = cat.get('registrations') or {}
+    if reg and 'error' not in reg:
+        for outcome, n in (reg.get('by_outcome') or {}).items():
+            if n:
+                values[f'catrg_{outcome}'] = int(n)
+        for code, n in (reg.get('failed_by_exit') or {}).items():
+            values[f'catfx_{code}'] = int(n)
+    probe = cat.get('probe') or {}
+    if probe and 'error' not in probe:
+        for k in ('tls', 'ping', 'read'):
+            entry = probe.get(k) or {}
+            if entry.get('latency_ms') is not None and not (
+                    k == 'read' and 'read not made' in str(entry.get('error') or '')):
+                values[f'catpr_{k}'] = float(entry['latency_ms'])
+    lat = cat.get('latency') or {}
+    if lat and 'error' not in lat:
+        reg_stats = lat.get('registered') or {}
+        if reg_stats.get('count'):
+            values['catlt_median'] = float(reg_stats.get('median_s') or 0)
+            values['catlt_p90'] = float(reg_stats.get('p90_s') or 0)
+    rr = cat.get('registrar') or {}
+    if rr and 'error' not in rr:
+        values['catrr_pending'] = int(rr.get('pending') or 0)
+        if rr.get('oldest_pending_h') is not None:
+            values['catrr_oldest_h'] = float(rr['oldest_pending_h'])
+    return values
+
+
+def _catalog_curve_label(curve_id):
+    prefix, _, member = curve_id.partition('_')
+    if prefix == 'catrg':
+        return _CATALOG_OUTCOME_LABELS.get(member, member)
+    if prefix == 'catfx':
+        return f'exit {member}'
+    if prefix == 'catpr':
+        return _CATALOG_PROBE_LABELS.get(member, member)
+    if prefix == 'catlt':
+        return {'median': 'median', 'p90': '90th percentile'}.get(member, member)
+    if prefix == 'catrr':
+        return {'pending': 'pending owed (24 h)', 'oldest_h': 'oldest pending, h'}.get(member, member)
+    return None
+
+
+def _catalog_curve_color(curve_id):
+    prefix, _, member = curve_id.partition('_')
+    if prefix == 'catrg':
+        return _CATALOG_OUTCOME_COLORS.get(member)
+    if prefix == 'catfx':
+        return _CATALOG_EXIT_COLORS.get(member)
+    if prefix == 'catpr':
+        return _CATALOG_PROBE_COLORS.get(member)
+    if prefix == 'catlt':
+        return {'median': '#1565c0', 'p90': '#7e57c2'}.get(member)
+    if prefix == 'catrr':
+        return {'pending': '#f9a825', 'oldest_h': '#ef6c00'}.get(member)
+    return None
+
+
+def _catalog_section(label):
+    return {'label': label, 'display': label,
+            'pinned': True, 'idle': False, 'peak': ''}
+
+
+def _catalog_groups():
+    # Panel order following the question: what was asked, what came
+    # back, how fast, what is owed.
+    return (
+        {'name': 'Catalog registrations', 'title': 'Registrations by outcome',
+         'section': _catalog_section('What the jobs asked'),
+         'prefixes': ['catrg_'], 'ids': [],
+         'order': [f'catrg_{o}' for o in _CATALOG_OUTCOME_ORDER],
+         'stacked': True, 'panel_px': 170, 'units': 'jobs ended per interval'},
+        {'name': 'Catalog failed by exit', 'title': 'Registration lost, by payload exit code',
+         'prefixes': ['catfx_'], 'ids': [],
+         'stacked': True, 'panel_px': 130, 'units': 'jobs per interval'},
+        {'name': 'Catalog probe', 'title': 'Catalog response, measured from swf-monitor',
+         'section': _catalog_section('How the catalog answered'),
+         'prefixes': ['catpr_'], 'ids': [],
+         'order': ['catpr_tls', 'catpr_ping', 'catpr_read'],
+         'panel_px': 130, 'units': 'ms (timeouts drawn at the timeout)'},
+        {'name': 'Catalog registration time', 'title': 'Registration stage wall time, registered jobs',
+         'prefixes': ['catlt_'], 'ids': [],
+         'order': ['catlt_median', 'catlt_p90'],
+         'panel_px': 130, 'units': 'seconds'},
+        {'name': 'Catalog registrar', 'title': 'Registrations owed',
+         'section': _catalog_section('What is owed'),
+         'prefixes': [], 'ids': ['catrr_pending', 'catrr_oldest_h'],
+         'order': ['catrr_pending', 'catrr_oldest_h'],
+         'default_off_ids': ['catrr_oldest_h'],
+         'panel_px': 110, 'units': 'pending jobs (24 h) · hours'},
+    )
+
+
+CATALOG_FAMILIES = ('Catalog registrations', 'Catalog failed by exit',
+                    'Catalog probe', 'Catalog registration time',
+                    'Catalog registrar')
+
+
+def _catalog_focus_view():
+    """The Catalog focus tab (docs/SNAPPER_CATALOG.md): what the jobs
+    asked of the JLab Rucio catalog, what they got, how it answered,
+    and what is owed, on one axis; the cut is the catalog card."""
+    return {
+        'param': 'catalog',
+        'label': 'Catalog',
+        'selector_label': 'Catalog',
+        'cache_series': True,
+        'components': ('catalog',),
+        'prewarm_series': True,
+        'note': ('Registrations count the production jobs that ended in each '
+                 'five-minute interval by what their payload reported of the '
+                 'JLab Rucio catalog; the probe is measured from swf-monitor. '
+                 'Click the plot for the catalog\'s standing at that instant.'),
+        'default': 'overall',
+        'default_window': '24h',
+        'options': [{'value': 'overall', 'label': 'JLab Rucio',
+                     'families': list(CATALOG_FAMILIES),
+                     'component': 'catalog'}],
+    }
+
+
+def _catalog_card(data, previous_data, ctx):
+    """The catalog cut card: the verdicts with their thresholds, the
+    probe timings, the interval's registrations by outcome, queue and
+    exit code, the registration times, and the backlog."""
+    if not data or 'registrations' not in data:
+        return None
+    assessment = data.get('assessment') or {}
+    thresholds = assessment.get('thresholds') or {}
+    threshold_text = {
+        'probe': (f"warn when a probe fails or exceeds {thresholds.get('catalog_probe_slow_ms')} ms "
+                  f"(timeout {thresholds.get('catalog_probe_timeout_s')} s)"),
+        'failed_share': (f"warn when at least {thresholds.get('catalog_failed_share')} of registrations "
+                         f"fail, over at least {thresholds.get('catalog_failed_floor')} attempts"),
+        'pending_backlog': f"warn when the oldest pending registration is over {thresholds.get('catalog_pending_old_hours')} h",
+    }
+    verdicts = [{'name': name.replace('_', ' '), 'value': value,
+                 'chip': cut_chip('ok' if value == 'ok' else 'warning' if value == 'warning' else 'unknown'),
+                 'threshold': threshold_text.get(name, '')}
+                for name, value in (assessment.get('verdicts') or {}).items()]
+    probe = data.get('probe') or {}
+    probe_rows = [{'name': _CATALOG_PROBE_LABELS.get(k, k), **(probe.get(k) or {})}
+                  for k in ('tls', 'ping', 'read')] if 'error' not in probe else []
+    reg = data.get('registrations') or {}
+    by_outcome = [{'outcome': o, 'label': _CATALOG_OUTCOME_LABELS.get(o, o),
+                   'count': int((reg.get('by_outcome') or {}).get(o) or 0),
+                   'color': _CATALOG_OUTCOME_COLORS.get(o)}
+                  for o in _CATALOG_OUTCOME_ORDER if (reg.get('by_outcome') or {}).get(o)]
+    queue_rows = []
+    for queue, counts in sorted((reg.get('by_queue') or {}).items(),
+                                key=lambda kv: -sum(kv[1].values())):
+        queue_rows.append({'queue': queue, 'total': sum(counts.values()),
+                           'registered': counts.get('registered', 0),
+                           'pending': counts.get('pending', 0),
+                           'failed': counts.get('failed', 0),
+                           'not_reached': counts.get('not_reached', 0)})
+    return {
+        'kind': 'catalog',
+        'overall': assessment.get('overall') or 'unknown',
+        'overall_chip': cut_chip('ok' if assessment.get('overall') == 'ok'
+                                 else 'warning' if assessment.get('overall') == 'warning' else 'unknown'),
+        'verdicts': verdicts,
+        'interval': data.get('interval') or {},
+        'probe_host': probe.get('host') or '', 'probe_error': probe.get('error') or '',
+        'probe_rows': probe_rows,
+        'registrations': {'jobs': reg.get('jobs'), 'attempted': reg.get('attempted'),
+                          'failed_share': reg.get('failed_share'),
+                          'failed_by_exit': sorted((reg.get('failed_by_exit') or {}).items()),
+                          'versions': sorted((reg.get('payload_versions') or {}).items()),
+                          'error': reg.get('error') or ''},
+        'by_outcome': by_outcome, 'queue_rows': queue_rows,
+        'latency': data.get('latency') or {},
+        'registrar': data.get('registrar') or {},
     }
 
 
@@ -5866,12 +6081,13 @@ def register_snapper_providers():
         scope_components=('panda', 'health', 'delivery'),
         focus_view=(_delivery_focus_view, _site_focus_view,
                     _errors_focus_view, _platform_focus_view,
-                    _storage_focus_view),
+                    _storage_focus_view, _catalog_focus_view),
         component_cards={'panda': _panda_card,
                          'delivery': _delivery_card,
                          'errors': _errors_card,
                          'platform': _platform_card,
-                         'storage': _storage_card},
+                         'storage': _storage_card,
+                         'catalog': _catalog_card},
         card_template=CARD_TEMPLATE,
         annotate_references=annotate_references,
     ))

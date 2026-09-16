@@ -643,6 +643,72 @@
   </div>
   {% endfor %}
 
+{% elif card.kind == 'catalog' %}
+  {# The catalog cut: verdicts, the probe, the interval's registrations by outcome, queue and exit code, the registration times, the backlog. #}
+  <section class="snapper-cut-card">
+    <div class="mb-2"><strong>JLab Rucio catalog</strong>
+      <span class="snapper-chip" style="background:{{ card.overall_chip.color }}">{{ card.overall }}</span>
+      {% if card.interval.end %}<span class="text-muted small">interval {{ card.interval.start|fmt_dt }} – {{ card.interval.end|fmt_dt }} ET</span>{% endif %}</div>
+    <div class="d-flex flex-wrap column-gap-3 row-gap-1 mb-2">
+      {% for v in card.verdicts %}
+      <span title="{{ v.threshold }}"><span class="snapper-chip" style="background:{{ v.chip.color }}">{{ v.chip.value }}</span> {{ v.name }}</span>
+      {% endfor %}
+    </div>
+    <div class="d-flex flex-wrap column-gap-4 row-gap-2 align-items-start">
+      <div>
+        <div class="mb-1"><strong>Probe</strong> <span class="text-muted small">from swf-monitor to {{ card.probe_host }}</span></div>
+        {% if card.probe_error %}<div class="text-danger mb-1">{{ card.probe_error }}</div>{% endif %}
+        <table class="table table-sm table-bordered w-auto mb-2">
+          <thead><tr><th>Request</th><th class="text-end">ms</th><th>Outcome</th></tr></thead>
+          <tbody>
+          {% for p in card.probe_rows %}
+          <tr><td>{{ p.name }}</td><td class="text-end">{{ p.latency_ms|default_if_none:"—" }}</td><td>{% if p.ok %}ok{% elif p.timeout %}<span class="text-danger">timeout</span>{% else %}<span class="text-danger">{{ p.error|default:"failed" }}</span>{% endif %}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <div class="mb-1"><strong>Registrations in the interval</strong> <span class="text-muted small">{{ card.registrations.jobs|default_if_none:"—" }} jobs ended, {{ card.registrations.attempted|default_if_none:"—" }} reached registration{% if card.registrations.failed_share is not None %}, failed share {{ card.registrations.failed_share|floatformat:3 }}{% endif %}</span></div>
+        {% if card.registrations.error %}<div class="text-danger mb-1">{{ card.registrations.error }}</div>{% endif %}
+        <table class="table table-sm table-bordered w-auto mb-1">
+          <tbody>
+          {% for o in card.by_outcome %}
+          <tr><td><span style="display:inline-block;width:.8em;height:.8em;border-radius:2px;vertical-align:baseline;background:{{ o.color }}"></span> {{ o.label }}</td><td class="text-end">{{ o.count }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% if card.registrations.failed_by_exit %}<div class="text-muted small mb-1">Lost by payload exit code: {% for code, n in card.registrations.failed_by_exit %}{% if not forloop.first %}, {% endif %}exit {{ code }}: {{ n }}{% endfor %}.</div>{% endif %}
+        {% if card.registrations.versions %}<div class="text-muted small mb-2">Payload versions: {% for v, n in card.registrations.versions %}{% if not forloop.first %}, {% endif %}{{ v }} ({{ n }}){% endfor %}.</div>{% endif %}
+        {% if card.queue_rows %}
+        <table class="table table-sm table-bordered w-auto mb-2">
+          <thead><tr><th>Queue</th><th class="text-end">Ended</th><th class="text-end">Registered</th><th class="text-end">Pending</th><th class="text-end">Lost</th><th class="text-end">Not reached</th></tr></thead>
+          <tbody>
+          {% for q in card.queue_rows %}
+          <tr><td>{{ q.queue }}</td><td class="text-end">{{ q.total }}</td><td class="text-end">{{ q.registered }}</td><td class="text-end">{{ q.pending }}</td><td class="text-end">{{ q.failed }}</td><td class="text-end">{{ q.not_reached }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </div>
+      <div>
+        <div class="mb-1"><strong>Registration stage time</strong> <span class="text-muted small">from the payload reports at hand</span></div>
+        {% if card.latency.error %}<div class="text-danger mb-1">{{ card.latency.error }}</div>{% else %}
+        <table class="table table-sm table-bordered w-auto mb-2">
+          <thead><tr><th>Jobs</th><th class="text-end">Count</th><th class="text-end">Median s</th><th class="text-end">p90 s</th><th class="text-end">Max s</th></tr></thead>
+          <tbody>
+          <tr><td>registered</td><td class="text-end">{{ card.latency.registered.count|default_if_none:"—" }}</td><td class="text-end">{{ card.latency.registered.median_s|default_if_none:"—" }}</td><td class="text-end">{{ card.latency.registered.p90_s|default_if_none:"—" }}</td><td class="text-end">{{ card.latency.registered.max_s|default_if_none:"—" }}</td></tr>
+          <tr><td>all with a report</td><td class="text-end">{{ card.latency.all.count|default_if_none:"—" }}</td><td class="text-end">{{ card.latency.all.median_s|default_if_none:"—" }}</td><td class="text-end">{{ card.latency.all.p90_s|default_if_none:"—" }}</td><td class="text-end">{{ card.latency.all.max_s|default_if_none:"—" }}</td></tr>
+          </tbody>
+        </table>
+        {% endif %}
+        <div class="mb-1"><strong>Owed</strong></div>
+        {% if card.registrar.error %}<div class="text-danger mb-1">{{ card.registrar.error }}</div>{% else %}
+        <div class="text-muted small">{{ card.registrar.pending|default_if_none:"—" }} pending registrations over the last {{ card.registrar.window_hours }} h{% if card.registrar.oldest_pending_h is not None %}, the oldest {{ card.registrar.oldest_pending_h }} h old{% endif %}.</div>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
 {% elif card.kind == 'delivery' %}
   {% if card.filter_note %}
   <div class="mb-1"><strong>{{ card.filter_note }}</strong></div>

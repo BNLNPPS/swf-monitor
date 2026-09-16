@@ -42,6 +42,10 @@ from monitor_app.snapper_platform import (  # noqa: E402
     compact_platform_publication_report,
     publish_platform_state,
 )
+from monitor_app.snapper_catalog import (  # noqa: E402
+    compact_catalog_publication_report,
+    publish_catalog_state,
+)
 
 
 def main(argv):
@@ -66,6 +70,13 @@ def main(argv):
         print(compact_errors_publication_report(errors_publication))
         platform_publication = publish_platform_state()
         print(compact_platform_publication_report(platform_publication))
+        # The catalog component (docs/SNAPPER_CATALOG.md): a failed
+        # publication is reported and never stops the platform's.
+        try:
+            catalog_publication = publish_catalog_state()
+            print(compact_catalog_publication_report(catalog_publication))
+        except Exception as exc:                              # noqa: BLE001
+            print(f'WARNING: catalog publication failed: {exc}', file=sys.stderr)
         # The Platform view plots components that advance every cycle,
         # so its series is stale as soon as this refresh publishes and
         # the next visitor would pay the rebuild. Warm it here instead,
@@ -74,7 +85,7 @@ def main(argv):
         try:
             from snapper_ai.presentation import prewarm_focus_series
             warmed = prewarm_focus_series('epicprod', window_keys=('24h',),
-                                          only=('platform',))
+                                          only=('platform', 'catalog'))
             print(f'series prewarm: {len(warmed)} platform product(s)')
         except Exception as exc:                              # noqa: BLE001
             print(f'WARNING: platform series prewarm failed: {exc}',
