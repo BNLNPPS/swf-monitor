@@ -20,7 +20,7 @@ from .viewdir.user_admin import user_rights_set
 from .viewdir.capcom import (capcom_notice_ingest, capcom_notices,
                              capcom_state, capcom_user_state,
                              NoticeSubscriptionViewSet)
-from .viewdir.declared_api import declared_state
+from .viewdir.declared_api import declared_state, node_guard_exclusion
 from .viewdir.snapper_api import (snapper_changes_between,
                                   snapper_component_history, snapper_context,
                                   snapper_cut_summary, snapper_latest,
@@ -127,6 +127,9 @@ urlpatterns = [
     # The declared record for out-of-process readers (the site canary's
     # provider): CONTINUOUS_PRODUCTION.md, Declared downtime.
     path('declared/', declared_state, name='declared-state'),
+    # The node guard's published exclusion (site-canary docs/NODE_GUARD.md,
+    # Actuation): what the cycle puts on the bucket's pilot prefix.
+    path('node-guard/exclusion/', node_guard_exclusion, name='node-guard-exclusion'),
     path('capcom/notices/ingest/', capcom_notice_ingest,
          name='capcom-notice-ingest'),
     path('messages/stream/', sse_message_stream, name='sse-message-stream'),

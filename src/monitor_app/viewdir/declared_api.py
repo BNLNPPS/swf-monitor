@@ -43,3 +43,19 @@ def declared_state(request):
                     'in_force': '', 'coming': '', 'coming_at': None, 'line': '',
                     'spans': info.get('spans', []), 'last_end': info.get('last_end')})
     return Response(out)
+
+
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def node_guard_exclusion(request):
+    """GET /api/node-guard/exclusion/ — the node guard's published
+    exclusion as the last cycle stored it (site-canary docs/NODE_GUARD.md,
+    Actuation): the same document the cycle puts on the bucket's pilot
+    prefix. Anonymous, read-only; a 503 until a cycle has run."""
+    from monitor_app.models import CachedProduct
+    from monitor_app.panda.node_guard import EXCLUSION_KEY
+    row = CachedProduct.objects.filter(key=EXCLUSION_KEY).first()
+    if row is None or not row.value:
+        return Response({'error': 'no exclusion document stored yet'}, status=503)
+    return Response(row.value)

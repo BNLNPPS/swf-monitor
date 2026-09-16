@@ -5,11 +5,18 @@ comes back is recorded on the action stream and stored as the cached
 product ``node_guard_state``, which the Node guard page reads.
 
 The cycle runs as the production-operations agent's ``node_guard_cycle``
-doer (``scripts/node-guard-cycle.py``), by cron enqueue. It holds no
-credential and acts on nothing: in shadow mode a tripped node reads
-``would_exclude``; live mode (the published exclusion, the wrapper and
-landing checks, the OSG clause) is a later build and is refused until
-then, decided as shadow with the refusal recorded.
+doer (``scripts/node-guard-cycle.py``), by cron enqueue. In shadow mode
+a tripped node reads ``would_exclude``, in live mode ``excluded``; the
+record is written the same way in both. What acts is the published
+exclusion (NODE_GUARD.md, Actuation): every cycle the record's black
+holes go out as one document carrying the mode and a validity, stored
+as the cached product ``node_guard_exclusion``, served anonymously at
+``GET /api/node-guard/exclusion/``, and put on the devcloud bucket's
+public pilot prefix (``pilot/node-exclusion.json``) with the worker
+profile in the operating account's AWS credentials, where the wrapper
+and the payload's landing check fetch it. A reader declines only on a
+live document inside its validity, so a publisher that stops leaves no
+exclusion standing.
 
 Settings live in SysConfig under ``node_guard.*`` and are seeded at
 their defaults on first read, so every knob is visible on the System
@@ -25,7 +32,10 @@ for each standing black hole; one ``node_guard_cycle`` per cycle. Every
 read is fenced: a failed window read or calibration is recorded as the
 cycle's error and the cycle goes on with what it has.
 """
+import json
 import logging
+import os
+from datetime import timedelta
 
 from django.db import connections
 from django.utils import timezone
@@ -36,7 +46,18 @@ logger = logging.getLogger(__name__)
 
 STATE_KEY = 'node_guard_state'
 STATE_TTL_S = 24 * 3600
-MODES = ('shadow',)          # 'live' once the actuation is built
+MODES = ('shadow', 'live')
+# The published exclusion: the document's validity (a reader ignores an
+# older one) and where it goes. The bucket, key and profile follow
+# swf-epicprod docs/DEVCLOUD_STAGEOUT.md § 4; the environment overrides.
+EXCLUSION_KEY = 'node_guard_exclusion'
+EXCLUSION_VALID_S = 20 * 60
+EXCLUSION_BUCKET = os.environ.get('NODE_EXCLUSION_BUCKET', 'epic-devcloud-stageout')
+EXCLUSION_OBJECT = os.environ.get('NODE_EXCLUSION_OBJECT', 'pilot/node-exclusion.json')
+EXCLUSION_REGION = os.environ.get('NODE_EXCLUSION_REGION', 'us-east-1')
+EXCLUSION_PROFILE = os.environ.get('NODE_EXCLUSION_PROFILE', 'epic-stageout')
+EXCLUSION_URL = (f'https://{EXCLUSION_BUCKET}.s3.{EXCLUSION_REGION}.amazonaws.com/'
+                 f'{EXCLUSION_OBJECT}')
 HEARTBEAT_S = 3600
 DEFAULTS = {
     'enabled': False,
@@ -253,6 +274,35 @@ def _readings(verdicts, rows, calib, cfg):
     return readings
 
 
+def exclusion_document(mode, now):
+    """The published exclusion: the record's black holes
+    (``canary.store.nodes.current_exclusion``) with the mode and a
+    validity. A reader (the wrapper, the payload's landing check) declines
+    a landing only when ``mode`` is live, ``valid_until`` has not passed,
+    and its host (and queue, when it knows it) is listed."""
+    from canary.store import nodes as node_record
+    return {
+        'generated_at': now.isoformat(),
+        'valid_until': (now + timedelta(seconds=EXCLUSION_VALID_S)).isoformat(),
+        'mode': mode,
+        'nodes': node_record.current_exclusion(),
+        'source': 'swf-monitor node guard (site-canary docs/NODE_GUARD.md)',
+    }
+
+
+def publish_exclusion(document):
+    """Put the document on the bucket's public pilot prefix, where every
+    worker fetches; the worker profile in the operating account's AWS
+    credentials writes it. Returns the public URL; raises on failure."""
+    import boto3
+    session = boto3.Session(profile_name=EXCLUSION_PROFILE, region_name=EXCLUSION_REGION)
+    session.client('s3').put_object(
+        Bucket=EXCLUSION_BUCKET, Key=EXCLUSION_OBJECT,
+        Body=json.dumps(document, indent=1).encode(),
+        ContentType='application/json', CacheControl='no-cache, max-age=0')
+    return EXCLUSION_URL
+
+
 def run_cycle(*, dry_run=False, created_by='node-guard'):
     """One cycle. Returns (nodes, summary): the judged nodes with their
     verdicts as shown, and the cycle summary; writes the records and
@@ -274,8 +324,8 @@ def run_cycle(*, dry_run=False, created_by='node-guard'):
     mode_requested = str(cfg['mode'])
     mode = mode_requested
     if mode not in MODES:
-        errors.append(f'node_guard.mode {mode_requested!r} is not available (the actuation '
-                      f'is not built); decided as shadow')
+        errors.append(f'node_guard.mode {mode_requested!r} is not a mode ({", ".join(MODES)}); '
+                      f'decided as shadow')
         mode = 'shadow'
     tripped_state = TRIPPED_STATES[mode]
 
@@ -374,6 +424,25 @@ def run_cycle(*, dry_run=False, created_by='node-guard'):
                 queue=key[0], window_h=cfg['window_h'], **e), failed(f'{key} heartbeat'))
             written += 1
 
+    # The published exclusion, every cycle the guard is on: the record's
+    # black holes as the document the wrapper and the landing check read,
+    # stored, served, and put on the bucket. A failed publication is the
+    # cycle's error; the last document's validity bounds what stands.
+    exclusion = {'nodes': 0, 'published': False, 'url': ''}
+    if enabled and not dry_run:
+        document = _safe('exclusion document', lambda: exclusion_document(mode, t0),
+                         failed('exclusion document'))
+        if document is not None:
+            from monitor_app.cached_product import get_product
+            exclusion['nodes'] = len(document['nodes'])
+            _safe('exclusion store', lambda: get_product(
+                EXCLUSION_KEY, lambda: document, ttl_seconds=STATE_TTL_S, refresh=True),
+                failed('exclusion store'))
+            url = _safe('exclusion publish', lambda: publish_exclusion(document),
+                        failed('exclusion publish'))
+            if url:
+                exclusion.update(published=True, url=url)
+
     tripped_nodes = [n for n in nodes if n['state'] in TRIPPED_STATES.values()]
     summary = {'cycle_at': t0.isoformat(), 'mode': mode, 'mode_requested': mode_requested,
                'enabled': enabled, 'window_h': cfg['window_h'],
@@ -382,6 +451,8 @@ def run_cycle(*, dry_run=False, created_by='node-guard'):
                'opened': len(trips), 'record_changes': len(changes),
                'malformed': verdicts['malformed'], 'decisions_recorded': written,
                'under_declaration': sum(set_aside.values()),
+               'exclusion_nodes': exclusion['nodes'],
+               'exclusion_published': exclusion['published'],
                'errors': errors,
                'duration_s': round((timezone.now() - t0).total_seconds(), 1)}
     if not dry_run:
@@ -397,6 +468,7 @@ def run_cycle(*, dry_run=False, created_by='node-guard'):
                          'queues': queues_state, 'nodes': nodes,
                          'tripped': [(n['queue'], n['host']) for n in tripped_nodes],
                          'under_declaration': set_aside,
+                         'exclusion': exclusion,
                          'errors': errors, 'duration_s': summary['duration_s']}
         from monitor_app.cached_product import get_product
         _safe('state store', lambda: get_product(
@@ -420,6 +492,9 @@ def run_cycle(*, dry_run=False, created_by='node-guard'):
                         if set_aside else '')
                      + ''.join(f'; {q} storm on {s["storm_hosts"]} hosts, the queue\'s event'
                                for q, s in queues_state.items() if s.get('queue_event'))
+                     + (f'; exclusion of {exclusion["nodes"]} node'
+                        f'{"s" if exclusion["nodes"] != 1 else ""} published ({mode})'
+                        if exclusion['published'] else '')
                      + (f'; errors: {"; ".join(errors)}' if errors else '')),
             **{k: v for k, v in summary.items() if k != 'errors'}),
             failed('cycle record'))
