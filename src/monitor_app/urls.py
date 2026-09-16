@@ -124,7 +124,8 @@ from .viewdir.system_status import (
 # Import iDDS database views from new dedicated module
 from .viewdir.analysis import analysis_view
 from .viewdir.panda_census import panda_queue_census_json
-from .viewdir.panda_node_guard import panda_node_guard, panda_node_guard_set
+from .viewdir.panda_node_guard import (panda_node_guard, panda_node_guard_json,
+                                       panda_node_guard_set)
 from pcs.views import front_page as panda_front
 from .viewdir.idds_database import (
     idds_database_tables_list,
@@ -294,6 +295,7 @@ urlpatterns = [
     # The node guard: black hole nodes judged from the job record
     # (site-canary docs/NODE_GUARD.md).
     path('panda/node-guard/', panda_node_guard, name='panda_node_guard'),
+    path('panda/node-guard/json/', panda_node_guard_json, name='panda_node_guard_json'),
     path('panda/node-guard/set/', panda_node_guard_set, name='panda_node_guard_set'),
     path('panda/jobs/', panda_jobs_list, name='panda_jobs_list'),
     path('panda/jobs/datatable/', panda_jobs_datatable_ajax, name='panda_jobs_datatable_ajax'),

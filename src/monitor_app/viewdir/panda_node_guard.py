@@ -134,6 +134,40 @@ def panda_node_guard(request):
     return render(request, 'monitor_app/panda_node_guard.html', context)
 
 
+def panda_node_guard_json(request):
+    """The node guard as JSON for scripts (prod-notify): the last cycle's
+    tripped nodes (would_exclude in shadow mode, excluded live) and the
+    node record's rows that are not clear. The same reads as the page,
+    nothing computed."""
+    from django.core.serializers.json import DjangoJSONEncoder
+    from django.http import JsonResponse
+    from monitor_app.models import CachedProduct, SysConfig
+
+    config = SysConfig.get_config()
+    row = CachedProduct.objects.filter(key=STATE_KEY).first()
+    state = (row.value if row else None) or {}
+    tripped = [
+        {'queue': n.get('queue'), 'host': n.get('host'), 'state': n.get('state'),
+         'reason': n.get('reason') or '', 'site': (n.get('evidence') or {}).get('site') or '',
+         'log_id': n.get('log_id')}
+        for n in state.get('nodes') or [] if (n.get('state') or 'clear') != 'clear']
+    errors = list(state.get('errors') or [])
+    try:
+        record = [{k: r.get(k) for k in ('queue', 'host', 'site', 'status', 'reason',
+                                          'opened_at', 'expires_at', 'trips', 'last_verdict_at')}
+                  for r in _record_rows()]
+    except Exception as exc:  # noqa: BLE001
+        logger.exception('node guard json: the record could not be read')
+        record = []
+        errors.append(f'the node record could not be read: {type(exc).__name__}: {exc}')
+    return JsonResponse({
+        'cycle_at': state.get('cycle_at'),
+        'mode': state.get('mode') or config.get('node_guard.mode', DEFAULTS['mode']),
+        'enabled': bool(state.get('enabled', config.get('node_guard.enabled', DEFAULTS['enabled']))),
+        'errors': errors, 'tripped': tripped, 'record': record,
+    }, encoder=DjangoJSONEncoder)
+
+
 def panda_node_guard_set(request):
     """A person's decision on one node of the record: clear, pin, unpin
     (back to clear, the guard may trip it again) or open a black hole by
