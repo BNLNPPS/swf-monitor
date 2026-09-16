@@ -36,7 +36,9 @@
             {% if sig.configuration %}
             <table class="table table-bordered table-sm align-middle w-auto">
                 <tbody>
-                {% if sig.configuration.prod_task %}<tr><th>PCS task</th><td><a href="{% url 'pcs:prod_task_detail' name=sig.configuration.prod_task %}">{{ sig.configuration.prod_task }}</a></td></tr>{% endif %}
+                {# the link takes the composed name, the task's identity; a registered sample's stored name carries slashes the route refuses #}
+                {% if sig.configuration.composed_name %}<tr><th>PCS task</th><td><a href="{% url 'pcs:prod_task_detail' name=sig.configuration.composed_name %}">{{ sig.configuration.prod_task }}</a></td></tr>
+                {% elif sig.configuration.prod_task %}<tr><th>PCS task</th><td><a href="{% url 'pcs:prod_task_detail' name=sig.configuration.prod_task %}">{{ sig.configuration.prod_task }}</a></td></tr>{% endif %}
                 <tr><th>Campaign</th><td>{{ sig.configuration.campaign }}</td></tr>
                 <tr><th>Composed name</th><td>{{ sig.configuration.composed_name }}</td></tr>
                 <tr><th>Physics</th><td>{{ sig.configuration.process }}</td></tr>
