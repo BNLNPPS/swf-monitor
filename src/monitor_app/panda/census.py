@@ -67,13 +67,44 @@ def _live_counts():
 
 def _tasks_active():
     """Per queue, the production tasks pinned to it that have not
-    ended (canary and other test tasks excluded)."""
+    ended (canary and other test tasks excluded). By processing type,
+    not VO: PCS submits under ``epic``, the production team's own
+    submissions carry the client default ``wlcg``, and both are the
+    queue's production."""
     placeholders = ', '.join(['%s'] * len(TASK_TERMINAL_STATUSES))
     sql = f"""
         SELECT COALESCE("site", 'unknown'), COUNT(*)
         FROM "{PANDA_SCHEMA}"."jedi_tasks"
-        WHERE "vo" = 'epic' AND "processingtype" = 'epicproduction'
+        WHERE "processingtype" = 'epicproduction'
           AND ("status" IS NULL OR "status" NOT IN ({placeholders}))
+        GROUP BY 1
+    """
+    with connections['panda'].cursor() as cursor:
+        cursor.execute(sql, list(TASK_TERMINAL_STATUSES))
+        return {str(site): int(n or 0) for site, n in cursor.fetchall()}
+
+
+def _ungenerated():
+    """Per queue, the rows of its non-terminal production tasks that
+    JEDI has not generated jobs for: ``nFilesToBeUsed - nFilesUsed`` on
+    each task's input dataset (the largest input where a task carries
+    several, as an EVGEN task carries two pseudo inputs with one count).
+    The work committed to a queue beyond its activated pool; the
+    pressure front's phase-two depth counts it once the ePIC job
+    throttler paces generation (swf-epicprod CONTINUOUS_PRODUCTION.md,
+    Two regulators)."""
+    placeholders = ', '.join(['%s'] * len(TASK_TERMINAL_STATUSES))
+    sql = f"""
+        SELECT site, SUM(remaining) FROM (
+            SELECT COALESCE(t."site", 'unknown') AS site, t."jeditaskid",
+                   MAX(GREATEST(COALESCE(d."nfilestobeused", 0) - COALESCE(d."nfilesused", 0), 0)) AS remaining
+            FROM "{PANDA_SCHEMA}"."jedi_tasks" t
+            JOIN "{PANDA_SCHEMA}"."jedi_datasets" d ON d."jeditaskid" = t."jeditaskid"
+            WHERE t."processingtype" = 'epicproduction'
+              AND (t."status" IS NULL OR t."status" NOT IN ({placeholders}))
+              AND d."type" IN ('input', 'pseudo_input') AND d."masterid" IS NULL
+            GROUP BY 1, 2
+        ) per_task
         GROUP BY 1
     """
     with connections['panda'].cursor() as cursor:
@@ -181,6 +212,7 @@ def queue_census(refresh=False):
     observed_at = timezone.now()
     live = _live_counts()
     tasks = _tasks_active()
+    ungenerated = _ungenerated()
     calib = calibration(refresh=refresh)
     calib_queues = calib.get('queues') or {}
     gate = _gate_window(calib_queues)
@@ -206,6 +238,7 @@ def queue_census(refresh=False):
             'running': running,
             'finishing': finishing,
             'tasks_active': int(tasks.get(name) or 0),
+            'ungenerated': int(ungenerated.get(name) or 0),
             'calibration': {
                 'median_walltime_h': med_h,
                 'p90_walltime_h': c.get('p90_walltime_h'),

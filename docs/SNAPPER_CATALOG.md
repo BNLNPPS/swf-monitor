@@ -85,7 +85,8 @@ or verdict publishes; a quiet interval affirms.
 
 ## The Catalog view
 
-A focus view, `Catalog`, at `/snapper/epicprod/catalog/`, the
+A focus view, tab `Catalog`, page `Rucio Catalog`, at
+`/snapper/epicprod/catalog/`, the
 mechanism of the Site, Errors, Platform and Storage views: a
 focus-sized cached series over the `catalog` component's snaps, its
 own detail rendering, the window, cut, zoom and curve selection every

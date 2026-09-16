@@ -5980,6 +5980,7 @@ def _catalog_focus_view():
     return {
         'param': 'catalog',
         'label': 'Catalog',
+        'view_label': 'Rucio Catalog',
         'selector_label': 'Catalog',
         'cache_series': True,
         'components': ('catalog',),
