@@ -580,11 +580,14 @@ def compute_usage(request):
             row['label'] = labels.get(row['site'], '')
             # The pool row expands inline into these, in the table itself.
             row['execute_sites'] = execute_sites.get(row['site'], [])
-            # Test queues stay out unless ticked: anything CRIC does not
-            # type as production, and production queues named as test,
-            # CI, dev, pilot-test, or IRI trials.
+            # Test queues stay out unless ticked: anything CRIC types as
+            # neither production nor unified (a unified queue serves both
+            # job classes and carries the production load: BNL_OSG_PanDA_1
+            # ran 20,000 jobs in the week to 9/16 and read as a test queue
+            # under the earlier production-only rule), and queues named as
+            # test, CI, dev, pilot-test, or IRI trials.
             name = row['site']
-            row['is_test'] = (types.get(name, 'production') != 'production'
+            row['is_test'] = (types.get(name, 'production') not in ('production', 'unified')
                               or bool(re.search(r'test|_ci$|_dev$|pilotest|_iri$',
                                                 name, re.IGNORECASE)))
     return render(request, 'monitor_app/compute_usage.html', {

@@ -168,7 +168,7 @@
         </div>
         <div class="form-check mb-2">
           <input class="form-check-input" type="checkbox" id="usage-include-test"{% if include_test %} checked{% endif %}>
-          <label class="form-check-label small" for="usage-include-test" title="Test, CI, dev, and unified queues stay out of the plots and table unless ticked">Test queues</label>
+          <label class="form-check-label small" for="usage-include-test" title="Test, CI, dev and pilot-test queues stay out of the plots and table unless ticked; production and unified queues are always in">Test queues</label>
         </div>
         <div class="usage-site-list">
           {% for site in usage.by_site %}
