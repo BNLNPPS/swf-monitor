@@ -687,7 +687,7 @@ class EpicProdOpsAgent(BaseAgent):
         operation = m.get("operation")
         task_name = m.get("task_name")
         jedi_task_id = m.get("jedi_task_id")
-        if operation not in ("increase_attempts", "retry_failures", "pause", "resume"):
+        if operation not in ("increase_attempts", "retry_failures", "pause", "resume", "finish"):
             self.logger.error(f"PRODOPS panda_task_operation: bad operation {operation!r}")
             return
         if not task_name or not jedi_task_id:
@@ -718,7 +718,7 @@ class EpicProdOpsAgent(BaseAgent):
             f"jediTaskID={jedi_task_id}")
         t0 = time.monotonic()
         operation_id = str(m.get('operation_id') or '')
-        is_state_change = operation in ('pause', 'resume')
+        is_state_change = operation in ('pause', 'resume', 'finish')
         if is_state_change:
             self._record_panda_operation_state(operation_id, 'running')
         try:
@@ -806,7 +806,7 @@ class EpicProdOpsAgent(BaseAgent):
             # notices show; the task page is the event's subject URL.
             ok_bits = {'url': f'/panda/tasks/{jedi_task_id}/'}
             if is_state_change:
-                verb = 'paused' if operation == 'pause' else 'resumed'
+                verb = {'pause': 'paused', 'resume': 'resumed', 'finish': 'finishing'}.get(operation, operation)
                 ok_bits['summary'] = (
                     f'{verb}; observed PanDA state: '
                     f'{observed_status or "unknown"}')

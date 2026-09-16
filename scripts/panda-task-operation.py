@@ -375,6 +375,25 @@ def _panda_result_ok(result):
         if len(result) == 1:
             return True, "transport succeeded"
         payload = result[1]
+        if isinstance(payload, (list, tuple)) and payload and isinstance(payload[0], bool):
+            # The client's extended output mode: (success, data) on success,
+            # (False, message) on failure. For the task commands the data is
+            # the server's return code (0 registered, 1 server error, 2 not
+            # found, 3 permission, 4 irrelevant status); a bool read as a
+            # code made every accepted finish read "return code True: 0" and
+            # fail (39992, 2026-09-16).
+            success, data = payload[0], (payload[1] if len(payload) > 1 else None)
+            if not success:
+                return False, f"refused: {data}"
+            if isinstance(data, bool):
+                return data, f"accepted={data}"
+            if isinstance(data, int):
+                return data == 0, f"return code {data}"
+            if isinstance(data, (list, tuple)) and data:
+                code = data[0]
+                message = data[1] if len(data) > 1 else ""
+                return code == 0, f"return code {code}: {message}"
+            return True, f"accepted: {data}"
         if isinstance(payload, (list, tuple)) and payload:
             code = payload[0]
             message = payload[1] if len(payload) > 1 else ""
