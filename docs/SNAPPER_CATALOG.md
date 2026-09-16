@@ -95,14 +95,22 @@ report page carries; the clean page lands on the last 24 hours.
 **Families**, panel order following the question: what was asked,
 what came back, how fast, what is owed.
 
-1. *Registrations* — jobs ended per bin stacked by registration
-   outcome: ok, pending, stashed, failed, not reached; house state
-   colors (ok blue, pending the warning color, stashed the tape grey,
-   failed the failure color). One panel per queue under a queue
+1. *Registrations* — jobs ended per five minutes stacked by
+   registration outcome: registered, diverted, pending, unfinished,
+   failed, not reached (the job ended before its registration stage),
+   no digest (the payload wrote no report: it died before the report
+   or predates it); house state colors (registered blue, pending the
+   warning color, failed the failure color, the last two solid greys
+   that read on white). A reading covers the interval since the
+   previous publication, five minutes on the drumbeat and longer
+   across a missed cycle, so every interval's count is scaled to five
+   minutes on the curves: a 34-minute interval after a deploy reads as
+   its rate, not as a seven-fold spike. The cut card keeps the
+   interval's own count and bounds. One panel per queue under a queue
    selector, default all queues summed.
 2. *Failed by exit code* — the failed member alone, stacked by payload
-   exit code, so a lost registration (1, 81 under payloads before
-   0.18.1) reads apart from a refused one (78).
+   exit code and scaled the same way, so a lost registration (1, 81
+   under payloads before 0.18.1) reads apart from a refused one (78).
 3. *Catalog latency* — the probe's three timings as lines in
    milliseconds, timeouts drawn at the timeout value in the failure
    color; the registration stage's median and 90th percentile from

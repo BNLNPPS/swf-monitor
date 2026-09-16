@@ -5851,13 +5851,36 @@ _CATALOG_OUTCOME_LABELS = {
     'pending': 'pending (catalog unreachable)',
     'start': 'unfinished (died or stashed in registration)',
     'failed': 'failed (registration lost)',
-    'not_reached': 'not reached', 'none': 'no digest',
+    'not_reached': 'not reached (the job ended before its registration stage)',
+    'none': 'no digest (the payload wrote no report: died before it, or predates it)',
 }
 _CATALOG_OUTCOME_COLORS = {
     'registered': '#1565c0', 'diverted': '#8ab6e8', 'pending': '#f9a825',
-    'start': '#78909c', 'failed': '#c62828', 'not_reached': '#c7c7c7',
-    'none': '#e0e0e0',
+    'start': '#78909c', 'failed': '#c62828', 'not_reached': '#6d4c41',
+    'none': '#424242',
 }
+# A registrations reading covers the interval since the previous
+# publication, five minutes on the drumbeat and longer across a missed
+# cycle (a deploy, a restart); the curves carry every interval's count
+# scaled to five minutes so a long interval reads as its rate, not as a
+# spike. The cut card keeps the interval's own count and bounds.
+_CATALOG_RATE_SECONDS = 300.0
+
+
+def _catalog_interval_scale(cat):
+    """The factor taking the interval's count to a five-minute rate; 1
+    where the interval is five minutes or its bounds are missing."""
+    from datetime import datetime
+    interval = cat.get('interval') or {}
+    try:
+        start = datetime.fromisoformat(str(interval.get('start')).replace('Z', '+00:00'))
+        end = datetime.fromisoformat(str(interval.get('end')).replace('Z', '+00:00'))
+    except (TypeError, ValueError):
+        return 1.0
+    seconds = (end - start).total_seconds()
+    if seconds <= 0:
+        return 1.0
+    return _CATALOG_RATE_SECONDS / seconds
 _CATALOG_PROBE_LABELS = {'tls': 'TLS handshake', 'ping': '/ping',
                          'read': 'authenticated read'}
 _CATALOG_PROBE_COLORS = {'tls': '#7e57c2', 'ping': '#1565c0', 'read': '#2e7d32'}
@@ -5877,11 +5900,12 @@ def _catalog_curve_values(state):
         return values
     reg = cat.get('registrations') or {}
     if reg and 'error' not in reg:
+        scale = _catalog_interval_scale(cat)
         for outcome, n in (reg.get('by_outcome') or {}).items():
             if n:
-                values[f'catrg_{outcome}'] = int(n)
+                values[f'catrg_{outcome}'] = round(int(n) * scale, 1)
         for code, n in (reg.get('failed_by_exit') or {}).items():
-            values[f'catfx_{code}'] = int(n)
+            values[f'catfx_{code}'] = round(int(n) * scale, 1)
     probe = cat.get('probe') or {}
     if probe and 'error' not in probe:
         for k in ('tls', 'ping', 'read'):
@@ -5946,10 +5970,10 @@ def _catalog_groups():
          'section': _catalog_section('What the jobs asked'),
          'prefixes': ['catrg_'], 'ids': [],
          'order': [f'catrg_{o}' for o in _CATALOG_OUTCOME_ORDER],
-         'stacked': True, 'panel_px': 170, 'units': 'jobs ended per interval'},
+         'stacked': True, 'panel_px': 170, 'units': 'jobs ended per five minutes'},
         {'name': 'Catalog failed by exit', 'title': 'Registration lost, by payload exit code',
          'prefixes': ['catfx_'], 'ids': [],
-         'stacked': True, 'panel_px': 130, 'units': 'jobs per interval'},
+         'stacked': True, 'panel_px': 130, 'units': 'jobs per five minutes'},
         {'name': 'Catalog probe', 'title': 'Catalog response, measured from swf-monitor',
          'section': _catalog_section('How the catalog answered'),
          'prefixes': ['catpr_'], 'ids': [],

@@ -68,9 +68,10 @@ def _live_counts():
 def _tasks_active():
     """Per queue, the production tasks pinned to it that have not
     ended (canary and other test tasks excluded). By processing type,
-    not VO: PCS submits under ``epic``, the production team's own
-    submissions carry the client default ``wlcg``, and both are the
-    queue's production."""
+    not VO: production tasks carry ``wlcg`` (the VO the server was
+    commissioned under, set by the Standard Production configuration),
+    the test and canary paths carry ``epic``; a VO filter here had read
+    a queue with three live production tasks as none."""
     placeholders = ', '.join(['%s'] * len(TASK_TERMINAL_STATUSES))
     sql = f"""
         SELECT COALESCE("site", 'unknown'), COUNT(*)
