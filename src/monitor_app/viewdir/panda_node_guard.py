@@ -6,6 +6,7 @@ switches. Reads the store and the cached product the cycle stored;
 computes nothing and reaches neither PanDA nor Rucio.
 """
 import logging
+from datetime import datetime, timezone
 
 from django.contrib import messages
 from django.shortcuts import redirect, render
@@ -117,6 +118,9 @@ def panda_node_guard(request):
             'judged': q.get('judged'), 'tripped': q.get('tripped'),
             'queue_event': bool(q.get('queue_event')), 'storm_hosts': q.get('storm_hosts'),
             'storm_nodes': q.get('storm_nodes') or [],
+            # a burst: more than storm_nodes hosts failing inside one interval
+            'bursts': [{'at': datetime.fromtimestamp(b['from_s'], timezone.utc), 'hosts': b['hosts']}
+                       for b in (q.get('bursts') or []) if b.get('from_s') is not None],
             'median_finished_min': round(med / 60.0) if med else None,
             'fast_under_min': round(fast / 60.0) if fast else None,
             'not_nodes': sorted((q.get('not_nodes') or {}).items()),

@@ -49,13 +49,15 @@ DEFAULTS = {
     'fast_fraction': 0.5,
     'fast_ratio': 0.5,
     'storm_nodes': 10,
+    'storm_minutes': 5,
     'not_nodes': ['pandaharvester01.sdcc.bnl.gov', 'osgsub01.sdcc.bnl.gov'],
     'fixed_min_jobs': 5,
     'fixed_time_ratio': 1.2,
     'expiry_h': 24,
 }
 DECISION_KEYS = ('min_jobs', 'failed_fraction', 'fast_fraction', 'fast_ratio',
-                 'storm_nodes', 'not_nodes', 'fixed_min_jobs', 'fixed_time_ratio')
+                 'storm_nodes', 'storm_minutes', 'not_nodes', 'fixed_min_jobs',
+                 'fixed_time_ratio')
 TRIPPED_STATES = {'shadow': 'would_exclude', 'live': 'excluded'}
 # The record's status as the decision record names it, per mode.
 RECORD_STATES = {'black_hole': TRIPPED_STATES, 'half_open': {'shadow': 'half_open', 'live': 'half_open'},

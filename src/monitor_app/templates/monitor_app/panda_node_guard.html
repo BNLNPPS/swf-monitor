@@ -52,7 +52,7 @@
                     <li><strong>failures not fast</strong>: the node's jobs fail, but late; not a black hole.</li>
                     <li><strong>its tasks finish nowhere on the queue</strong>: the queue's other nodes finish other work but none of these tasks; the task's condition.</li>
                     <li><strong>no other node on the queue</strong>: nothing finished on any other node of the queue in the attribution window, so node and queue are one thing here; the queue's failure detectors are the instrument.</li>
-                    <li><strong>the queue's event</strong>: more than {{ settings.storm_nodes }} nodes of the queue tripped at once; a storm, the queue's condition, not the nodes'.</li>
+                    <li><strong>the queue's event</strong>: more than {{ settings.storm_nodes }} nodes of the queue tripped at once, or the node's failures fell in a burst, more than {{ settings.storm_nodes }} nodes of the queue failing inside {{ settings.storm_minutes }} minutes; a storm, the queue's condition, not the nodes'.</li>
                     <li><strong>no calibration for the queue</strong>: the queue finished no production job in 14 days, so fast cannot be defined.</li>
                 </ul>
             </li>
@@ -167,7 +167,7 @@
                 <td class="text-end">{{ q.tripped }}</td>
                 <td class="text-end">{{ q.median_finished_min|default_if_none:"" }}</td>
                 <td class="text-end">{{ q.fast_under_min|default_if_none:"" }}</td>
-                <td>{% if q.queue_event %}<strong>{{ q.storm_hosts }} nodes tripped at once: the queue's event</strong>{% endif %}</td>
+                <td>{% if q.bursts %}<strong>the queue's event</strong>: {% for b in q.bursts %}{{ b.hosts }} nodes failed in the {{ settings.storm_minutes }} min from {{ b.at|date:"H:i" }} UTC{% if not forloop.last %}; {% endif %}{% endfor %}{% elif q.queue_event %}<strong>{{ q.storm_hosts }} nodes tripped at once: the queue's event</strong>{% endif %}</td>
                 <td class="small">{% for host, c in q.not_nodes %}{{ host }}: {{ c.failed }} failed, {{ c.finished }} finished{% if not forloop.last %}; {% endif %}{% endfor %}</td>
             </tr>
         {% empty %}
