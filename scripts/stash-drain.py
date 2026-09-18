@@ -212,16 +212,11 @@ def register_in_place(entry, events, jlab, proxy, rse):
     the registrar's way, and verified AVAILABLE. Returns ('home', '') or
     ('failed', reason)."""
     owes = entry['owes']
+    # The registrar's completion reads the replica back and answers
+    # 'registered' only when it reads AVAILABLE at the RSE.
     outcome, reason = _reg.complete(jlab, rse, owes, events, proxy)
     if outcome != 'registered':
         return 'failed', f'registration {outcome}: {reason}'
-    try:
-        replicas = list(jlab.list_replicas([{'scope': JLAB_SCOPE, 'name': owes}],
-                                           all_states=True))
-    except Exception as e:                                    # noqa: BLE001
-        return 'failed', f'the registration could not be read back: {e}'
-    if not any((r.get('states') or {}).get(rse) == 'AVAILABLE' for r in replicas):
-        return 'failed', f'the replica at {rse} does not read AVAILABLE'
     if owes.startswith('/TEST/'):
         try:
             jlab.set_metadata(JLAB_SCOPE, owes, 'lifetime', TEST_LIFETIME_S)

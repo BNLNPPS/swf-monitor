@@ -280,6 +280,50 @@ def complete(client, rse, did, events, proxy, dry_run=False):
             return 'deferred', f'the output dataset {dataset} is not in the catalog: {e}'
         if not ('already' in text or 'duplicate' in text):
             return 'deferred', f'add_files_to_datasets: {e}'
+    # Read back. A DID the job's own upload attempt had registered before
+    # the catalog failed it (the temporary replica since tombstoned) exists
+    # with no replica; the one call above skips such a DID as a duplicate
+    # and adds nothing, so the replica is added to the existing DID and the
+    # attachment made explicitly (1,699 of the first 16,000 stashed files,
+    # 2026-09-18).
+    try:
+        replicas = list(client.list_replicas(
+            [{'scope': RUCIO_SCOPE, 'name': did}], all_states=True))
+    except Exception as e:                                    # noqa: BLE001
+        return 'deferred', f'registered, but the read-back failed: {e}'
+    available = any((r.get('states') or {}).get(rse) == 'AVAILABLE' for r in replicas)
+    if not available:
+        state_at_rse = next(((r.get('states') or {}).get(rse) for r in replicas
+                             if (r.get('states') or {}).get(rse)), None)
+        if state_at_rse:
+            # The job's own failed upload left the replica row UNAVAILABLE
+            # and tombstoned (register_to_rucio's cleanup of a COPYING
+            # replica); the file at that path is the stash. The row is
+            # made AVAILABLE, which the dataset's rule then locks.
+            try:
+                client.update_replicas_states(
+                    rse, files=[{'scope': RUCIO_SCOPE, 'name': did, 'state': 'A'}])
+            except Exception as e:                            # noqa: BLE001
+                return 'deferred', f'the {state_at_rse} replica could not be made AVAILABLE: {e}'
+        else:
+            try:
+                client.add_replicas(rse=rse, files=[entry], ignore_availability=True)
+            except Exception as e:                            # noqa: BLE001
+                if 'already' not in str(e).lower():
+                    return 'deferred', f'add_replicas on the existing DID: {e}'
+        try:
+            client.attach_dids(scope=RUCIO_SCOPE, name=dataset,
+                               dids=[{'scope': RUCIO_SCOPE, 'name': did}])
+        except Exception as e:                                # noqa: BLE001
+            if 'already' not in str(e).lower():
+                return 'deferred', f'attach_dids on the existing DID: {e}'
+        try:
+            replicas = list(client.list_replicas(
+                [{'scope': RUCIO_SCOPE, 'name': did}], all_states=True))
+        except Exception as e:                                # noqa: BLE001
+            return 'deferred', f'registered, but the read-back failed: {e}'
+        if not any((r.get('states') or {}).get(rse) == 'AVAILABLE' for r in replicas):
+            return 'deferred', f'the replica at {rse} does not read AVAILABLE after registration'
     if events is not None:
         try:
             client.set_metadata(RUCIO_SCOPE, did, 'events', int(events))
