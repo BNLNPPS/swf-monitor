@@ -59,9 +59,9 @@ REGISTRAR_WINDOW_HOURS = 24
 
 # The digest's registration outcomes as the payload writes them
 # (payload_report.registration_record), in the order the view stacks
-# them. 'start' is a job that died inside its registration stage or
+# them. 'unfinished' is a job that died inside its registration stage or
 # stashed its output at BNL without closing the stage.
-OUTCOMES = ("registered", "pending", "diverted", "start", "failed", "not_reached", "none")
+OUTCOMES = ("registered", "pending", "diverted", "unfinished", "failed", "not_reached", "none")
 
 CONFIG_DEFAULTS = {
     "catalog_rucio_url": "https://rucio-server.jlab.org:443",

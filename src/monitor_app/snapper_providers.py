@@ -5844,19 +5844,24 @@ def _series_cache(key, builder, refresh=False):
 
 # ── Catalog view (docs/SNAPPER_CATALOG.md) ──────────────────────────────
 
-_CATALOG_OUTCOME_ORDER = ('registered', 'diverted', 'pending', 'start',
+_CATALOG_OUTCOME_ORDER = ('registered', 'diverted', 'pending', 'unfinished',
                           'failed', 'not_reached', 'none')
 _CATALOG_OUTCOME_LABELS = {
     'registered': 'registered', 'diverted': 'diverted (clash)',
     'pending': 'pending (catalog unreachable)',
-    'start': 'unfinished (died or stashed in registration)',
+    'unfinished': 'unfinished (died or stashed in registration)',
     'failed': 'failed (registration lost)',
     'not_reached': 'not reached (the job ended before its registration stage)',
     'none': 'no digest (the payload wrote no report: died before it, or predates it)',
 }
+# One hue per outcome: the house state colors where the outcome is a
+# state (registered blue, pending the warning color, failed the failure
+# color), green for a registration that landed on a diverted path,
+# purple for one that never ended, and two greys that read on white for
+# the jobs that never registered at all.
 _CATALOG_OUTCOME_COLORS = {
-    'registered': '#1565c0', 'diverted': '#8ab6e8', 'pending': '#f9a825',
-    'start': '#78909c', 'failed': '#c62828', 'not_reached': '#6d4c41',
+    'registered': '#1565c0', 'diverted': '#2e7d32', 'pending': '#f9a825',
+    'unfinished': '#7e57c2', 'failed': '#c62828', 'not_reached': '#6d4c41',
     'none': '#424242',
 }
 # A registrations reading covers the interval since the previous

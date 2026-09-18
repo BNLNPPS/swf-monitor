@@ -99,9 +99,10 @@ what came back, how fast, what is owed.
    registration outcome: registered, diverted, pending, unfinished,
    failed, not reached (the job ended before its registration stage),
    no digest (the payload wrote no report: it died before the report
-   or predates it); house state colors (registered blue, pending the
-   warning color, failed the failure color, the last two solid greys
-   that read on white). A reading covers the interval since the
+   or predates it); one hue per outcome: house state colors where the
+   outcome is a state (registered blue, pending the warning color,
+   failed the failure color), green for diverted, purple for
+   unfinished, the last two solid greys that read on white. A reading covers the interval since the
    previous publication, five minutes on the drumbeat and longer
    across a missed cycle, so every interval's count is scaled to five
    minutes on the curves: a 34-minute interval after a deploy reads as
