@@ -230,42 +230,96 @@ def register_in_place(entry, events, jlab, proxy, rse):
     return 'home', ''
 
 
-def register_all(entries, present, state, rse, summary, proxy, dry_run=False):
-    """Every present, due entry registered where it lies; each outcome kept
-    in the drain's state."""
+def register_all(entries, state, rse, summary, proxy, dry_run=False):
+    """Every due entry registered where it lies, a few at a time, inside
+    a pass budget, with the state saved as it goes.
+
+    The registrar's completion (``_reg.complete``) confirms the file at
+    the door itself (stat and checksum), so nothing is confirmed twice.
+    Workers each hold their own catalog client; the state is written
+    after every outcome under a lock, so a pass cut short by the agent's
+    timeout keeps everything it registered (a pass that saved only at
+    its end lost its work to the timeout, 2026-09-18). What the budget
+    leaves waits for the next hourly pass, which skips what went home."""
+    import threading
+    import time as _time
+    from concurrent.futures import ThreadPoolExecutor
+
     evgen = _reg._evgen
-    try:
-        jlab = evgen.rucio_client(proxy)
-    except evgen.DoerError as e:
-        summary['failed'].append(f'the catalog of record cannot be written: {e}')
-        return
+    workers = max(1, int(os.environ.get('STASH_WORKERS', 8)))
+    budget_s = float(os.environ.get('STASH_PASS_BUDGET_S', 1500))
+    started = _time.monotonic()
     now = datetime.now(dt_timezone.utc).isoformat()
-    for pandaid, entry, _report in entries:
+    lock = threading.Lock()
+    local = threading.local()
+
+    work = []
+    for pandaid, entry, report in entries:
         name = entry['stashed_as']
-        if name not in present:
-            continue
         entry_state = state.setdefault(name, {})
         if not due(entry_state):
-            summary['deferred'].append({'stashed_as': name, 'owes': entry['owes'],
-                                        'reason': entry_state.get('reason', '')})
+            if entry_state.get('outcome') != 'home':
+                summary['deferred'].append({'stashed_as': name, 'owes': entry['owes'],
+                                            'reason': entry_state.get('reason', '')})
             continue
-        if dry_run:
-            summary['home'].append(entry['owes'])
-            continue
-        _size, _adler, events = present[name]
-        outcome, reason = register_in_place(entry, events, jlab, proxy, rse)
-        entry_state['attempts'] = int(entry_state.get('attempts') or 0) + 1
-        entry_state['last_attempt'] = now
-        entry_state['outcome'] = outcome
-        entry_state['reason'] = reason
-        entry_state['owes'] = entry['owes']
-        if outcome == 'home':
-            entry_state['home_at'] = now
-            summary['moved'] += 1
-            summary['home'].append(entry['owes'])
-        else:
-            summary['failed'].append(f'{name}: {reason}')
+        events = entry.get('events')
+        if events is None and report is not None:
+            events = _reg._events_for(report, entry.get('owes', ''))
+        work.append((pandaid, entry, events))
+    summary['due'] = len(work)
+    if dry_run:
+        summary['home'].extend(e['owes'] for _p, e, _ev in work)
+        return
+
+    def client():
+        if not hasattr(local, 'jlab'):
+            local.jlab = evgen.rucio_client(proxy)
+        return local.jlab
+
+    saved = [0]
+
+    def one(item):
+        pandaid, entry, events = item
+        name = entry['stashed_as']
+        if _time.monotonic() - started > budget_s:
+            return name, 'budget', ''
+        try:
+            outcome, reason = register_in_place(entry, events, client(), proxy, rse)
+        except Exception as e:                                # noqa: BLE001
+            outcome, reason = 'failed', f'{type(e).__name__}: {e}'
+        with lock:
+            entry_state = state.setdefault(name, {})
+            entry_state['attempts'] = int(entry_state.get('attempts') or 0) + 1
+            entry_state['last_attempt'] = now
+            entry_state['outcome'] = outcome
+            entry_state['reason'] = reason
+            entry_state['owes'] = entry['owes']
+            if outcome == 'home':
+                entry_state['home_at'] = now
+                summary['moved'] += 1
+                summary['home'].append(entry['owes'])
+            else:
+                summary['failed'].append(f'{name}: {reason}')
+                if 'undelivered' in reason:
+                    summary['missing_at_stash'] += 1
+            saved[0] += 1
+            if saved[0] % 20 == 0:
+                save_state(state)
         _log(f"{pandaid} {name} at {rse}: {outcome}{' — ' + reason if reason else ''}")
+        return name, outcome, reason
+
+    left = 0
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for name, outcome, _reason in pool.map(one, work):
+                if outcome == 'budget':
+                    left += 1
+    finally:
+        save_state(state)
+    if left:
+        summary['deferred'].append({'stashed_as': f'{left} entries', 'owes': '',
+                                    'reason': f'pass budget of {budget_s:.0f}s reached before they were tried'})
+        _log(f'pass budget reached: {left} due entries wait for the next pass')
 
 
 def jlab_reachable():
@@ -334,40 +388,16 @@ def main():
         print(json.dumps(summary))
         return 0
 
-    # Confirm at the door only what this pass can still register: entries
-    # already home are skipped, and the confirmation stops on a time
-    # budget so the pass always finishes inside the agent's timeout; what
-    # is left waits for the next hourly pass, which skips what went home.
-    import time as _time
-    started = _time.monotonic()
-    budget_s = float(os.environ.get('STASH_PASS_BUDGET_S', 1200))
-    present = {}
-    for pandaid, entry, report in entries:
-        name = entry.get('stashed_as', '')
-        if (state.get(name) or {}).get('outcome') == 'home':
-            continue
-        if _time.monotonic() - started > budget_s:
-            summary['deferred'].append({'stashed_as': name, 'owes': entry.get('owes', ''),
-                                        'reason': 'pass budget reached before confirmation'})
-            continue
-        found = stored_at(STASH_DOOR, entry.get('path', ''), proxy)
-        if found is None:
-            summary['missing_at_stash'] += 1
-            _log(f"{pandaid} {name}: not at the stash")
-            continue
-        events = entry.get('events')
-        if events is None and report is not None:
-            events = _reg._events_for(report, entry.get('owes', ''))
-        present[name] = (found[0], found[1], events)
-        summary['catalogued'] += 1
-        _log(f"{pandaid} {name}: at {STASH_RSE}, {found[0]} bytes, owes {entry.get('owes')}")
-
-    register_all(entries, present, state, args.rse, summary, proxy,
-                 dry_run=args.dry_run)
+    register_all(entries, state, args.rse, summary, proxy, dry_run=args.dry_run)
 
     if not args.dry_run:
         save_state(state)
         store_state(summary, entries, state)
+    # The pass summary names what it did; tens of thousands of names
+    # belong in the state file, not on one log line.
+    for key in ('home', 'failed', 'deferred'):
+        summary[f'{key}_count'] = len(summary[key])
+        summary[key] = summary[key][:50]
     print(json.dumps(summary))
     return 0
 

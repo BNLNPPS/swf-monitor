@@ -185,9 +185,15 @@ def _due(state, did):
     return (datetime.now(dt_timezone.utc) - when).total_seconds() >= RETRY_INTERVAL_S
 
 
+_PREFIX_CACHE = {}
+
+
 def rse_pfn_prefix(client, rse):
     """The deterministic PFN prefix of an RSE, from its own protocol entry,
-    so nothing here hardcodes a door."""
+    so nothing here hardcodes a door. Read once per process: it is a
+    property of the RSE, not of the file."""
+    if rse in _PREFIX_CACHE:
+        return _PREFIX_CACHE[rse]
     protocols = client.get_protocols(rse)
     for protocol in sorted(protocols, key=lambda p: p.get('domains', {})
                            .get('wan', {}).get('read', 99)):
@@ -198,7 +204,8 @@ def rse_pfn_prefix(client, rse):
         port = protocol.get('port')
         prefix = protocol.get('prefix') or '/'
         netloc = f'{host}:{port}' if port else host
-        return f'{scheme}://{netloc}/{prefix.lstrip("/")}'
+        _PREFIX_CACHE[rse] = f'{scheme}://{netloc}/{prefix.lstrip("/")}'
+        return _PREFIX_CACHE[rse]
     raise _evgen.DoerError(EXIT_RUCIO, f'no readable protocol on RSE {rse}')
 
 
@@ -238,15 +245,10 @@ def stored_file(pfn, proxy):
 def complete(client, rse, did, events, proxy, dry_run=False):
     """Register one pending DID. Returns (outcome, reason)."""
     dataset = did.rsplit('/', 1)[0]
-    try:
-        replicas = list(client.list_replicas(
-            [{'scope': RUCIO_SCOPE, 'name': did}], all_states=True))
-    except Exception as e:                                    # noqa: BLE001
-        return 'deferred', f'catalog unreachable: {e}'
-    for replica in replicas:
-        if 'AVAILABLE' in (replica.get('states') or {}).values():
-            return 'registered', 'already registered with an available replica'
-
+    # No read before the write: the registration call ignores a duplicate,
+    # so an entry already registered costs one call that changes nothing,
+    # where a read first cost every entry a call (the catalog answers
+    # about one call a second under load, 2026-09-18).
     try:
         prefix = rse_pfn_prefix(client, rse)
     except Exception as e:                                    # noqa: BLE001
@@ -262,22 +264,22 @@ def complete(client, rse, did, events, proxy, dry_run=False):
         return 'would register', f'{size} bytes, adler32 {adler}'
 
     entry = {'scope': RUCIO_SCOPE, 'name': did, 'bytes': size, 'adler32': adler}
+    # One call registers the replica and attaches the file to its dataset,
+    # committed together (the payload's own registration since 0.19.1, the
+    # pilot's stage-out call). The dataset exists by contract
+    # (RUCIO_REGISTRATION_CONTRACT.md § 2); one that does not is reported,
+    # never created here: three calls a file (add_replicas, add_dataset,
+    # attach_dids) were two too many against a catalog this size.
     try:
-        client.add_replicas(rse=rse, files=[entry], ignore_availability=True)
+        client.add_files_to_datasets(
+            [{'scope': RUCIO_SCOPE, 'name': dataset, 'rse': rse, 'dids': [entry]}],
+            ignore_duplicate=True)
     except Exception as e:                                    # noqa: BLE001
-        if 'Data identifier already added' not in str(e):
-            return 'deferred', f'add_replicas: {e}'
-    try:
-        client.add_dataset(scope=RUCIO_SCOPE, name=dataset)
-    except Exception as e:                                    # noqa: BLE001
-        if 'Data identifier already added' not in str(e):
-            _log(f'WARNING: add_dataset {dataset}: {e}')
-    try:
-        client.attach_dids(scope=RUCIO_SCOPE, name=dataset,
-                           dids=[{'scope': RUCIO_SCOPE, 'name': did}])
-    except Exception as e:                                    # noqa: BLE001
-        if 'already attached' not in str(e).lower():
-            return 'deferred', f'attach_dids: {e}'
+        text = str(e).lower()
+        if 'not found' in text or 'does not exist' in text:
+            return 'deferred', f'the output dataset {dataset} is not in the catalog: {e}'
+        if not ('already' in text or 'duplicate' in text):
+            return 'deferred', f'add_files_to_datasets: {e}'
     if events is not None:
         try:
             client.set_metadata(RUCIO_SCOPE, did, 'events', int(events))
