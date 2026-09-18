@@ -46,7 +46,12 @@ from monitor_app.panda.constants import PANDA_SCHEMA  # noqa: E402
 
 OUTPUTS_URL = os.environ.get(
     'PCS_OUTPUTS_URL', 'https://localhost/swf-monitor/pcs/api/outputs/')
-POST_TIMEOUT_S = 60
+POST_TIMEOUT_S = 120
+# Rows per request: the writer upserts a row at a time, so one request
+# carrying a 50,000-job task ran past the gateway's minute and the record
+# of the three tasks of 2026-09-17 was never written; a batch is a few
+# seconds, and the writer's keying by task and DID makes any split safe.
+POST_BATCH = int(os.environ.get('OUTPUTS_POST_BATCH', 2000))
 DEFAULT_HOURS = 48
 
 
@@ -239,14 +244,18 @@ def main():
         _log(f'task {jedi_task_id}: {len(reports)} report(s), {len(rows)} row(s)')
         if args.dry_run:
             continue
-        ok, detail = post_outputs(jedi_task_id, rows, token)
-        if ok:
-            summary['written'] += (detail or {}).get('written', len(rows))
-            for refusal in (detail or {}).get('refused') or []:
-                summary['refused'].append(f'{jedi_task_id}: {refusal}')
-        else:
-            summary['refused'].append(f'{jedi_task_id}: {detail}')
-            _log(f'ERROR: task {jedi_task_id} refused: {detail}')
+        for start in range(0, len(rows), POST_BATCH):
+            batch = rows[start:start + POST_BATCH]
+            ok, detail = post_outputs(jedi_task_id, batch, token)
+            if ok:
+                summary['written'] += (detail or {}).get('written', len(batch))
+                for refusal in (detail or {}).get('refused') or []:
+                    summary['refused'].append(f'{jedi_task_id}: {refusal}')
+            else:
+                summary['refused'].append(
+                    f'{jedi_task_id} rows {start}-{start + len(batch)}: {detail}')
+                _log(f'ERROR: task {jedi_task_id} rows {start}-{start + len(batch)} refused: {detail}')
+                break
 
     print(json.dumps(summary))
     return 0 if summary['rows'] else 2
