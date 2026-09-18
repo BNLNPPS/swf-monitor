@@ -436,6 +436,16 @@ def main():
                          "(file,ext,nevents,ichunk) instead of one of the "
                          "spec's, the crashed job's row of a reproduction "
                          "(swf-epicprod SEGFAULT_DIAGNOSIS.md, Reproduction)")
+    ap.add_argument("--canary-defer-datasets", action="store_true",
+                    default=os.environ.get("CANARY_DEFER_DATASETS", "") == "1",
+                    help="payload canary only: submit without creating the "
+                         "expiring /TEST output dataset first, so the payload's "
+                         "own handling of a catalog that does not answer can be "
+                         "exercised during a JLab Rucio outage (the file is "
+                         "preserved at the RSE either way; the registration is "
+                         "owed). Never for production: a production task's "
+                         "datasets exist at submission (RUCIO_REGISTRATION_"
+                         "CONTRACT.md § 2). Also CANARY_DEFER_DATASETS=1")
     ap.add_argument("--canary-container", default="",
                     help="payload canary: run this container image instead "
                          "of the configuration's (a reproduction runs the "
@@ -464,6 +474,9 @@ def main():
     args = ap.parse_args()
     if bool(args.canary_stamp) != bool(args.canary_queue):
         _log("ERROR: --canary-stamp and --canary-queue go together")
+        return 2
+    if args.canary_defer_datasets and not args.canary_stamp:
+        _log("ERROR: --canary-defer-datasets is for payload canaries only")
         return 2
 
     if not args.swf_monitor_url:
@@ -588,12 +601,23 @@ def main():
     # their rule and metadata under the production account, so the jobs
     # register files into them and carry no dataset-level work
     # (swf-epicprod docs/RUCIO_REGISTRATION_CONTRACT.md § 2).
-    try:
-        spec['output_datasets'] = _precreate_outputs(spec, args)
-    except Exception as e:                                    # noqa: BLE001
-        _log(f"ERROR: output datasets not created: {e}")
-        _record_submission_failure(args, f"output datasets not created: {e}")
-        return 8
+    if args.canary_defer_datasets:
+        # A canary during a catalog outage: its /TEST dataset is not
+        # created here, so the submission needs no catalog, and the job
+        # meets the outage itself after preserving its output.
+        spec['output_datasets'] = [
+            {'dataset': f"{_load_sibling('register-evgen-rucio.py').RUCIO_SCOPE}:{o['dataset']}",
+             'level': o.get('level'), 'deferred': True,
+             'reason': 'canary submitted without dataset creation (--canary-defer-datasets)'}
+            for o in _outputs_to_create(spec, args)]
+        _log("output datasets deferred: canary submitted without creating them")
+    else:
+        try:
+            spec['output_datasets'] = _precreate_outputs(spec, args)
+        except Exception as e:                                    # noqa: BLE001
+            _log(f"ERROR: output datasets not created: {e}")
+            _record_submission_failure(args, f"output datasets not created: {e}")
+            return 8
 
     # 3. Assemble the sandbox.
     try:
