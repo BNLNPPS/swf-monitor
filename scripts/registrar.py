@@ -247,7 +247,10 @@ def complete(client, rse, did, events, proxy, dry_run=False):
         if 'AVAILABLE' in (replica.get('states') or {}).values():
             return 'registered', 'already registered with an available replica'
 
-    prefix = rse_pfn_prefix(client, rse)
+    try:
+        prefix = rse_pfn_prefix(client, rse)
+    except Exception as e:                                    # noqa: BLE001
+        return 'deferred', f'catalog unreachable (RSE protocols): {e}'
     pfn = f'{prefix.rstrip("/")}/{did.lstrip("/")}'
     found = stored_file(pfn, proxy)
     if found is None:
@@ -319,15 +322,42 @@ def main():
         print(json.dumps(summary))
         return EXIT_RUCIO
 
+    # One pass is bounded in time (the agent's timeout is the ceiling) and
+    # in consecutive catalog failures: a catalog that answers nothing is
+    # noted once and the rest of the worklist waits for the next pass
+    # rather than being asked a thousand times. Nothing here raises past
+    # an entry: a crash records no attempt and defers nothing (the passes
+    # of 2026-09-17 died on the first 503, every hour, for 14 hours).
+    import time as _time
+    started = _time.monotonic()
+    budget_s = float(os.environ.get('REGISTRAR_PASS_BUDGET_S', 1500))
+    unreachable_streak = 0
+    max_streak = int(os.environ.get('REGISTRAR_UNREACHABLE_STREAK', 5))
+    stopped = ''
     for pandaid, report, dids in work:
+        if stopped:
+            break
         state = _registrar_state(pandaid)
         for did in dids:
+            if _time.monotonic() - started > budget_s:
+                stopped = f'pass budget of {budget_s:.0f}s reached'
+                break
+            if unreachable_streak >= max_streak:
+                stopped = f'catalog unreachable {unreachable_streak} times in a row'
+                break
             if not _due(state, did):
                 summary['skipped'] += 1
                 continue
-            outcome, reason = complete(
-                client, args.rse, did, _events_for(report, did), proxy,
-                dry_run=args.dry_run)
+            try:
+                outcome, reason = complete(
+                    client, args.rse, did, _events_for(report, did), proxy,
+                    dry_run=args.dry_run)
+            except Exception as e:                            # noqa: BLE001
+                outcome, reason = 'deferred', f'{type(e).__name__}: {e}'
+            if outcome == 'deferred' and 'unreachable' in reason:
+                unreachable_streak += 1
+            else:
+                unreachable_streak = 0
             _log(f'{pandaid} {did}: {outcome}{" — " + reason if reason else ""}')
             if not args.dry_run:
                 _record_attempt(pandaid, did, outcome, reason)
@@ -338,6 +368,9 @@ def main():
             else:
                 summary['deferred'].append({'did': did, 'reason': reason})
 
+    if stopped:
+        summary['stopped'] = stopped
+        _log(f'pass ended early: {stopped}; the rest of the worklist waits for the next pass')
     print(json.dumps(summary))
     return 0
 

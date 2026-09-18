@@ -321,29 +321,49 @@ def main():
         print(json.dumps(summary))
         return 0
 
+    # The catalog of record is asked first, before any file is confirmed
+    # at the door: a silent catalog ends the pass in seconds with the
+    # entries kept, the page current, and nothing touched. Confirming
+    # every stashed file first cost 30 minutes on 871 entries and no
+    # pass completed for 14 hours (2026-09-17).
+    summary['jlab_reachable'] = jlab_reachable()
+    if not summary['jlab_reachable']:
+        _log('JLab is not answering; the stash keeps its entries for a later pass')
+        if not args.dry_run:
+            store_state(summary, entries, state)
+        print(json.dumps(summary))
+        return 0
+
+    # Confirm at the door only what this pass can still register: entries
+    # already home are skipped, and the confirmation stops on a time
+    # budget so the pass always finishes inside the agent's timeout; what
+    # is left waits for the next hourly pass, which skips what went home.
+    import time as _time
+    started = _time.monotonic()
+    budget_s = float(os.environ.get('STASH_PASS_BUDGET_S', 1200))
     present = {}
     for pandaid, entry, report in entries:
+        name = entry.get('stashed_as', '')
+        if (state.get(name) or {}).get('outcome') == 'home':
+            continue
+        if _time.monotonic() - started > budget_s:
+            summary['deferred'].append({'stashed_as': name, 'owes': entry.get('owes', ''),
+                                        'reason': 'pass budget reached before confirmation'})
+            continue
         found = stored_at(STASH_DOOR, entry.get('path', ''), proxy)
         if found is None:
             summary['missing_at_stash'] += 1
-            _log(f"{pandaid} {entry.get('stashed_as')}: not at the stash")
+            _log(f"{pandaid} {name}: not at the stash")
             continue
         events = entry.get('events')
         if events is None and report is not None:
             events = _reg._events_for(report, entry.get('owes', ''))
-        present[entry['stashed_as']] = (found[0], found[1], events)
+        present[name] = (found[0], found[1], events)
         summary['catalogued'] += 1
-        _log(f"{pandaid} {entry.get('stashed_as')}: at {STASH_RSE}, "
-             f"{found[0]} bytes, owes {entry.get('owes')}")
+        _log(f"{pandaid} {name}: at {STASH_RSE}, {found[0]} bytes, owes {entry.get('owes')}")
 
-    # Not attempted while the catalog of record is silent: a stash that
-    # cannot be registered is a backlog, which is what it is for.
-    summary['jlab_reachable'] = jlab_reachable()
-    if not summary['jlab_reachable']:
-        _log('JLab is not answering; the stash keeps its entries for a later pass')
-    else:
-        register_all(entries, present, state, args.rse, summary, proxy,
-                     dry_run=args.dry_run)
+    register_all(entries, present, state, args.rse, summary, proxy,
+                 dry_run=args.dry_run)
 
     if not args.dry_run:
         save_state(state)
