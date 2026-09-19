@@ -79,6 +79,35 @@ changes over days, not minutes.
 
 Both read the stored record. Neither builds it.
 
+## Pools we cannot read
+
+A pool whose scheduler answers no collector of ours, NERSC Perlmutter
+first, is read by its own jobs. The pilot launch production operations
+publishes for the site (swf-epicprod docs/NERSC_PERLMUTTER.md, the pool
+sample) runs `squeue` and `sinfo` on the worker node before the
+container starts, once per worker, and writes `pool-sample.json`
+(schema `pool-sample/1`): the machine's and the allocation's running and
+pending jobs and nodes, the allocation's oldest pending age, and the
+partition's node states. The payload carries the sample in its report
+(EPICPROD_PAYLOAD.md item 14), the pilot ships the report as job
+metadata, and the monitor takes the newest sample among the finished
+jobs of the pool's queues in the last three days as the pool's reading,
+a cached product (`pool_sample:v1:<pool>`, five minutes) so no page
+reads the PanDA record. Such a pool is declared in `pools.py` with
+`source: sample` and the queue-name prefix that identifies its queues;
+attribution is by name, since nothing else runs there.
+
+The reading renders in the same card and columns as a collector's:
+claimed fraction and slots become allocated and total nodes of the
+partition; the queue ahead is the machine's pending jobs and the nodes
+they ask for; a row the collector pools do not have shows our own jobs
+as the batch system counts them. The card names the sample's node and
+the job that carried it, and its age is the sample's, not the store's.
+Until a job of the pool's queues has carried a sample, the card says so.
+The sample arrives with the jobs, so a pool that has stopped giving us
+nodes stops reporting: the Workers card beside it is what says how long
+we have been waiting.
+
 ## The queue's own workers
 
 The pool reading says how full the pool is; the other half of the wait

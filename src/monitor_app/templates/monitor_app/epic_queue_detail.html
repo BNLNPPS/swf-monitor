@@ -125,7 +125,10 @@
         </div>
         <div class="card-body p-0">
             <table class="table table-sm table-striped mb-0">
-                {% if pool.error %}
+                {% if pool.absent %}
+                <tr><td class="fw-bold" style="width:24%">Reading</td>
+                    <td>None yet: {{ pool.error }}</td></tr>
+                {% elif pool.error %}
                 <tr><td class="fw-bold" style="width:24%">Reading</td>
                     <td>The pool did not answer: {{ pool.error }}</td></tr>
                 {% else %}
@@ -134,7 +137,7 @@
                     <td>{{ pool.claimed_fraction|floatformat:3 }} of the pool claimed</td></tr>
                 {% endif %}
                 {% if pool.slots.total %}
-                <tr><td class="fw-bold">Slots</td>
+                <tr><td class="fw-bold">{{ pool.slots_unit|default:"Slots"|capfirst }}</td>
                     <td>{{ pool.slots.total }} total{% if pool.slots.claimed is not None %},
                         {{ pool.slots.claimed }} claimed, {{ pool.slots.unclaimed }} free{% endif %}{% if pool.slots.admitted is not None %},
                         {{ pool.slots.admitted }} admitted by this queue's requirements{% endif %}</td></tr>
@@ -145,10 +148,17 @@
                 {% endif %}
                 {% if pool.queue.idle is not None %}
                 <tr><td class="fw-bold">Queue ahead</td>
-                    <td>{{ pool.queue.idle }} waiting{% if pool.queue.running is not None %},
-                        {{ pool.queue.running }} running{% endif %}{% if pool.queue.held %},
+                    <td>{{ pool.queue.idle }} waiting{% if pool.queue.idle_nodes is not None %} for {{ pool.queue.idle_nodes }} nodes{% endif %}{% if pool.queue.running is not None %},
+                        {{ pool.queue.running }} running{% if pool.queue.running_nodes is not None %} on {{ pool.queue.running_nodes }} nodes{% endif %}{% endif %}{% if pool.queue.held %},
                         {{ pool.queue.held }} held{% endif %}
                         <span class="text-muted ms-2">{{ pool.queue.scope }}{% if pool.queue.schedds %}, across {{ pool.queue.schedds }} schedds{% endif %}</span></td></tr>
+                {% endif %}
+                {% if pool.ours %}
+                <tr><td class="fw-bold">Our jobs there</td>
+                    <td>{{ pool.ours.idle|default_if_none:"?" }} waiting{% if pool.ours.oldest_pending_s %},
+                        the oldest for {{ pool.ours.oldest_pending_s|fmt_duration }}{% endif %},
+                        {{ pool.ours.running|default_if_none:"?" }} running
+                        <span class="text-muted ms-2">allocation {{ pool.ours.account }}, as the batch system counts them</span></td></tr>
                 {% endif %}
                 {% endif %}
                 <tr><td class="fw-bold">Why this pool</td>
