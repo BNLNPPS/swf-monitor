@@ -79,6 +79,26 @@ changes over days, not minutes.
 
 Both read the stored record. Neither builds it.
 
+## The queue's own workers
+
+The pool reading says how full the pool is; the other half of the wait
+question is what that costs at one queue, and that half is in a record
+every queue has whether or not its pool is one we can see: the
+harvester's worker table in the PanDA database. `monitor_app/workers.py`
+reads it into a cached product per queue
+(`harvester_workers:v1:<queue>`, two minutes) and the queue detail page
+shows it as a Workers card beside the Batch pool card: the workers
+submitted and not started, with the age of the oldest; the workers
+running; the workers started in the last day and in the last hour; the
+median and 90th-percentile wait from the harvester's submission to the
+batch start over the workers that started in the last day; and the
+workers that ended in the day by their final status.
+
+At a pool we cannot read, NERSC Perlmutter above all, this card is the
+whole reading: on 2026-09-19, 100 workers waiting, the oldest for 21
+hours, a median wait of ten hours, which is the answer to "is something
+wrong at Perlmutter" (nothing of ours: the machine is full).
+
 ## Install
 
 1. The virtual environment with the HTCondor bindings.

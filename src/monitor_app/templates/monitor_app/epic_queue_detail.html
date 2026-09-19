@@ -21,6 +21,8 @@
         <span class="text-muted mx-1">&middot;</span>
         <a href="#pool">Batch pool</a>
         <span class="text-muted mx-1">&middot;</span>
+        <a href="#workers">Workers</a>
+        <span class="text-muted mx-1">&middot;</span>
         <a href="#submission">Submission</a>
         <span class="text-muted mx-1">&middot;</span>
         <a href="#schedconfig">Declared configuration</a>
@@ -152,6 +154,46 @@
                 <tr><td class="fw-bold">Why this pool</td>
                     <td>{{ pool.evidence }}{% if pool.collector %}
                         <span class="text-muted ms-2">{{ pool.collector }}</span>{% endif %}</td></tr>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if workers %}
+    <div class="card mb-3" id="workers">
+        <div class="card-header queue-section-header">
+            <strong>Workers</strong>
+            <span class="ms-2">this queue's harvester workers in the batch pool, read
+                <span data-relative-time="{{ workers.built_at|date:'c' }}"></span>
+                <a href="?refresh=1#workers" class="btn btn-secondary btn-sm swf-update-btn ms-2">Update</a></span>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-sm table-striped mb-0">
+                {% if workers.error %}
+                <tr><td class="fw-bold" style="width:24%">Reading</td>
+                    <td>The harvester record did not answer: {{ workers.error }}</td></tr>
+                {% else %}
+                <tr><td class="fw-bold" style="width:24%">Waiting now</td>
+                    <td>{{ workers.pending }} worker{{ workers.pending|pluralize }} submitted and not started{% if workers.pending %},
+                        the oldest for {{ workers.oldest_pending_s|fmt_duration }}{% endif %}{% if workers.cores_per_worker %}
+                        <span class="text-muted ms-2">{{ workers.cores_per_worker }} cores each</span>{% endif %}</td></tr>
+                <tr><td class="fw-bold">Running now</td>
+                    <td>{{ workers.running }}</td></tr>
+                <tr><td class="fw-bold">Started</td>
+                    <td>{{ workers.started }} in the last {{ workers.window_hours }} h,
+                        {{ workers.started_last_hour }} in the last hour{% if workers.last_start_at %},
+                        the latest <span data-relative-time="{{ workers.last_start_at }}"></span>{% endif %}</td></tr>
+                {% if workers.wait_p50_s is not None %}
+                <tr><td class="fw-bold">Wait to start</td>
+                    <td>{{ workers.wait_p50_s|fmt_duration }} median, {{ workers.wait_p90_s|fmt_duration }} at the 90th percentile,
+                        over the workers started in the last {{ workers.window_hours }} h</td></tr>
+                {% endif %}
+                {% if workers.ended %}
+                <tr><td class="fw-bold">Ended</td>
+                    <td>{% for status, count in workers.ended.items %}{{ count }} {{ status }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                        in the last {{ workers.window_hours }} h</td></tr>
+                {% endif %}
+                {% endif %}
             </table>
         </div>
     </div>
