@@ -97,6 +97,11 @@
                         {% endfor %}
                         </tbody>
                     </table>
+                    {% if jobs.closed_not_counted %}
+                    <div class="text-muted small mt-2">Not counted above or in the tables below:
+                        <a href="{% url 'monitor_app:panda_jobs_list' %}?days={{ days }}&status=closed">{{ jobs.closed_not_counted }} closed jobs</a>,
+                        never run, disposed of by the workload manager when their task was reassigned or regenerated.</div>
+                    {% endif %}
                 </div>
             </div>
         </div>

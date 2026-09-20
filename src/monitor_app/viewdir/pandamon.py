@@ -440,7 +440,7 @@ def _activity_product(days, refresh):
             raise RuntimeError(data['error'])
         return data
 
-    return get_product(f'panda_activity:{days}', build,
+    return get_product(f'panda_activity:v2:{days}', build,
                        ttl_seconds=300, refresh=refresh)
 
 
@@ -692,16 +692,19 @@ def compute_usage_data(request):
 # ── Job list ─────────────────────────────────────────────────────────────────
 
 def _jobs_outcomes_product(days, site, refresh,
-                           ended_after=None, ended_before=None):
+                           ended_after=None, ended_before=None,
+                           include_closed=False):
     """Completed-job outcome series (finished/failed per bin with
     cumulative integrals) for the jobs page's graphical view, served
-    as a cached product."""
+    as a cached product; closed jobs only when the page was asked for
+    them by status."""
     from ..cached_product import get_product
 
     def build():
         outcomes = job_outcomes(
             days=days, site=site or None,
-            start_time=ended_after, end_time=ended_before)
+            start_time=ended_after, end_time=ended_before,
+            include_closed=include_closed)
         if outcomes.get('error'):
             raise RuntimeError(outcomes['error'])
         return outcomes
@@ -710,7 +713,8 @@ def _jobs_outcomes_product(days, site, refresh,
         f':{ended_after.isoformat()}:{ended_before.isoformat()}'
         if ended_after is not None and ended_before is not None else '')
     return get_product(
-        f"jobs_outcomes:v2:{days}:{site or ''}{exact_key}", build,
+        f"jobs_outcomes:v3:{days}:{site or ''}{exact_key}"
+        f"{':closed' if include_closed else ''}", build,
         ttl_seconds=300, refresh=refresh)
 
 
@@ -768,12 +772,17 @@ def panda_jobs_list(request):
     if selected_site:
         site_url = reverse('monitor_app:epic_queue_detail', args=[selected_site])
         description += f'<br><a href="{site_url}">Site info for <strong>{selected_site}</strong></a>'
+    if request.GET.get('status', '') != 'closed':
+        description += ('<br><span class="text-muted">Closed jobs (never run, '
+                        'disposed of by the workload manager) are left out; '
+                        'select status closed to see them.</span>')
 
     refresh = request.GET.get('refresh') == '1'
     try:
         outcomes_product = _jobs_outcomes_product(
             days, selected_site, refresh,
-            ended_after=ended_after, ended_before=ended_before)
+            ended_after=ended_after, ended_before=ended_before,
+            include_closed=request.GET.get('status', '') == 'closed')
         job_outcomes_data = outcomes_product['value'] or {
             'error': 'Outcome history is building — reload shortly.'}
         if outcomes_product['value'] and outcomes_product['built_at']:

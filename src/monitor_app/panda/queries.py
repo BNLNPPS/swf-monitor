@@ -1523,7 +1523,15 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
 
 
 def get_activity(days=1, username=None, site=None, workinggroup=None):
-    """Pre-digested overview of PanDA activity — aggregate counts only."""
+    """Pre-digested overview of PanDA activity — aggregate counts only.
+
+    Closed jobs are in none of the job counts: a closed job never ran,
+    JEDI disposed of it for workflow reasons (a task reassigned, unstarted
+    jobs regenerated) and the work comes back as new jobs, so the count
+    tells a user nothing and, at 169k on one reassignment, drowns
+    everything else. Their number is reported apart as
+    ``jobs.closed_not_counted``; the jobs list shows them on request
+    (status=closed)."""
     cutoff = timezone.now() - timedelta(days=days)
     conn = connections['panda']
 
@@ -1580,6 +1588,7 @@ def get_activity(days=1, username=None, site=None, workinggroup=None):
             cursor.execute(status_sql, job_params + job_params)
             job_by_status = {row[0]: row[1] for row in cursor.fetchall()}
 
+        closed_not_counted = job_by_status.pop('closed', 0)
         job_total = sum(job_by_status.values())
 
         job_user_sql = f"""
@@ -1600,6 +1609,8 @@ def get_activity(days=1, username=None, site=None, workinggroup=None):
         job_owner_map = _pcs_owner_map([row[2] for row in job_user_rows])
         user_map = {}
         for status_val, user_val, jeditaskid, count in job_user_rows:
+            if status_val == 'closed':
+                continue
             user_val = job_owner_map.get(jeditaskid) or _canonical_user(user_val)
             if user_val not in user_map:
                 user_map[user_val] = {'user': user_val, 'total': 0}
@@ -1610,6 +1621,8 @@ def get_activity(days=1, username=None, site=None, workinggroup=None):
         site_rows = _job_agg('computingsite')
         site_map = {}
         for status_val, site_val, count in site_rows:
+            if status_val == 'closed':
+                continue
             if site_val not in site_map:
                 site_map[site_val] = {'site': site_val, 'total': 0}
             site_map[site_val][status_val] = count
@@ -1701,6 +1714,10 @@ def get_activity(days=1, username=None, site=None, workinggroup=None):
             "by_status": job_by_status,
             "by_user": by_user,
             "by_site": by_site,
+            # Never-run jobs JEDI disposed of, outside every count above;
+            # a large number here is a question for the task record (why
+            # were so many jobs made that ended closed), not activity.
+            "closed_not_counted": closed_not_counted,
         },
         "tasks": {
             "total": task_total,
@@ -1985,10 +2002,12 @@ def get_queue(panda_queue):
     return {"queue": config}
 
 
-def job_outcomes(days=7, site=None, start_time=None, end_time=None):
+def job_outcomes(days=7, site=None, start_time=None, end_time=None,
+                 include_closed=False):
     """Completed-job outcomes over time for the jobs page's graphical
-    view: finished/failed/cancelled/closed counts per Eastern-time
-    bucket, each with its cumulative integral over the window. Bins
+    view: finished/failed/cancelled counts per Eastern-time bucket, and
+    closed when asked for (never-run jobs; see get_activity), each with
+    its cumulative integral over the window. Bins
     are hourly up to three days, daily beyond. Rows are deduplicated
     across the active and archived tables by (pandaid, endtime,
     status)."""
@@ -2016,10 +2035,11 @@ def job_outcomes(days=7, site=None, start_time=None, end_time=None):
         clause, val = like_or_eq('computingsite', site)
         filters += f' AND {clause}'
         extra_params.append(val)
+    statuses = ('finished', 'failed', 'cancelled') + (
+        ('closed',) if include_closed else ())
     where = (
         '"endtime" > %s AND "endtime" <= %s'
-        ' AND "jobstatus" IN'
-        " ('finished', 'failed', 'cancelled', 'closed')"
+        ' AND "jobstatus" IN (' + ', '.join(f"'{s}'" for s in statuses) + ')'
         + filters)
     params = [window_start, window_end] + extra_params
     sql = f'''
@@ -2067,7 +2087,7 @@ def job_outcomes(days=7, site=None, start_time=None, end_time=None):
     for bin_time, status, count in rows:
         counts.setdefault(status, {})[bin_time] = int(count)
     series = []
-    for status in ('finished', 'failed', 'cancelled', 'closed'):
+    for status in statuses:
         per_bin = counts.get(status)
         if not per_bin:
             continue
@@ -3454,13 +3474,20 @@ def _job_window_filter(days, ended_after=None, ended_before=None):
 def _job_list_where(days, status=None, username=None, site=None,
                     taskid=None, reqid=None,
                     ended_after=None, ended_before=None):
-    """The WHERE clauses and parameters a jobs-list request selects."""
+    """The WHERE clauses and parameters a jobs-list request selects.
+
+    Closed jobs (never run, disposed of by JEDI; see get_activity) are
+    left out unless the request asks for them by status: they are a
+    question about the task record, not a listing anyone reads
+    through."""
     where, params = _job_window_filter(
         days, ended_after=ended_after, ended_before=ended_before)
 
     if status:
         where.append('"jobstatus" = %s')
         params.append(status)
+    else:
+        where.append('"jobstatus" <> \'closed\'')
     if username:
         clause, vals = _effective_username_filter('produsername', username)
         where.append(clause)
@@ -3648,6 +3675,11 @@ def job_filter_counts(days=7, status=None, username=None, site=None,
         # Apply all other filters except this one
         where = list(base_where)
         params = list(base_params)
+        # The status facet keeps closed listed with its count, the way
+        # an expert asks for closed jobs; the other facets count what the
+        # listing shows, which leaves closed out unless it was asked for.
+        if filter_name != 'status' and status != 'closed':
+            where.append('"jobstatus" <> \'closed\'')
         for other_db_field, other_name, other_value in filter_config:
             if other_name != filter_name and other_value:
                 if other_name == 'username':

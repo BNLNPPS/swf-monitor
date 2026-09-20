@@ -323,7 +323,11 @@ async def panda_get_activity(
         workinggroup: Filter tasks by working group (e.g. 'EIC').
 
     Returns:
-        jobs: {total, by_status, by_user, by_site} — aggregate counts only.
+        jobs: {total, by_status, by_user, by_site, closed_not_counted} —
+            aggregate counts only. Closed jobs (never run; disposed of by
+            JEDI when a task was reassigned or its unstarted jobs
+            regenerated) are in none of the counts; their number is
+            closed_not_counted. Ask panda_list_jobs(status='closed') for them.
         tasks: {total, by_status, by_user} — aggregate counts only.
         filters: Applied filter values.
     """
