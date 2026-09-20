@@ -73,9 +73,11 @@ changes over days, not minutes.
 
 - The ePIC queues page: the pool's fullness as a percentage and the
   idle jobs ahead, per queue, sortable.
-- The queue detail page: a Batch pool card with the claimed fraction,
+- The queue detail page: a Batch pool card with the claimed share,
   slots and cores, the queue ahead across the pool's schedds, and the
-  evidence for the attribution.
+  reading's age in the header. The attribution evidence stays in the
+  record (the queue page showed it until 2026-09-20; it is the
+  developer's provenance, not the operator's information).
 
 Both read the stored record. Neither builds it.
 
