@@ -772,11 +772,6 @@ def panda_jobs_list(request):
     if selected_site:
         site_url = reverse('monitor_app:epic_queue_detail', args=[selected_site])
         description += f'<br><a href="{site_url}">Site info for <strong>{selected_site}</strong></a>'
-    if request.GET.get('status', '') != 'closed':
-        description += ('<br><span class="text-muted">Closed jobs (never run, '
-                        'disposed of by the workload manager) are left out; '
-                        'select status closed to see them.</span>')
-
     refresh = request.GET.get('refresh') == '1'
     try:
         outcomes_product = _jobs_outcomes_product(
