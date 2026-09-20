@@ -134,7 +134,7 @@
                 {% else %}
                 {% if pool.claimed_fraction is not None %}
                 <tr><td class="fw-bold" style="width:24%">Full</td>
-                    <td>{{ pool.claimed_fraction|floatformat:3 }} of the pool claimed</td></tr>
+                    <td>{% widthratio pool.claimed_fraction 1 100 %}% of the pool claimed</td></tr>
                 {% endif %}
                 {% if pool.slots.total %}
                 <tr><td class="fw-bold">{{ pool.slots_unit|default:"Slots"|capfirst }}</td>
