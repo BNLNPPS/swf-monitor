@@ -1,6 +1,9 @@
 {% extends "monitor_app/_datatable_dynamic_base.html" %}
 
 {% block extra_filters %}
+{% if request_notice %}
+<div class="alert alert-warning py-2 px-3 mb-3">{{ request_notice }}</div>
+{% endif %}
 <!-- Days selector -->
 <div style="margin-bottom:1em;">
     <strong>Time window:</strong>
@@ -19,19 +22,14 @@
        style="margin-left:1cm;font-weight:bold;">Snapper view</a>
 </div>
 
-{% if snapper_embed %}
-<div class="mb-2">
-  <div class="d-flex align-items-baseline">
-    <h5 class="mb-1">State history · {{ selected_site }}</h5>
-    <a class="ms-3" href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='site' %}?site={{ selected_site|urlencode }}">Open in Snapper</a>
-  </div>
-  {% include 'snapper_ai/_snapper_embed.html' with embed=snapper_embed %}
-</div>
-{% endif %}
-
 {% if job_outcomes %}
 <div class="mb-3">
-  <h5 class="mb-1">Completed jobs{% if selected_site %} · {{ selected_site }}{% endif %} · {{ jobs_window_label }}</h5>
+  <div class="d-flex align-items-baseline">
+    <h5 class="mb-1">Completed jobs{% if selected_site %} · {{ selected_site }}{% endif %} · {{ jobs_window_label }}</h5>
+    {% if selected_site %}
+    <a class="ms-3" href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='site' %}?site={{ selected_site|urlencode }}">State history in Snapper</a>
+    {% endif %}
+  </div>
   {% if job_outcomes.error %}
   <div class="text-muted mb-2">{{ job_outcomes.error }}</div>
   {% else %}

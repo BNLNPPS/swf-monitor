@@ -28,7 +28,7 @@ from ..panda.operations import BULK_OPERATION_STATUSES
 from ..utils import DataTablesProcessor
 from ..panda import (
     get_activity, study_job, list_jobs, task_payload_rollup,
-    list_jobs_dt, build_tasks_window,
+    list_jobs_dt, job_request_size, build_tasks_window,
     job_filter_counts, task_filter_counts,
     get_task, error_summary, diagnose_jobs, job_completion_details,
     list_queues, get_queue, queue_last_use, landing_declines, node_declines,
@@ -323,6 +323,83 @@ def _get_days(request):
         return int(request.GET.get('days', 7))
     except (ValueError, TypeError):
         return 7
+
+
+def _get_jobs_days(request):
+    """The jobs page's window in days: whole days from the selector, or
+    the fraction of a day the page narrowed a too-large request to
+    (``_judge_jobs_request``), which its table and count calls carry
+    back. Default 7."""
+    raw = request.GET.get('days', 7)
+    try:
+        days = float(raw)
+    except (ValueError, TypeError):
+        return 7
+    if days <= 0:
+        return 7
+    return int(days) if days == int(days) else days
+
+
+# The most jobs the jobs page builds for at once. Its queries are
+# aggregates and one paged read, a second or two at 400k jobs; the cap
+# keeps a 30-day, all-site ask from holding a web worker and the PanDA
+# database for a minute. A larger ask is narrowed to its newest slice
+# and the page says so (the yellow panel), as the PanDA monitor does.
+JOBS_PAGE_CAP = 100000
+
+
+def _window_label(days):
+    """'last 7 days', 'last 21 h', 'last 40 min'."""
+    if days >= 1 and days == int(days):
+        return f'last {int(days)} day' + ('' if days == 1 else 's')
+    hours = days * 24
+    if hours >= 2:
+        return f'last {hours:.0f} h'
+    return f'last {hours * 60:.0f} min'
+
+
+def _judge_jobs_request(days, status, username, site, taskid,
+                        ended_after, ended_before):
+    """Examine what a jobs-list request asks for before building it.
+
+    Counts the jobs the request covers; over JOBS_PAGE_CAP the window
+    is halved, anchored at its end, until the count fits (at most eight
+    halvings: a week becomes 40 minutes). Returns the window to build
+    for, (days, ended_after, ended_before), and a notice for the page
+    when it was narrowed, or None. A count that fails leaves the
+    request as asked."""
+    asked = job_request_size(
+        days=days, status=status, username=username, site=site,
+        taskid=taskid, ended_after=ended_after, ended_before=ended_before)
+    if asked is None or asked <= JOBS_PAGE_CAP:
+        return days, ended_after, ended_before, None
+    asked_label = (
+        f"{ended_after.astimezone(ZoneInfo(settings.TIME_ZONE)):%m-%d %H:%M}"
+        f" to {ended_before.astimezone(ZoneInfo(settings.TIME_ZONE)):%m-%d %H:%M} ET"
+        if ended_after is not None else _window_label(days))
+    count = asked
+    for _ in range(8):
+        if ended_after is not None:
+            ended_after = ended_before - (ended_before - ended_after) / 2
+        else:
+            days = days / 2
+        count = job_request_size(
+            days=days, status=status, username=username, site=site,
+            taskid=taskid, ended_after=ended_after, ended_before=ended_before)
+        if count is None or count <= JOBS_PAGE_CAP:
+            break
+    shown_label = (
+        f"the {(ended_before - ended_after).total_seconds() / 3600:.1f} h"
+        f" ending {ended_before.astimezone(ZoneInfo(settings.TIME_ZONE)):%m-%d %H:%M} ET"
+        if ended_after is not None else f'the {_window_label(days)}')
+    notice = (
+        f'This request covers {asked:,} jobs ({asked_label}), more than '
+        f'this page builds for at once ({JOBS_PAGE_CAP:,}). Showing '
+        f'{shown_label}'
+        + (f' ({count:,} jobs)' if count is not None else '')
+        + '. Add a status, user, site or task filter, or pick a shorter '
+        'window, for the selection you want.')
+    return days, ended_after, ended_before, notice
 
 
 def _get_ended_window(request):
@@ -637,47 +714,47 @@ def _jobs_outcomes_product(days, site, refresh,
         ttl_seconds=300, refresh=refresh)
 
 
-def _jobs_site_graphics_product(days, site, refresh,
-                                ended_after=None, ended_before=None):
-    """Placeable Snapper site history and outcomes pie for this page."""
+def _jobs_site_pie_product(days, site, refresh,
+                           ended_after=None, ended_before=None):
+    """The site's final-job-state pie over the window, from Snapper's
+    counter blocks (two cuts, seconds), as a cached product.
+
+    The embedded Snapper site-history plot this product carried until
+    2026-09-20 is gone: ``embed_context`` reads every snap of the window
+    into the web worker, about 65 s and 3 GB for a week and the same for
+    a queue with ten jobs as for one with 400,000; the 7-day jobs page
+    and the 14-day queue page together took the host into an OOM kill
+    (job 3492628's queue, 13:30 ET). The Site focus page in Snapper
+    remains the place for the history, by its link."""
     from django.utils import timezone as dj_timezone
 
-    from snapper_ai.embed import embed_context
     from ..cached_product import get_product
     from ..snapper_providers import panda_site_outcomes_pie
 
     def build():
         end = ended_before or dj_timezone.now()
         start = ended_after or (end - timedelta(days=days))
-        ctx = embed_context(
-            'epicprod', start, end,
-            families=(f'Site jobs {site}',))
-        if ctx.get('error'):
-            raise RuntimeError(ctx['error'])
-        # This embedded Site plot must open the same focused Site page,
-        # not the generic epicprod report.
-        ctx['report_focus_slug'] = 'site'
-        ctx['report_query'] = (
-            urlencode({'site': site}) + '&' + ctx['report_query'])
-        return {
-            'embed': ctx,
-            'outcomes_pie': panda_site_outcomes_pie(
-                site, start, end, size=270),
-        }
+        return panda_site_outcomes_pie(site, start, end, size=270)
 
     exact_key = (
         f':{ended_after.isoformat()}:{ended_before.isoformat()}'
         if ended_after is not None and ended_before is not None else '')
     return get_product(
-        f'snapper_site_graphics:v7:epicprod:site:{site}:{days}{exact_key}',
+        f'snapper_site_pie:v1:epicprod:site:{site}:{days}{exact_key}',
         build,
         ttl_seconds=300, refresh=refresh)
 
 
 def panda_jobs_list(request):
-    days = _get_days(request)
+    days = _get_jobs_days(request)
     ended_after, ended_before = _get_ended_window(request)
     selected_site = request.GET.get('site', '')
+    # The request is examined before anything is built for it: too
+    # large an ask is narrowed to its newest slice and the page says so.
+    days, ended_after, ended_before, request_notice = _judge_jobs_request(
+        days, request.GET.get('status', '') or None,
+        request.GET.get('username', '') or None, selected_site or None,
+        request.GET.get('taskid', '') or None, ended_after, ended_before)
     if ended_after is not None:
         et = ZoneInfo(settings.TIME_ZONE)
         ended_range_label = (
@@ -686,8 +763,8 @@ def panda_jobs_list(request):
         description = f'Production jobs ending in {ended_range_label}.'
         jobs_window_label = ended_range_label
     else:
-        description = f'Production jobs from the last {days} days.'
-        jobs_window_label = f'last {days} day' + ('' if days == 1 else 's')
+        description = f'Production jobs from the {_window_label(days)}.'
+        jobs_window_label = _window_label(days)
     if selected_site:
         site_url = reverse('monitor_app:epic_queue_detail', args=[selected_site])
         description += f'<br><a href="{site_url}">Site info for <strong>{selected_site}</strong></a>'
@@ -708,26 +785,19 @@ def panda_jobs_list(request):
     except Exception as e:                                   # noqa: BLE001
         logger.error('jobs outcomes build failed: %s', e)
         job_outcomes_data = {'error': str(e)}
-    snapper_embed = None
     job_outcomes_pie = None
     if selected_site:
         try:
-            graphics_product = _jobs_site_graphics_product(
+            job_outcomes_pie = _jobs_site_pie_product(
                 days, selected_site, refresh,
-                ended_after=ended_after, ended_before=ended_before)
-            graphics = graphics_product['value'] or {}
-            snapper_embed = graphics.get('embed') or {
-                'scope': 'epicprod',
-                'error': 'state history is building — reload shortly.'}
-            job_outcomes_pie = graphics.get('outcomes_pie')
+                ended_after=ended_after, ended_before=ended_before)['value']
         except Exception as e:                               # noqa: BLE001
-            logger.error('snapper site graphics failed for jobs list: %s', e)
-            snapper_embed = {'scope': 'epicprod', 'error': str(e)}
+            logger.error('site outcomes pie failed for jobs list: %s', e)
 
     context = {
         'job_outcomes': job_outcomes_data,
         'job_outcomes_pie': job_outcomes_pie,
-        'snapper_embed': snapper_embed,
+        'request_notice': request_notice,
         'table_title': 'PanDA Jobs',
         'table_description': description,
         'ajax_url': reverse('monitor_app:panda_jobs_datatable_ajax'),
@@ -762,7 +832,7 @@ def panda_jobs_list(request):
 def panda_jobs_datatable_ajax(request):
     dt = DataTablesProcessor(request, JOB_FIELD_NAMES,
                              default_order_column=0, default_order_direction='desc')
-    days = _get_days(request)
+    days = _get_jobs_days(request)
     ended_after, ended_before = _get_ended_window(request)
     status = request.GET.get('status', '') or None
     username = request.GET.get('username', '') or None
@@ -823,7 +893,7 @@ def panda_jobs_datatable_ajax(request):
 
 
 def panda_jobs_filter_counts(request):
-    days = _get_days(request)
+    days = _get_jobs_days(request)
     ended_after, ended_before = _get_ended_window(request)
     status = request.GET.get('status', '') or None
     username = request.GET.get('username', '') or None
@@ -2749,28 +2819,15 @@ def epic_queue_detail(request, queue_name):
         shown.update(s.keys())
     other = {k: v for k, v in config.items() if k not in shown}
 
-    # Same snapper site history + outcomes pie the jobs page shows when
-    # filtered to this queue, over the standing 2-week window.
-    snapper_embed = None
+    # The same outcomes pie the jobs page shows when filtered to this
+    # queue, over the standing 2-week window (the embedded site history
+    # that stood beside it is gone: _jobs_site_pie_product).
     site_outcomes_pie = None
-    site_no_activity = False
     try:
-        graphics_product = _jobs_site_graphics_product(
-            14, queue_name, request.GET.get('refresh') == '1')
-        graphics = graphics_product['value'] or {}
-        snapper_embed = graphics.get('embed') or {
-            'scope': 'epicprod',
-            'error': 'state history is building — reload shortly.'}
-        site_outcomes_pie = graphics.get('outcomes_pie')
+        site_outcomes_pie = _jobs_site_pie_product(
+            14, queue_name, request.GET.get('refresh') == '1')['value']
     except Exception as e:                                   # noqa: BLE001
-        if 'has no curve family' in str(e):
-            # No job history in the snapper record for this queue: an
-            # expected absence, not a failure.
-            site_no_activity = True
-        else:
-            logger.error(
-                'snapper site graphics failed for queue detail: %s', e)
-            snapper_embed = {'scope': 'epicprod', 'error': str(e)}
+        logger.error('site outcomes pie failed for queue detail: %s', e)
 
     # What CRIC declares for the queue, in force and coming, and the
     # history (CONTINUOUS_PRODUCTION.md, Declared downtime).
@@ -2785,9 +2842,7 @@ def epic_queue_detail(request, queue_name):
         'sections': sections,
         'other': other,
         'config_json': json_mod.dumps(config, indent=2, default=str),
-        'snapper_embed': snapper_embed,
         'site_outcomes_pie': site_outcomes_pie,
-        'site_no_activity': site_no_activity,
         'declines': _landing_declines_product().get(queue_name),
         'observed': _with_measurements(_queue_observed_product(queue_name), queue_name),
         'declines_days': SPARK_SPAN_DAYS,

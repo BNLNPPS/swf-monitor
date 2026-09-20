@@ -3451,11 +3451,10 @@ def _job_window_filter(days, ended_after=None, ended_before=None):
     return ['"modificationtime" >= %s'], [cutoff]
 
 
-def list_jobs_dt(days=7, status=None, username=None, site=None,
-                 taskid=None, reqid=None,
-                 order_by='"pandaid" DESC', limit=100, offset=0, search=None,
-                 ended_after=None, ended_before=None):
-    """List PanDA jobs for DataTables (returns rows, total, filtered counts)."""
+def _job_list_where(days, status=None, username=None, site=None,
+                    taskid=None, reqid=None,
+                    ended_after=None, ended_before=None):
+    """The WHERE clauses and parameters a jobs-list request selects."""
     where, params = _job_window_filter(
         days, ended_after=ended_after, ended_before=ended_before)
 
@@ -3476,6 +3475,38 @@ def list_jobs_dt(days=7, status=None, username=None, site=None,
     if reqid:
         where.append('"reqid" = %s')
         params.append(int(reqid))
+    return where, params
+
+
+def job_request_size(days=7, status=None, username=None, site=None,
+                     taskid=None, reqid=None,
+                     ended_after=None, ended_before=None):
+    """How many jobs a jobs-list request covers, before anything is built
+    for it: the number the page judges the request by. None when the
+    count fails (logged), so the caller can proceed as asked."""
+    where, params = _job_list_where(
+        days, status=status, username=username, site=site,
+        taskid=taskid, reqid=reqid,
+        ended_after=ended_after, ended_before=ended_before)
+    count_sql, count_params = build_union_count(where, params)
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(count_sql, count_params)
+            return int(cursor.fetchone()[0])
+    except Exception as e:                                   # noqa: BLE001
+        logger.error(f"job_request_size count failed: {e}")
+        return None
+
+
+def list_jobs_dt(days=7, status=None, username=None, site=None,
+                 taskid=None, reqid=None,
+                 order_by='"pandaid" DESC', limit=100, offset=0, search=None,
+                 ended_after=None, ended_before=None):
+    """List PanDA jobs for DataTables (returns rows, total, filtered counts)."""
+    where, params = _job_list_where(
+        days, status=status, username=username, site=site,
+        taskid=taskid, reqid=reqid,
+        ended_after=ended_after, ended_before=ended_before)
 
     conn = connections['panda']
 
