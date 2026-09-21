@@ -469,6 +469,27 @@ def main():
                     help="Event Service canary: events of the input file the "
                          "job covers (nEventsPerJob and nEventsPerInputFile); "
                          "with --es-input-dataset")
+    ap.add_argument("--canary-out-rse", default="",
+                    help="payload canary: register its outputs at this RSE "
+                         "instead of the configuration's (a test at JLab's "
+                         "EIC-XRD while the production RSE is down, or a test "
+                         "RSE); the canary dataset is created there too")
+    ap.add_argument("--es-direct-input", action="store_true",
+                    help="Event Service canary: the pilot hands the input as a "
+                         "TURL instead of copying it (its --accessmode=direct, "
+                         "read as a substring of the job parameters, so it rides "
+                         "inside the exec where runGen never sees it); for a "
+                         "queue that cannot reach the input's storage (npps0)")
+    ap.add_argument("--es-slots", type=int, default=1,
+                    help="Event Service canary: the node harness's slots, one "
+                         "resident EICrecon and one range at a time each; "
+                         "also the job's core count (default 1)")
+    ap.add_argument("--es-deadline-s", type=int, default=0,
+                    help="Event Service canary: seconds of wall after which the "
+                         "harness takes no further range and drains (0 = none)")
+    ap.add_argument("--es-margin-s", type=int, default=1800,
+                    help="Event Service canary: the margin before the deadline "
+                         "at which taking ranges stops (default 1800)")
     ap.add_argument("--trial", action="store_true",
                     help="trial run (docs/PCS.md, Trials): the composed "
                          "configuration submitted small and for real — one "
@@ -564,6 +585,9 @@ def main():
         spec.update(site=args.canary_queue, processingType='canary',
                     prodSourceLabel='test', userName='canary', nJobs=1,
                     maxAttempt=1, skipScout=True)
+        if args.canary_out_rse:
+            spec['env'] = dict(spec.get('env') or {}, OUT_RSE=args.canary_out_rse)
+            _log(f"canary outputs to {args.canary_out_rse}")
         if args.es_input_dataset:
             # An Event Service canary: JEDI makes ranges of
             # --es-events-per-range over the input dataset's file; the
@@ -576,10 +600,15 @@ def main():
                 _log("ERROR: --es-input-dataset needs --es-events-per-range "
                      "and --es-events")
                 return 2
+            deadline = (f"ES_DEADLINE_S={int(args.es_deadline_s)} ES_MARGIN_S={int(args.es_margin_s)} "
+                        if args.es_deadline_s else "")
             spec['exec'] = (f"ES_PAYLOAD_IMAGE={spec.get('containerImage', '')} "
+                            f"ES_SLOTS={int(args.es_slots)} {deadline}"
                             f"python3 evgen_job_dispatcher.py es "
                             f"{spec['csvBase']} {args.canary_stamp} "
-                            f"$PILOT_EVENTRANGECHANNEL")
+                            f"$PILOT_EVENTRANGECHANNEL"
+                            + (" --accessmode=direct" if args.es_direct_input else ""))
+            spec['nCore'] = int(args.es_slots)
             spec.update(inputDataset=args.es_input_dataset, nFilesPerJob=1,
                         nEventsPerInputFile=int(args.es_events),
                         nEventsPerJob=int(args.es_events),
