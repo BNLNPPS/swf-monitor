@@ -455,6 +455,20 @@ def main():
                          "MB) the dispatcher puts on the payload, so a "
                          "reference run matches the production queue's "
                          "memory")
+    ap.add_argument("--es-input-dataset", default="",
+                    help="payload canary as an Event Service job (swf-epicprod "
+                         "NODE_EVENT_DISPATCHER.md): this PanDA input dataset "
+                         "(the row's EVGEN file, in the PanDA catalog) is what "
+                         "JEDI makes ranges over; the dispatcher's es mode "
+                         "takes the ranges from the pilot's channel and runs "
+                         "each through the payload in the task's image")
+    ap.add_argument("--es-events-per-range", type=int, default=0,
+                    help="Event Service canary: events per range "
+                         "(nEventsPerWorker); with --es-input-dataset")
+    ap.add_argument("--es-events", type=int, default=0,
+                    help="Event Service canary: events of the input file the "
+                         "job covers (nEventsPerJob and nEventsPerInputFile); "
+                         "with --es-input-dataset")
     ap.add_argument("--trial", action="store_true",
                     help="trial run (docs/PCS.md, Trials): the composed "
                          "configuration submitted small and for real — one "
@@ -550,6 +564,43 @@ def main():
         spec.update(site=args.canary_queue, processingType='canary',
                     prodSourceLabel='test', userName='canary', nJobs=1,
                     maxAttempt=1, skipScout=True)
+        if args.es_input_dataset:
+            # An Event Service canary: JEDI makes ranges of
+            # --es-events-per-range over the input dataset's file; the
+            # pilot's generic executor hands them to the dispatcher's es
+            # mode, which names the channel on its command line (the
+            # token the pilot matches to export it) and runs each range
+            # through the payload in the task's image, outside the
+            # pilot's own container start (evgen_job_dispatcher.py).
+            if args.es_events_per_range < 1 or args.es_events < 1:
+                _log("ERROR: --es-input-dataset needs --es-events-per-range "
+                     "and --es-events")
+                return 2
+            spec['exec'] = (f"ES_PAYLOAD_IMAGE={spec.get('containerImage', '')} "
+                            f"python3 evgen_job_dispatcher.py es "
+                            f"{spec['csvBase']} {args.canary_stamp} "
+                            f"$PILOT_EVENTRANGECHANNEL")
+            spec.update(inputDataset=args.es_input_dataset, nFilesPerJob=1,
+                        nEventsPerInputFile=int(args.es_events),
+                        nEventsPerJob=int(args.es_events),
+                        nEventsPerWorker=int(args.es_events_per_range),
+                        # The es_events storage's record reaches the pilot
+                        # from the queue's published ddmendpoints.json
+                        # (perlmutter/<queue>/, STORAGEDATA_SERVER_URL in
+                        # the launcher), not from the job: the pilot's
+                        # executor resolves the storage id on the
+                        # pilot-wide information service, which a job-level
+                        # record does not reach (job 3494150).
+                        # No log dataset: the pilot makes an event-service
+                        # job's log tarball from the wrong directory and the
+                        # missing file fails the job after every range was
+                        # reported (3494150, pilot error 1165), which loses
+                        # the ranges; the worker record on the portal is the
+                        # log. The npps0 round trip ran the same way.
+                        noLog=True)
+            _log(f"event service canary: {args.es_events} events of "
+                 f"{args.es_input_dataset} in ranges of "
+                 f"{args.es_events_per_range}")
         _log(f"payload canary {spec['outDS']} on {args.canary_queue}: "
              f"row {spec['csvRows'][0]}"
              + (f", RLIMIT_AS {args.canary_mem_limit_mb} MB"

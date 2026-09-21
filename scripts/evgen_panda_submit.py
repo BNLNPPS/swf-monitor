@@ -165,6 +165,56 @@ def build_task_params(spec, archive_name):
     if spec.get('nEventsPerWorker'):
         params['nEventsPerWorker'] = int(spec['nEventsPerWorker'])
 
+    # A PanDA input dataset (the ES shape that finishes: JEDI makes and
+    # completes ranges over files of type input only, NODE_EVENT_DISPATCHER.md,
+    # The round trip). The pilot stages the files in; the payload reads
+    # what it reads. nEventsPerInputFile tells JEDI the events per file
+    # when the catalog carries no event count.
+    if spec.get('inputDataset'):
+        params.pop('noInput', None)
+        params['jobParameters'].append({
+            'type': 'template', 'param_type': 'input',
+            'value': '-i "${IN/T}"', 'dataset': spec['inputDataset'],
+            'expand': True, 'exclude': r'\.log\.tgz(\.\d+)*$',
+        })
+        params['nFilesPerJob'] = int(spec.get('nFilesPerJob', 1))
+        if spec.get('nEventsPerInputFile'):
+            params['nEventsPerInputFile'] = int(spec['nEventsPerInputFile'])
+        # Over real input nEvents is the events to process, not the job
+        # count the noInput shape encodes in it.
+        params['nEvents'] = params['nEventsPerJob'] * int(spec.get('nJobs', 1))
+
+    # Storage records the job carries for the pilot (--overwriteStorageData,
+    # the pilot's job-level master source for StorageData): the pilot
+    # otherwise knows storages only from ATLAS CRIC, and an Event Service
+    # consumer must resolve the es_events storage to an id before it can
+    # stage a range's receipt and report the range finished (job 3492644:
+    # "Failed to load storage details for ddms=['BNL_PROD_DISK_1']" after
+    # every range had been processed). The pilot tokenizes the job
+    # parameters with shlex and takes the option's value as the next
+    # token, read as a Python literal (jobdata.parse_args): the record
+    # goes as a separate double-quoted token in Python's own syntax
+    # (job 3493147 got it as one --option=json token and passed it to
+    # runGen, which knows no such option).
+    if spec.get('storageData'):
+        record = repr(spec['storageData'])
+        params['jobParameters'].append({
+            'type': 'constant', 'value': f'--overwriteStorageData "{record}"'})
+
+    # Files the pilot stages out and registers, by name (one job: the LFN
+    # is the file's name in the job directory, no serial). Production
+    # payloads self-register to JLab and use none of this; a PCS spec's
+    # 'outputs' is its JLab datasets, another thing.
+    if spec.get('stageOutFiles'):
+        params.pop('noOutput', None)
+        for name in spec['stageOutFiles']:
+            params['jobParameters'].append({
+                'type': 'template', 'param_type': 'output',
+                'value': f"{spec['outDS']}.{name}",
+                'dataset': f"{spec['outDS']}_{name.split('.')[0]}/",
+                'hidden': True,
+            })
+
     # Scouts off -> walltime used directly; scouts on -> HS06 per-event routing
     # (avoids the noInput pseudo-input 1MB-file walltime inflation).
     if spec.get('skipScout'):

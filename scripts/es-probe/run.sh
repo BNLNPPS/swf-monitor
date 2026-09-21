@@ -20,7 +20,7 @@ mkdir -p "${WORK}/sandbox"
 echo "ES probe sandbox: es_range_client.py speaks the pilot's range channel" \
     > "${WORK}/sandbox/README"
 cp "${HERE}/es_range_client.py" "${WORK}/sandbox/"
-sed "s/%STAMP%/${STAMP}/" "${SPEC}" > "${WORK}/spec.json"
+sed "s/%STAMP%/${STAMP}/g" "${SPEC}" > "${WORK}/spec.json"
 echo "spec: ${WORK}/spec.json"
 grep outDS "${WORK}/spec.json"
 source ~/pclient/run/setup.sh

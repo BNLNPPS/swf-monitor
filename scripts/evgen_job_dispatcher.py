@@ -329,7 +329,165 @@ def run_payload_canary(csv_base, stamp, workdir):
     return 0
 
 
+# Event Service (swf-epicprod NODE_EVENT_DISPATCHER.md): the pilot's
+# generic executor hands event ranges over a yampl channel it names in
+# PILOT_EVENTRANGECHANNEL; this mode takes them one at a time and runs
+# each through the production payload. The pilot runs an Event Service
+# payload outside the job's container, so this mode starts the task's
+# image itself, once per range, with the working directory bound at its
+# own path (run.sh sources environment-*.sh from it and finds the proxy).
+ES_RECEIPT_DIR = "es_out"
+
+
+def _container_runtime():
+    """apptainer as the site provides it: on PATH, or ALRB's copy."""
+    import shutil
+    for name in ("apptainer", "singularity"):
+        found = shutil.which(name)
+        if found:
+            return found
+    alrb = "/cvmfs/atlas.cern.ch/repo/containers/sw/apptainer/x86_64-el8/current/bin/apptainer"
+    return alrb if os.path.exists(alrb) else "apptainer"
+
+
+def _run_range_in_container(image, workdir, args, env):
+    """One manifest-row run of the payload inside ``image``: run.sh with
+    ``args`` in ``workdir`` (bound at its own path), ``env`` exported
+    inside. Returns the payload's exit code."""
+    exports = "".join(f"export {k}={json.dumps(str(v))}; " for k, v in env.items())
+    inner = exports + " ".join(json.dumps(a) for a in
+                               [os.path.join(workdir, PAYLOAD_SUBDIR, "run.sh")] + args)
+    cmd = [_container_runtime(), "exec", "--cleanenv", "-B", workdir, "--pwd", workdir]
+    if os.path.isdir("/cvmfs"):
+        cmd += ["-B", "/cvmfs"]
+    cmd += [image, "/bin/bash", "-c", inner]
+    print(f"range payload: {' '.join(cmd[:8])} ... {image}", flush=True)
+    return subprocess.run(cmd, text=True).returncode
+
+
+def run_event_service(csv_base, stamp, workdir, channel):
+    """Event Service canary: manifest row 1's input, one range at a time
+    from the pilot's channel, each range through the production payload
+    in the task's image as a chunk of the row (the range's start divided
+    by its length: run.sh skips start events, seeds by chunk, names the
+    outputs by chunk), outputs to epic:/TEST/canary/<stamp>. A receipt per
+    finished range is what the pilot is told, on the payload's own report
+    the pilot tars and stages; the science data went to JLab from the
+    payload. ERR_ for a range whose payload failed. Exits 0 when the pilot
+    says there are no more events; the job report carries every range."""
+    import time
+    name = channel or os.environ.get("PILOT_EVENTRANGECHANNEL")
+    if not name:
+        print("ERROR: no range channel (argument or PILOT_EVENTRANGECHANNEL): "
+              "not an Event Service job", file=sys.stderr)
+        return 2
+    try:
+        import yampl
+    except Exception as exc:                                  # noqa: BLE001
+        print(f"ERROR: cannot import yampl: {exc}; PYTHONPATH="
+              f"{os.environ.get('PYTHONPATH')}", file=sys.stderr)
+        return 3
+    image = os.environ.get("ES_PAYLOAD_IMAGE", "").strip()
+    if not image:
+        print("ERROR: ES_PAYLOAD_IMAGE names no container image", file=sys.stderr)
+        return 2
+    with open(f"{csv_base}.csv") as f:
+        row = next(csv.reader(f), None)
+    if not row or len(row) < 4:
+        print(f"ERROR: no manifest row in {csv_base}.csv", file=sys.stderr)
+        return 1
+    file_path, ext = row[0], row[1]
+    dataset = f"{CANARY_DATASET_ROOT}/{stamp}"
+    # Receipts one level above runGen's workDir, which runGen removes
+    # when the payload exits, before the pilot tars the reported outputs.
+    outdir = os.path.join(os.path.dirname(workdir), ES_RECEIPT_DIR)
+    os.makedirs(outdir, exist_ok=True)
+    sock = yampl.ClientSocket(name, "local")
+    print(f"event service: channel {name}, image {image}, row {row}, "
+          f"outputs epic:/{dataset}, receipts {outdir}", flush=True)
+    ranges_done, ranges_failed = [], []
+    while True:
+        sock.send_raw(b"Ready for events")
+        while True:
+            size, buf = sock.try_recv_raw()
+            if size != -1:
+                break
+            time.sleep(0.05)
+        message = buf.decode("utf8") if isinstance(buf, bytes) else str(buf)
+        if "No more events" in message:
+            print(f"no more events: {len(ranges_done)} ranges done, "
+                  f"{len(ranges_failed)} failed", flush=True)
+            break
+        try:
+            ranges = json.loads(message)
+        except ValueError as exc:
+            print(f"ERROR: unparseable range message: {exc}: {message[:300]}",
+                  file=sys.stderr)
+            return 4
+        if isinstance(ranges, dict):
+            ranges = [ranges]
+        for rng in ranges:
+            rid = rng.get("eventRangeID")
+            # Ranges count events from 1 (the first is 1-5); run.sh skips
+            # chunk * length events, so the chunk is the zero-based start
+            # over the length (job 3492641 refused every range with the
+            # one-based start).
+            start, last = int(rng.get("startEvent", 0)), int(rng.get("lastEvent", 0))
+            count = last - start + 1
+            t0 = time.time()
+            if count < 1 or (start - 1) % count:
+                report = (f"ERR_ATHENAMP_PROCESS {rid}: range {start}-{last} is not "
+                          f"a whole chunk of its own length")
+                sock.send_raw(report.encode("utf8"))
+                ranges_failed.append({"range": rng, "error": report})
+                print(report, flush=True)
+                continue
+            chunk = f"{(start - 1) // count:04d}"
+            stages_log = os.path.join(outdir, f"{rid}.stages.log")
+            rc = _run_range_in_container(image, workdir,
+                                         [f"EVGEN/{file_path}", ext, str(count), chunk],
+                                         {"CANARY_OUTPUT_DATASET": dataset,
+                                          "CANARY_LIFETIME_S": str(CANARY_LIFETIME_S),
+                                          "PAYLOAD_STAGES_LOG": stages_log,
+                                          "PANDAID": os.environ.get("PANDAID", "")})
+            wall = time.time() - t0
+            payload = read_payload_report(workdir) or {}
+            stages = _read_stages(stages_log)
+            dids = [s["detail"] for s in stages
+                    if s["stage"] == "registration" and s["status"] == "ok" and s["detail"]]
+            record = {"range": rng, "chunk": chunk, "events": count, "rc": rc,
+                      "wall_s": round(wall, 1),
+                      "events_reconstructed": (payload.get("events") or {}).get("reconstructed"),
+                      "dids": dids, "stages": stages}
+            path = os.path.join(outdir, f"{rid}.json")
+            with open(path, "w") as fh:
+                json.dump(record, fh)
+            if rc == 0 and dids:
+                report = f"{path},ID:{rid},CPU:{wall:.1f},WALL:{wall:.1f}"
+                ranges_done.append(record)
+            else:
+                report = (f"ERR_ATHENAMP_PROCESS {rid}: payload exit {rc}"
+                          + ("" if dids else ", nothing registered"))
+                ranges_failed.append(record)
+            sock.send_raw(report.encode("utf8"))
+            print(f"range {rid} events {start}-{last} chunk {chunk}: rc {rc}, "
+                  f"{wall:.0f} s, dids {dids}", flush=True)
+    write_job_report(0, workdir, extra={
+        "payload_version": payload_version(workdir),
+        "es": {"kind": "event_service", "stamp": stamp, "dataset": f"epic:/{dataset}",
+               "image": image, "manifest_row": row,
+               "ranges_done": ranges_done, "ranges_failed": ranges_failed}})
+    return 0
+
+
 def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "es":
+        if len(sys.argv) < 4:
+            print(f"Usage: {sys.argv[0]} es <csv_base> <stamp> [channel]",
+                  file=sys.stderr)
+            return 2
+        return run_event_service(sys.argv[2], sys.argv[3],
+                                 os.getcwd(), sys.argv[4] if len(sys.argv) > 4 else "")
     if len(sys.argv) >= 2 and sys.argv[1] == "canary":
         # Canary probe job: same runner, landing-kit payload.
         payload_seconds = int(sys.argv[2]) if len(sys.argv) > 2 else 60

@@ -1,0 +1,17 @@
+{
+  "outDS": "group.EIC.esinput.%STAMP%",
+  "exec": "xrdcp -f root://dtn-eic.jlab.org//volatile/eic/EPIC/EVGEN/EXCLUSIVE/UPSILON_ABCONV/eSTARlight1.3.0-1.0/Upsilon3S/9x275/q2_0to0.01/hiAcc/eSTARlight1.3.0-1.0_Upsilon3S_9x275_q2_0to0.01_hiAcc_ab_run000.hepmc3.tree.root ../group.EIC.esinput.%STAMP%.hepmc3.tree.root && ls -l ../group.EIC.esinput.%STAMP%.hepmc3.tree.root",
+  "outputs": [
+    "hepmc3.tree.root"
+  ],
+  "site": "BNL_OSG_PanDA_pilotest",
+  "prodSourceLabel": "test",
+  "nJobs": 1,
+  "nEventsPerJob": 1,
+  "nCore": 1,
+  "memory": 2048,
+  "walltimeHours": 0.5,
+  "skipScout": true,
+  "maxAttempt": 1,
+  "containerImage": "/cvmfs/singularity.opensciencegrid.org/eicweb/eic_xl:26.07.1-stable"
+}
