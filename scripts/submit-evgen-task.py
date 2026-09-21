@@ -478,7 +478,8 @@ def main():
                     help="Event Service canary: the pilot hands the input as a "
                          "TURL instead of copying it (its --accessmode=direct, "
                          "read as a substring of the job parameters, so it rides "
-                         "inside the exec where runGen never sees it); for a "
+                         "inside the exec where runGen never sees it), and "
+                         "runGen takes the input as given (--givenPFN); for a "
                          "queue that cannot reach the input's storage (npps0)")
     ap.add_argument("--es-slots", type=int, default=1,
                     help="Event Service canary: the node harness's slots, one "
@@ -609,6 +610,9 @@ def main():
                             f"$PILOT_EVENTRANGECHANNEL"
                             + (" --accessmode=direct" if args.es_direct_input else ""))
             spec['nCore'] = int(args.es_slots)
+            if args.es_direct_input:
+                # runGen takes the input as given (the kernel's --givenPFN)
+                spec['directInput'] = True
             spec.update(inputDataset=args.es_input_dataset, nFilesPerJob=1,
                         nEventsPerInputFile=int(args.es_events),
                         nEventsPerJob=int(args.es_events),

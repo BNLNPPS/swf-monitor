@@ -183,6 +183,13 @@ def build_task_params(spec, archive_name):
         # Over real input nEvents is the events to process, not the job
         # count the noInput shape encodes in it.
         params['nEvents'] = params['nEventsPerJob'] * int(spec.get('nJobs', 1))
+        # Input handed to the payload as a TURL, not staged: runGen's
+        # --givenPFN takes the input names as given and skips its check
+        # for a local copy, which otherwise ends the job before the
+        # payload starts (job 3556333, "No input file is available"). The
+        # pilot's own switch (--accessmode=direct) rides in the exec.
+        if spec.get('directInput'):
+            params['jobParameters'].append({'type': 'constant', 'value': '--givenPFN'})
 
     # Storage records the job carries for the pilot (--overwriteStorageData,
     # the pilot's job-level master source for StorageData): the pilot
