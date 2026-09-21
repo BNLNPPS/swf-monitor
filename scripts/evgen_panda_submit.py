@@ -164,6 +164,18 @@ def build_task_params(spec, archive_name):
     # dispatch and bookkeeping.
     if spec.get('nEventsPerWorker'):
         params['nEventsPerWorker'] = int(spec['nEventsPerWorker'])
+    # Fine-grained processing: the server's Event Service flavor without
+    # the merge step (JEDI TaskRefinerBase fineGrainedProc; job flag 6).
+    # Every event of the input is a range; a job's finished ranges count
+    # at its end and the rest go back to the file for the next job
+    # (check_fine_grained_processing), so nothing merges and no consumer
+    # is spawned. The ordinary flavor closes a consumer by generating an
+    # ES merge job, which has no place in a payload that registers per
+    # range (job 3556339: every range done, the job failed on the merge
+    # job's insert). Exclusive with nEventsPerWorker.
+    if spec.get('fineGrainedProc'):
+        params.pop('nEventsPerWorker', None)
+        params['fineGrainedProc'] = True
 
     # A PanDA input dataset (the ES shape that finishes: JEDI makes and
     # completes ranges over files of type input only, NODE_EVENT_DISPATCHER.md,
