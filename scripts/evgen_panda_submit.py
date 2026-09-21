@@ -176,6 +176,15 @@ def build_task_params(spec, archive_name):
     if spec.get('fineGrainedProc'):
         params.pop('nEventsPerWorker', None)
         params['fineGrainedProc'] = True
+    # An Event Service job runs its payload in one step outside the
+    # pilot's container (the harness starts the image itself), so the
+    # container's pre- and post-process steps have nothing to do: the
+    # post-process runGen ran after the single-step one had removed its
+    # work directory and failed, and every Event Service job carried
+    # pilot error 1357 "Post-process command failed" though the server
+    # finished it (jobs 3556341-3556349).
+    if params.get('nEventsPerWorker') or params.get('fineGrainedProc'):
+        params.pop('multiStepExec', None)
 
     # A PanDA input dataset (the ES shape that finishes: JEDI makes and
     # completes ranges over files of type input only, NODE_EVENT_DISPATCHER.md,
