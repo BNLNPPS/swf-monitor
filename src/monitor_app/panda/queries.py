@@ -861,9 +861,15 @@ def _get_task_job_counts(jeditaskids):
 
     Extras beyond JOB_STATUS_CATEGORIES:
     - nrunning: count of job records with jobstatus='running' (subset of nactive).
-    - nretries: count of job records with attemptnr > 1. In the ePIC PanDA
-      schema every retry creates a new job record, so this is the total
-      retry count for the task.
+    - nretries: retries of failures: job records with attemptnr > 1, less
+      the closed records. Every retry creates a new job record, and so
+      does every reissue of a closed job (JEDI closes a job whose
+      activation expired unrun and issues it again with the attempt
+      bumped); each closed record has exactly one successor, so
+      subtracting the closed records leaves the attempts that followed a
+      failure. On Perlmutter in 2026-09 a task showed 56,000 "retries"
+      against 890 failures before this (Sakib, 9/20). A task aborted with
+      closed jobs never reissued undercounts, clamped at zero.
     - nfinalfailed: count of input files that exhausted their retry budget,
       from JEDI's file-level accounting (jedi_datasets.nfilesfailed on the
       master input datasets). These are final failures — no attempt remains.
@@ -926,6 +932,8 @@ def _get_task_job_counts(jeditaskids):
                 if jobstatus == 'running':
                     counts[tid]['nrunning'] += n
                 counts[tid]['nretries'] += nretries_part or 0
+                if jobstatus == 'closed':
+                    counts[tid]['nclosed'] = counts[tid].get('nclosed', 0) + n
                 if cat == 'finished':
                     counts[tid]['nretries_finished'] += retries_sum_part or 0
                 if maxattempt_part is not None:
@@ -937,6 +945,10 @@ def _get_task_job_counts(jeditaskids):
     except Exception as e:
         logger.error(f"_get_task_job_counts failed: {e}")
         # On failure, return zeros so caller still gets a consistent shape.
+    for tid in counts:
+        # Reissues of closed jobs are not retries (docstring, nretries).
+        counts[tid]['nretries'] = max(
+            0, counts[tid]['nretries'] - counts[tid].pop('nclosed', 0))
 
     # Final-failure accounting comes from JEDI's file-level bookkeeping on
     # the master input datasets, not from job records (see docstring).
