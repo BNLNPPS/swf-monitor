@@ -488,6 +488,11 @@ def main():
                          "the rest back to the file; --es-events-per-range "
                          "is then the harness's unit, consecutive events "
                          "run as one chunk")
+    ap.add_argument("--es-close-s", type=int, default=0,
+                    help="Event Service canary: seconds between the harness's "
+                         "closes, each the units since the last merged into one "
+                         "podio file and registered (payload es/es_close.sh); "
+                         "0 = each unit registers its own file")
     ap.add_argument("--es-max-attempt", type=int, default=1,
                     help="Event Service canary: job attempts over the input "
                          "file (default 1, a canary's); 2 or more lets a job "
@@ -620,8 +625,9 @@ def main():
             # quantum, the chunk that names the outputs).
             per_unit = (f"ES_EVENTS_PER_UNIT={int(args.es_events_per_range)} "
                         if args.es_fine_grained and args.es_events_per_range > 0 else "")
+            close = f"ES_CLOSE_S={int(args.es_close_s)} " if args.es_close_s > 0 else ""
             spec['exec'] = (f"ES_PAYLOAD_IMAGE={spec.get('containerImage', '')} "
-                            f"ES_SLOTS={int(args.es_slots)} {deadline}{per_unit}"
+                            f"ES_SLOTS={int(args.es_slots)} {deadline}{per_unit}{close}"
                             f"python3 evgen_job_dispatcher.py es "
                             f"{spec['csvBase']} {args.canary_stamp} "
                             f"$PILOT_EVENTRANGECHANNEL"
