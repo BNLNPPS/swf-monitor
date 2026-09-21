@@ -496,6 +496,11 @@ def main():
                          "production jobs of the task's name over 14 days), in "
                          "place of --es-events-per-range; no measurement, no "
                          "submission")
+    ap.add_argument("--es-measure-queue", default="",
+                    help="Event Service canary: the queue whose record measures "
+                         "the seconds per event for --es-quantum-s, when the "
+                         "canary queue has no production of its own (the "
+                         "Perlmutter test queue runs the production queue's nodes)")
     ap.add_argument("--es-close-s", type=int, default=0,
                     help="Event Service canary: seconds between the harness's "
                          "closes, each the units since the last merged into one "
@@ -630,19 +635,21 @@ def main():
                     return 2
                 try:
                     m = json.loads(_api_get(args.swf_monitor_url, "/api/panda/seconds-per-event/",
-                                            {"task": args.task_name, "queue": args.canary_queue},
+                                            {"task": args.task_name,
+                                             "queue": args.es_measure_queue or args.canary_queue},
                                             args.token))
                 except Exception as e:                                   # noqa: BLE001
                     _log(f"ERROR: seconds per event not read: {e}")
                     return 2
                 if not m.get("s_per_event"):
                     _log(f"ERROR: no measured seconds per event for {args.task_name} on "
-                         f"{args.canary_queue} ({m.get('jobs', 0)} finished jobs in {m.get('days')} days)")
+                         f"{args.es_measure_queue or args.canary_queue} ({m.get('jobs', 0)} finished "
+                         f"jobs in {m.get('days')} days)")
                     return 2
                 args.es_events_per_range = max(1, int(round(args.es_quantum_s / float(m["s_per_event"]))))
                 _log(f"unit: {args.es_events_per_range} events = {args.es_quantum_s} s over "
                      f"{m['s_per_event']} s/event ({m['jobs']} finished jobs of the configuration on "
-                     f"{args.canary_queue}, median {m['median_wall_s']} s for {m['median_events']} events)")
+                     f"{m['queue']}, median {m['median_wall_s']} s for {m['median_events']} events)")
             if (args.es_events_per_range < 1 and not args.es_fine_grained) or args.es_events < 1:
                 _log("ERROR: --es-input-dataset needs --es-events-per-range "
                      "(or --es-fine-grained) and --es-events")
