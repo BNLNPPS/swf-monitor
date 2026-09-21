@@ -3445,6 +3445,40 @@ def es_verdict(job):
     }
 
 
+def seconds_per_event(taskname, queue, days=14):
+    """The measured cost of an event of one production configuration on
+    one queue: over the finished production jobs of the task name (a
+    prefix: the configuration's tasks and their residuals) on the queue
+    in the window, the median of each job's wall over its own event
+    count (the payload's count in the job record). The node harness's
+    unit size follows from it (swf-epicprod NODE_EVENT_DISPATCHER.md):
+    the loss quantum over the seconds per event. No measurement, no
+    number: ``jobs`` is 0 and ``s_per_event`` None."""
+    sql = f"""
+        SELECT COUNT(*),
+               percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (j."endtime" - j."starttime"))),
+               percentile_cont(0.5) WITHIN GROUP (ORDER BY j."nevents"),
+               percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (j."endtime" - j."starttime")) / j."nevents")
+        FROM "{PANDA_SCHEMA}"."jobsarchived4" j
+        JOIN "{PANDA_SCHEMA}"."jedi_tasks" t ON t."jeditaskid" = j."jeditaskid"
+        WHERE t."taskname" LIKE %s AND j."computingsite" = %s
+          AND j."jobstatus" = 'finished' AND j."nevents" > 0
+          AND j."processingtype" = 'epicproduction'
+          AND j."modificationtime" > NOW() - INTERVAL %s
+    """
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(sql, [f'{taskname}%', queue, f'{int(days)} days'])
+            n, med_s, med_events, med_spe = cursor.fetchone()
+    except Exception as e:
+        logger.error(f"seconds_per_event failed for {taskname} on {queue}: {e}")
+        return {'error': str(e)}
+    return {'task': taskname, 'queue': queue, 'days': int(days), 'jobs': int(n or 0),
+            'median_wall_s': round(float(med_s), 1) if med_s is not None else None,
+            'median_events': round(float(med_events), 1) if med_events is not None else None,
+            's_per_event': round(float(med_spe), 3) if med_spe is not None else None}
+
+
 def es_harness_report(conn, pandaid):
     """The node harness's account of an Event Service job, from the job
     report the pilot shipped as metadata (evgen_job_dispatcher.py es

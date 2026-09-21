@@ -312,6 +312,32 @@ def task_operation_update(request, operation_id):
 @api_view(['GET'])
 @authentication_classes(_AUTH)
 @permission_classes([AllowAny])
+def seconds_per_event(request):
+    """GET /api/panda/seconds-per-event/ — the measured seconds per event
+    of a production configuration on a queue, from its finished jobs
+    (queries.seconds_per_event); what sizes the node harness's unit.
+
+    Query params:
+        task (str, required): the task name, matched as a prefix
+        queue (str, required)
+        days (int, default 14)
+    """
+    task = (request.query_params.get('task') or '').strip()
+    queue = (request.query_params.get('queue') or '').strip()
+    if not task or not queue:
+        return Response({'error': 'task and queue are required'}, status=http_status.HTTP_400_BAD_REQUEST)
+    days, err = _int_param(request, 'days', default=14, min_value=1)
+    if err:
+        return err
+    result = queries.seconds_per_event(task, queue, days)
+    if 'error' in result:
+        return Response(result, status=http_status.HTTP_500_INTERNAL_SERVER_ERROR)
+    return Response(result)
+
+
+@api_view(['GET'])
+@authentication_classes(_AUTH)
+@permission_classes([AllowAny])
 def activity(request):
     """GET /api/panda/activity/ — aggregate counts by task and job status.
 
