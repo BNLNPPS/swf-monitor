@@ -3490,6 +3490,13 @@ def es_harness_report(conn, pandaid):
                 'rc': u.get('rc'),
             })
     units.sort(key=lambda u: (u['first_event'] is None, u['first_event'] or 0))
+    closes = []
+    for c in es.get('closes') or []:
+        if isinstance(c, dict):
+            closes.append({'index': c.get('index'), 'outcome': c.get('outcome'),
+                           'events': c.get('events'), 'units': len(c.get('units') or []),
+                           'wall_s': c.get('wall_s'), 'did': (c.get('did') or '').split('/')[-1],
+                           'message': c.get('message') or '', 'ok': bool(c.get('ok'))})
     return {
         'payload_version': metadata.get('payload_version') or '',
         'stamp': es.get('stamp'),
@@ -3500,6 +3507,7 @@ def es_harness_report(conn, pandaid):
         'harness_rc': es.get('harness_rc'),
         'untaken_at_deadline': bool(es.get('untaken_at_deadline')),
         'units': units,
+        'closes': closes,
         'n_done': sum(1 for u in units if u['status'] == 'done'),
         'n_failed': sum(1 for u in units if u['status'] == 'failed'),
         'events_reconstructed': sum(int(u['reconstructed'] or 0) for u in units),

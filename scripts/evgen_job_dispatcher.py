@@ -385,7 +385,8 @@ def run_event_service(csv_base, stamp, workdir, channel):
                "wall_s": summary.get("wall_s"),
                "untaken_at_deadline": summary.get("untaken_at_deadline"),
                "ranges_done": summary.get("done", []),
-               "ranges_failed": summary.get("failed", [])}})
+               "ranges_failed": summary.get("failed", []),
+               "closes": summary.get("closes", [])}})
     return 0
 
 
