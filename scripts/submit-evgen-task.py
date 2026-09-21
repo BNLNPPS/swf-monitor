@@ -486,7 +486,8 @@ def main():
                          "(the server's no-merge flavor): every event a "
                          "range, finished ranges counted at the job's end, "
                          "the rest back to the file; --es-events-per-range "
-                         "is then not used")
+                         "is then the harness's unit, consecutive events "
+                         "run as one chunk")
     ap.add_argument("--es-slots", type=int, default=1,
                     help="Event Service canary: the node harness's slots, one "
                          "resident EICrecon and one range at a time each; "
@@ -609,8 +610,13 @@ def main():
                 return 2
             deadline = (f"ES_DEADLINE_S={int(args.es_deadline_s)} ES_MARGIN_S={int(args.es_margin_s)} "
                         if args.es_deadline_s else "")
+            # A fine-grained task's ranges are single events; the harness
+            # runs --es-events-per-range of them as one unit (the loss
+            # quantum, the chunk that names the outputs).
+            per_unit = (f"ES_EVENTS_PER_UNIT={int(args.es_events_per_range)} "
+                        if args.es_fine_grained and args.es_events_per_range > 0 else "")
             spec['exec'] = (f"ES_PAYLOAD_IMAGE={spec.get('containerImage', '')} "
-                            f"ES_SLOTS={int(args.es_slots)} {deadline}"
+                            f"ES_SLOTS={int(args.es_slots)} {deadline}{per_unit}"
                             f"python3 evgen_job_dispatcher.py es "
                             f"{spec['csvBase']} {args.canary_stamp} "
                             f"$PILOT_EVENTRANGECHANNEL"
@@ -640,7 +646,8 @@ def main():
                         noLog=True)
             _log(f"event service canary: {args.es_events} events of "
                  f"{args.es_input_dataset} in ranges of "
-                 + ("1 (fine-grained)" if args.es_fine_grained else str(args.es_events_per_range)))
+                 + (f"1 (fine-grained), units of {args.es_events_per_range or 1}"
+                    if args.es_fine_grained else str(args.es_events_per_range)))
         _log(f"payload canary {spec['outDS']} on {args.canary_queue}: "
              f"row {spec['csvRows'][0]}"
              + (f", RLIMIT_AS {args.canary_mem_limit_mb} MB"
