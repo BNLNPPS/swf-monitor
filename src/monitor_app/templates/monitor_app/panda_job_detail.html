@@ -37,7 +37,7 @@
         {% endif %}
         {% endwith %}
         {% if event_service.verdict %}
-        <span class="ms-2">Verdict: <span class="{% if event_service.verdict.substatus %}text-danger{% endif %}">{{ event_service.verdict.substatus|default:"" }}{% if event_service.verdict.code %}{% if event_service.verdict.substatus %}, {% endif %}code {{ event_service.verdict.code }}: {{ event_service.verdict.meaning }}{% endif %}</span></span>
+        <span class="ms-2">Verdict: <span class="{% if event_service.verdict.ok %}text-success{% elif event_service.verdict.substatus %}text-danger{% endif %}">{{ event_service.verdict.substatus|default:"" }}{% if event_service.verdict.code %}{% if event_service.verdict.substatus %}, {% endif %}code {{ event_service.verdict.code }}{% endif %}{% if event_service.verdict.meaning %}: {{ event_service.verdict.meaning }}{% endif %}</span></span>
         {% endif %}
     </div>
     {% endif %}
@@ -179,6 +179,41 @@
             {% endif %}
         </div>
     </div>
+    {% endif %}
+
+    <!-- The node harness's account of an Event Service job: its units, each
+         a chunk of the row run through the payload, from the job report
+         carried in the job metadata (swf-epicprod NODE_EVENT_DISPATCHER.md,
+         The record). -->
+    {% if event_service.report %}
+    {% with rep=event_service.report %}
+    <div class="card mb-3">
+        <div class="card-header"><strong>Event Service Units ({{ rep.units|length }})</strong>
+            <span class="text-muted ms-2">{{ rep.payload_version }}</span>
+            <span class="ms-2">{{ rep.slots }} slot{{ rep.slots|pluralize }}, {{ rep.n_done }} unit{{ rep.n_done|pluralize }} done{% if rep.n_failed %}, <span class="text-danger">{{ rep.n_failed }} failed</span>{% endif %}, {{ rep.events_reconstructed }} events reconstructed{% if rep.wall_s %}, harness wall {{ rep.wall_s }} s{% endif %}</span>
+            {% if rep.untaken_at_deadline %}<span class="ms-2 badge bg-warning text-dark">stopped taking ranges at the deadline</span>{% endif %}
+            {% if rep.harness_rc %}<span class="ms-2 badge bg-danger">harness exit {{ rep.harness_rc }}</span>{% endif %}
+        </div>
+        <div class="card-body">
+            {% if rep.dataset %}<p class="mb-2 text-muted">Outputs registered per unit in {{ rep.dataset }}{% if rep.image %}; image {{ rep.image }}{% endif %}.</p>{% endif %}
+            <table class="table table-striped table-bordered table-sm align-middle w-auto">
+                <thead><tr><th>Unit</th><th>Events</th><th>Result</th><th>Wall</th><th>Reconstructed</th><th>Output</th></tr></thead>
+                <tbody>
+                {% for u in rep.units %}
+                    <tr>
+                        <td style="word-break:break-all;">{{ u.unit_id }}</td>
+                        <td>{{ u.first_event }}-{{ u.last_event }} ({{ u.events }})</td>
+                        <td class="{% if u.status == 'done' %}text-success{% else %}text-danger{% endif %}">{{ u.status }}{% if u.rc %} (exit {{ u.rc }}){% endif %}</td>
+                        <td>{% if u.wall_s is not None %}{{ u.wall_s }} s{% endif %}</td>
+                        <td>{% if u.reconstructed is not None %}{{ u.reconstructed }}{% endif %}</td>
+                        <td style="word-break:break-all;">{% for d in u.dids %}{{ d }}{% if not forloop.last %}<br>{% endif %}{% endfor %}{% if u.message %}<span class="text-danger">{{ u.message }}</span>{% endif %}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endwith %}
     {% endif %}
 
     <!-- What the payload reported: stage by stage, from the payload's own

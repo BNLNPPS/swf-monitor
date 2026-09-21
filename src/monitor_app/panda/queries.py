@@ -22,6 +22,7 @@ from .constants import (
     ERROR_COMPONENTS, FAULTY_STATUSES, TASK_LIST_FIELDS,
     STUDY_FIELDS, FILE_FIELDS, JOB_STATUS_CATEGORIES,
     ES_JOB_FLAVORS, ES_RANGE_STATUS, ES_RANGE_DONE, ES_TASKBUFFER_CODES,
+    FG_SUBSTATUS,
 )
 from .sql import (
     build_union_query, build_count_query,
@@ -3429,6 +3430,10 @@ def es_verdict(job):
     except (TypeError, ValueError):
         code = None
     meaning = ES_TASKBUFFER_CODES.get(code)
+    if sub in FG_SUBSTATUS:
+        # A fine-grained job's disposition is its substatus alone.
+        return {'substatus': sub, 'code': None, 'meaning': FG_SUBSTATUS[sub],
+                'diag': None, 'ok': sub == 'fg_done'}
     if not sub.startswith('es_') and meaning is None:
         return None
     return {
@@ -3436,6 +3441,68 @@ def es_verdict(job):
         'code': code if meaning else None,
         'meaning': meaning,
         'diag': job.get('taskbuffererrordiag') if meaning else None,
+        'ok': False,
+    }
+
+
+def es_harness_report(conn, pandaid):
+    """The node harness's account of an Event Service job, from the job
+    report the pilot shipped as metadata (evgen_job_dispatcher.py es
+    mode: the summary under ``es``, every unit's record with its events,
+    wall, outputs and, for a failed unit, the payload's failed stage and
+    error lines; swf-epicprod NODE_EVENT_DISPATCHER.md, The record).
+    None when the job carries none; never raises."""
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f'SELECT "metadata" FROM "{PANDA_SCHEMA}"."metatable" WHERE "pandaid" = %s',
+                [int(pandaid)])
+            row = cursor.fetchone()
+    except Exception as e:
+        logger.error(f"harness report query failed for job {pandaid}: {e}")
+        return None
+    if not row or not row[0]:
+        return None
+    try:
+        metadata = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+    except (ValueError, TypeError) as e:
+        logger.error(f"job metadata unparsable for job {pandaid}: {e}")
+        return None
+    es = metadata.get('es') if isinstance(metadata, dict) else None
+    if not isinstance(es, dict):
+        return None
+    units = []
+    for status, key in (('done', 'ranges_done'), ('failed', 'ranges_failed')):
+        for u in es.get(key) or []:
+            if not isinstance(u, dict):
+                continue
+            rng = u.get('range') or {}
+            units.append({
+                'unit_id': u.get('unit_id'),
+                'status': status,
+                'first_event': rng.get('startEvent'),
+                'last_event': rng.get('lastEvent'),
+                'events': u.get('events'),
+                'wall_s': u.get('wall_s'),
+                'reconstructed': u.get('events_reconstructed'),
+                'dids': [d.split('/')[-1] for d in (u.get('dids') or [])],
+                'message': u.get('message') or '',
+                'rc': u.get('rc'),
+            })
+    units.sort(key=lambda u: (u['first_event'] is None, u['first_event'] or 0))
+    return {
+        'payload_version': metadata.get('payload_version') or '',
+        'stamp': es.get('stamp'),
+        'dataset': es.get('dataset'),
+        'image': es.get('image'),
+        'slots': es.get('slots'),
+        'wall_s': es.get('wall_s'),
+        'harness_rc': es.get('harness_rc'),
+        'untaken_at_deadline': bool(es.get('untaken_at_deadline')),
+        'units': units,
+        'n_done': sum(1 for u in units if u['status'] == 'done'),
+        'n_failed': sum(1 for u in units if u['status'] == 'failed'),
+        'events_reconstructed': sum(int(u['reconstructed'] or 0) for u in units),
     }
 
 
@@ -3458,6 +3525,7 @@ def event_service_for_job(job, task_info):
         'events_per_range': es_events_per_range((task_info or {}).get('splitrule')),
         'ranges': ranges,
         'verdict': es_verdict(job),
+        'report': es_harness_report(connections['panda'], job.get('pandaid')),
     }
 
 

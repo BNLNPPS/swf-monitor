@@ -131,6 +131,15 @@ ES_TASKBUFFER_CODES = {
     126: 'closed in bad job status',
 }
 
+# The server's dispositions of a fine-grained job (job_complex_module
+# archiveJob, check_fine_grained_processing): its finished ranges count at
+# its end and the rest go back to the file for the next job.
+FG_SUBSTATUS = {
+    'fg_done': 'every range finished',
+    'fg_partial': 'some ranges finished, the rest released to the file for the next job',
+    'fg_stumble': 'no range finished; the ranges released to the file for the next job',
+}
+
 # State-color maps — imported verbatim from PanDA BigMon
 # (panda-bigmon-core/core/static/js/draw-plots-c3.js: task_state_colors /
 # job_state_colors). BigMon tuned these over years; staying consistent so
