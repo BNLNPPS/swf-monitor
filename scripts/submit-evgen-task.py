@@ -488,6 +488,11 @@ def main():
                          "the rest back to the file; --es-events-per-range "
                          "is then the harness's unit, consecutive events "
                          "run as one chunk")
+    ap.add_argument("--es-max-attempt", type=int, default=1,
+                    help="Event Service canary: job attempts over the input "
+                         "file (default 1, a canary's); 2 or more lets a job "
+                         "that ended with units untaken (the deadline drain) "
+                         "be followed by the next job over what is left")
     ap.add_argument("--es-slots", type=int, default=1,
                     help="Event Service canary: the node harness's slots, one "
                          "resident EICrecon and one range at a time each; "
@@ -622,6 +627,8 @@ def main():
                             f"$PILOT_EVENTRANGECHANNEL"
                             + (" --accessmode=direct" if args.es_direct_input else ""))
             spec['nCore'] = int(args.es_slots)
+            if args.es_max_attempt > 1:
+                spec['maxAttempt'] = int(args.es_max_attempt)
             if args.es_direct_input:
                 # runGen takes the input as given (the kernel's --givenPFN)
                 spec['directInput'] = True
