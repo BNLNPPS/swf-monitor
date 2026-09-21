@@ -181,10 +181,13 @@ def window_rows(window_h, queues=()):
 
 def finished_elsewhere(attribution_h, queues=()):
     """Per queue and task, the hosts on which the task finished over the
-    attribution window: ``{queue: {task: {host, ...}}}``."""
+    attribution window, each with its latest finish:
+    ``{queue: {task: {host: endtime}}}``. The guard's attribution is
+    contemporaneous (a finish at or after the node's first failure), so
+    the time travels with the host."""
     from canary.guard import normalize_host
     sql = f"""
-        SELECT "computingsite", "jeditaskid", "modificationhost"
+        SELECT "computingsite", "jeditaskid", "modificationhost", MAX("endtime")
         FROM "{PANDA_SCHEMA}"."jobsarchived4"
         WHERE "processingtype" = 'epicproduction'
           AND "endtime" > NOW() - INTERVAL %s
@@ -199,12 +202,13 @@ def finished_elsewhere(attribution_h, queues=()):
         cursor.execute(sql, params)
         rows = cursor.fetchall()
     out = {}
-    for queue, task, host in rows:
+    for queue, task, host, end in rows:
         if not queue or task is None:
             continue
         h = normalize_host(host)
         if h:
-            out.setdefault(str(queue), {}).setdefault(task, set()).add(h)
+            out.setdefault(str(queue), {}).setdefault(task, {})[h] = (
+                end.isoformat() if end is not None else None)
     return out
 
 

@@ -22,6 +22,7 @@ import ssl
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from datetime import datetime, timezone
 from html.parser import HTMLParser
@@ -1505,11 +1506,13 @@ class PandaBot:
                         bot._loop)
 
             def on_disconnected(self):
+                # The broker restarts in ten seconds under systemd (the
+                # OOM kill of 2026-09-21); one immediate attempt fails
+                # inside that and left the inlet dead until the unit was
+                # restarted. Retry with backoff off the listener thread.
                 logger.warning("Brains queue connection lost; reconnecting")
-                try:
-                    bot._brains_connect()
-                except Exception:
-                    logger.exception("Brains queue reconnect failed")
+                threading.Thread(target=bot._brains_reconnect,
+                                 name='brains-reconnect', daemon=True).start()
 
         self._brains_listener = _BrainsListener()
 
@@ -1536,6 +1539,25 @@ class PandaBot:
             logger.info("Brains web inlet listening on %s", self.BRAINS_QUEUE)
 
         self._brains_connect = _connect
+
+        def _reconnect():
+            # 2, 4, 8, ... 60 s between attempts, for up to an hour; the
+            # unit's restart is the recovery beyond that.
+            delay, waited = 2.0, 0.0
+            while waited < 3600.0:
+                time.sleep(delay)
+                waited += delay
+                try:
+                    _connect()
+                    logger.info("Brains queue reconnected after %.0f s", waited)
+                    return
+                except Exception as exc:
+                    logger.warning("Brains queue reconnect failed (%s); next in %.0f s",
+                                   exc, min(delay * 2, 60.0))
+                delay = min(delay * 2, 60.0)
+            logger.error("Brains queue reconnect gave up after an hour; restart the unit")
+
+        self._brains_reconnect = _reconnect
         try:
             _connect()
         except Exception:
