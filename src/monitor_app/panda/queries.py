@@ -3500,20 +3500,26 @@ def task_harness_rollup(jeditaskid, limit=2000):
     try:
         with conn.cursor() as cursor:
             cursor.execute(
-                f'SELECT m."pandaid", m."metadata" FROM "{PANDA_SCHEMA}"."metatable" m '
+                f'SELECT m."pandaid", m."metadata", j."starttime", j."endtime" '
+                f'FROM "{PANDA_SCHEMA}"."metatable" m '
                 f'JOIN "{PANDA_SCHEMA}"."jobsarchived4" j ON j."pandaid" = m."pandaid" '
-                f'WHERE j."jeditaskid" = %s LIMIT %s', [int(jeditaskid), int(limit)])
+                f'WHERE j."jeditaskid" = %s ORDER BY m."pandaid" DESC LIMIT %s',
+                [int(jeditaskid), int(limit)])
             rows = cursor.fetchall()
     except Exception as e:
         logger.error(f"harness rollup query failed for task {jeditaskid}: {e}")
         return None
+    from ..es_plot import slot_plot_svg
     jobs = 0
     slots = []
     unit_walls, unit_events, spe = [], [], []
     done = failed = events_done = 0
     closes, close_walls, close_events, close_failed = 0, [], 0, 0
     deadline_marks = 0
-    for pandaid, raw in rows:
+    busy_s = allocated_s = 0.0
+    heads, tails = [], []
+    plots = []
+    for pandaid, raw, jstart, jend in rows:
         try:
             metadata = json.loads(raw) if isinstance(raw, str) else raw
         except (ValueError, TypeError):
@@ -3522,6 +3528,17 @@ def task_harness_rollup(jeditaskid, limit=2000):
         if not isinstance(es, dict):
             continue
         jobs += 1
+        # The slots' occupancy of this job, for the task's total and the
+        # newest jobs' plots.
+        tl = es_slot_timeline({'starttime': jstart, 'endtime': jend}, es)
+        if tl:
+            busy_s += tl['busy_s']
+            allocated_s += tl['allocated_s']
+            if tl.get('head_idle_s') is not None:
+                heads.append(tl['head_idle_s'])
+                tails.append(tl['tail_idle_s'])
+            if len(plots) < 8:
+                plots.append({'pandaid': int(pandaid), 'timeline': tl, 'svg': slot_plot_svg(tl)})
         if es.get('slots'):
             slots.append(int(es['slots']))
         if es.get('untaken_at_deadline'):
@@ -3563,6 +3580,12 @@ def task_harness_rollup(jeditaskid, limit=2000):
         'close_wall_median_s': _median(close_walls),
         'deadline_marks': deadline_marks,
         'capped': len(rows) >= limit,
+        # The slots' occupancy over the task: slot-time busy of allocated,
+        # and the typical idle head and tail of a job.
+        'busy_s': round(busy_s, 1), 'allocated_s': round(allocated_s, 1),
+        'busy_fraction': round(busy_s / allocated_s, 3) if allocated_s else None,
+        'head_idle_median_s': _median(heads), 'tail_idle_median_s': _median(tails),
+        'plots': plots,
     }
 
 

@@ -46,7 +46,7 @@ def slot_plot_svg(tl):
         return LEFT + max(0.0, min(1.0, t / wall)) * plot_w
 
     parts = [f'<svg viewBox="0 0 {WIDTH} {height}" width="100%" height="{height}" '
-             f'role="img" aria-label="slot occupancy" style="font-family:inherit;font-size:13px;max-width:100%">']
+             f'role="img" aria-label="slot occupancy" style="font-family:inherit;font-size:14px;max-width:100%">']
     # Lanes: the idle band the whole job long, then the units.
     for i, row in enumerate(rows):
         y = TOP + i * LANE_H

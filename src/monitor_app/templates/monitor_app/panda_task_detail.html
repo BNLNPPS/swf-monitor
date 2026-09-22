@@ -83,7 +83,21 @@
                 <tr><td><strong>Units</strong></td><td>{{ h.units_done }} done{% if h.units_failed %}, <span class="text-danger">{{ h.units_failed }} failed</span>{% endif %}; {{ h.events_done }} events reconstructed{% if h.unit_events_median %}; {{ h.unit_events_median }} events a unit (median){% endif %}</td></tr>
                 <tr><td><strong>Unit wall</strong></td><td>{% if h.unit_wall_median_s is not None %}median {{ h.unit_wall_median_s }} s, 90th percentile {{ h.unit_wall_p90_s }} s{% if h.s_per_event_median %}; {{ h.s_per_event_median }} s an event{% endif %}{% endif %}</td></tr>
                 <tr><td><strong>Closes</strong></td><td>{% if h.closes %}{{ h.closes }} close{{ h.closes|pluralize }}, {{ h.close_events }} events registered{% if h.closes_failed %}, <span class="text-danger">{{ h.closes_failed }} failed</span>{% endif %}{% if h.close_wall_median_s is not None %}; median {{ h.close_wall_median_s }} s a close{% endif %}{% else %}none: each unit registered its own file{% endif %}</td></tr>
+                {% if h.busy_fraction is not None %}
+                <tr><td><strong>Slot occupancy</strong></td><td>{{ h.busy_s|fmt_duration }} slot-time busy of {{ h.allocated_s|fmt_duration }} allocated over the jobs: <strong>{% widthratio h.busy_fraction 1 100 %}%</strong>{% if h.head_idle_median_s is not None %}; a job's first unit {{ h.head_idle_median_s|fmt_duration }} in and its last unit ended {{ h.tail_idle_median_s|fmt_duration }} before its end (medians){% endif %}</td></tr>
+                {% endif %}
             </table>
+            {% if h.plots %}
+            <!-- Each job's slots through its life: a lane per slot, the units
+                 as bars, the closes; bare lane is idle slot. -->
+            <div class="mt-3">
+            {% for pl in h.plots %}
+                <p class="mb-1 mt-2"><a href="{% url 'monitor_app:panda_job_detail' pandaid=pl.pandaid %}">Job {{ pl.pandaid }}</a>: {{ pl.timeline.slots }} slot{{ pl.timeline.slots|pluralize }}, {{ pl.timeline.wall_s|fmt_duration }} of job wall, {% widthratio pl.timeline.busy_fraction 1 100 %}% of slot-time busy; first unit {{ pl.timeline.head_idle_s|fmt_duration }} in, last unit ended {{ pl.timeline.tail_idle_s|fmt_duration }} before the end</p>
+                {{ pl.svg }}
+            {% endfor %}
+            {% if h.jobs > 8 %}<p class="text-muted mt-2">The newest 8 of {{ h.jobs }} jobs are drawn.</p>{% endif %}
+            </div>
+            {% endif %}
         </div>
     </div>
     {% endwith %}
