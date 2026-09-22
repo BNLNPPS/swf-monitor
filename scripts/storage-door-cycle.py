@@ -36,6 +36,17 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'swf_monitor_project.settings')
 import django  # noqa: E402
 django.setup()
 
+# The probe writes as production writes: the registrar's proxy
+# (EVGEN_X509_PROXY), not whatever X509_USER_PROXY the agent's
+# environment happens to carry. On 2026-09-22 the cycle used
+# longproxy-for-rucio, which is group-readable, and xrootd refuses a
+# credential with excessive access rights — the write fell back to no
+# credential and BNL-XRD answered "permission denied", which read as a
+# door that was down while it was taking production's bytes.
+_proxy = os.environ.get('EVGEN_X509_PROXY', '')
+if _proxy and os.path.exists(_proxy):
+    os.environ['X509_USER_PROXY'] = _proxy
+
 from monitor_app.panda.storage_doors import run_cycle  # noqa: E402
 
 
