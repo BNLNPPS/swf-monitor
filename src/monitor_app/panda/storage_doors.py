@@ -49,6 +49,77 @@ DEFAULTS = {
 }
 
 
+# The failures a dead write door causes: the payload's own registration
+# exit, and the pilot's label for the stat it could not make at the door.
+# A node is not a black hole for these while its door is down.
+REGISTRATION_ERRORS = ('pilot 1305', 'exe 78', 'trans 78')
+
+
+def down_windows(hours=24, now=None):
+    """The spans each door was recorded down, newest verdict last, from
+    the cycle's own verdict changes on the action stream:
+    ``[{'rse', 'door', 'start', 'end'}]`` with ``end`` None while a door
+    is still down. A door that has never changed verdict has no span,
+    which is the honest answer before the canary has watched it.
+    """
+    from django.utils.dateparse import parse_datetime
+    from monitor_app.models import AppLog
+
+    now = now or timezone.now()
+    since = now - timedelta(hours=hours)
+    opened, spans = {}, []
+    rows = (AppLog.objects
+            .filter(app_name='epicprod', timestamp__gte=since,
+                    extra_data__action='storage_door_verdict')
+            .order_by('timestamp')
+            .values_list('timestamp', 'extra_data'))
+    for stamp, extra in rows:
+        extra = extra or {}
+        rse = str(extra.get('subject_key') or '')
+        if not rse:
+            continue
+        verdict = str(extra.get('verdict') or '')
+        if verdict == 'down' and rse not in opened:
+            opened[rse] = {'rse': rse, 'door': str(extra.get('door') or ''),
+                           'start': stamp, 'end': None}
+        elif verdict != 'down' and rse in opened:
+            span = opened.pop(rse)
+            span['end'] = stamp
+            spans.append(span)
+    spans.extend(opened.values())
+    return spans
+
+
+def set_aside_door(rows, spans, parse=None):
+    """The node guard's rows with the registration failures that ended
+    while their write door was down set aside: a dead door is not a
+    node's fault (site-canary docs/NODE_GUARD.md, The detector).
+    Returns (kept, set_aside_by_queue). Pure over ``spans``.
+
+    Only a failure of the registration class is set aside, and only
+    inside a span: a node that kills jobs for its own reasons during an
+    outage still reads as what it is.
+    """
+    from django.utils.dateparse import parse_datetime
+    parse = parse or parse_datetime
+    by_queue = {}
+    if not spans:
+        return list(rows), by_queue
+    kept = []
+    for row in rows:
+        error = str(row.get('error') or '')
+        when = parse(str(row.get('endtime') or '')) if row.get('endtime') else None
+        if (row.get('jobstatus') == 'failed' and error in REGISTRATION_ERRORS
+                and when is not None
+                and any(s['start'] <= when and (s['end'] is None or when <= s['end'])
+                        for s in spans)):
+            queue = str(row.get('queue') or '')
+            by_queue[queue] = by_queue.get(queue, 0) + 1
+            continue
+        kept.append(row)
+    return kept, by_queue
+
+
 def _safe(label, fn, fallback):
     try:
         return fn()

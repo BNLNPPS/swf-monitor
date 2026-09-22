@@ -335,6 +335,7 @@ def run_cycle(*, dry_run=False, created_by='node-guard'):
 
     rows = calib = elsewhere = None
     set_aside = {}
+    door_aside = {}
     if enabled:
         rows = _safe('window', lambda: window_rows(cfg['window_h'], cfg['queues']),
                      failed('window'))
@@ -348,6 +349,22 @@ def run_cycle(*, dry_run=False, created_by='node-guard'):
             kept = _safe('declared', lambda: set_aside_declared(rows), failed('declared'))
             if kept is not None:
                 rows, set_aside = kept
+            # And the registration failures that ended while the write
+            # door was down: a dead door kills every node's jobs at the
+            # same point in their run, which reads as a fixed-time kill
+            # on each of them in turn (2026-09-22: four Perlmutter nodes
+            # excluded for epicxrd1's expired certificate). The door
+            # canary's own record says when a door was down
+            # (site-canary docs/STORAGE_DOORS.md); before it has watched
+            # a door there are no spans and nothing is set aside.
+            from monitor_app.panda import storage_doors
+            spans = _safe('door spans',
+                          lambda: storage_doors.down_windows(cfg['window_h'] + 1),
+                          failed('door spans')) or []
+            kept = _safe('door', lambda: storage_doors.set_aside_door(rows, spans),
+                         failed('door'))
+            if kept is not None:
+                rows, door_aside = kept
         calib = _safe('calibration', median_finished_s, failed('calibration')) or {}
         elsewhere = _safe('attribution',
                           lambda: finished_elsewhere(cfg['attribution_h'], cfg['queues']),
@@ -455,6 +472,7 @@ def run_cycle(*, dry_run=False, created_by='node-guard'):
                'opened': len(trips), 'record_changes': len(changes),
                'malformed': verdicts['malformed'], 'decisions_recorded': written,
                'under_declaration': sum(set_aside.values()),
+               'under_dead_door': sum(door_aside.values()),
                'exclusion_nodes': exclusion['nodes'],
                'exclusion_published': exclusion['published'],
                'errors': errors,
@@ -472,6 +490,7 @@ def run_cycle(*, dry_run=False, created_by='node-guard'):
                          'queues': queues_state, 'nodes': nodes,
                          'tripped': [(n['queue'], n['host']) for n in tripped_nodes],
                          'under_declaration': set_aside,
+                         'under_dead_door': door_aside,
                          'exclusion': exclusion,
                          'errors': errors, 'duration_s': summary['duration_s']}
         from monitor_app.cached_product import get_product
@@ -494,6 +513,10 @@ def run_cycle(*, dry_run=False, created_by='node-guard'):
                      + (f'; {summary["under_declaration"]} jobs under a declared downtime set aside ('
                         + ', '.join(f'{q} {n}' for q, n in sorted(set_aside.items())) + ')'
                         if set_aside else '')
+                     + (f'; {summary["under_dead_door"]} registration failures at a dead '
+                        f'door set aside ('
+                        + ', '.join(f'{q} {n}' for q, n in sorted(door_aside.items())) + ')'
+                        if door_aside else '')
                      + ''.join(f'; {q} storm on {s["storm_hosts"]} hosts, the queue\'s event'
                                for q, s in queues_state.items() if s.get('queue_event'))
                      + (f'; exclusion of {exclusion["nodes"]} node'
