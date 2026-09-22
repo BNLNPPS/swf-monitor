@@ -42,7 +42,8 @@ DEFAULTS = {
     'skip_rses': [],
     'probe_prefix': '/canary',
     'probe_name': 'storage-door-probe',
-    'timeout_s': 60,
+    'timeout_s': 30,
+    'max_per_cycle': 4,
     'warn_days': 7,
     'catalog_url': 'https://rucio-server.jlab.org:443',
     'account': 'eicprod',
@@ -143,7 +144,8 @@ def settings():
         out['skip_rses'] = []
     out['interval_h'] = max(0.25, float(out['interval_h'] or 1))
     out['validity_h'] = max(2 * out['interval_h'], float(out['validity_h'] or 3))
-    out['timeout_s'] = max(5, int(out['timeout_s'] or 60))
+    out['timeout_s'] = max(5, int(out['timeout_s'] or 30))
+    out['max_per_cycle'] = max(1, int(out['max_per_cycle'] or 4))
     if out['mode'] not in MODES:
         logger.error('storage_doors.mode is not one of %s: %r; running shadow',
                      MODES, out['mode'])
@@ -231,15 +233,25 @@ def run_cycle(*, dry_run=False, created_by='storage-doors', force=False,
         wanted = {r.strip() for r in only if r.strip()}
         resolved = {rse: door for rse, door in resolved.items() if rse in wanted}
 
+    # The most overdue doors first, and only so many in one cycle: a
+    # door that does not answer costs its whole timeout, and eight of
+    # those would outlast the doer. With the enqueue every fifteen
+    # minutes, every door still gets its turn inside the hour.
+    def overdue(item):
+        was = previous.get(item[0]) or {}
+        return str(was.get('probed_at') or '')
+    ordered = sorted(resolved.items(), key=overdue)
+
     readings, state, probed = [], {}, 0
-    for rse, door in sorted(resolved.items()):
+    for rse, door in ordered:
         was = previous.get(rse) or {}
         if not door:
             state[rse] = {**was, 'rse': rse, 'verdict': 'unknown',
                           'reason': 'no_xrootd_write_door',
                           'evidence': {}, 'door': '', 'probed_at': was.get('probed_at')}
             continue
-        if not (force or cfg['enabled']) or not is_due(was, cfg['interval_h'], t0):
+        if (not (force or cfg['enabled']) or not is_due(was, cfg['interval_h'], t0)
+                or probed >= cfg['max_per_cycle']):
             state[rse] = {**was, 'rse': rse, 'door': door['door']}
             continue
         path = canary_doors.probe_path(door['prefix'], cfg['probe_prefix'],
@@ -302,7 +314,7 @@ def run_cycle(*, dry_run=False, created_by='storage-doors', force=False,
     down = sorted(r for r, s in state.items() if s.get('verdict') == 'down')
     expiring = sorted(r for r, s in state.items()
                       if (s.get('evidence') or {}).get('certificate_expiring'))
-    summary = {'cycle_at': t0.isoformat(), 'mode': cfg['mode'], 'enabled': cfg['enabled'],
+    summary = {'cycle_at': t0.isoformat(), 'max_per_cycle': cfg['max_per_cycle'], 'mode': cfg['mode'], 'enabled': cfg['enabled'],
                'interval_h': cfg['interval_h'], 'rses': len(state), 'probed': probed,
                'down': down, 'expiring': expiring, 'changes': len(changes),
                'errors': errors,
