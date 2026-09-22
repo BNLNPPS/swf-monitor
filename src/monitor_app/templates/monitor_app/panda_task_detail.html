@@ -69,6 +69,25 @@
         {% endif %}
         {% endwith %}
     </div>
+    {% if event_service.harness %}
+    {% with h=event_service.harness %}
+    <!-- The node harness across the task's jobs, from their job reports
+         (swf-epicprod NODE_EVENT_DISPATCHER.md, The record). -->
+    <div class="card mb-3">
+        <div class="card-header"><strong>Event Service Units</strong>
+            <span class="text-muted ms-2">{{ h.jobs }} job{{ h.jobs|pluralize }} with a harness report{% if h.capped %} (the first 2000){% endif %}{% if h.slots_min %}, {% if h.slots_min == h.slots_max %}{{ h.slots_min }}{% else %}{{ h.slots_min }} to {{ h.slots_max }}{% endif %} slot{{ h.slots_max|pluralize }} a job{% endif %}</span>
+            {% if h.deadline_marks %}<span class="ms-2 badge bg-warning text-dark">{{ h.deadline_marks }} job{{ h.deadline_marks|pluralize }} stopped taking ranges at the deadline</span>{% endif %}
+        </div>
+        <div class="card-body">
+            <table class="table table-striped table-bordered table-sm align-middle w-auto mb-0">
+                <tr><td><strong>Units</strong></td><td>{{ h.units_done }} done{% if h.units_failed %}, <span class="text-danger">{{ h.units_failed }} failed</span>{% endif %}; {{ h.events_done }} events reconstructed{% if h.unit_events_median %}; {{ h.unit_events_median }} events a unit (median){% endif %}</td></tr>
+                <tr><td><strong>Unit wall</strong></td><td>{% if h.unit_wall_median_s is not None %}median {{ h.unit_wall_median_s }} s, 90th percentile {{ h.unit_wall_p90_s }} s{% if h.s_per_event_median %}; {{ h.s_per_event_median }} s an event{% endif %}{% endif %}</td></tr>
+                <tr><td><strong>Closes</strong></td><td>{% if h.closes %}{{ h.closes }} close{{ h.closes|pluralize }}, {{ h.close_events }} events registered{% if h.closes_failed %}, <span class="text-danger">{{ h.closes_failed }} failed</span>{% endif %}{% if h.close_wall_median_s is not None %}; median {{ h.close_wall_median_s }} s a close{% endif %}{% else %}none: each unit registered its own file{% endif %}</td></tr>
+            </table>
+        </div>
+    </div>
+    {% endwith %}
+    {% endif %}
     {% if event_service.ranges.range_counts or event_service.ranges.attempt_counts %}
     <div class="card mb-3">
         <div class="card-header"><strong>Event Ranges</strong> <span class="text-muted ms-2">{{ event_service.ranges.total }} row{{ event_service.ranges.total|pluralize }} in the range record across the task</span></div>

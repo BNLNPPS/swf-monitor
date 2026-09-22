@@ -3479,6 +3479,93 @@ def seconds_per_event(taskname, queue, days=14):
             's_per_event': round(float(med_spe), 3) if med_spe is not None else None}
 
 
+def _median(values):
+    vals = sorted(v for v in values if v is not None)
+    if not vals:
+        return None
+    mid = len(vals) // 2
+    return round(vals[mid] if len(vals) % 2 else (vals[mid - 1] + vals[mid]) / 2, 1)
+
+
+def task_harness_rollup(jeditaskid, limit=2000):
+    """What the node harness reported across a task's Event Service
+    jobs: the jobs with a report, their slots, the units done and failed
+    with their events, the unit wall's middle and tail and the seconds
+    an event costs (unit wall over its events), the closes with their
+    events and wall, and every job's untaken-at-deadline mark. From the
+    job reports in the metatable (finished jobs), capped at ``limit``
+    jobs; None when no job of the task carries a harness report. Never
+    raises: one card on a page."""
+    conn = connections['panda']
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f'SELECT m."pandaid", m."metadata" FROM "{PANDA_SCHEMA}"."metatable" m '
+                f'JOIN "{PANDA_SCHEMA}"."jobsarchived4" j ON j."pandaid" = m."pandaid" '
+                f'WHERE j."jeditaskid" = %s LIMIT %s', [int(jeditaskid), int(limit)])
+            rows = cursor.fetchall()
+    except Exception as e:
+        logger.error(f"harness rollup query failed for task {jeditaskid}: {e}")
+        return None
+    jobs = 0
+    slots = []
+    unit_walls, unit_events, spe = [], [], []
+    done = failed = events_done = 0
+    closes, close_walls, close_events, close_failed = 0, [], 0, 0
+    deadline_marks = 0
+    for pandaid, raw in rows:
+        try:
+            metadata = json.loads(raw) if isinstance(raw, str) else raw
+        except (ValueError, TypeError):
+            continue
+        es = metadata.get('es') if isinstance(metadata, dict) else None
+        if not isinstance(es, dict):
+            continue
+        jobs += 1
+        if es.get('slots'):
+            slots.append(int(es['slots']))
+        if es.get('untaken_at_deadline'):
+            deadline_marks += 1
+        for u in es.get('ranges_done') or []:
+            if not isinstance(u, dict):
+                continue
+            done += 1
+            ev = int(u.get('events_reconstructed') or u.get('events') or 0)
+            events_done += ev
+            w = u.get('wall_s')
+            if w is not None:
+                unit_walls.append(float(w))
+                unit_events.append(ev)
+                if ev:
+                    spe.append(float(w) / ev)
+        failed += len(es.get('ranges_failed') or [])
+        for c in es.get('closes') or []:
+            if not isinstance(c, dict):
+                continue
+            closes += 1
+            if c.get('ok'):
+                close_events += int(c.get('events') or 0)
+            else:
+                close_failed += 1
+            if c.get('wall_s') is not None:
+                close_walls.append(float(c['wall_s']))
+    if not jobs:
+        return None
+    walls = sorted(unit_walls)
+    return {
+        'jobs': jobs, 'slots_min': min(slots) if slots else None, 'slots_max': max(slots) if slots else None,
+        'units_done': done, 'units_failed': failed, 'events_done': events_done,
+        'unit_events_median': _median(unit_events),
+        'unit_wall_median_s': _median(unit_walls),
+        'unit_wall_p90_s': round(walls[min(len(walls) - 1, int(0.9 * len(walls)))], 1) if walls else None,
+        's_per_event_median': round(_median(spe), 2) if spe else None,
+        'closes': closes, 'closes_failed': close_failed, 'close_events': close_events,
+        'close_wall_median_s': _median(close_walls),
+        'deadline_marks': deadline_marks,
+        'capped': len(rows) >= limit,
+    }
+
+
 def es_harness_report(conn, pandaid):
     """The node harness's account of an Event Service job, from the job
     report the pilot shipped as metadata (evgen_job_dispatcher.py es

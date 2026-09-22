@@ -1766,6 +1766,8 @@ def panda_task_detail(request, jeditaskid):
                 int(jeditaskid),
                 consumer_ids=[j['pandaid'] for j in jobs if j.get('pandaid')]),
         }
+        from ..panda.queries import task_harness_rollup
+        event_service['harness'] = task_harness_rollup(int(jeditaskid))
     return render(request, 'monitor_app/panda_task_detail.html', {
         'task': task,
         'event_service': event_service,
