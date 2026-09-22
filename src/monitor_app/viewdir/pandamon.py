@@ -42,6 +42,7 @@ from ..panda.constants import (
 from ..cell_fmt import fill_cell
 from ..pools import readings_by_queue
 from ..workers import worker_reading
+from ..es_reading import es_reading
 from ..activemq_connection import ActiveMQConnectionManager
 from ..epicprod_inventory import (
     cached_payload_log_parts,
@@ -2860,6 +2861,10 @@ def epic_queue_detail(request, queue_name):
         # The queue's own workers in that pool: waiting now, and what
         # the ones that started waited (docs/POOL_REPORTER.md).
         'workers': worker_reading(queue_name, refresh=request.GET.get('refresh') == '1'),
+        # What the node harness reported across the queue's Event Service
+        # jobs (swf-epicprod NODE_EVENT_DISPATCHER.md): a cached product,
+        # None for a queue that ran none in the window.
+        'es': es_reading(queue_name, refresh=request.GET.get('refresh') == '1'),
     })
 
 

@@ -23,6 +23,8 @@
         <span class="text-muted mx-1">&middot;</span>
         <a href="#workers">Workers</a>
         <span class="text-muted mx-1">&middot;</span>
+        {% if es %}<a href="#event-service">Event Service</a>
+        <span class="text-muted mx-1">&middot;</span>{% endif %}
         <a href="#submission">Submission</a>
         <span class="text-muted mx-1">&middot;</span>
         <a href="#schedconfig">Declared configuration</a>
@@ -199,6 +201,43 @@
                 <tr><td class="fw-bold">Ended</td>
                     <td>{% for status, count in workers.ended.items %}{{ count }} {{ status }}{% if not forloop.last %}, {% endif %}{% endfor %}
                         in the last {{ workers.window_hours }} h</td></tr>
+                {% endif %}
+                {% endif %}
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if es %}
+    <!-- What the node harness reported across this queue's Event Service
+         jobs, from the job reports (swf-epicprod NODE_EVENT_DISPATCHER.md,
+         The record); a cached product (es_reading.py). -->
+    <div class="card mb-3" id="event-service">
+        <div class="card-header queue-section-header">
+            <strong>Event Service</strong>
+            <span class="ms-2">the node harness on this queue's Event Service jobs of the last {{ es.window_days }} days, read
+                <span data-relative-time="{{ es.built_at|date:'c' }}"></span>
+                <a href="?refresh=1#event-service" class="btn btn-secondary btn-sm swf-update-btn ms-2">Update</a></span>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-sm table-striped mb-0">
+                {% if es.error %}
+                <tr><td class="fw-bold" style="width:24%">Reading</td><td>The record did not answer: {{ es.error }}</td></tr>
+                {% else %}
+                <tr><td class="fw-bold" style="width:24%">Jobs</td>
+                    <td>{{ es.es_jobs }} Event Service job{{ es.es_jobs|pluralize }}{% if es.capped %} (the newest {{ es.es_jobs }}){% endif %}: {% for status, n in es.by_status.items %}{{ n }} {{ status }}{% if not forloop.last %}, {% endif %}{% endfor %}{% if es.by_substatus %} ({% for sub, n in es.by_substatus.items %}{{ n }} {{ sub }}{% if not forloop.last %}, {% endif %}{% endfor %}){% endif %}; {{ es.reports }} with a harness report{% if es.slots_min %}, {% if es.slots_min == es.slots_max %}{{ es.slots_min }}{% else %}{{ es.slots_min }} to {{ es.slots_max }}{% endif %} slot{{ es.slots_max|pluralize }} a job{% endif %}
+                        {% if es.deadline_marks %}<span class="badge bg-warning text-dark ms-2">{{ es.deadline_marks }} stopped at the deadline</span>{% endif %}</td></tr>
+                <tr><td class="fw-bold">Units</td>
+                    <td>{{ es.units_done }} done{% if es.units_failed %}, <span class="text-danger">{{ es.units_failed }} failed</span>{% endif %}; {{ es.events_done }} events reconstructed{% if es.unit_events_median %}; {{ es.unit_events_median }} events a unit (median){% endif %}</td></tr>
+                {% if es.unit_wall_median_s is not None %}
+                <tr><td class="fw-bold">Unit wall</td>
+                    <td>{{ es.unit_wall_median_s|fmt_duration }} median, {{ es.unit_wall_p90_s|fmt_duration }} at the 90th percentile{% if es.s_per_event_median %}; {{ es.s_per_event_median }} s an event on this queue{% endif %}</td></tr>
+                {% endif %}
+                <tr><td class="fw-bold">Closes</td>
+                    <td>{% if es.closes %}{{ es.closes }} close{{ es.closes|pluralize }}, {{ es.close_events }} events registered{% if es.closes_failed %}, <span class="text-danger">{{ es.closes_failed }} failed</span>{% endif %}{% if es.close_wall_median_s is not None %}; {{ es.close_wall_median_s }} s a close (median){% endif %}{% else %}none: each unit registered its own file{% endif %}</td></tr>
+                {% if es.events_per_job_hour %}
+                <tr><td class="fw-bold">Rate</td>
+                    <td>{{ es.events_per_job_hour }} events an hour of job wall, over {{ es.job_wall_h }} job-hours</td></tr>
                 {% endif %}
                 {% endif %}
             </table>
