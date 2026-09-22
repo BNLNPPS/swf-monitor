@@ -195,6 +195,16 @@
             {% if rep.harness_rc %}<span class="ms-2 badge bg-danger">harness exit {{ rep.harness_rc }}</span>{% endif %}
         </div>
         <div class="card-body">
+            {% if rep.timeline %}
+            {% with tl=rep.timeline %}
+            <!-- What each batch slot did through the job's life: a lane per
+                 slot, the units as bars, the closes, the harness's span.
+                 Bare lane is idle slot: the pilot's head before the first
+                 unit, the tail after the last (the last close, the exit). -->
+            <p class="mb-1"><strong>Slot occupancy</strong>: {{ tl.slots }} slot{{ tl.slots|pluralize }} over {{ tl.wall_s|fmt_duration }} of job wall, {{ tl.busy_s|fmt_duration }} slot-time busy of {{ tl.allocated_s|fmt_duration }} allocated{% if tl.busy_fraction is not None %}: <strong>{% widthratio tl.busy_fraction 1 100 %}%</strong>{% endif %}{% if tl.head_idle_s is not None %}; first unit {{ tl.head_idle_s|fmt_duration }} in, last unit ended {{ tl.tail_idle_s|fmt_duration }} before the end{% endif %}{% if not tl.lanes_from_record %} <span class="text-muted">(lanes laid out from the units' times; the record before payload 0.21.4 names no slot)</span>{% endif %}</p>
+            <div class="mb-3">{{ rep.svg }}</div>
+            {% endwith %}
+            {% endif %}
             {% if rep.dataset %}<p class="mb-2 text-muted">Outputs registered {% if rep.closes %}per close{% else %}per unit{% endif %} in {{ rep.dataset }}{% if rep.image %}; image {{ rep.image }}{% endif %}.</p>{% endif %}
             {% if rep.closes %}
             <table class="table table-striped table-bordered table-sm align-middle w-auto">

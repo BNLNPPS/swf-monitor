@@ -3566,6 +3566,96 @@ def task_harness_rollup(jeditaskid, limit=2000):
     }
 
 
+def es_slot_timeline(job, es):
+    """The slot occupancy of one Event Service job for the plot: each
+    slot's units as intervals on the job's own clock (seconds from the
+    pilot's start of the job), the closes, the harness's span, and the
+    accounting: slot-seconds allocated (slots times the job's wall),
+    slot-seconds busy (the units' wall), the head before the first unit
+    and the tail after the last, per slot. A unit's slot comes from the
+    record (payload 0.21.4); an older record is laid out greedily onto
+    lanes, which is what the slots did since each runs one unit at a
+    time. None when the job has no start and end."""
+    start, end = job.get('starttime'), job.get('endtime')
+    if not start or not end:
+        return None
+    from datetime import datetime, timezone as _tz
+
+    def epoch(t):
+        if isinstance(t, str):
+            t = parse_datetime(t)
+        if t is None:
+            return None
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=_tz.utc)
+        return t.timestamp()
+
+    t0, t1 = epoch(start), epoch(end)
+    if t0 is None or t1 is None or t1 <= t0:
+        return None
+    nslots = int(es.get('slots') or 0) or 1
+    units = []
+    for status, key in (('done', 'ranges_done'), ('failed', 'ranges_failed')):
+        for u in es.get(key) or []:
+            if not isinstance(u, dict) or u.get('started_at') is None:
+                continue
+            us = float(u['started_at'])
+            ue = float(u.get('ended_at') or (us + float(u.get('wall_s') or 0)))
+            units.append({'unit_id': u.get('unit_id'), 'status': status,
+                          'start_s': us - t0, 'end_s': ue - t0,
+                          'events': int(u.get('events_reconstructed') or u.get('events') or 0),
+                          'slot': u.get('slot')})
+    units.sort(key=lambda u: u['start_s'])
+    lanes = {}
+    if all(u['slot'] is not None for u in units) and units:
+        for u in units:
+            lanes.setdefault(int(u['slot']), []).append(u)
+    else:
+        # Greedy lanes: a unit takes the first lane free at its start.
+        free_at = []
+        for u in units:
+            lane = next((i for i, t in enumerate(free_at) if t <= u['start_s'] + 0.5), None)
+            if lane is None:
+                lane = len(free_at)
+                free_at.append(0.0)
+            free_at[lane] = u['end_s']
+            lanes.setdefault(lane, []).append(u)
+    for i in range(nslots):
+        lanes.setdefault(i, [])
+    closes = []
+    for c in es.get('closes') or []:
+        if isinstance(c, dict) and c.get('started_at') is not None:
+            cs = float(c['started_at'])
+            closes.append({'index': c.get('index'), 'ok': bool(c.get('ok')),
+                           'start_s': cs - t0,
+                           'end_s': float(c.get('ended_at') or (cs + float(c.get('wall_s') or 0))) - t0})
+    wall = t1 - t0
+    busy = sum(u['end_s'] - u['start_s'] for u in units)
+    allocated = wall * max(nslots, len(lanes))
+    slot_rows = []
+    for i in sorted(lanes):
+        us = lanes[i]
+        slot_rows.append({
+            'index': i, 'units': us,
+            'busy_s': round(sum(u['end_s'] - u['start_s'] for u in us), 1),
+            'head_idle_s': round(us[0]['start_s'], 1) if us else round(wall, 1),
+            'tail_idle_s': round(wall - us[-1]['end_s'], 1) if us else 0.0,
+        })
+    harness = None
+    if es.get('started_at'):
+        harness = {'start_s': float(es['started_at']) - t0,
+                   'end_s': (float(es['ended_at']) - t0) if es.get('ended_at') else None}
+    return {
+        'wall_s': round(wall, 1), 'slots': max(nslots, len(lanes)),
+        'rows': slot_rows, 'closes': closes, 'harness': harness,
+        'busy_s': round(busy, 1), 'allocated_s': round(allocated, 1),
+        'busy_fraction': round(busy / allocated, 3) if allocated else None,
+        'head_idle_s': round(min(r['head_idle_s'] for r in slot_rows), 1) if slot_rows else None,
+        'tail_idle_s': round(min(r['tail_idle_s'] for r in slot_rows), 1) if slot_rows else None,
+        'lanes_from_record': all(u['slot'] is not None for u in units) and bool(units),
+    }
+
+
 def es_harness_report(conn, pandaid):
     """The node harness's account of an Event Service job, from the job
     report the pilot shipped as metadata (evgen_job_dispatcher.py es
@@ -3611,6 +3701,7 @@ def es_harness_report(conn, pandaid):
                 'rc': u.get('rc'),
             })
     units.sort(key=lambda u: (u['first_event'] is None, u['first_event'] or 0))
+    raw_es = es
     closes = []
     for c in es.get('closes') or []:
         if isinstance(c, dict):
@@ -3629,6 +3720,7 @@ def es_harness_report(conn, pandaid):
         'untaken_at_deadline': bool(es.get('untaken_at_deadline')),
         'units': units,
         'closes': closes,
+        'raw': raw_es,
         'n_done': sum(1 for u in units if u['status'] == 'done'),
         'n_failed': sum(1 for u in units if u['status'] == 'failed'),
         'events_reconstructed': sum(int(u['reconstructed'] or 0) for u in units),
@@ -3648,7 +3740,7 @@ def event_service_for_job(job, task_info):
         return None
     ranges = event_service_ranges(job.get('jeditaskid'), job.get('pandaid'),
                                   job.get('jobsetid'))
-    return {
+    out = {
         'flavor': flavor,
         'flavor_name': ES_JOB_FLAVORS.get(flavor, f'flag {flavor}'),
         'events_per_range': es_events_per_range((task_info or {}).get('splitrule')),
@@ -3656,6 +3748,11 @@ def event_service_for_job(job, task_info):
         'verdict': es_verdict(job),
         'report': es_harness_report(connections['panda'], job.get('pandaid')),
     }
+    if out['report']:
+        out['report']['timeline'] = es_slot_timeline(job, out['report']['raw'])
+        from ..es_plot import slot_plot_svg
+        out['report']['svg'] = slot_plot_svg(out['report']['timeline'])
+    return out
 
 
 # ── DataTables query functions ───────────────────────────────────────────────
