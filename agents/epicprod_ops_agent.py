@@ -179,6 +179,8 @@ FILE_EVENTS_TIMEOUT = int(os.environ.get("EPICPROD_FILE_EVENTS_TIMEOUT", "3600")
 
 DELIVERY_DAILY_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "delivery-daily-rebuild.py"
 DELIVERY_DAILY_TIMEOUT = int(os.environ.get("EPICPROD_DELIVERY_DAILY_TIMEOUT", "3600"))
+REQUEST_SIZES_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "request-sizes-build.py"
+REQUEST_SIZES_TIMEOUT = int(os.environ.get("EPICPROD_REQUEST_SIZES_TIMEOUT", "300"))
 # The condor event log of a failed job is the only whole account of a
 # batch-layer failure, and the harvester keeps it about eighteen days
 # (docs/ERROR_ATTRIBUTION.md, Batch-layer records). The window covers the
@@ -360,6 +362,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "capture_system_snap",
                    "rucio_arrivals_sweep", "epic_prod_past_import",
                    "file_events_measure", "delivery_daily_rebuild",
+                   "request_sizes_build",
                    "batch_log_capture", "batch_log_learn",
                    "segfault_inventory", "segfault_dig", "segfault_study", "segfault_notice", "segfault_package",
                    "segfault_diagnose", "segfault_diagnosis_completed",
@@ -1484,6 +1487,7 @@ class EpicProdOpsAgent(BaseAgent):
             ('campaign_progress_refresh', self._do_campaign_progress_refresh),
             ('file_events_measure', self._do_file_events_measure),
             ('delivery_daily_rebuild', self._do_delivery_daily_rebuild),
+            ('request_sizes_build', self._do_request_sizes_build),
             ('storage_sweep',
              lambda msg: self._do_storage_sweep(dict(msg, mode='full'))),
             ('campaign_config_propose', self._do_campaign_config_propose),
@@ -2822,6 +2826,53 @@ class EpicProdOpsAgent(BaseAgent):
         self.run_in_background(
             self._do_delivery_daily_rebuild, m,
             dedup_key="delivery_daily_rebuild", label="delivery_daily_rebuild")
+
+    def _handle_request_sizes_build(self, m):
+        """Build the request-size record off the receiver thread —
+        normally a catalog_sync chain step, also directly invokable."""
+        self.run_in_background(
+            self._do_request_sizes_build, m,
+            dedup_key="request_sizes_build", label="request_sizes_build")
+
+    def _do_request_sizes_build(self, m):
+        """Build the record the Request size plot page renders: every
+        production request that states a number of events, read and
+        summarized (swf-epicprod docs/REQUEST_SIZES.md). Cheap and
+        idempotent: it reads the request records and writes one cached
+        product."""
+        cmd = [sys.executable, str(REQUEST_SIZES_SCRIPT),
+               "--created-by", str(m.get('created_by') or 'prodops_agent')]
+        self.logger.info("PRODOPS request_sizes_build: reading the requests")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=REQUEST_SIZES_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS request_sizes_build TIMEOUT after {REQUEST_SIZES_TIMEOUT}s")
+            self._log_action('request_sizes_build', t0, outcome='timeout',
+                             reason=f'timed out after {REQUEST_SIZES_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  request-sizes-build: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  request-sizes-build: {line}")
+        if p.returncode != 0:
+            self.logger.error(f"PRODOPS request_sizes_build FAILED rc={p.returncode}")
+            self._log_action('request_sizes_build', t0, outcome='error',
+                             reason=self._derive_reason(p),
+                             username=str(m.get('created_by') or ''),
+                             sublevel='normal', live_default=True,
+                             level=logging.ERROR)
+            return
+        self._log_action('request_sizes_build', t0, outcome='ok',
+                         username=str(m.get('created_by') or ''),
+                         sublevel='low', live_default=False,
+                         summary=(p.stdout or '').strip().splitlines()[0]
+                         if (p.stdout or '').strip() else 'built')
 
     def _handle_storage_sweep(self, m):
         """Run the storage pass (swf-epicprod STORAGE.md): the nightly full
