@@ -181,6 +181,8 @@ DELIVERY_DAILY_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "de
 DELIVERY_DAILY_TIMEOUT = int(os.environ.get("EPICPROD_DELIVERY_DAILY_TIMEOUT", "3600"))
 REQUEST_SIZES_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "request-sizes-build.py"
 REQUEST_SIZES_TIMEOUT = int(os.environ.get("EPICPROD_REQUEST_SIZES_TIMEOUT", "300"))
+STORAGE_DOOR_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "storage-door-cycle.py"
+STORAGE_DOOR_TIMEOUT = int(os.environ.get("EPICPROD_STORAGE_DOOR_TIMEOUT", "900"))
 # The condor event log of a failed job is the only whole account of a
 # batch-layer failure, and the harvester keeps it about eighteen days
 # (docs/ERROR_ATTRIBUTION.md, Batch-layer records). The window covers the
@@ -363,6 +365,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "rucio_arrivals_sweep", "epic_prod_past_import",
                    "file_events_measure", "delivery_daily_rebuild",
                    "request_sizes_build",
+                   "storage_door_cycle",
                    "batch_log_capture", "batch_log_learn",
                    "segfault_inventory", "segfault_dig", "segfault_study", "segfault_notice", "segfault_package",
                    "segfault_diagnose", "segfault_diagnosis_completed",
@@ -2826,6 +2829,53 @@ class EpicProdOpsAgent(BaseAgent):
         self.run_in_background(
             self._do_delivery_daily_rebuild, m,
             dedup_key="delivery_daily_rebuild", label="delivery_daily_rebuild")
+
+    def _handle_storage_door_cycle(self, m):
+        """Run one storage door cycle off the receiver thread: the doors
+        production writes through, used and read (site-canary
+        docs/STORAGE_DOORS.md). Enqueued every fifteen minutes; the
+        cycle itself probes a door only when its interval has passed."""
+        self.run_in_background(
+            self._do_storage_door_cycle, m,
+            dedup_key="storage_door_cycle", label="storage_door_cycle")
+
+    def _do_storage_door_cycle(self, m):
+        """One cycle of the storage door canary. The canary reports and
+        production operations act: nothing here excludes anything."""
+        cmd = [sys.executable, str(STORAGE_DOOR_SCRIPT),
+               "--created-by", str(m.get('created_by') or 'prodops_agent')]
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=STORAGE_DOOR_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS storage_door_cycle TIMEOUT after {STORAGE_DOOR_TIMEOUT}s")
+            self._log_action('storage_door_cycle', t0, outcome='timeout',
+                             reason=f'timed out after {STORAGE_DOOR_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  storage-door-cycle: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  storage-door-cycle: {line}")
+        if p.returncode != 0:
+            self.logger.error(f"PRODOPS storage_door_cycle FAILED rc={p.returncode}")
+            self._log_action('storage_door_cycle', t0, outcome='error',
+                             reason=self._derive_reason(p),
+                             username=str(m.get('created_by') or ''),
+                             sublevel='normal', live_default=True,
+                             level=logging.ERROR)
+            return
+        # The cycle records its own summary and its own notices; this is
+        # the agent's line that it ran.
+        self._log_action('storage_door_cycle', t0, outcome='ok',
+                         username=str(m.get('created_by') or ''),
+                         sublevel='low', live_default=False,
+                         summary=(p.stdout or '').strip().splitlines()[-1][:200]
+                         if (p.stdout or '').strip() else 'cycle complete')
 
     def _handle_request_sizes_build(self, m):
         """Build the request-size record off the receiver thread —

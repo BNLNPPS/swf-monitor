@@ -155,6 +155,10 @@ def run_cycle(*, dry_run=False, created_by='storage-doors', force=False,
 
     previous = previous_state()
     resolved = _safe('catalog', lambda: catalog_doors(cfg), failed('catalog')) or {}
+    if only:
+        # A look by hand at named RSEs; the cycle itself takes the catalog.
+        wanted = {r.strip() for r in only if r.strip()}
+        resolved = {rse: door for rse, door in resolved.items() if rse in wanted}
 
     readings, state, probed = [], {}, 0
     for rse, door in sorted(resolved.items()):

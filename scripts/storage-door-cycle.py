@@ -45,12 +45,14 @@ def main():
                     help='probe and print, record nothing')
     ap.add_argument('--force', action='store_true',
                     help='probe every door, whatever the interval or the switch')
+    ap.add_argument('--rse', action='append', default=[],
+                    help='probe only these RSEs (repeatable), for a look by hand')
     ap.add_argument('--created-by', default='storage-doors',
                     help='who runs the cycle (the records carry it)')
     args = ap.parse_args()
     try:
         doors, summary = run_cycle(dry_run=args.dry_run, force=args.force,
-                                   created_by=args.created_by)
+                                   only=tuple(args.rse), created_by=args.created_by)
     except Exception as exc:  # noqa: BLE001
         print(f'ERROR: {type(exc).__name__}: {exc}', file=sys.stderr)
         return 1
