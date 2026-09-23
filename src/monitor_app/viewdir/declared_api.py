@@ -48,6 +48,25 @@ def declared_state(request):
 @api_view(['GET'])
 @authentication_classes([])
 @permission_classes([AllowAny])
+def storage_doors(request):
+    """GET /api/storage-doors/ — the storage door canary's record as the
+    last cycle stored it (site-canary docs/STORAGE_DOORS.md): every door,
+    its verdict and evidence, the certificate it serves, and a
+    valid_until so a reader can tell a current reading from a stale one.
+    Anonymous, read-only; a 503 until a cycle has run. Nothing acts on
+    this record — it is read by people and by the node guard, which uses
+    it only to excuse a node for a door's failures."""
+    from monitor_app.models import CachedProduct
+    from monitor_app.panda.storage_doors import STATE_KEY
+    row = CachedProduct.objects.filter(key=STATE_KEY).first()
+    if row is None or not row.value:
+        return Response({'error': 'no storage door record stored yet'}, status=503)
+    return Response(row.value)
+
+
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([AllowAny])
 def node_guard_exclusion(request):
     """GET /api/node-guard/exclusion/ — the node guard's published
     exclusion as the last cycle stored it (site-canary docs/NODE_GUARD.md,

@@ -20,7 +20,7 @@ from .viewdir.user_admin import user_rights_set
 from .viewdir.capcom import (capcom_notice_ingest, capcom_notices,
                              capcom_state, capcom_user_state,
                              NoticeSubscriptionViewSet)
-from .viewdir.declared_api import declared_state, node_guard_exclusion
+from .viewdir.declared_api import declared_state, node_guard_exclusion, storage_doors
 from .viewdir.snapper_api import (snapper_changes_between,
                                   snapper_component_history, snapper_context,
                                   snapper_cut_summary, snapper_latest,
@@ -130,6 +130,7 @@ urlpatterns = [
     path('declared/', declared_state, name='declared-state'),
     # The node guard's published exclusion (site-canary docs/NODE_GUARD.md,
     # Actuation): what the cycle puts on the bucket's pilot prefix.
+    path('storage-doors/', storage_doors, name='storage-doors'),
     path('node-guard/exclusion/', node_guard_exclusion, name='node-guard-exclusion'),
     path('capcom/notices/ingest/', capcom_notice_ingest,
          name='capcom-notice-ingest'),
