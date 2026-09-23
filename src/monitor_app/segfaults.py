@@ -988,7 +988,7 @@ PAYLOAD_PATH = 'swf_epicprod/payload/run.sh'
 PAYLOAD_VERSION_FILE = 'swf_epicprod/payload/VERSION'
 # The JLab door and base the payload streams EVGEN input from (run.sh,
 # XRDRURL and XRDRBASE defaults).
-INPUT_DOOR = 'root://dtn-eic.jlab.org//volatile/eic/EPIC'
+INPUT_DOOR = 'root://dtn2304.jlab.org:8443//jlab-osdf-ro/eic/EPIC/volatile'
 
 
 def local_repro(sig, pandaid=None):
