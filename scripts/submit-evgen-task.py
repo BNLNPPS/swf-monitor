@@ -526,6 +526,10 @@ def main():
                          "file (default 1, a canary's); 2 or more lets a job "
                          "that ended with units untaken (the deadline drain) "
                          "be followed by the next job over what is left")
+    ap.add_argument("--es-ram-per-core-mb", type=int, default=0,
+                    help="Event Service canary: memory per core (MBPerCoreFixed); "
+                         "on a whole-node queue the job asks for this times the "
+                         "node's cores, which must fit the node")
     ap.add_argument("--es-slots", type=int, default=1,
                     help="Event Service canary: the node harness's slots, one "
                          "resident EICrecon and one range at a time each; "
@@ -688,6 +692,13 @@ def main():
                             f"$PILOT_EVENTRANGECHANNEL"
                             + (" --accessmode=direct" if args.es_direct_input else ""))
             spec['nCore'] = int(args.es_slots)
+            if args.es_ram_per_core_mb > 0:
+                # The memory is per core, and a queue that declares a whole
+                # node's cores (NERSC_Perlmutter_epic_es: 256) multiplies it:
+                # 3.7 GB x 256 = 922 GB, more than a node holds, and no pilot
+                # could take the job (task 40225).
+                spec['memory'] = int(args.es_ram_per_core_mb)
+                _log(f"event service memory: {spec['memory']} MB per core")
             if args.es_max_attempt > 1:
                 spec['maxAttempt'] = int(args.es_max_attempt)
             if args.es_direct_input:
