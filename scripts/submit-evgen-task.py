@@ -526,6 +526,9 @@ def main():
                          "file (default 1, a canary's); 2 or more lets a job "
                          "that ended with units untaken (the deadline drain) "
                          "be followed by the next job over what is left")
+    ap.add_argument("--es-loop", action="store_true",
+                    help="TEST AND DEMO ONLY: the harness replays the file's events "
+                         "(unreported filler units) until the deadline margin")
     ap.add_argument("--es-ram-per-core-mb", type=int, default=0,
                     help="Event Service canary: memory per core (MBPerCoreFixed); "
                          "on a whole-node queue the job asks for this times the "
@@ -685,6 +688,12 @@ def main():
             per_unit = (f"ES_EVENTS_PER_UNIT={int(args.es_events_per_range)} "
                         if args.es_fine_grained and args.es_events_per_range > 0 else "")
             close = f"ES_CLOSE_S={int(args.es_close_s)} " if args.es_close_s > 0 else ""
+            # TEST AND DEMO ONLY: replay the file's events until the deadline
+            # margin so the slots work to the wall (swf-epicprod es_harness.py
+            # --loop). Never set on production submissions.
+            if args.es_loop:
+                close += f"ES_LOOP=1 ES_EXPECTED_EVENTS={int(args.es_events)} "
+                _log("ES LOOP (test/demo): replaying events to the deadline")
             spec['exec'] = (f"ES_PAYLOAD_IMAGE={spec.get('containerImage', '')} "
                             f"ES_SLOTS={int(args.es_slots)} {deadline}{per_unit}{close}"
                             f"python3 evgen_job_dispatcher.py es "
