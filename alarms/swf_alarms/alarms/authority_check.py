@@ -52,7 +52,7 @@ UNRECORDED_QUERY = """
     FROM auth_user u
     LEFT JOIN user_preference p ON p.username = u.username
     WHERE u.date_joined >= %(since)s::date
-      AND u.date_joined < now() - make_interval(hours => %(grace)s)
+      AND u.date_joined < now() - %(grace)s * interval '1 hour'
       AND (p.username IS NULL OR p.prefs->'authority' IS NULL)
       AND NOT (u.username = ANY(%(service)s))
     ORDER BY u.date_joined
