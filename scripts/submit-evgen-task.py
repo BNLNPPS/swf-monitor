@@ -207,6 +207,12 @@ def _assemble_sandbox(spec, proxy_path, root):
     env = dict(spec.get('env') or {})
     env['X509_USER_PROXY'] = proxy_base
     _stage_bg_files(env, sandbox)
+    # The payload runs npsim and eicrecon with the task's core count as
+    # their thread count, where the image supports it (swf-epicprod
+    # EPICPROD_PAYLOAD.md, Multithreading). An Event Service job's slots are
+    # its parallelism; its units stay single-threaded.
+    if 'nEventsPerWorker' not in spec:
+        env['EPICPROD_NTHREADS'] = str(max(1, int(spec.get('nCore') or 1)))
     # Only Event Service jobs carry the report key (Torre, 2026-09-24):
     # the fleet's reports tripped the bucket's growth guard on 9/18.
     if 'nEventsPerWorker' in spec:
@@ -467,6 +473,10 @@ def main():
                          "JEDI makes ranges over; the dispatcher's es mode "
                          "takes the ranges from the pilot's channel and runs "
                          "each through the payload in the task's image")
+    ap.add_argument("--canary-threads", type=int, default=0,
+                    help="payload canary: cores the job requests and threads "
+                         "npsim and eicrecon run with (where the image "
+                         "supports it); memory stays per core")
     ap.add_argument("--es-events-per-range", type=int, default=0,
                     help="Event Service canary: events per range "
                          "(nEventsPerWorker); with --es-input-dataset")
@@ -612,6 +622,10 @@ def main():
         else:
             spec['csvRows'] = rows[:1]
         spec['outDS'] = f"group.EIC.canary.{qtag}.{args.canary_stamp}"
+        if args.canary_threads > 0:
+            spec['nCore'] = int(args.canary_threads)
+            _log(f"canary threads: {spec['nCore']} cores requested, "
+                 f"{spec.get('memory', 4096)} MB per core")
         # Settings ride as an environment prefix on the dispatcher command,
         # as a trial's do.
         prefix = (f"CANARY_MEM_LIMIT_MB={int(args.canary_mem_limit_mb)} "
