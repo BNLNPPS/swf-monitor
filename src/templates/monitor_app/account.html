@@ -92,6 +92,19 @@
         <p><strong>Email:</strong> {{ user.email|default:'Not set' }}</p>
 
         <h3 style="margin-top: 24px;">Production access</h3>
+        <table class="table table-sm w-auto" style="font-size: 1rem;">
+          <tr><th scope="row" style="padding-right: 1.2rem;">GitHub account</th>
+            <td>{% if authority.record.github %}<strong>{{ authority.record.github }}</strong>{% else %}none linked{% endif %}</td></tr>
+          <tr><th scope="row" style="padding-right: 1.2rem;">eic member</th>
+            <td>{% if authority.record.eic is True %}<strong>yes</strong>{% elif authority.record.eic is False %}<strong>no</strong>{% else %}not recorded{% endif %}{% if authority.record.eic_at %}, checked <span data-relative-time="{{ authority.record.eic_at }}"></span> (on {{ authority.record.eic_at|slice:":10" }}){% endif %}</td></tr>
+          {% if authority.record.check_failed %}
+          <tr><th scope="row" style="padding-right: 1.2rem; color: #a4001d;">Last check</th>
+            <td style="color: #a4001d;"><strong>membership could not be checked</strong>
+              (<span data-relative-time="{{ authority.record.check_failed_at }}"></span>):
+              {{ authority.record.check_failed }}. Reading is unaffected; signing out
+              and in again retries, and operations has been alerted.</td></tr>
+          {% endif %}
+        </table>
         {% if authority.may_act %}
         <p><strong>You may act on the production system.</strong></p>
         <p>
