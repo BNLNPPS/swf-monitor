@@ -26,7 +26,8 @@ from rest_framework.decorators import (api_view, authentication_classes,
                                        permission_classes)
 from rest_framework.permissions import AllowAny
 
-from monitor_app.authority import AUTHORITY_WRITER, AuthorityError, set_eic
+from monitor_app.authority import (AUTHORITY_WRITER, AuthorityError,
+                                   set_check_failed, set_eic)
 from monitor_app.middleware import TunnelAuthentication, is_tunnel_request
 
 _AUTH = [TunnelAuthentication, SessionAuthentication, TokenAuthentication]
@@ -49,6 +50,10 @@ def user_authority(request):
     """POST /api/user-authority/
 
     ``{"username": "...", "authority": {"eic": true, "github": "..."}}``
+    ``{"username": "...", "authority": {"check_failed": "...", "github": "..."}}``
+
+    The second form records a sign-in whose membership check reached no
+    answer; it leaves ``eic`` alone and is cleared by the next observation.
 
     Records observed organisation membership for the account, and the GitHub
     login it was observed for — several accounts have a username unlike their
@@ -76,17 +81,25 @@ def user_authority(request):
         return JsonResponse(
             {'error': 'rights is granted by a person in the User admin page '
                       'and cannot be written here'}, status=400)
-    unknown = sorted(set(values) - {'eic', 'github'})
+    unknown = sorted(set(values) - {'eic', 'github', 'check_failed'})
     if unknown:
         return JsonResponse(
             {'error': f"unknown authority field(s): {', '.join(unknown)}; "
-                      'this endpoint writes eic and github'}, status=400)
-    if 'eic' not in values:
-        return JsonResponse({'error': 'eic is required'}, status=400)
+                      'this endpoint writes eic, github and check_failed'},
+            status=400)
+    if ('eic' in values) == ('check_failed' in values):
+        return JsonResponse(
+            {'error': 'exactly one of eic (an observation) or check_failed '
+                      '(a check that reached no answer) is required'},
+            status=400)
 
     github = values.get('github', body.get('github'))
     try:
-        record = set_eic(username, values.get('eic'), github=github)
+        if 'check_failed' in values:
+            record = set_check_failed(username, values.get('check_failed'),
+                                      github=github)
+        else:
+            record = set_eic(username, values.get('eic'), github=github)
     except AuthorityError as e:
         return JsonResponse({'error': str(e)}, status=400)
     return JsonResponse({'username': username, 'authority': record})

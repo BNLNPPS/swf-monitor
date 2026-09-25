@@ -71,6 +71,39 @@ class AuthorityRuleTests(TestCase):
         self.assertFalse(A.get_authority('p')['pac'])
         self.assertTrue(A.get_authority('p')['ops'])
 
+    def test_failed_check_keeps_eic_and_clears_on_observation(self):
+        A.set_eic('f', True, github='f-gh')
+        A.set_check_failed('f', 'no stored GitHub token')
+        record = A.get_authority('f')
+        self.assertEqual((record['eic'], record['check_failed']),
+                         (True, 'no stored GitHub token'))
+        self.assertTrue(record['check_failed_at'] and A.may_act(record))
+        A.set_eic('f', True, github='f-gh')
+        record = A.get_authority('f')
+        self.assertEqual((record['check_failed'], record['check_failed_at']),
+                         ('', ''))
+        with self.assertRaises(A.AuthorityError):
+            A.set_check_failed('f', '  ')
+
+    def test_endpoint_takes_one_of_observation_or_failure(self):
+        from django.test import Client
+        client = Client(REMOTE_ADDR='127.0.0.1',
+                        HTTP_X_REMOTE_USER=A.AUTHORITY_WRITER)
+
+        def post(authority):
+            return client.post('/api/user-authority/',
+                               {'username': 'e', 'authority': authority},
+                               content_type='application/json')
+
+        self.assertEqual(post({'check_failed': 'GitHub unanswered',
+                               'github': 'e-gh'}).status_code, 200)
+        self.assertEqual(A.get_authority('e')['check_failed'],
+                         'GitHub unanswered')
+        self.assertEqual(post({'eic': True, 'check_failed': 'x'}).status_code, 400)
+        self.assertEqual(post({'github': 'e-gh'}).status_code, 400)
+        self.assertEqual(post({'eic': True}).status_code, 200)
+        self.assertEqual(A.get_authority('e')['check_failed'], '')
+
     def test_former_ops_rung_reads_as_the_role_and_clears_to_basic(self):
         A.set_rights('o', 'ops')
         record = A.get_authority('o')

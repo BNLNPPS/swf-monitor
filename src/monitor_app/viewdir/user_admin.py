@@ -81,6 +81,8 @@ def _rows():
             'may_act': may_act(record),
             'may_set_priority': may_set_priority(record),
             'last_seen': record['eic_at'] or '',
+            'check_failed': record['check_failed'],
+            'check_failed_at': record['check_failed_at'],
             'last_login': logins.get(username),
             'is_staff': username in staff,
         })

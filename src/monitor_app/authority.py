@@ -80,6 +80,7 @@ class AuthorityError(ValueError):
 def empty_authority():
     """The record an account with nothing written resolves to."""
     return {'eic': None, 'rights': None, 'github': '', 'eic_at': '',
+            'check_failed': '', 'check_failed_at': '',
             'pac': False, 'ops': False}
 
 
@@ -97,7 +98,7 @@ def _record_from(stored):
     # The former rights rung reads as the role, so a record written before
     # the roles existed keeps what it had.
     record['ops'] = stored.get(OPS_KEY) is True or rights == RIGHTS_OPS
-    for field in ('github', 'eic_at'):
+    for field in ('github', 'eic_at', 'check_failed', 'check_failed_at'):
         value = stored.get(field)
         if isinstance(value, str):
             record[field] = value
@@ -256,7 +257,33 @@ def set_eic(username, eic, github=None):
     # The sweep runs at sign-in, so the moment membership was last observed
     # is the moment the person last signed in — the only sign-in time this
     # side can know, since a proxied request never opens a session here.
-    changes = {'eic': eic, 'eic_at': timezone.now().isoformat()}
+    # A completed observation supersedes any earlier failed one.
+    changes = {'eic': eic, 'eic_at': timezone.now().isoformat(),
+               'check_failed': None, 'check_failed_at': None}
+    if github is not None:
+        if not isinstance(github, str):
+            raise AuthorityError(
+                f'github must be a string, got {type(github).__name__}')
+        changes['github'] = github or None
+    return _write(username, changes)
+
+
+def set_check_failed(username, reason, github=None):
+    """Record that a sign-in's membership check did not complete.
+
+    The sweep's second setter. It stamps the reason and the time and leaves
+    ``eic`` as it was: a check that reached no answer is not an observation,
+    and recording a negative on a revoked token or a network failure would
+    strip access from an account that holds it. The next completed check
+    (``set_eic``) clears both fields; until then the failure is surfaced by
+    the ``authority_check`` alarm and on the User admin page.
+    """
+    from django.utils import timezone
+
+    if not isinstance(reason, str) or not reason.strip():
+        raise AuthorityError('check_failed must be a nonempty reason')
+    changes = {'check_failed': reason.strip()[:500],
+               'check_failed_at': timezone.now().isoformat()}
     if github is not None:
         if not isinstance(github, str):
             raise AuthorityError(

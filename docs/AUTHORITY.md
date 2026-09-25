@@ -125,6 +125,38 @@ the `/swf-monitor/` prefix.
 it is the moment the person last signed in — the only sign-in time this side
 can know, since a proxied request never opens a session here.
 
+### A check that reached no answer
+
+A sign-in whose membership check could not complete — no stored GitHub token,
+GitHub unanswered, the membership write refused — is posted to the same
+endpoint in its second form:
+
+```
+POST /api/user-authority/
+     {"username": "...", "authority": {"check_failed": "<reason>", "github": "..."}}
+```
+
+`set_check_failed` stamps `check_failed` and `check_failed_at` and leaves
+`eic` as it was, since a check without an answer is not an observation. The
+next completed check clears both. Exactly one of `eic` or `check_failed` is
+accepted per request.
+
+Every GitHub sign-in therefore ends in one of two writes, and anything else
+is surfaced rather than logged:
+
+- the person is told at sign-in that membership could not be checked, that
+  reading is unaffected, and that signing in again retries;
+- the `authority_check` alarm (`alarms/swf_alarms/alarms/authority_check.py`)
+  fires per account while `check_failed` is set, and per account that
+  appeared here more than an hour ago with no authority record at all — the
+  case where even the failure report did not arrive;
+- the User admin page marks the account "last check failed".
+
+From the 9/9 backfill to 2026-09-25 swf-remote stored no OAuth tokens
+(django-allauth 65 keeps none unless `SOCIALACCOUNT_STORE_TOKENS` is set), so
+no sign-in in that period wrote anything and nothing said so. The guard exists
+so that this failure cannot be silent again.
+
 The backfill writes both fields and so uses both endpoints: membership for
 the GitHub-linked accounts through the first, `rights: basic` for the
 grandfathered non-members and for the accounts with no GitHub identity

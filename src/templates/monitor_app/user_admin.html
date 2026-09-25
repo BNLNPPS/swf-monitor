@@ -65,6 +65,10 @@
           {% if row.eic is True %}member
           {% elif row.eic is False %}not a member
           {% else %}<span class="text-muted">unset</span>{% endif %}
+          {% if row.check_failed %}
+            <div class="text-danger fw-semibold" title="{{ row.check_failed }}">last check failed
+              <span data-relative-time="{{ row.check_failed_at }}"></span></div>
+          {% endif %}
         </td>
         <td>
           {% if row.last_seen %}
