@@ -207,7 +207,12 @@ def _assemble_sandbox(spec, proxy_path, root):
     env = dict(spec.get('env') or {})
     env['X509_USER_PROXY'] = proxy_base
     _stage_bg_files(env, sandbox)
-    env.update(_reporting_env())
+    # Only Event Service jobs carry the report key (Torre, 2026-09-24):
+    # the fleet's reports tripped the bucket's growth guard on 9/18.
+    if 'nEventsPerWorker' in spec:
+        env.update(_reporting_env())
+    else:
+        _log("job reporting off: not an Event Service task")
     with open(os.path.join(sandbox, f"environment-{csv_base}.sh"), "w") as f:
         for k, v in env.items():
             f.write(f'export {k}={v}\n')
