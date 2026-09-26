@@ -65,6 +65,11 @@ def slot_plot_svg(tl):
                            f"{(u['end_s'] - u['start_s']) / 60:.1f} min from {u['start_s'] / 60:.1f} min")
             parts.append(f'<rect x="{x0:.1f}" y="{y + 3}" width="{max(1.5, x1 - x0):.1f}" height="{LANE_H - 6}" '
                          f'fill="{color}"><title>{title}</title></rect>')
+            # A slim white line where the unit starts: consecutive units
+            # on a core read as one bar without it.
+            if x1 - x0 >= 3:
+                parts.append(f'<line x1="{x0:.1f}" y1="{y + 3}" x2="{x0:.1f}" y2="{y + LANE_H - 3}" '
+                             f'stroke="#fff" stroke-width="1"/>')
         # The events the core processed: unequal counts show the stream
         # filling each core by its own pace.
         n = sum(int(u.get('events') or 0) for u in row['units'] if u['status'] == 'done')
