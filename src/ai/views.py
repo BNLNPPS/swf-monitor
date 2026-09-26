@@ -1,5 +1,5 @@
 """AI app pages: the AI proposal list."""
-from django.db.models import Count
+from django.db.models import Count, Max
 from django.shortcuts import render
 
 from .models import Proposal
@@ -34,6 +34,8 @@ def _review_surface(action, counterpart):
                 reverse('pcs:pcs_campaign_plan') + f'?campaign={counterpart}')
     if action == 'registered_sample':
         return 'EVGEN inputs', reverse('pcs:evgen_inputs')
+    if action == 'propagation':
+        return 'the task catalog', reverse('pcs:pcs_catalog')
     return '', ''
 
 
@@ -100,12 +102,10 @@ def ai_proposals(request):
         if p.action == 'campaign_plan':
             p.disposition_label = str((p.payload or {}).get('disposition') or '').replace('_', ' ')
 
-    def facet_row(title, param, pairs, label_of=str, newest_first=False, keep=0):
+    def facet_row(title, param, pairs, label_of=str, keep=0):
         items = [{'label': label_of(value), 'count': count,
                   'url': url_with(**{param: value}), 'active': filters[param] == value}
                  for value, count in pairs if value]
-        if newest_first:
-            items.sort(key=lambda i: i['label'], reverse=True)
         shown, folded = (items[:keep], items[keep:]) if keep else (items, [])
         if any(i['active'] for i in folded):
             shown, folded = items, []
@@ -137,8 +137,10 @@ def ai_proposals(request):
         facet_row('Quality', 'quality',
                   counts('quality', 'quality', lambda q: q.exclude(quality=''))),
         facet_row('Batch', 'batch',
-                  counts('batch', 'batch_id', lambda q: q.exclude(batch_id='')),
-                  newest_first=True, keep=6),
+                  [(bid, n) for bid, n, _ in select(everything, skip='batch')
+                   .exclude(batch_id='').values_list('batch_id')
+                   .annotate(n=Count('id'), last=Max('created_at')).order_by('-last')],
+                  keep=6),
     ]
 
     # Waiting for a decision: one line per kind and proposer, what it asks,
