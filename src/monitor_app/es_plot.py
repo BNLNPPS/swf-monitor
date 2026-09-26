@@ -1,5 +1,6 @@
 """The slot occupancy plot of an Event Service job: one lane per slot
-along the job's own clock, each unit a bar (green done, red failed),
+along the job's own clock, each unit a bar (green done, red failed), the slot's start before its
+first unit and drain after its last in yellow (the allocation lost),
 each slot's processed events at its right and their total on the closes
 lane, the closes on their own lane, the harness's span, the pilot's head and
 tail as the bare lanes before the first unit and after the last. What
@@ -21,6 +22,7 @@ DONE = '#2e8b57'
 FAILED = '#c0392b'
 CLOSE = '#3a7bd5'
 HARNESS = '#8e6bbf'
+LOST = '#e0b400'   # a slot's allocation before its first unit and after its last
 IDLE = 'rgba(128,128,128,0.18)'
 
 
@@ -53,6 +55,16 @@ def slot_plot_svg(tl):
         y = TOP + i * LANE_H
         parts.append(f'<text x="{LEFT - 8}" y="{y + LANE_H * 0.72:.1f}" text-anchor="end" fill="currentColor">slot {row["index"]}</text>')
         parts.append(f'<rect x="{LEFT}" y="{y + 3}" width="{plot_w:.1f}" height="{LANE_H - 6}" fill="{IDLE}"/>')
+        # What the slot loses: its start before the first unit and its
+        # drain after the last, the allocation it holds without work.
+        if row['units']:
+            first = min(u['start_s'] for u in row['units'])
+            last = max(u['end_s'] for u in row['units'])
+            for a, b, what in ((0.0, first, 'start'), (last, wall, 'drain')):
+                if b > a:
+                    title = escape(f"lost to the slot's {what}: {(b - a) / 60:.1f} min")
+                    parts.append(f'<rect x="{x(a):.1f}" y="{y + 3}" width="{max(1.0, x(b) - x(a)):.1f}" '
+                                 f'height="{LANE_H - 6}" fill="{LOST}"><title>{title}</title></rect>')
         for u in row['units']:
             x0, x1 = x(u['start_s']), x(u['end_s'])
             color = DONE if u['status'] == 'done' else FAILED
