@@ -210,6 +210,18 @@ class NarrativeCommentView(_AiApiView):
         return Response({'ok': True}, status=status.HTTP_200_OK)
 
 
+class ProposalRemoveSupersededView(_AiApiView):
+    def post(self, request):
+        """Delete the withdrawn nightly copies of later proposals of the same
+        change and give each survivor the date it was first made
+        (services.proposal_remove_superseded)."""
+        try:
+            result = services.proposal_remove_superseded(deleted_by=request.user.username)
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response(result, status=status.HTTP_200_OK)
+
+
 class ProposalDeleteView(_AiApiView):
     def post(self, request):
         """Delete AI proposal list rows (operator housekeeping). Body: ids."""

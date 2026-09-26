@@ -58,6 +58,58 @@ def _proposal_input_hash(payload, comment):
     return _hashlib.sha1(blob.encode()).hexdigest()
 
 
+# What a proposal would do, per action: the payload fields whose values
+# the executor acts on. A proposal is the same proposal while these hold,
+# whatever its comment and descriptive fields say (a ping's "129.7 days
+# from the check", a plan entry's delivered counts): the nightly proposers
+# re-derive those every night, and fingerprinting them withdrew and
+# re-created every pending proposal nightly, wiping the date it was first
+# made and letting a denial lapse the next night.
+DECISION_FIELDS = {
+    'campaign_plan': ('campaign', 'disposition', 'target_events', 'priority'),
+    'ping': ('title', 'due', 'lead_days', 'owner'),
+    'standard_config': ('edition', 'name', 'template', 'container_image',
+                        'jug_xl_tag', 'rucio_rse', 'ping_title'),
+    'registered_sample': ('did', 'campaign', 'physics', 'evgen', 'background',
+                          'sample', 'physics_tag', 'pc'),
+}
+
+
+def decision_hash(action, payload):
+    """The fingerprint of what a proposal would do (DECISION_FIELDS)."""
+    fields = DECISION_FIELDS[action]
+    blob = _json.dumps({k: (payload or {}).get(k) for k in fields}, sort_keys=True)
+    return _hashlib.sha1(blob.encode()).hexdigest()
+
+
+def _upsert_proposal(action, base, payload, comment, now, create):
+    """One recurring proposal against its subject's rows (``base``, the
+    action's rows for this subject): 'denied' when a denial of the same
+    decision stands; 'refreshed' when an open proposal of the same
+    decision exists, which keeps its row, ref and date and takes the
+    fresh comment and descriptive fields; otherwise the open proposals of
+    another decision are withdrawn and ``create(input_hash)`` makes the
+    new row, 'proposed'. Rows written before decision fingerprints carry
+    another hash, so rows are compared by their payloads."""
+    want = decision_hash(action, payload)
+    rows = list(base.filter(status__in=('denied', 'proposed')))
+    if any(r.status == 'denied' and decision_hash(action, r.payload) == want for r in rows):
+        return 'denied'
+    same = [r for r in rows if r.status == 'proposed' and decision_hash(action, r.payload) == want]
+    if same:
+        keep = min(same, key=lambda r: r.created_at)
+        if keep.payload != payload or keep.comment != comment or keep.input_hash != want:
+            keep.payload, keep.comment, keep.input_hash = payload, comment, want
+            keep.save(update_fields=['payload', 'comment', 'input_hash'])
+        extra = [r.pk for r in same if r.pk != keep.pk]
+        if extra:
+            Proposal.objects.filter(pk__in=extra).update(status='withdrawn', decided_at=now)
+        return 'refreshed'
+    base.filter(status='proposed').update(status='withdrawn', decided_at=now)
+    create(want)
+    return 'proposed'
+
+
 def _clear_proposal_projection(name):
     """Remove the render projection from the record a proposal targeted."""
     head = (Dataset.objects
@@ -279,43 +331,20 @@ def propose_campaign_plan(campaign_name, items, *, proposer='',
             if current == plan_entry_anchor(entry):
                 noop.append(pc)
                 continue
-            input_hash = _proposal_input_hash(payload, comment)
-            if Proposal.objects.filter(
-                    action='campaign_plan', subject_key=pc,
-                    counterpart_key=campaign_name,
-                    status='denied', input_hash=input_hash).exists():
-                denied_skips.append(pc)
-                continue
-            # An identical pending proposal stands: leave it in place —
-            # a regeneration heartbeat must not reissue refs for
-            # unchanged recommendations.
-            if Proposal.objects.filter(
-                    action='campaign_plan', subject_key=pc,
-                    counterpart_key=campaign_name,
-                    status='proposed', input_hash=input_hash).exists():
-                noop.append(pc)
-                continue
-            Proposal.objects.filter(
-                action='campaign_plan', subject_key=pc,
-                counterpart_key=campaign_name,
-                status='proposed').update(status='withdrawn',
-                                          decided_at=now)
-            Proposal.objects.create(
-                action='campaign_plan',
-                subject_type='physics_config',
-                subject_key=pc,
-                counterpart_key=campaign_name,
-                payload=payload,
-                comment=comment,
-                proposer=proposer or '',
-                scan_version=scan_version,
-                batch_id=batch_id or '',
-                executor='service',
-                precondition={'prev_entry': current},
-                input_hash=input_hash,
-                created_by=created_by or '',
-            )
-            proposed.append(pc)
+            outcome = _upsert_proposal(
+                'campaign_plan',
+                Proposal.objects.filter(action='campaign_plan', subject_key=pc,
+                                        counterpart_key=campaign_name),
+                payload, comment, now,
+                lambda h: Proposal.objects.create(
+                    action='campaign_plan', subject_type='physics_config',
+                    subject_key=pc, counterpart_key=campaign_name,
+                    payload=payload, comment=comment, proposer=proposer or '',
+                    scan_version=scan_version, batch_id=batch_id or '',
+                    executor='service', precondition={'prev_entry': current},
+                    input_hash=h, created_by=created_by or ''))
+            {'denied': denied_skips, 'refreshed': noop,
+             'proposed': proposed}[outcome].append(pc)
 
     log_epicprod_action(
         'web', 'proposal_created',
@@ -489,25 +518,19 @@ def propose_pings(items, *, proposer='', batch_id='', created_by='',
             subject_key = _ping_subject_key(title)
             existing = alarms_data.open_ping_with_title(title)
             precondition = {'existing_open': existing.id if existing else None}
-            input_hash = _proposal_input_hash(payload, comment)
-            base = Proposal.objects.filter(action='ping',
-                                           subject_key=subject_key)
-            if base.filter(status='denied', input_hash=input_hash).exists():
-                denied_skips.append(title)
-                continue
-            if base.filter(status='proposed', input_hash=input_hash).exists():
-                noop.append(title)
-                continue
-            base.filter(status='proposed').update(status='withdrawn',
-                                                  decided_at=now)
-            Proposal.objects.create(
-                action='ping', subject_type='ping', subject_key=subject_key,
-                counterpart_key=due.isoformat(), payload=payload,
-                comment=comment, proposer=proposer or '', scan_version=1,
-                batch_id=batch_id or '', executor='service',
-                precondition=precondition, input_hash=input_hash,
-                created_by=created_by or '')
-            proposed.append(title)
+            outcome = _upsert_proposal(
+                'ping',
+                Proposal.objects.filter(action='ping', subject_key=subject_key),
+                payload, comment, now,
+                lambda h: Proposal.objects.create(
+                    action='ping', subject_type='ping', subject_key=subject_key,
+                    counterpart_key=due.isoformat(), payload=payload,
+                    comment=comment, proposer=proposer or '', scan_version=1,
+                    batch_id=batch_id or '', executor='service',
+                    precondition=precondition, input_hash=h,
+                    created_by=created_by or ''))
+            {'denied': denied_skips, 'refreshed': noop,
+             'proposed': proposed}[outcome].append(title)
     log_epicprod_action(
         'web', 'proposal_created', username=created_by,
         **_creation_record(rule),
@@ -600,25 +623,19 @@ def propose_standard_configs(items, *, proposer='', batch_id='',
                 'rucio_rse': values['rucio_rse'],
                 'ping_title': (item.get('ping_title') or '').strip(),
             }
-            input_hash = _proposal_input_hash(payload, comment)
-            base = Proposal.objects.filter(action='standard_config',
-                                           subject_key=name)
-            if base.filter(status='denied', input_hash=input_hash).exists():
-                denied_skips.append(name)
-                continue
-            if base.filter(status='proposed', input_hash=input_hash).exists():
-                noop.append(name)
-                continue
-            base.filter(status='proposed').update(status='withdrawn',
-                                                  decided_at=now)
-            Proposal.objects.create(
-                action='standard_config', subject_type='prod_config',
-                subject_key=name, counterpart_key=edition, payload=payload,
-                comment=comment, proposer=proposer or '', scan_version=1,
-                batch_id=batch_id or '', executor='service',
-                precondition={'existing': None}, input_hash=input_hash,
-                created_by=created_by or '')
-            proposed.append(name)
+            outcome = _upsert_proposal(
+                'standard_config',
+                Proposal.objects.filter(action='standard_config', subject_key=name),
+                payload, comment, now,
+                lambda h: Proposal.objects.create(
+                    action='standard_config', subject_type='prod_config',
+                    subject_key=name, counterpart_key=edition, payload=payload,
+                    comment=comment, proposer=proposer or '', scan_version=1,
+                    batch_id=batch_id or '', executor='service',
+                    precondition={'existing': None}, input_hash=h,
+                    created_by=created_by or ''))
+            {'denied': denied_skips, 'refreshed': noop,
+             'proposed': proposed}[outcome].append(name)
     log_epicprod_action(
         'web', 'proposal_created', username=created_by,
         **_creation_record(rule),
@@ -679,25 +696,20 @@ def propose_registered_samples(items, *, proposer='', batch_id='',
                 'registered_at': item.get('registered_at') or '',
                 'requestor': '', 'nevents': None, 'priority': None,
             }
-            input_hash = _proposal_input_hash(payload, comment)
-            base = Proposal.objects.filter(action='registered_sample',
-                                           subject_key=identity['did'])
-            if base.filter(status='denied', input_hash=input_hash).exists():
-                denied_skips.append(identity['did'])
-                continue
-            if base.filter(status='proposed', input_hash=input_hash).exists():
-                noop.append(identity['did'])
-                continue
-            base.filter(status='proposed').update(status='withdrawn',
-                                                  decided_at=now)
-            Proposal.objects.create(
-                action='registered_sample', subject_type='evgen_sample',
-                subject_key=identity['did'], counterpart_key=campaign,
-                payload=payload, comment=comment, proposer=proposer or '',
-                scan_version=1, batch_id=batch_id or '', executor='service',
-                precondition={'held': False}, input_hash=input_hash,
-                created_by=created_by or '')
-            proposed.append(identity['did'])
+            outcome = _upsert_proposal(
+                'registered_sample',
+                Proposal.objects.filter(action='registered_sample',
+                                        subject_key=identity['did']),
+                payload, comment, now,
+                lambda h: Proposal.objects.create(
+                    action='registered_sample', subject_type='evgen_sample',
+                    subject_key=identity['did'], counterpart_key=campaign,
+                    payload=payload, comment=comment, proposer=proposer or '',
+                    scan_version=1, batch_id=batch_id or '', executor='service',
+                    precondition={'held': False}, input_hash=h,
+                    created_by=created_by or ''))
+            {'denied': denied_skips, 'refreshed': noop,
+             'proposed': proposed}[outcome].append(identity['did'])
     log_epicprod_action(
         'web', 'proposal_created', username=created_by,
         **_creation_record(rule),
@@ -1262,6 +1274,63 @@ def proposal_delete(proposal_ids, *, deleted_by=''):
         deleted=deleted,
     )
     return {'deleted': deleted}
+
+
+def superseded_copies():
+    """The withdrawn rows that are copies of a later proposal of the same
+    decision on the same subject (``decision_hash``): the nightly
+    re-creations made before decision fingerprints, noise that records
+    no decision. Returns (copy ids, {surviving row id: the date the
+    proposal was first made}), the survivor being the newest row of each
+    run of the same decision."""
+    copies, first_made = [], {}
+    rows = (Proposal.objects.filter(action__in=list(DECISION_FIELDS))
+            .order_by('action', 'subject_key', 'counterpart_key', 'created_at')
+            .only('id', 'action', 'subject_key', 'counterpart_key', 'payload',
+                  'status', 'created_at'))
+    chain = []                      # consecutive rows of one subject and decision
+
+    def close(chain):
+        if len(chain) > 1:
+            survivor = chain[-1]
+            copies.extend(r.id for r in chain[:-1] if r.status == 'withdrawn')
+            if chain[0].created_at < survivor.created_at:
+                first_made[survivor.id] = chain[0].created_at
+
+    key = None
+    for r in rows:
+        k = (r.action, r.subject_key, r.counterpart_key, decision_hash(r.action, r.payload))
+        if k != key:
+            close(chain)
+            chain, key = [], k
+        if chain and chain[-1].status != 'withdrawn':
+            close(chain)            # a decided row ends the run: a later one is a new proposal
+            chain = []
+        chain.append(r)
+    close(chain)
+    return copies, first_made
+
+
+def proposal_remove_superseded(*, deleted_by=''):
+    """Delete the superseded copies (``superseded_copies``) and give each
+    surviving row the date its proposal was first made. Human-only (the
+    button on the proposals page's History tab) and logged with counts."""
+    from monitor_app.epicprod_logging import log_epicprod_action
+
+    if not deleted_by:
+        raise ServiceError('an authenticated deleter is required')
+    copies, first_made = superseded_copies()
+    with transaction.atomic():
+        for pk, when in first_made.items():
+            Proposal.objects.filter(pk=pk).update(created_at=when)
+        deleted, _ = Proposal.objects.filter(pk__in=copies, status='withdrawn').delete()
+    log_epicprod_action(
+        'web', 'proposal_deleted', username=deleted_by,
+        sublevel='normal', live_default=False,
+        message=(f'{deleted} superseded AI proposal copies deleted; '
+                 f'{len(first_made)} proposal(s) given the date first made'),
+        deleted=deleted, redated=len(first_made))
+    return {'deleted': deleted, 'redated': len(first_made)}
 
 
 def proposal_withdraw(*, batch_id=None, action='propagation', created_by=''):

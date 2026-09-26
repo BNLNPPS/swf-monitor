@@ -14,11 +14,44 @@
 <div class="container-fluid mt-3">
   <h1><span class="ai-attr-text">AI Proposals</span></h1>
   <p class="text-muted">
-    AI-proposed actions pending human review, and the decision history.
-    Approval executes the frozen payload deterministically through the same
-    service an operator uses; denial is recorded and the proposal is not
-    re-proposed until its inputs change. See docs/AI_PROPOSALS.md.
+    Changes the automation proposes; nothing happens until a person approves.
+    Approval runs the change through the same service an operator uses;
+    denial is recorded and the same proposal is not made again.
+    See docs/AI_PROPOSALS.md.
   </p>
+
+  <div class="swf-page-tabs mb-3">
+    <a href="{{ open_url }}" class="{% if tab == 'open' %}active{% endif %}">Waiting for a decision ({{ open_count }})</a>
+    <a href="{{ history_url }}" class="{% if tab == 'history' %}active{% endif %}">History ({{ history_count }})</a>
+  </div>
+
+  {% if tab == 'open' %}
+  <table class="table table-sm pcs-props-stats mb-3" style="width:auto">
+    <thead><tr><th>Waiting</th><th>Kind</th><th>What it asks</th><th>Soonest due</th><th>From</th><th>Review on</th></tr></thead>
+    <tbody>
+      {% for w in waiting %}
+      <tr>
+        <td class="text-end"><a href="{{ w.list_url }}"><strong>{{ w.count }}</strong></a></td>
+        <td><a href="{{ w.list_url }}">{{ w.label }}{% if w.campaign %} {{ w.campaign }}{% endif %}</a></td>
+        <td>{{ w.asks }}</td>
+        <td class="text-nowrap">{{ w.soonest|default:"" }}</td>
+        <td>{{ w.proposer }}</td>
+        <td>{% if w.surface_url %}<a href="{{ w.surface_url }}">{{ w.surface_label }}</a>{% endif %}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" class="text-muted">Nothing is waiting for a decision.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="mb-2">Decided, withdrawn and stale proposals.
+    {% if superseded %}
+    <button type="button" id="props-remove-superseded" class="btn btn-sm btn-danger ms-2"
+            {% if not user.is_authenticated %}disabled{% endif %}
+            title="Delete the {{ superseded }} withdrawn rows that are nightly copies of a later proposal of the same change, and give each surviving proposal the date it was first made{% if not user.is_authenticated %}; sign in to use{% endif %}">Remove superseded copies ({{ superseded }})</button>
+    {% endif %}
+  </p>
+  {% endif %}
 
   <div class="pcs-props-filter mb-2">
     {% for row in facet_rows %}
@@ -29,6 +62,11 @@
       {% for f in row.items %}
       <a href="{{ f.url }}" class="{% if f.active %}active{% endif %}">{{ f.label }} ({{ f.count }})</a>
       {% endfor %}
+      {% if row.folded %}
+      <details class="d-inline"><summary class="d-inline text-primary" style="cursor:pointer">{{ row.folded|length }} more</summary>
+        {% for f in row.folded %}<a href="{{ f.url }}">{{ f.label }} ({{ f.count }})</a>{% endfor %}
+      </details>
+      {% endif %}
     </div>
     {% endif %}
     {% endfor %}
@@ -84,9 +122,9 @@
         <td><input type="checkbox" class="props-cb" value="{{ p.id }}" {% if not user.is_authenticated %}disabled title="Sign in to select"{% endif %}></td>
         <td class="small"><strong>{{ p.ref }}</strong></td>
         <td class="small text-muted">{{ p.created_at|date:"Y-m-d H:i" }}</td>
-        <td class="small">{% if p.action == 'propagation' %}campaign propagation{% elif p.action == 'campaign_plan' %}campaign plan{% elif p.action == 'ping' %}ping{% elif p.action == 'ping_fulfil' %}ping fulfilled{% else %}{{ p.action }}{% endif %}</td>
-        <td class="small text-nowrap">{% if p.action == 'ping' %}enter, due {{ p.payload.due }}{% if p.payload.amended.due %} &rarr; {{ p.payload.amended.due }}{% endif %}{% elif p.action == 'ping_fulfil' %}open &rarr; fulfilled{% else %}{{ p.precondition.prev_state|default:"?" }} &rarr; {{ p.payload.state|default:"?" }}{% endif %}</td>
-        <td class="small">{% if p.action == 'ping' or p.action == 'ping_fulfil' %}<a href="{% url 'monitor_app:alarms_dashboard' %}#pings">{{ p.payload.title|default:p.subject_key }}</a>{% else %}<a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ p.subject_key|urlencode }}">{{ p.subject_key }}</a>
+        <td class="small">{% if p.action == 'propagation' %}campaign propagation{% elif p.action == 'campaign_plan' %}campaign plan{% elif p.action == 'ping' %}reminder{% elif p.action == 'ping_fulfil' %}reminder fulfilled{% elif p.action == 'standard_config' %}standard configuration{% elif p.action == 'registered_sample' %}registered sample{% else %}{{ p.action }}{% endif %}</td>
+        <td class="small">{% if p.action == 'ping' %}enter, due {{ p.payload.due }}{% if p.payload.amended.due %} &rarr; {{ p.payload.amended.due }}{% endif %}{% if p.payload.owner %}, owner {{ p.payload.owner }}{% endif %}{% elif p.action == 'ping_fulfil' %}open &rarr; fulfilled{% elif p.action == 'campaign_plan' %}{{ p.disposition_label|default:"?" }} in {{ p.payload.campaign }}{% if p.payload.target_events is not None %}, {{ p.payload.target_events }} events{% endif %}{% if p.payload.priority is not None %}, priority {{ p.payload.priority }}{% endif %}{% elif p.action == 'standard_config' %}create {{ p.payload.name }}{% elif p.action == 'registered_sample' %}take into {{ p.payload.campaign }}{% else %}{{ p.precondition.prev_state|default:"?" }} &rarr; {{ p.payload.state|default:"?" }}{% endif %}</td>
+        <td class="small">{% if p.action == 'ping' or p.action == 'ping_fulfil' %}<a href="{% url 'monitor_app:alarms_dashboard' %}#pings">{{ p.payload.title|default:p.subject_key }}</a>{% elif p.action == 'campaign_plan' %}<a href="{% url 'pcs:pcs_campaign_plan' %}?campaign={{ p.counterpart_key|urlencode }}">{{ p.subject_key }}</a> <span class="text-muted">{{ p.counterpart_key }}</span>{% elif p.action == 'registered_sample' %}<a href="{% url 'pcs:evgen_inputs' %}">{{ p.subject_key }}</a>{% else %}<a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ p.subject_key|urlencode }}">{{ p.subject_key }}</a>
           {% if p.counterpart_key %}<div class="text-muted">&harr; {{ p.counterpart_key }}</div>{% endif %}{% endif %}</td>
         <td class="small pcs-props-comment">{{ p.comment }}
           {% if p.payload.replaced_by %}<div class="text-muted">Replaced by: {{ p.payload.replaced_by }}</div>{% endif %}
@@ -185,6 +223,25 @@
       window.location.reload();
     } catch (err) {
       alert('Undo failed: ' + err.message);
+    }
+  });
+
+  const rs = document.getElementById('props-remove-superseded');
+  if (rs) rs.addEventListener('click', async () => {
+    if (!confirm(rs.title + '?')) return;
+    const token = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    try {
+      const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/proposals/remove-superseded/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+        body: '{}',
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || 'request failed');
+      alert(`${j.deleted} superseded copies deleted; ${j.redated} proposal(s) given the date first made.`);
+      window.location.reload();
+    } catch (err) {
+      alert('Remove superseded copies failed: ' + err.message);
     }
   });
 

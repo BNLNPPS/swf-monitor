@@ -5,13 +5,47 @@ from django.shortcuts import render
 from .models import Proposal
 
 
+# What each kind of proposal asks of the reviewer, where it is best
+# reviewed, and how its open rows sort (soonest obligation first for pings).
+PROPOSAL_KINDS = {
+    'campaign_plan': {'label': 'campaign plan',
+                      'asks': 'whether each physics configuration goes into the campaign plan '
+                              '(include, defer or retire), with target events and priority'},
+    'ping': {'label': 'reminder (ping)',
+             'asks': 'whether to enter a dated reminder with an owner'},
+    'ping_fulfil': {'label': 'reminder fulfilled',
+                    'asks': 'whether an open reminder is met'},
+    'standard_config': {'label': 'standard configuration',
+                        'asks': "whether to create an edition's Standard Production configuration"},
+    'registered_sample': {'label': 'registered sample',
+                          'asks': 'whether to take a registered EVGEN sample nobody requested into the campaign'},
+    'propagation': {'label': 'campaign propagation',
+                    'asks': "whether to set an edition's propagation"},
+}
+
+
+def _review_surface(action, counterpart):
+    """(label, url) of the page a kind of proposal is best reviewed on."""
+    from django.urls import reverse
+    if action in ('ping', 'ping_fulfil', 'standard_config'):
+        return 'Pings on the alarm dashboard', reverse('monitor_app:alarms_dashboard') + '#pings'
+    if action == 'campaign_plan':
+        return (f'the {counterpart} campaign plan',
+                reverse('pcs:pcs_campaign_plan') + f'?campaign={counterpart}')
+    if action == 'registered_sample':
+        return 'EVGEN inputs', reverse('pcs:evgen_inputs')
+    return '', ''
+
+
 def ai_proposals(request):
     """The AI proposal list (AI_PROPOSALS.md).
 
-    Pending proposals for review, decision history, and per-proposer track
-    records. Read-open — visible-but-inert; decisions require sign-in and
-    act through the same proposal-decide service as the catalog and
-    compose surfaces.
+    Opens on the proposals waiting for a decision, summarized by kind with
+    what each asks and where it is best reviewed; the History tab holds
+    the decided and withdrawn rows. Facet counts are counted within the
+    current selection (the house narrowing filter). Read-open;
+    decisions require sign-in and act through the same proposal-decide
+    service as the catalog and compose surfaces.
     """
     def url_with(**updates):
         params = request.GET.copy()
@@ -23,96 +57,119 @@ def ai_proposals(request):
         encoded = params.urlencode()
         return f'{request.path}?{encoded}' if encoded else request.path
 
-    filters = {key: (request.GET.get(key) or '').strip()
-               for key in ('status', 'action', 'change', 'decision',
-                           'quality', 'proposer', 'batch', 'subject')}
-    status_filter = filters['status'] or 'all'
+    params = ('status', 'action', 'change', 'decision', 'quality',
+              'proposer', 'batch', 'subject')
+    filters = {key: (request.GET.get(key) or '').strip() for key in params}
+    tab = 'history' if (request.GET.get('tab') == 'history'
+                        or filters['status'] not in ('', 'proposed')) else 'open'
 
-    qs = Proposal.objects.all()
-    if status_filter != 'all':
-        qs = qs.filter(status=status_filter)
-    if filters['subject']:
-        qs = qs.filter(subject_key=filters['subject'])
-    if filters['action']:
-        qs = qs.filter(action=filters['action'])
-    if filters['change'] and ':' in filters['change']:
-        prev_state, _, new_state = filters['change'].partition(':')
-        qs = qs.filter(precondition__prev_state=prev_state,
-                       payload__state=new_state)
-    if filters['decision']:
-        qs = qs.filter(decided_by=filters['decision'])
-    if filters['quality']:
-        qs = qs.filter(quality=filters['quality'])
-    if filters['proposer']:
-        qs = qs.filter(proposer=filters['proposer'])
-    if filters['batch']:
-        qs = qs.filter(batch_id=filters['batch'])
+    def select(qs, skip=None):
+        """The rows the page's filters select, all but ``skip``."""
+        if tab == 'open':
+            qs = qs.filter(status='proposed')
+        else:
+            qs = qs.exclude(status='proposed')
+            if filters['status'] and skip != 'status':
+                qs = qs.filter(status=filters['status'])
+        if filters['subject'] and skip != 'subject':
+            qs = qs.filter(subject_key=filters['subject'])
+        if filters['action'] and skip != 'action':
+            qs = qs.filter(action=filters['action'])
+        if filters['change'] and ':' in filters['change'] and skip != 'change':
+            prev_state, _, new_state = filters['change'].partition(':')
+            qs = qs.filter(precondition__prev_state=prev_state, payload__state=new_state)
+        if filters['decision'] and skip != 'decision':
+            qs = qs.filter(decided_by=filters['decision'])
+        if filters['quality'] and skip != 'quality':
+            qs = qs.filter(quality=filters['quality'])
+        if filters['proposer'] and skip != 'proposer':
+            qs = qs.filter(proposer=filters['proposer'])
+        if filters['batch'] and skip != 'batch':
+            qs = qs.filter(batch_id=filters['batch'])
+        return qs
 
-    total_count = qs.count()
-    rows = list(qs.order_by('-created_at')[:500])
-
-    # Facet rows: per-dimension global counts, links preserving the other
-    # active filters; every dimension leads with All (the default).
     everything = Proposal.objects.all()
+    qs = select(everything)
+    total_count = qs.count()
+    if filters['action'] == 'ping' and tab == 'open':
+        ordered = qs.order_by('counterpart_key', 'created_at')      # soonest due first
+    else:
+        ordered = qs.order_by('-created_at')
+    rows = list(ordered[:500])
+    for p in rows:
+        if p.action == 'campaign_plan':
+            p.disposition_label = str((p.payload or {}).get('disposition') or '').replace('_', ' ')
 
-    def facet_row(title, param, pairs, label_of=str):
-        items = [{
-            'label': label_of(value), 'count': count,
-            'url': url_with(**{param: value}),
-            'active': filters[param] == value,
-        } for value, count in pairs if value]
-        return {'title': title, 'items': items,
-                'all_url': url_with(**{param: ''}),
-                'all_active': not filters[param]}
+    def facet_row(title, param, pairs, label_of=str, newest_first=False, keep=0):
+        items = [{'label': label_of(value), 'count': count,
+                  'url': url_with(**{param: value}), 'active': filters[param] == value}
+                 for value, count in pairs if value]
+        if newest_first:
+            items.sort(key=lambda i: i['label'], reverse=True)
+        shown, folded = (items[:keep], items[keep:]) if keep else (items, [])
+        if any(i['active'] for i in folded):
+            shown, folded = items, []
+        return {'title': title, 'items': shown, 'folded': folded,
+                'all_url': url_with(**{param: ''}), 'all_active': not filters[param]}
 
-    status_counts = dict(everything.values_list('status').annotate(Count('id')))
-    status_order = ['proposed', 'executed', 'denied', 'withdrawn',
-                    'stale', 'approved_pending_execution']
-    status_row = {
-        'title': 'Status',
-        'items': [{'label': s, 'count': status_counts.get(s, 0),
-                   'url': url_with(status=s), 'active': status_filter == s}
-                  for s in status_order
-                  if status_counts.get(s, 0) or s == 'proposed'],
-        'all_url': url_with(status=''),
-        'all_active': status_filter == 'all',
-    }
+    def counts(param, field, qs_extra=None):
+        base = select(everything, skip=param)
+        if qs_extra:
+            base = qs_extra(base)
+        return base.values_list(field).annotate(Count('id')).order_by(field)
 
-    action_labels = {'propagation': 'campaign propagation',
-                     'campaign_plan': 'campaign plan',
-                     'ping': 'ping', 'ping_fulfil': 'ping fulfilled',
-                     'standard_config': 'standard configuration',
-                     'registered_sample': 'registered sample'}
-    facet_rows = [
-        status_row,
-        facet_row('Action', 'action',
-                  everything.values_list('action').annotate(Count('id'))
-                  .order_by('action'),
-                  lambda a: action_labels.get(a, a)),
+    facet_rows = []
+    if tab == 'history':
+        facet_rows.append(facet_row('Status', 'status', counts('status', 'status')))
+    facet_rows += [
+        facet_row('Kind', 'action', counts('action', 'action'),
+                  lambda a: PROPOSAL_KINDS.get(a, {}).get('label', a)),
+        facet_row('Proposer', 'proposer',
+                  counts('proposer', 'proposer', lambda q: q.exclude(proposer=''))),
         facet_row('Change', 'change', [
             (f'{prev}:{new}', count)
-            for prev, new, count in everything
+            for prev, new, count in select(everything, skip='change')
             .values_list('precondition__prev_state', 'payload__state')
-            .annotate(Count('id')).order_by()
-            if prev and new],
-            lambda v: v.replace(':', ' → ')),
-        facet_row('Decision', 'decision',
-                  everything.exclude(decided_by='')
-                  .values_list('decided_by').annotate(Count('id'))
-                  .order_by('decided_by')),
+            .annotate(Count('id')).order_by() if prev and new],
+            lambda v: v.replace(':', ' \u2192 ')),
+        facet_row('Decided by', 'decision',
+                  counts('decision', 'decided_by', lambda q: q.exclude(decided_by=''))),
         facet_row('Quality', 'quality',
-                  everything.exclude(quality='')
-                  .values_list('quality').annotate(Count('id'))
-                  .order_by('quality')),
-        facet_row('Proposer', 'proposer',
-                  everything.exclude(proposer='')
-                  .values_list('proposer').annotate(Count('id'))
-                  .order_by('proposer')),
+                  counts('quality', 'quality', lambda q: q.exclude(quality=''))),
         facet_row('Batch', 'batch',
-                  everything.exclude(batch_id='')
-                  .values_list('batch_id').annotate(Count('id'))
-                  .order_by('batch_id')),
+                  counts('batch', 'batch_id', lambda q: q.exclude(batch_id='')),
+                  newest_first=True, keep=6),
     ]
+
+    # Waiting for a decision: one line per kind and proposer, what it asks,
+    # how many, the soonest due for reminders, where to review it.
+    waiting = []
+    groups = (everything.filter(status='proposed')
+              .values('action', 'proposer').annotate(n=Count('id'))
+              .order_by('action', 'proposer'))
+    for g in groups:
+        kind = PROPOSAL_KINDS.get(g['action'], {'label': g['action'], 'asks': ''})
+        open_rows = everything.filter(status='proposed', action=g['action'],
+                                      proposer=g['proposer'])
+        counterparts = sorted(set(open_rows.exclude(counterpart_key='')
+                                  .values_list('counterpart_key', flat=True)))
+        soonest = counterparts[0] if g['action'] == 'ping' and counterparts else ''
+        campaign = counterparts[0] if g['action'] == 'campaign_plan' and len(counterparts) == 1 else ''
+        surface_label, surface_url = _review_surface(g['action'], campaign)
+        waiting.append({
+            'label': kind['label'], 'asks': kind['asks'], 'count': g['n'],
+            'proposer': g['proposer'] or '(session)', 'soonest': soonest,
+            'campaign': campaign,
+            'list_url': f"{request.path}?action={g['action']}"
+                        + (f"&proposer={g['proposer']}" if g['proposer'] else ''),
+            'surface_label': surface_label, 'surface_url': surface_url,
+        })
+    waiting.sort(key=lambda w: (w['soonest'] or '9999', w['label']))
+
+    superseded = 0
+    if tab == 'history':
+        from .services import superseded_copies
+        superseded = len(superseded_copies()[0])
 
     proposer_stats = []
     for proposer in (Proposal.objects.exclude(proposer='').order_by()
@@ -127,7 +184,16 @@ def ai_proposals(request):
             'wrong': base.filter(quality='wrong').count(),
         })
 
+    open_count = everything.filter(status='proposed').count()
     return render(request, 'ai/proposals.html', {
+        'tab': tab,
+        'open_url': request.path,
+        'history_url': f'{request.path}?tab=history',
+        'open_count': open_count,
+        'history_count': everything.count() - open_count,
+        'waiting': waiting,
+        'superseded': superseded,
+        'kinds': PROPOSAL_KINDS,
         'rows': rows,
         'total_count': total_count,
         'shown_count': len(rows),
