@@ -1,17 +1,10 @@
 <div class="mb-3" style="max-width: 60em;">
-  <p class="mb-1"><strong>Reading the plot.</strong> Each lane is one core of the job, running one
-    single-threaded instance of the simulation and reconstruction. A
-    <span style="color:#2e8b57;font-weight:600">green</span> bar is a unit of consecutive events processed on that core;
-    <span style="color:#c0392b;font-weight:600">red</span> is a unit that failed; grey is a core with nothing to do
-    (its start at the head, the drain at the end). The number at the right of a lane is the events that core processed.
-    After a sudden end (a preemption test), <span style="background:#f5d76e;padding:0 .2em">light yellow</span> is processing cut
-    off mid-unit and <span style="background:#d49a00;color:#000;padding:0 .2em">dark yellow</span> is units that finished
-    but whose output never left the node.</p>
-  <p class="mb-0"><strong>Output handling: the <span style="color:#3a7bd5">blue</span> bars.</strong> A finished unit's
-    reconstructed events wait on the node. At each close, on a fixed cadence and once more at the end, the units since
-    the last close are merged into one file, the file is copied off the node to its storage element and checked, and it is
-    registered in Rucio with its event count; only then are those units' events reported to PanDA as done. A blue bar is
-    one close, from the start of the merge to the registration. Short, regular blue bars mean output leaves the node as
-    it is made, so a sudden end loses at most the units since the last close{% if closes_table %}; the table below
-    lists each close and its file{% endif %}.</p>
+  <p class="mb-1"><strong>Reading the plot.</strong> One lane per core.
+    <span style="color:#2e8b57;font-weight:600">Green</span> processing,
+    <span style="color:#c0392b;font-weight:600">red</span> failed, grey idle;
+    after a sudden end, <span style="background:#f5d76e;padding:0 .2em">light yellow</span> work cut off,
+    <span style="background:#d49a00;color:#000;padding:0 .2em">dark yellow</span> output lost on the node.</p>
+  <p class="mb-0"><strong><span style="color:#3a7bd5">Blue</span>: output handling.</strong> Each close merges the
+    finished units into one file, ships it off the node and registers it, then credits the events in PanDA.
+    Short, regular closes mean a sudden end loses little.</p>
 </div>
