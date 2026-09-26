@@ -3616,6 +3616,11 @@ def es_slot_timeline(job, es):
     t0, t1 = epoch(start), epoch(end)
     if t0 is None or t1 is None or t1 <= t0:
         return None
+    # A job whose node was taken away ends at the cut, not when PanDA
+    # later gave up on its heartbeat.
+    cut = (es.get('preempted') or {}).get('at')
+    if cut and (es.get('preempted') or {}).get('real'):
+        t1 = min(t1, float(cut))
     nslots = int(es.get('slots') or 0) or 1
     units = []
     for status, key in (('done', 'ranges_done'), ('failed', 'ranges_failed'),
@@ -3680,6 +3685,44 @@ def es_slot_timeline(job, es):
         'head_idle_s': round(min(r['head_idle_s'] for r in slot_rows), 1) if slot_rows else None,
         'tail_idle_s': round(min(r['tail_idle_s'] for r in slot_rows), 1) if slot_rows else None,
         'lanes_from_record': all(u['slot'] is not None for u in units) and bool(units),
+        'cut_s': round(float(cut) - t0, 1) if cut else None,
+        'cut_real': bool((es.get('preempted') or {}).get('real')),
+    }
+
+
+def es_from_shipped_record(pandaid):
+    """The ``es`` block of a job that ended without its final report, from
+    the record the harness shipped off the node as it went (swf-epicprod
+    payload/es/es_record.py), as the sweep filed it under
+    ``EpicProdJob.data['es_record']``. The record's last write is the cut:
+    the units then in flight were cut off, the units finished and not yet
+    in a close that stood never left the node, and a close running at the
+    cut is lost with them. None when no record was filed."""
+    from ..models import EpicProdJob
+    job = EpicProdJob.objects.filter(pandaid=int(pandaid)).only('data').first()
+    rec = ((job.data or {}).get('es_record') or {}).get('record') if job else None
+    if not isinstance(rec, dict) or not rec.get('written_at'):
+        return None
+    cut = float(rec['written_at'])
+    interrupted = [dict(u, status='interrupted', ended_at=cut,
+                        wall_s=round(cut - float(u.get('started_at') or cut), 1))
+                   for u in rec.get('in_flight') or []]
+    unshipped = [dict(u, status='unshipped') for u in rec.get('awaiting_close') or []]
+    closes = list(rec.get('closes') or []) + [
+        {'index': c.get('index'), 'ok': False, 'outcome': 'cut off',
+         'started_at': c.get('started_at'), 'ended_at': cut} for c in rec.get('closing') or []]
+    return {
+        'kind': 'event_service', 'stamp': rec.get('stamp'), 'slots': rec.get('slots'),
+        'payload_version': rec.get('payload_version', ''),
+        'ranges_done': rec.get('done') or [], 'ranges_failed': rec.get('failed') or [],
+        'ranges_interrupted': interrupted, 'ranges_unshipped': unshipped, 'closes': closes,
+        'preempted': {
+            'real': True, 'at': cut,
+            'after_s': round(cut - float(rec.get('started_at') or cut), 1),
+            'interrupted_units': len(interrupted),
+            'interrupted_events': sum(int(u.get('events') or 0) for u in interrupted),
+            'unshipped_units': len(unshipped),
+            'unshipped_events': sum(int(u.get('events') or 0) for u in unshipped)},
     }
 
 
@@ -3689,7 +3732,11 @@ def es_harness_report(conn, pandaid):
     mode: the summary under ``es``, every unit's record with its events,
     wall, outputs and, for a failed unit, the payload's failed stage and
     error lines; swf-epicprod NODE_EVENT_DISPATCHER.md, The record).
-    None when the job carries none; never raises."""
+    A job with no such report, a preempted job above all, whose node
+    took the final report with it, is drawn from the record the harness
+    shipped off the node as it went, as the sweep filed it
+    (``es_from_shipped_record``). None when there is neither; never
+    raises."""
     try:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -3699,16 +3746,19 @@ def es_harness_report(conn, pandaid):
     except Exception as e:
         logger.error(f"harness report query failed for job {pandaid}: {e}")
         return None
-    if not row or not row[0]:
-        return None
-    try:
-        metadata = json.loads(row[0]) if isinstance(row[0], str) else row[0]
-    except (ValueError, TypeError) as e:
-        logger.error(f"job metadata unparsable for job {pandaid}: {e}")
-        return None
+    metadata = {}
+    if row and row[0]:
+        try:
+            metadata = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+        except (ValueError, TypeError) as e:
+            logger.error(f"job metadata unparsable for job {pandaid}: {e}")
+            return None
     es = metadata.get('es') if isinstance(metadata, dict) else None
     if not isinstance(es, dict):
-        return None
+        es = es_from_shipped_record(pandaid)
+        if es is None:
+            return None
+        metadata = {'payload_version': es.get('payload_version', '')}
     units = []
     for status, key in (('done', 'ranges_done'), ('failed', 'ranges_failed'),
                         ('interrupted', 'ranges_interrupted'), ('unshipped', 'ranges_unshipped')):

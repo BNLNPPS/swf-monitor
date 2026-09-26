@@ -89,6 +89,12 @@ def slot_plot_svg(tl):
                        f"{(c['end_s'] - c['start_s']):.0f} s from {c['start_s'] / 60:.1f} min")
         parts.append(f'<rect x="{x0:.1f}" y="{y + 3}" width="{max(2.0, x1 - x0):.1f}" height="{LANE_H - 6}" '
                      f'fill="{CLOSE if c.get("ok") else FAILED}"><title>{title}</title></rect>')
+    # The cut of a preemption: a red line through the lanes.
+    if tl.get('cut_s') is not None:
+        xc = x(tl['cut_s'])
+        label = 'preempted' if tl.get('cut_real') else 'cut (test)'
+        parts.append(f'<line x1="{xc:.1f}" y1="{TOP}" x2="{xc:.1f}" y2="{TOP + lanes * LANE_H}" '
+                     f'stroke="{FAILED}" stroke-width="2"><title>{label} at {tl["cut_s"] / 60:.1f} min</title></line>')
     # The harness's span, a thin line under the lanes.
     h = tl.get('harness')
     y_axis = TOP + lanes * LANE_H

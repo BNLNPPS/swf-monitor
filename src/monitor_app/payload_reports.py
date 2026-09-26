@@ -239,6 +239,71 @@ def file_report(pandaid, report, source_key, jeditaskid=None, node=''):
         return False
 
 
+def es_record_candidates(since):
+    """Event Service jobs that ended in the window: ``[(pandaid, jeditaskid)]``.
+
+    Whatever their status: a preempted fine-grained job whose heartbeat
+    runs out is archived finished when some of its ranges were credited
+    (panda-server ``archiveJob``, fine-grained branch), so the failed-job
+    candidates would never reach its record.
+    """
+    sql = f"""
+        SELECT "pandaid", "jeditaskid" FROM "{PANDA_SCHEMA}"."jobsactive4"
+        WHERE "eventservice" IS NOT NULL AND "eventservice" > 0
+          AND "jobstatus" IN ('finished', 'failed', 'closed', 'cancelled')
+          AND "modificationtime" >= %s
+        UNION
+        SELECT "pandaid", "jeditaskid" FROM "{PANDA_SCHEMA}"."jobsarchived4"
+        WHERE "eventservice" IS NOT NULL AND "eventservice" > 0
+          AND "modificationtime" >= %s
+    """
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(sql, [since, since])
+            return [(int(p), int(j) if j else None) for p, j in cursor.fetchall()]
+    except Exception as e:                                    # noqa: BLE001
+        logger.error(f'payload report sweep: Event Service candidate query failed: {e}')
+        return []
+
+
+def file_es_records(client, bucket, prefix, since, dry_run=False):
+    """File each ended Event Service job's shipped record (``es.json``, the
+    harness's record as it stood at its last write, swf-epicprod
+    payload/es/es_record.py) under ``EpicProdJob.data['es_record']``. It is
+    the only account of a preempted job, whose node took the final report
+    with it; the job page draws the job from it when the metadata has none.
+    Read before the failed-job pass deletes a job's objects; returns the
+    job ids filed."""
+    filed = []
+    for pandaid, jeditaskid in es_record_candidates(since):
+        key = f'{prefix}{pandaid}/es.json'
+        try:
+            body = client.get_object(Bucket=bucket, Key=key)['Body'].read()
+            record = json.loads(body.decode('utf-8'))
+        except Exception as e:                                # noqa: BLE001
+            if 'NoSuchKey' not in str(e) and 'Not Found' not in str(e):
+                logger.error(f'payload report sweep: {key} unreadable: {e}')
+            continue
+        if dry_run:
+            filed.append(pandaid)
+            continue
+        try:
+            job, _ = EpicProdJob.objects.get_or_create(pandaid=pandaid)
+            data = dict(job.data or {})
+            data['es_record'] = {'record': record, 'source_key': key,
+                                 'filed_at': datetime.now(dt_timezone.utc).isoformat()}
+            job.data = data
+            fields = ['data', 'updated_at']
+            if jeditaskid and not job.jeditaskid:
+                job.jeditaskid = jeditaskid
+                fields.append('jeditaskid')
+            job.save(update_fields=fields)
+            filed.append(pandaid)
+        except Exception as e:                                # noqa: BLE001
+            logger.error(f'payload report sweep: cannot file the Event Service record of {pandaid}: {e}')
+    return filed
+
+
 def delete_keys(client, bucket, keys):
     """Delete objects, returning those actually gone."""
     gone = []
@@ -326,6 +391,7 @@ def sweep(since, limit=None, per_signature=READ_PER_SIGNATURE, dry_run=False):
                 'filed': [], 'deleted_read': [], 'deleted_unread': []}
     client, bucket, prefix = opened
 
+    es_filed = file_es_records(client, bucket, prefix, since, dry_run=dry_run)
     jobs = candidates(since, limit=limit)
     seen, to_read, to_drop = {}, [], []
     for job in jobs:
@@ -376,6 +442,7 @@ def sweep(since, limit=None, per_signature=READ_PER_SIGNATURE, dry_run=False):
         'signatures': len(seen),
         'candidates': len(jobs),
         'filed': filed,
+        'es_records_filed': es_filed,
         'deleted_read': deleted_read,
         'deleted_unread': deleted_unread,
         'dry_run': bool(dry_run),
