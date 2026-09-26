@@ -95,6 +95,6 @@ def slot_plot_svg(tl):
         parts.append(f'<line x1="{xt:.1f}" y1="{y_axis + 8}" x2="{xt:.1f}" y2="{y_axis + 13}" stroke="currentColor" stroke-opacity="0.5"/>')
         parts.append(f'<text x="{xt:.1f}" y="{y_axis + 27}" text-anchor="middle" fill="currentColor">{m}</text>')
         m += step
-    parts.append(f'<text x="{WIDTH - RIGHT}" y="{y_axis + 27}" text-anchor="end" fill="currentColor" fill-opacity="0.7">min</text>')
+    parts.append(f'<text x="{WIDTH - 4}" y="{y_axis + 27}" text-anchor="end" fill="currentColor" fill-opacity="0.7">min</text>')
     parts.append('</svg>')
     return mark_safe(''.join(parts))
