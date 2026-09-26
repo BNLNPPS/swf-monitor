@@ -115,7 +115,7 @@
         <th>Ref</th><th>Proposed</th><th>Action</th><th>Change</th><th>Subject</th>
         <th class="pcs-props-comment">Comment</th>
         {% if tab == 'history' %}<th>Status</th><th>Decision</th><th>Quality</th>{% endif %}
-        <th>Proposer</th><th>Batch</th>
+        {% if tab == 'history' %}<th>Proposer</th>{% endif %}
       </tr>
     </thead>
     <tbody>
@@ -125,17 +125,16 @@
         <td class="small"><strong>{{ p.ref }}</strong></td>
         <td class="small text-muted">{{ p.created_at|date:"Y-m-d H:i" }}</td>
         <td class="small">{% if p.action == 'propagation' %}campaign propagation{% elif p.action == 'campaign_plan' %}campaign plan{% elif p.action == 'ping' %}reminder{% elif p.action == 'ping_fulfil' %}reminder fulfilled{% elif p.action == 'standard_config' %}standard configuration{% elif p.action == 'registered_sample' %}registered sample{% else %}{{ p.action }}{% endif %}</td>
-        <td class="small pcs-props-change">{% if p.action == 'ping' %}enter, due {{ p.payload.due }}{% if p.payload.amended.due %} &rarr; {{ p.payload.amended.due }}{% endif %}{% if p.payload.owner %}, owner {{ p.payload.owner }}{% endif %}{% elif p.action == 'ping_fulfil' %}open &rarr; fulfilled{% elif p.action == 'campaign_plan' %}{{ p.disposition_label|default:"?" }} in {{ p.payload.campaign }}{% if p.payload.target_events is not None %}, {{ p.payload.target_events|intcomma }} events{% endif %}{% if p.payload.priority is not None %}, priority {{ p.payload.priority }}{% endif %}{% elif p.action == 'standard_config' %}create {{ p.payload.name }}{% elif p.action == 'registered_sample' %}take into {{ p.payload.campaign }}{% else %}{{ p.precondition.prev_state|default:"?" }} &rarr; {{ p.payload.state|default:"?" }}{% endif %}</td>
-        <td class="small">{% if p.action == 'ping' or p.action == 'ping_fulfil' %}<a href="{% url 'monitor_app:alarms_dashboard' %}#pings">{{ p.payload.title|default:p.subject_key }}</a>{% elif p.action == 'campaign_plan' %}<a href="{% url 'pcs:pcs_campaign_plan' %}?campaign={{ p.counterpart_key|urlencode }}">{{ p.subject_key }}</a> <span class="text-muted">{{ p.counterpart_key }}</span>{% elif p.action == 'registered_sample' %}<a href="{% url 'pcs:evgen_inputs' %}">{{ p.subject_key }}</a>{% else %}<a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ p.subject_key|urlencode }}">{{ p.subject_key }}</a>
+        <td class="small pcs-props-change">{% if p.action == 'ping' %}enter, due {{ p.payload.due }}{% if p.payload.amended.due %} &rarr; {{ p.payload.amended.due }}{% endif %}{% if p.payload.owner %}, owner {{ p.payload.owner }}{% endif %}{% elif p.action == 'ping_fulfil' %}open &rarr; fulfilled{% elif p.action == 'campaign_plan' %}{{ p.disposition_label|default:"?" }}{% if p.payload.target_events is not None %}, {{ p.payload.target_events|intcomma }} events{% endif %}{% if p.payload.priority is not None %}, priority {{ p.payload.priority }}{% endif %}{% elif p.action == 'standard_config' %}create {{ p.payload.name }}{% elif p.action == 'registered_sample' %}take into {{ p.payload.campaign }}{% else %}{{ p.precondition.prev_state|default:"?" }} &rarr; {{ p.payload.state|default:"?" }}{% endif %}</td>
+        <td class="small">{% if p.action == 'ping' or p.action == 'ping_fulfil' %}<a href="{% url 'monitor_app:alarms_dashboard' %}#pings">{{ p.payload.title|default:p.subject_key }}</a>{% elif p.action == 'campaign_plan' %}<a href="{% url 'pcs:pcs_campaign_plan' %}?campaign={{ p.counterpart_key|urlencode }}">{{ p.subject_key }}</a> {{ p.physics }}{% elif p.action == 'registered_sample' %}<a href="{% url 'pcs:evgen_inputs' %}">{{ p.subject_key }}</a>{% else %}<a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ p.subject_key|urlencode }}">{{ p.subject_key }}</a>
           {% if p.counterpart_key %}<div class="text-muted">&harr; {{ p.counterpart_key }}</div>{% endif %}{% endif %}</td>
-        <td class="small pcs-props-comment">{{ p.comment }}
+        <td class="small pcs-props-comment">{% if p.action == 'campaign_plan' %}{{ p.payload.evidence|default:p.comment }}{% else %}{{ p.comment }}{% endif %}
           {% if p.payload.replaced_by %}<div class="text-muted">Replaced by: {{ p.payload.replaced_by }}</div>{% endif %}
           {% if p.confidence %}<div class="text-muted">Confidence: {{ p.confidence }}</div>{% endif %}</td>
         {% if tab == 'history' %}<td class="small">{{ p.status }}</td>
         <td class="small">{% if p.decided_by %}{{ p.decided_by }} {{ p.decided_at|date:"m-d H:i" }}{% else %}—{% endif %}</td>
         <td class="small">{{ p.quality|default:"—" }}</td>{% endif %}
-        <td class="small">{{ p.proposer|default:"—" }}</td>
-        <td class="small">{{ p.batch_id|default:"—" }}</td>
+        {% if tab == 'history' %}<td class="small">{{ p.proposer|default:"—" }}</td>{% endif %}
       </tr>
       {% empty %}
       <tr><td colspan="12" class="text-center text-muted py-3">No proposals match this filter.</td></tr>

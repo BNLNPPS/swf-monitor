@@ -98,9 +98,18 @@ def ai_proposals(request):
     else:
         ordered = qs.order_by('-created_at')
     rows = list(ordered[:500])
-    for p in rows:
-        if p.action == 'campaign_plan':
+    # A campaign plan row says what its configuration is (the physics
+    # beside the label, pcs.physics_config.summary) and what it proposes.
+    plan_rows = [p for p in rows if p.action == 'campaign_plan']
+    if plan_rows:
+        from pcs.models import PhysicsConfig
+        from pcs.physics_config import summary
+        configs = {pc.label: pc for pc in PhysicsConfig.objects
+                   .select_related('physics_tag', 'background_tag')
+                   .filter(label__in={p.subject_key for p in plan_rows})}
+        for p in plan_rows:
             p.disposition_label = str((p.payload or {}).get('disposition') or '').replace('_', ' ')
+            p.physics = summary(configs[p.subject_key]) if p.subject_key in configs else ''
 
     def facet_row(title, param, pairs, label_of=str, keep=0):
         items = [{'label': label_of(value), 'count': count,
