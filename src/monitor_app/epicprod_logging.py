@@ -100,6 +100,20 @@ ACTION_DEFAULTS = {
                        "terminal production jobs: jobs, hosts, judged and "
                        "tripped, and any queue read as a storm.",
     },
+    # the preemption close-out (swf-epicprod swf_epicprod/es_closeout.py)
+    'es_closeout': {
+        'sublevel': 'normal', 'live': True,
+        'description': "One Event Service job at a preemptible queue closed "
+                       "after its node was lost: the ranges of every close "
+                       "that stood credited and the job finished, or why "
+                       "the server refused.",
+    },
+    'es_closeout_cycle': {
+        'sublevel': 'low', 'live': False,
+        'description': "One cycle of the preemption close-out over the "
+                       "running Event Service jobs of the listed queues: "
+                       "jobs, quiet, closed, failed.",
+    },
     'harvester_stdout_capture': {
         'sublevel': 'low', 'live': False,
         'description': "One pass copying the harvester's stdout of the jobs "

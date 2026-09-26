@@ -71,6 +71,11 @@ Capabilities:
                        holes, recorded as node_guard_decision; shadow mode
                        acts on nothing (five-minutely; site-canary
                        docs/NODE_GUARD.md).
+  es_closeout_cycle  — one cycle of the preemption close-out: a running
+                       Event Service job at a listed queue whose shipped
+                       record has gone quiet is credited and finished
+                       (five-minutely; swf-epicprod swf_epicprod/es_closeout.py,
+                       docs/NODE_EVENT_DISPATCHER.md, Preemption).
   cric_declared_state — the declared record from CRIC: the PanDA queue
                        status rules, the DDM endpoint status rules and the
                        downtime windows of the EIC queues, endpoints and
@@ -252,6 +257,11 @@ STORAGE_SWEEP_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "sto
 FRONT_CYCLE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "front-cycle.py"
 NODE_GUARD_TIMEOUT = int(os.environ.get("EPICPROD_NODE_GUARD_TIMEOUT", "240"))
 NODE_GUARD_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "node-guard-cycle.py"
+# The preemption close-out: a PanDA DB read, a store read per running Event
+# Service job at the listed queues, and the PanDA client step for the quiet
+# ones (its own 180 s bound inside).
+ES_CLOSEOUT_TIMEOUT = int(os.environ.get("EPICPROD_ES_CLOSEOUT_TIMEOUT", "240"))
+ES_CLOSEOUT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "es-closeout-cycle.py"
 # The declared record from CRIC: four bounded CRIC reads with the proxy
 # and a few entry rows (CONTINUOUS_PRODUCTION.md, Declared downtime).
 DECLARED_STATE_TIMEOUT = int(os.environ.get("EPICPROD_DECLARED_STATE_TIMEOUT", "300"))
@@ -376,6 +386,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "credential_ping_propose", "certificate_ping_propose",
                    "assessment_completed", "front_cycle", "node_guard_cycle",
                    "harvester_stdout_capture", "cric_declared_state",
+                   "es_closeout_cycle",
                    "health_ping", "shutdown"}
 
     def __init__(self):
@@ -3135,6 +3146,45 @@ class EpicProdOpsAgent(BaseAgent):
                              live_default=False, level=logging.ERROR)
             return
         self.logger.info("PRODOPS node_guard_cycle done")
+
+    def _handle_es_closeout_cycle(self, m):
+        """One cycle of the preemption close-out (swf-epicprod
+        swf_epicprod/es_closeout.py): five-minutely by cron enqueue,
+        directly invokable. Deduped so a slow cycle is never doubled."""
+        self.run_in_background(
+            self._do_es_closeout_cycle, m,
+            dedup_key="es_closeout_cycle", label="es_closeout_cycle")
+
+    def _do_es_closeout_cycle(self, m):
+        """Run the es-closeout-cycle doer; each close-out and the cycle
+        record are written by the doer itself, so this records only a
+        cycle that did not run to completion."""
+        username = str(m.get('created_by') or 'es-closeout')
+        cmd = [sys.executable, str(ES_CLOSEOUT_SCRIPT), "--created-by", username]
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=ES_CLOSEOUT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS es_closeout_cycle TIMEOUT after {ES_CLOSEOUT_TIMEOUT}s")
+            self._log_action('es_closeout_cycle', t0, outcome='timeout',
+                             reason=f'timed out after {ES_CLOSEOUT_TIMEOUT}s',
+                             username=username, sublevel='normal',
+                             live_default=True, level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  es-closeout-cycle: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  es-closeout-cycle: {line}")
+        if p.returncode != 0:
+            reason = self._derive_reason(p)
+            self.logger.error(f"PRODOPS es_closeout_cycle FAILED rc={p.returncode}")
+            self._log_action('es_closeout_cycle', t0, outcome='error', reason=reason,
+                             username=username, sublevel='normal',
+                             live_default=True, level=logging.ERROR)
+            return
+        self.logger.info("PRODOPS es_closeout_cycle done")
 
     def _handle_cric_declared_state(self, m):
         """The declared record from CRIC (swf-epicprod
