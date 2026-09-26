@@ -478,13 +478,14 @@ def propose_pings(items, *, proposer='', batch_id='', created_by='',
                   rule=False):
     """Propose pings (PINGS.md): creation subjects keyed on the obligation,
     the due date as counterpart. ``items``: [{title, due, lead_days,
-    owner, note, url, comment}]. Validation mirrors the executor
-    (``alarms_data.create_ping``); the precondition anchor is the open
+    owner, note, url, comment}], with ``due_days`` in place of ``due``
+    for an obligation due a set time after it is first found. Validation
+    mirrors the executor (``alarms_data.create_ping``); the precondition anchor is the open
     ping with the same obligation at proposal time (None for a true
     creation). Denial memory and identical-pending checks follow the
     subsystem conventions; one ``proposal_created`` event per call,
     low and not live from a rule proposer (``rule=True``)."""
-    from datetime import date
+    from datetime import date, timedelta
 
     from monitor_app import alarms_data
     from monitor_app.epicprod_logging import log_epicprod_action
@@ -500,6 +501,17 @@ def propose_pings(items, *, proposer='', batch_id='', created_by='',
             if not title or not comment:
                 invalid.append(title or '(missing title)')
                 continue
+            if not item.get('due') and item.get('due_days') is not None:
+                # An obligation with no date of its own is due a set time
+                # after it was first found: an open proposal keeps the due
+                # date it was made with, so a nightly proposer does not
+                # move it a day each night.
+                first = (Proposal.objects.filter(
+                    action='ping', subject_key=_ping_subject_key(title),
+                    status='proposed').order_by('created_at').first())
+                item = dict(item, due=(first.payload or {}).get('due') if first else
+                            (alarms_data._today_eastern()
+                             + timedelta(days=int(item['due_days']))).isoformat())
             try:
                 due = date.fromisoformat(str(item.get('due') or '')[:10])
                 lead = int(item.get('lead_days')
