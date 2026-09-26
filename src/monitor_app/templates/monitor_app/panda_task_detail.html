@@ -96,6 +96,7 @@
                 {{ pl.svg }}
             {% endfor %}
             {% if h.jobs > 8 %}<p class="text-muted mt-2">The newest 8 of {{ h.jobs }} jobs are drawn.</p>{% endif %}
+            {% if h.plots %}<div class="mt-2">{% include "monitor_app/_es_plot_legend.html" %}</div>{% endif %}
             </div>
             {% endif %}
         </div>
