@@ -3671,6 +3671,9 @@ def es_slot_timeline(job, es):
                    'end_s': (float(es['ended_at']) - t0) if es.get('ended_at') else None}
     return {
         'wall_s': round(wall, 1), 'slots': max(nslots, len(lanes)),
+        # The cores the batch job holds, which may exceed the cores it works
+        # (npps0: 6 of 8, a memory limit).
+        'cores_allocated': int(job.get('actualcorecount') or job.get('corecount') or 0) or None,
         'rows': slot_rows, 'closes': closes, 'harness': harness,
         'busy_s': round(busy, 1), 'allocated_s': round(allocated, 1),
         'busy_fraction': round(busy / allocated, 3) if allocated else None,

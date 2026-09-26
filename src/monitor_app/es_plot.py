@@ -1,10 +1,11 @@
-"""The slot occupancy plot of an Event Service job: one lane per slot
+"""The core occupancy plot of an Event Service job: one lane per core the
+job works (one single-threaded payload instance each)
 along the job's own clock, each unit a bar (green done, red failed; after a sudden end, light
 yellow the processing cut off and dark yellow the units whose output
-never left the node), each slot's processed events at its right and their total on the closes
+never left the node), each core's processed events at its right and their total on the closes
 lane, the closes on their own lane, the harness's span, the pilot's head and
 tail as the bare lanes before the first unit and after the last. What
-the batch slot was doing every minute of its life, and what it was not
+the job's cores were doing every minute of its life, and what they were not
 (swf-epicprod NODE_EVENT_DISPATCHER.md, The record). Inline SVG, no
 script, legible in both themes.
 """
@@ -12,7 +13,7 @@ from django.utils.html import escape
 from django.utils.safestring import mark_safe
 
 LEFT = 70          # the lane labels
-RIGHT = 90         # each slot's events
+RIGHT = 90         # each core's events
 WIDTH = 1000
 LANE_H = 20
 AXIS_H = 34
@@ -51,11 +52,11 @@ def slot_plot_svg(tl):
         return LEFT + max(0.0, min(1.0, t / wall)) * plot_w
 
     parts = [f'<svg viewBox="0 0 {WIDTH} {height}" width="100%" height="{height}" '
-             f'role="img" aria-label="slot occupancy" style="font-family:inherit;font-size:14px;max-width:100%">']
+             f'role="img" aria-label="core occupancy" style="font-family:inherit;font-size:14px;max-width:100%">']
     # Lanes: the idle band the whole job long, then the units.
     for i, row in enumerate(rows):
         y = TOP + i * LANE_H
-        parts.append(f'<text x="{LEFT - 8}" y="{y + LANE_H * 0.72:.1f}" text-anchor="end" fill="currentColor">slot {row["index"]}</text>')
+        parts.append(f'<text x="{LEFT - 8}" y="{y + LANE_H * 0.72:.1f}" text-anchor="end" fill="currentColor">core {row["index"]}</text>')
         parts.append(f'<rect x="{LEFT}" y="{y + 3}" width="{plot_w:.1f}" height="{LANE_H - 6}" fill="{IDLE}"/>')
         for u in row['units']:
             x0, x1 = x(u['start_s']), x(u['end_s'])
@@ -64,8 +65,8 @@ def slot_plot_svg(tl):
                            f"{(u['end_s'] - u['start_s']) / 60:.1f} min from {u['start_s'] / 60:.1f} min")
             parts.append(f'<rect x="{x0:.1f}" y="{y + 3}" width="{max(1.5, x1 - x0):.1f}" height="{LANE_H - 6}" '
                          f'fill="{color}"><title>{title}</title></rect>')
-        # The events the slot processed: unequal counts show the stream
-        # filling each slot by its own pace.
+        # The events the core processed: unequal counts show the stream
+        # filling each core by its own pace.
         n = sum(int(u.get('events') or 0) for u in row['units'] if u['status'] == 'done')
         parts.append(f'<text x="{WIDTH - 4}" y="{y + LANE_H * 0.72:.1f}" text-anchor="end" fill="currentColor">'
                      f'{n:,} ev</text>')

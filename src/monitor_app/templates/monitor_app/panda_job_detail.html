@@ -142,7 +142,7 @@
     <div class="card mb-3">
         <div class="card-header"><strong>Event Service Units ({{ rep.units|length }})</strong>
             <span class="text-muted ms-2">{{ rep.payload_version }}</span>
-            <span class="ms-2">{{ rep.slots }} slot{{ rep.slots|pluralize }}, {{ rep.n_done }} unit{{ rep.n_done|pluralize }} done{% if rep.n_failed %}, <span class="text-danger">{{ rep.n_failed }} failed</span>{% endif %}, {{ rep.events_reconstructed }} events reconstructed{% if rep.wall_s %}, harness wall {{ rep.wall_s }} s{% endif %}</span>
+            <span class="ms-2">{{ rep.slots }} core{{ rep.slots|pluralize }}, {{ rep.n_done }} unit{{ rep.n_done|pluralize }} done{% if rep.n_failed %}, <span class="text-danger">{{ rep.n_failed }} failed</span>{% endif %}, {{ rep.events_reconstructed }} events reconstructed{% if rep.wall_s %}, harness wall {{ rep.wall_s }} s{% endif %}</span>
             {% if rep.untaken_at_deadline %}<span class="ms-2 badge bg-warning text-dark">stopped taking ranges at the deadline</span>{% endif %}
             {% if rep.preempted %}<span class="ms-2 badge bg-warning text-dark">preempted at {{ rep.preempted.after_s|floatformat:0 }} s (test): {{ rep.preempted.interrupted_units }} unit{{ rep.preempted.interrupted_units|pluralize }} cut off, {{ rep.preempted.interrupted_events }} events; {{ rep.preempted.unshipped_units }} unit{{ rep.preempted.unshipped_units|pluralize }} unshipped, {{ rep.preempted.unshipped_events }} events</span>{% endif %}
             {% if rep.harness_rc %}<span class="ms-2 badge bg-danger">harness exit {{ rep.harness_rc }}</span>{% endif %}
@@ -150,11 +150,12 @@
         <div class="card-body">
             {% if rep.timeline %}
             {% with tl=rep.timeline %}
-            <!-- What each batch slot did through the job's life: a lane per
-                 slot, the units as bars, the closes, the harness's span.
-                 Bare lane is idle slot: the pilot's head before the first
-                 unit, the tail after the last (the last close, the exit). -->
-            <p class="mb-1"><strong>Slot occupancy</strong>: {{ tl.slots }} slot{{ tl.slots|pluralize }} over {{ tl.wall_s|fmt_duration }} of job wall, {{ tl.busy_s|fmt_duration }} slot-time busy of {{ tl.allocated_s|fmt_duration }} allocated{% if tl.busy_fraction is not None %}: <strong>{% widthratio tl.busy_fraction 1 100 %}%</strong>{% endif %}{% if tl.head_idle_s is not None %}; first unit {{ tl.head_idle_s|fmt_duration }} in, last unit ended {{ tl.tail_idle_s|fmt_duration }} before the end{% endif %}{% if not tl.lanes_from_record %} <span class="text-muted">(lanes laid out from the units' times; the record before payload 0.21.4 names no slot)</span>{% endif %}</p>
+            <!-- What each core the job works did through the job's life: a
+                 lane per core (one single-threaded payload instance each),
+                 the units as bars, the closes, the harness's span. Bare lane
+                 is an idle core: the pilot's head before the first unit, the
+                 tail after the last (the last close, the exit). -->
+            <p class="mb-1"><strong>Core occupancy</strong>: {{ tl.slots }} core{{ tl.slots|pluralize }}{% if tl.cores_allocated and tl.cores_allocated != tl.slots %} of the {{ tl.cores_allocated }} allocated{% endif %} over {{ tl.wall_s|fmt_duration }} of job wall, {{ tl.busy_s|fmt_duration }} core-time busy of {{ tl.allocated_s|fmt_duration }} allocated{% if tl.busy_fraction is not None %}: <strong>{% widthratio tl.busy_fraction 1 100 %}%</strong>{% endif %}{% if tl.head_idle_s is not None %}; first unit {{ tl.head_idle_s|fmt_duration }} in, last unit ended {{ tl.tail_idle_s|fmt_duration }} before the end{% endif %}{% if not tl.lanes_from_record %} <span class="text-muted">(lanes laid out from the units' times; the record before payload 0.21.4 names no core)</span>{% endif %}</p>
             <div class="mb-3">{{ rep.svg }}</div>
             {% endwith %}
             {% endif %}
