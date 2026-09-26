@@ -386,7 +386,11 @@ def run_event_service(csv_base, stamp, workdir, channel):
                "untaken_at_deadline": summary.get("untaken_at_deadline"),
                "ranges_done": summary.get("done", []),
                "ranges_failed": summary.get("failed", []),
-               "closes": summary.get("closes", [])}})
+               "closes": summary.get("closes", []),
+               # TEST AND DEMO ONLY (ES_PREEMPT_AT_S): the sudden end and what it cost.
+               "preempted": summary.get("preempted"),
+               "ranges_interrupted": summary.get("interrupted", []),
+               "ranges_unshipped": summary.get("unshipped", [])}})
     return 0
 
 

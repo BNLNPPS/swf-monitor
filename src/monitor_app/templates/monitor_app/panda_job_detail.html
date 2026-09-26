@@ -144,6 +144,7 @@
             <span class="text-muted ms-2">{{ rep.payload_version }}</span>
             <span class="ms-2">{{ rep.slots }} slot{{ rep.slots|pluralize }}, {{ rep.n_done }} unit{{ rep.n_done|pluralize }} done{% if rep.n_failed %}, <span class="text-danger">{{ rep.n_failed }} failed</span>{% endif %}, {{ rep.events_reconstructed }} events reconstructed{% if rep.wall_s %}, harness wall {{ rep.wall_s }} s{% endif %}</span>
             {% if rep.untaken_at_deadline %}<span class="ms-2 badge bg-warning text-dark">stopped taking ranges at the deadline</span>{% endif %}
+            {% if rep.preempted %}<span class="ms-2 badge bg-warning text-dark">preempted at {{ rep.preempted.after_s|floatformat:0 }} s (test): {{ rep.preempted.interrupted_units }} unit{{ rep.preempted.interrupted_units|pluralize }} cut off, {{ rep.preempted.interrupted_events }} events; {{ rep.preempted.unshipped_units }} unit{{ rep.preempted.unshipped_units|pluralize }} unshipped, {{ rep.preempted.unshipped_events }} events</span>{% endif %}
             {% if rep.harness_rc %}<span class="ms-2 badge bg-danger">harness exit {{ rep.harness_rc }}</span>{% endif %}
         </div>
         <div class="card-body">
@@ -180,7 +181,7 @@
                     <tr>
                         <td style="word-break:break-all;">{{ u.unit_id }}</td>
                         <td>{{ u.first_event }}-{{ u.last_event }} ({{ u.events }})</td>
-                        <td class="{% if u.status == 'done' %}text-success{% else %}text-danger{% endif %}">{{ u.status }}{% if u.rc %} (exit {{ u.rc }}){% endif %}</td>
+                        <td class="{% if u.status == 'done' %}text-success{% elif u.status == 'failed' %}text-danger{% else %}text-warning{% endif %}">{{ u.status }}{% if u.rc %} (exit {{ u.rc }}){% endif %}</td>
                         <td>{% if u.wall_s is not None %}{{ u.wall_s }} s{% endif %}</td>
                         <td>{% if u.reconstructed is not None %}{{ u.reconstructed }}{% endif %}</td>
                         <td style="word-break:break-all;">{% for d in u.dids %}{{ d }}{% if not forloop.last %}<br>{% endif %}{% endfor %}{% if u.message %}<span class="text-danger">{{ u.message }}</span>{% endif %}</td>

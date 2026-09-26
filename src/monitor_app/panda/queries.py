@@ -3618,7 +3618,8 @@ def es_slot_timeline(job, es):
         return None
     nslots = int(es.get('slots') or 0) or 1
     units = []
-    for status, key in (('done', 'ranges_done'), ('failed', 'ranges_failed')):
+    for status, key in (('done', 'ranges_done'), ('failed', 'ranges_failed'),
+                        ('interrupted', 'ranges_interrupted'), ('unshipped', 'ranges_unshipped')):
         for u in es.get(key) or []:
             if not isinstance(u, dict) or u.get('started_at') is None:
                 continue
@@ -3706,7 +3707,8 @@ def es_harness_report(conn, pandaid):
     if not isinstance(es, dict):
         return None
     units = []
-    for status, key in (('done', 'ranges_done'), ('failed', 'ranges_failed')):
+    for status, key in (('done', 'ranges_done'), ('failed', 'ranges_failed'),
+                        ('interrupted', 'ranges_interrupted'), ('unshipped', 'ranges_unshipped')):
         for u in es.get(key) or []:
             if not isinstance(u, dict):
                 continue
@@ -3741,6 +3743,7 @@ def es_harness_report(conn, pandaid):
         'wall_s': es.get('wall_s'),
         'harness_rc': es.get('harness_rc'),
         'untaken_at_deadline': bool(es.get('untaken_at_deadline')),
+        'preempted': es.get('preempted'),
         'units': units,
         'closes': closes,
         'raw': raw_es,

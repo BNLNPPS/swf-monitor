@@ -529,6 +529,10 @@ def main():
     ap.add_argument("--es-loop", action="store_true",
                     help="TEST AND DEMO ONLY: the harness replays the file's events "
                          "(unreported filler units) until the deadline margin")
+    ap.add_argument("--es-preempt-at-s", type=int, default=0,
+                    help="TEST AND DEMO ONLY: the harness ends suddenly at this many "
+                         "seconds, as a preempted node does, and records the processing "
+                         "cut off and the output never shipped")
     ap.add_argument("--es-ram-per-core-mb", type=int, default=0,
                     help="Event Service canary: memory per core (MBPerCoreFixed); "
                          "on a whole-node queue the job asks for this times the "
@@ -694,6 +698,11 @@ def main():
             if args.es_loop:
                 close += f"ES_LOOP=1 ES_EXPECTED_EVENTS={int(args.es_events)} "
                 _log("ES LOOP (test/demo): replaying events to the deadline")
+            # TEST AND DEMO ONLY: a sudden end (swf-epicprod es_harness.py
+            # --preempt-at-s). Never set on production submissions.
+            if args.es_preempt_at_s > 0:
+                close += f"ES_PREEMPT_AT_S={int(args.es_preempt_at_s)} "
+                _log(f"ES PREEMPT (test/demo): sudden end at {int(args.es_preempt_at_s)} s")
             spec['exec'] = (f"ES_PAYLOAD_IMAGE={spec.get('containerImage', '')} "
                             f"ES_SLOTS={int(args.es_slots)} {deadline}{per_unit}{close}"
                             f"python3 evgen_job_dispatcher.py es "

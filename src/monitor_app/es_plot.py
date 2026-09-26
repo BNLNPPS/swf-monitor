@@ -1,5 +1,7 @@
 """The slot occupancy plot of an Event Service job: one lane per slot
-along the job's own clock, each unit a bar (green done, red failed), the slot's start before its
+along the job's own clock, each unit a bar (green done, red failed; after a sudden end, light
+yellow the processing cut off and dark yellow the units whose output
+never left the node), the slot's start before its
 first unit and drain after its last in yellow (the allocation lost),
 each slot's processed events at its right and their total on the closes
 lane, the closes on their own lane, the harness's span, the pilot's head and
@@ -22,6 +24,9 @@ DONE = '#2e8b57'
 FAILED = '#c0392b'
 CLOSE = '#3a7bd5'
 HARNESS = '#8e6bbf'
+INTERRUPTED = '#f5d76e'   # processing cut off by a sudden end (preemption)
+UNSHIPPED = '#d49a00'     # finished, its output never left the node
+UNIT_COLOR = {'done': DONE, 'failed': FAILED, 'interrupted': INTERRUPTED, 'unshipped': UNSHIPPED}
 LOST = '#e0b400'   # a slot's allocation before its first unit and after its last
 IDLE = 'rgba(128,128,128,0.18)'
 
@@ -67,7 +72,7 @@ def slot_plot_svg(tl):
                                  f'height="{LANE_H - 6}" fill="{LOST}"><title>{title}</title></rect>')
         for u in row['units']:
             x0, x1 = x(u['start_s']), x(u['end_s'])
-            color = DONE if u['status'] == 'done' else FAILED
+            color = UNIT_COLOR.get(u['status'], FAILED)
             title = escape(f"{u.get('unit_id') or 'unit'}: {u['status']}, {u.get('events') or 0} events, "
                            f"{(u['end_s'] - u['start_s']) / 60:.1f} min from {u['start_s'] / 60:.1f} min")
             parts.append(f'<rect x="{x0:.1f}" y="{y + 3}" width="{max(1.5, x1 - x0):.1f}" height="{LANE_H - 6}" '
