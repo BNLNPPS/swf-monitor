@@ -3628,7 +3628,7 @@ def es_slot_timeline(job, es):
             units.append({'unit_id': u.get('unit_id'), 'status': status,
                           'start_s': us - t0, 'end_s': ue - t0,
                           'events': int(u.get('events_reconstructed') or u.get('events') or 0),
-                          'slot': u.get('slot')})
+                          'slot': u.get('slot'), 'close': u.get('close')})
     units.sort(key=lambda u: u['start_s'])
     lanes = {}
     if all(u['slot'] is not None for u in units) and units:

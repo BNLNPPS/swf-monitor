@@ -62,7 +62,8 @@ def slot_plot_svg(tl):
             x0, x1 = x(u['start_s']), x(u['end_s'])
             color = UNIT_COLOR.get(u['status'], FAILED)
             title = escape(f"{u.get('unit_id') or 'unit'}: {u['status']}, {u.get('events') or 0} events, "
-                           f"{(u['end_s'] - u['start_s']) / 60:.1f} min from {u['start_s'] / 60:.1f} min")
+                           f"{(u['end_s'] - u['start_s']) / 60:.1f} min from {u['start_s'] / 60:.1f} min"
+                           + (f"; output shipped in close {u['close']}" if u.get('close') else ''))
             parts.append(f'<rect x="{x0:.1f}" y="{y + 3}" width="{max(1.5, x1 - x0):.1f}" height="{LANE_H - 6}" '
                          f'fill="{color}"><title>{title}</title></rect>')
             # A slim white line where the unit starts: consecutive units
