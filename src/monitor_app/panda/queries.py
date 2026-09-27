@@ -3708,8 +3708,14 @@ def es_from_shipped_record(pandaid):
                         wall_s=round(cut - float(u.get('started_at') or cut), 1))
                    for u in rec.get('in_flight') or []]
     unshipped = [dict(u, status='unshipped') for u in rec.get('awaiting_close') or []]
-    closes = list(rec.get('closes') or []) + [
-        {'index': c.get('index'), 'ok': False, 'outcome': 'cut off',
+    # The record's closes carry no unit count; each done unit names its close.
+    per_close = {}
+    for u in rec.get('done') or []:
+        if u.get('close') is not None:
+            per_close[int(u['close'])] = per_close.get(int(u['close']), 0) + 1
+    closes = [dict(c, units=per_close.get(int(c.get('index') or 0), 0))
+              for c in rec.get('closes') or []] + [
+        {'index': c.get('index'), 'ok': False, 'outcome': 'cut off', 'units': len(c.get('units') or []),
          'started_at': c.get('started_at'), 'ended_at': cut} for c in rec.get('closing') or []]
     return {
         'kind': 'event_service', 'stamp': rec.get('stamp'), 'slots': rec.get('slots'),
