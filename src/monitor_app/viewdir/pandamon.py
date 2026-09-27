@@ -41,7 +41,7 @@ from ..panda.constants import (
 )
 from ..cell_fmt import fill_cell
 from ..pools import readings_by_queue
-from ..workers import worker_reading
+from ..workers import worker_reading, allocation_product
 from ..es_reading import es_reading
 from ..activemq_connection import ActiveMQConnectionManager
 from ..epicprod_inventory import (
@@ -1616,29 +1616,32 @@ def panda_batch_record(request, pandaid):
 def panda_allocation_detail(request, harvesterid, workerid):
     """One batch allocation (a harvester worker) and the jobs its pilots
     ran, drawn on the Event Service occupancy plot: what every pilot of
-    the allocation did from the batch start to its end."""
-    from ..panda.queries import allocation_timeline
+    the allocation did from the batch start to its end. The timeline is
+    kept in the product store as first built (workers.allocation_product),
+    so the plot outlives the worker record in PanDA."""
     from ..es_plot import slot_plot_svg
-    tl = allocation_timeline(harvesterid, workerid)
     ctx = {'harvesterid': harvesterid, 'workerid': workerid}
-    if tl is None:
-        ctx['error'] = (f'No PanDA job is linked to worker {workerid} of harvester '
-                        f'{harvesterid}.')
-    elif tl.get('error'):
-        ctx['error'] = tl['error']
-    else:
-        worker = tl.get('worker') or {}
-        for key in ('submittime', 'starttime', 'endtime'):
-            if worker.get(key) is not None and worker[key].tzinfo is None:
-                worker[key] = worker[key].replace(tzinfo=dt_timezone.utc)
-        if worker.get('submittime') and worker.get('starttime'):
-            ctx['batch_wait_s'] = (worker['starttime'] - worker['submittime']).total_seconds()
-        ctx['tl'] = tl
-        ctx['worker'] = worker
-        ctx['svg'] = slot_plot_svg(tl)
-        ctx['site'] = worker.get('computingsite') or next(
-            (u.get('site') for u in tl['units'] if u.get('site')), '')
-        ctx['job_rows'] = sorted(tl['units'], key=lambda u: (u['start_s'], u['unit_id']))
+    try:
+        product = allocation_product(harvesterid, workerid,
+                                     refresh=request.GET.get('refresh') == '1')
+    except Exception as e:                                    # noqa: BLE001
+        logger.error('allocation page %s/%s: %s', harvesterid, workerid, e)
+        ctx['error'] = str(e)
+        return render(request, 'monitor_app/panda_allocation_detail.html', ctx)
+    tl = product.get('value') or {}
+    worker = dict(tl.get('worker') or {})
+    for key in ('submittime', 'starttime', 'endtime'):
+        if isinstance(worker.get(key), str):
+            worker[key] = datetime.fromisoformat(worker[key])
+    if worker.get('submittime') and worker.get('starttime'):
+        ctx['batch_wait_s'] = (worker['starttime'] - worker['submittime']).total_seconds()
+    ctx['tl'] = tl
+    ctx['worker'] = worker
+    ctx['product_built_at'] = product.get('built_at')
+    ctx['svg'] = slot_plot_svg(tl)
+    ctx['site'] = worker.get('computingsite') or next(
+        (u.get('site') for u in tl.get('units') or [] if u.get('site')), '')
+    ctx['job_rows'] = sorted(tl.get('units') or [], key=lambda u: (u['start_s'], u['unit_id']))
     return render(request, 'monitor_app/panda_allocation_detail.html', ctx)
 
 

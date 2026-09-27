@@ -23,6 +23,7 @@
         {% if worker.starttime %}Started {{ worker.starttime|fmt_dt }}{% if batch_wait_s is not None %} after {{ batch_wait_s|fmt_duration }} in the batch queue{% endif %}{% if worker.endtime %}, ended {{ worker.endtime|fmt_dt }}{% else %}, still running{% endif %}; wall {{ tl.wall_s|fmt_duration }}.{% endif %}
         {% if worker.diagmessage %}<span class="text-muted ms-1">Batch system: {{ worker.diagmessage }}</span>{% endif %}
     </div>
+    {% if product_built_at %}<p class="text-muted mb-2">{% if tl.live %}Read from PanDA {{ product_built_at|fmt_dt }}; refreshed every two minutes while the slot runs.{% else %}Kept as read from PanDA {{ product_built_at|fmt_dt }}, after the slot ended.{% endif %}</p>{% endif %}
     {% if tl.bounds_from_jobs %}
     <p class="text-muted">The harvester's record of this worker is no longer in PanDA, which keeps it three months. The clock runs from the first job's start to the last job's end, so the allocation's idle time before its first job and after its last is not shown.</p>
     {% endif %}

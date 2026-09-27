@@ -107,3 +107,54 @@ def worker_reading(queue_name, refresh=False):
     value['built_at'] = (product or {}).get('built_at')
     value['age_seconds'] = (product or {}).get('age_seconds')
     return value
+
+
+# An allocation's occupancy timeline is kept as it is first built: the
+# harvester's worker record ages out of PanDA after three months, and the
+# plot of a slot must not lose its batch start and end with it.
+ALLOCATION_LIVE_TTL_S = 120
+ALLOCATION_KEPT_TTL_S = 10 * 365 * 86400
+
+
+def _jsonable_timeline(tl):
+    """The timeline with the worker's timestamps as ISO strings (UTC)."""
+    worker = dict(tl.get('worker') or {})
+    for key, value in list(worker.items()):
+        if hasattr(value, 'isoformat'):
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=dt_timezone.utc)
+            worker[key] = value.isoformat()
+    return dict(tl, worker=worker or None)
+
+
+def allocation_product(harvesterid, workerid, refresh=False):
+    """One allocation's occupancy timeline (panda.queries.allocation_timeline)
+    from the product store, ``allocation:v1:<harvester>:<worker>``.
+
+    A live allocation rebuilds every two minutes; an ended one is kept and
+    served without rebuilding. A rebuild never replaces a record that holds
+    the worker's batch start and end with one that has lost them. Raises
+    when the allocation cannot be read or ran no job."""
+    from .models import CachedProduct
+    from .panda.queries import allocation_timeline
+
+    key = 'allocation:v1:{}:{}'.format(harvesterid, int(workerid))
+    row = CachedProduct.objects.filter(key=key).first()
+    stored = row.value if row is not None and row.built_at is not None else None
+
+    def build():
+        tl = allocation_timeline(harvesterid, workerid)
+        if tl is None:
+            raise ValueError(f'no PanDA job is linked to worker {workerid} of harvester {harvesterid}')
+        if tl.get('error'):
+            raise RuntimeError(tl['error'])
+        if (tl.get('bounds_from_jobs') and isinstance(stored, dict)
+                and not stored.get('bounds_from_jobs')):
+            return stored
+        return _jsonable_timeline(tl)
+
+    kept = isinstance(stored, dict) and not stored.get('live')
+    ttl = ALLOCATION_KEPT_TTL_S if kept else ALLOCATION_LIVE_TTL_S
+    product = get_product(key, build, ttl_seconds=ttl, refresh=refresh)
+    return product
+
