@@ -526,6 +526,13 @@ def main():
                          "file (default 1, a canary's); 2 or more lets a job "
                          "that ended with units untaken (the deadline drain) "
                          "be followed by the next job over what is left")
+    ap.add_argument("--es-max-failure", type=int, default=0,
+                    help="Event Service canary: passes over the input file that "
+                         "credit nothing (a failed job) before the file is given "
+                         "up (JEDI maxFailure); 0 = unset. A pass that credits "
+                         "ranges ends fg_partial, counts against --es-max-attempt "
+                         "only, so on a preemptible queue set --es-max-attempt "
+                         "high and bound the passes without progress here")
     ap.add_argument("--es-loop", action="store_true",
                     help="TEST AND DEMO ONLY: the harness replays the file's events "
                          "(unreported filler units) until the deadline margin")
@@ -719,6 +726,8 @@ def main():
                 _log(f"event service memory: {spec['memory']} MB per core")
             if args.es_max_attempt > 1:
                 spec['maxAttempt'] = int(args.es_max_attempt)
+            if args.es_max_failure > 0:
+                spec['maxFailure'] = int(args.es_max_failure)
             if args.es_direct_input:
                 # runGen takes the input as given (the kernel's --givenPFN)
                 spec['directInput'] = True

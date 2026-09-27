@@ -256,6 +256,11 @@ def build_task_params(spec, archive_name):
     # blurred by automatic retries.
     if spec.get('maxAttempt'):
         params['maxAttempt'] = int(spec['maxAttempt'])
+    # Passes that failed outright, apart from all passes: a fine-grained
+    # Event Service job that credits ranges ends finished (fg_partial) and
+    # spends an attempt but not a failure (JEDI maxFailure).
+    if spec.get('maxFailure'):
+        params['maxFailure'] = int(spec['maxFailure'])
 
     if spec.get('containerImage'):
         params['container_name'] = spec['containerImage']
