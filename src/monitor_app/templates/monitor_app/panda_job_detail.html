@@ -546,10 +546,14 @@
     {% endif %}
 
     <!-- Harvester info -->
-    {% if harvester %}
+    {% if harvester or allocation_ref %}
     <div class="card mb-3">
-        <div class="card-header"><strong>Harvester Worker</strong></div>
+        <div class="card-header"><strong>Harvester Worker</strong>
+            {% if allocation_ref %}<a class="ms-2" href="{% url 'monitor_app:panda_allocation_detail' allocation_ref.harvesterid allocation_ref.workerid %}">the allocation's pilot occupancy plot</a>{% endif %}
+        </div>
         <div class="card-body">
+            {% if not harvester %}<p class="mb-0 text-muted">Worker {{ allocation_ref.workerid }} of harvester {{ allocation_ref.harvesterid }}; its record is no longer in PanDA, which keeps it three months.</p>{% endif %}
+            {% if harvester %}
             <table class="table table-sm mb-0">
                 {% for key, val in harvester.items %}
                 <tr>
@@ -566,6 +570,7 @@
                 </tr>
                 {% endfor %}
             </table>
+            {% endif %}
         </div>
     </div>
     {% endif %}

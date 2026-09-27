@@ -25,7 +25,9 @@ CLOSE = '#3a7bd5'
 HARNESS = '#8e6bbf'
 INTERRUPTED = '#f5d76e'   # processing cut off by a sudden end (preemption)
 UNSHIPPED = '#d49a00'     # finished, its output never left the node
-UNIT_COLOR = {'done': DONE, 'failed': FAILED, 'interrupted': INTERRUPTED, 'unshipped': UNSHIPPED}
+RUNNING = '#7fc8a9'       # an allocation's job still running
+UNIT_COLOR = {'done': DONE, 'failed': FAILED, 'interrupted': INTERRUPTED, 'unshipped': UNSHIPPED,
+              'running': RUNNING}
 IDLE = 'rgba(128,128,128,0.18)'
 
 
@@ -39,14 +41,28 @@ def _tick_step(wall_s):
 
 
 def slot_plot_svg(tl):
-    """The SVG for a timeline from queries.es_slot_timeline, or ''."""
+    """The SVG for a timeline from queries.es_slot_timeline, or ''.
+
+    queries.allocation_timeline gives the same shape for a batch
+    allocation's jobs, with optional keys: ``lane_label`` (default
+    'core'), ``closes_lane`` False to omit the closes lane, a row's
+    ``right_text`` and the timeline's ``total_text`` in place of the
+    events counts, and a unit's ``title`` in place of the default hover
+    text; ``compact_lanes`` narrows the lanes and labels every eighth."""
     if not tl or not tl.get('wall_s'):
         return ''
     wall = float(tl['wall_s'])
     rows = list(tl.get('rows') or [])
-    lanes = len(rows) + 1                         # the closes lane
+    closes_lane = tl.get('closes_lane', True)
+    lane_label = tl.get('lane_label') or 'core'
+    lanes = len(rows) + (1 if closes_lane else 0)
+    compact = bool(tl.get('compact_lanes'))
+    LANE_H = 8 if compact else 20
+    label_every = 8 if compact else 1
     height = TOP + lanes * LANE_H + AXIS_H
     plot_w = WIDTH - LEFT - RIGHT
+    pad = 1 if compact else 3
+    label_dy = LANE_H / 2 + 5 if compact else LANE_H * 0.72
 
     def x(t):
         return LEFT + max(0.0, min(1.0, t / wall)) * plot_w
@@ -56,39 +72,49 @@ def slot_plot_svg(tl):
     # Lanes: the idle band the whole job long, then the units.
     for i, row in enumerate(rows):
         y = TOP + i * LANE_H
-        parts.append(f'<text x="{LEFT - 8}" y="{y + LANE_H * 0.72:.1f}" text-anchor="end" fill="currentColor">core {row["index"]}</text>')
-        parts.append(f'<rect x="{LEFT}" y="{y + 3}" width="{plot_w:.1f}" height="{LANE_H - 6}" fill="{IDLE}"/>')
+        # Compact lanes are labelled every eighth, the label centred on its lane.
+        if i % label_every == 0:
+            parts.append(f'<text x="{LEFT - 8}" y="{y + label_dy:.1f}" text-anchor="end" fill="currentColor">'
+                         f'{lane_label} {row["index"]}</text>')
+        parts.append(f'<rect x="{LEFT}" y="{y + pad}" width="{plot_w:.1f}" height="{LANE_H - 2 * pad}" fill="{IDLE}"/>')
         for u in row['units']:
             x0, x1 = x(u['start_s']), x(u['end_s'])
             color = UNIT_COLOR.get(u['status'], FAILED)
-            title = escape(f"{u.get('unit_id') or 'unit'}: {u['status']}, {u.get('events') or 0} events, "
-                           f"{(u['end_s'] - u['start_s']) / 60:.1f} min from {u['start_s'] / 60:.1f} min"
-                           + (f"; output shipped in close {u['close']}" if u.get('close') else ''))
-            parts.append(f'<rect x="{x0:.1f}" y="{y + 3}" width="{max(1.5, x1 - x0):.1f}" height="{LANE_H - 6}" '
+            title = escape(u.get('title') or (
+                f"{u.get('unit_id') or 'unit'}: {u['status']}, {u.get('events') or 0} events, "
+                f"{(u['end_s'] - u['start_s']) / 60:.1f} min from {u['start_s'] / 60:.1f} min"
+                + (f"; output shipped in close {u['close']}" if u.get('close') else '')))
+            parts.append(f'<rect x="{x0:.1f}" y="{y + pad}" width="{max(1.5, x1 - x0):.1f}" height="{LANE_H - 2 * pad}" '
                          f'fill="{color}"><title>{title}</title></rect>')
             # A slim white line where the unit starts: consecutive units
             # on a core read as one bar without it.
             if x1 - x0 >= 3:
-                parts.append(f'<line x1="{x0:.1f}" y1="{y + 3}" x2="{x0:.1f}" y2="{y + LANE_H - 3}" '
+                parts.append(f'<line x1="{x0:.1f}" y1="{y + pad}" x2="{x0:.1f}" y2="{y + LANE_H - pad}" '
                              f'stroke="#fff" stroke-width="1"/>')
         # The events the core processed: unequal counts show the stream
         # filling each core by its own pace.
-        n = sum(int(u.get('events') or 0) for u in row['units'] if u['status'] == 'done')
-        parts.append(f'<text x="{WIDTH - 4}" y="{y + LANE_H * 0.72:.1f}" text-anchor="end" fill="currentColor">'
-                     f'{n:,} ev</text>')
-    # The closes lane.
-    y = TOP + len(rows) * LANE_H
-    total = sum(int(u.get('events') or 0) for row in rows for u in row['units'] if u['status'] == 'done')
-    parts.append(f'<text x="{WIDTH - 4}" y="{y + LANE_H * 0.72:.1f}" text-anchor="end" fill="currentColor" '
-                 f'font-weight="bold">{total:,} ev</text>')
-    parts.append(f'<text x="{LEFT - 8}" y="{y + LANE_H * 0.72:.1f}" text-anchor="end" fill="currentColor">closes</text>')
-    parts.append(f'<rect x="{LEFT}" y="{y + 3}" width="{plot_w:.1f}" height="{LANE_H - 6}" fill="{IDLE}"/>')
-    for c in tl.get('closes') or []:
-        x0, x1 = x(c['start_s']), x(c['end_s'])
-        title = escape(f"close {c.get('index')}: {'registered' if c.get('ok') else 'failed'}, "
-                       f"{(c['end_s'] - c['start_s']):.0f} s from {c['start_s'] / 60:.1f} min")
-        parts.append(f'<rect x="{x0:.1f}" y="{y + 3}" width="{max(2.0, x1 - x0):.1f}" height="{LANE_H - 6}" '
-                     f'fill="{CLOSE if c.get("ok") else FAILED}"><title>{title}</title></rect>')
+        if 'right_text' in row:
+            right = row['right_text']
+        else:
+            n = sum(int(u.get('events') or 0) for u in row['units'] if u['status'] == 'done')
+            right = f'{n:,} ev'
+        if right and i % label_every == 0:
+            parts.append(f'<text x="{WIDTH - 4}" y="{y + label_dy:.1f}" text-anchor="end" fill="currentColor">'
+                         f'{escape(right)}</text>')
+    if closes_lane:
+        # The closes lane.
+        y = TOP + len(rows) * LANE_H
+        total = sum(int(u.get('events') or 0) for row in rows for u in row['units'] if u['status'] == 'done')
+        parts.append(f'<text x="{WIDTH - 4}" y="{y + LANE_H * 0.72:.1f}" text-anchor="end" fill="currentColor" '
+                     f'font-weight="bold">{total:,} ev</text>')
+        parts.append(f'<text x="{LEFT - 8}" y="{y + LANE_H * 0.72:.1f}" text-anchor="end" fill="currentColor">closes</text>')
+        parts.append(f'<rect x="{LEFT}" y="{y + 3}" width="{plot_w:.1f}" height="{LANE_H - 6}" fill="{IDLE}"/>')
+        for c in tl.get('closes') or []:
+            x0, x1 = x(c['start_s']), x(c['end_s'])
+            title = escape(f"close {c.get('index')}: {'registered' if c.get('ok') else 'failed'}, "
+                           f"{(c['end_s'] - c['start_s']):.0f} s from {c['start_s'] / 60:.1f} min")
+            parts.append(f'<rect x="{x0:.1f}" y="{y + 3}" width="{max(2.0, x1 - x0):.1f}" height="{LANE_H - 6}" '
+                         f'fill="{CLOSE if c.get("ok") else FAILED}"><title>{title}</title></rect>')
     # The cut of a preemption: a red line through the lanes.
     if tl.get('cut_s') is not None:
         xc = x(tl['cut_s'])

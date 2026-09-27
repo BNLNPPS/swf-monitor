@@ -1,0 +1,76 @@
+{% extends 'base.html' %}
+{% load swf_fmt %}
+
+{% block title %}Allocation {{ workerid }} - SWF Monitor{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>Allocation {{ workerid }} <span class="fs-5 text-muted">harvester {{ harvesterid }}</span></h2>
+        <div class="d-flex gap-2">
+            <a href="{% url 'monitor_app:panda_jobs_list' %}" class="btn btn-outline-secondary btn-sm">Back to Jobs</a>
+        </div>
+    </div>
+
+    {% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+    {% else %}
+
+    <!-- The batch job: one harvester worker, one allocation -->
+    <div class="mb-3 fs-6">
+        {% if site %}<strong><a href="{% url 'monitor_app:panda_queue_detail' site %}">{{ site }}</a></strong>{% endif %}
+        {% if worker.batchid %}, batch job {{ worker.batchid }}{% endif %}{% if worker.ncore %}, {{ worker.ncore }} cores{% endif %}{% if worker.status %}, worker <span class="{{ worker.status|state_class }} px-1">{{ worker.status }}</span>{% endif %}.
+        {% if worker.starttime %}Started {{ worker.starttime|fmt_dt }}{% if batch_wait_s is not None %} after {{ batch_wait_s|fmt_duration }} in the batch queue{% endif %}{% if worker.endtime %}, ended {{ worker.endtime|fmt_dt }}{% else %}, still running{% endif %}; wall {{ tl.wall_s|fmt_duration }}.{% endif %}
+        {% if worker.diagmessage %}<span class="text-muted ms-1">Batch system: {{ worker.diagmessage }}</span>{% endif %}
+    </div>
+    {% if tl.bounds_from_jobs %}
+    <p class="text-muted">The harvester's record of this worker is no longer in PanDA, which keeps it three months. The clock runs from the first job's start to the last job's end, so the allocation's idle time before its first job and after its last is not shown.</p>
+    {% endif %}
+
+    <div class="card mb-3">
+        <div class="card-header"><strong>Pilot occupancy</strong>
+            <span class="ms-2">{{ tl.jobs }} job{{ tl.jobs|pluralize }}: {{ tl.counts.done }} finished{% if tl.counts.failed %}, <span class="text-danger">{{ tl.counts.failed }} failed</span>{% endif %}{% if tl.counts.interrupted %}, {{ tl.counts.interrupted }} ended under by the batch job{% endif %}{% if tl.counts.running %}, {{ tl.counts.running }} running{% endif %}{% if tl.never_started %}, {{ tl.never_started }} never started{% endif %}</span>
+        </div>
+        <div class="card-body">
+            <p class="mb-1"><strong>Core occupancy</strong>: {{ tl.slots }} pilot{{ tl.slots|pluralize }} on {{ tl.cores_allocated }} cores over {{ tl.wall_s|fmt_duration }}, {{ tl.busy_core_h }} core-hours in jobs of {{ tl.allocated_core_h }} allocated{% if tl.busy_fraction is not None %}: <strong>{% widthratio tl.busy_fraction 1 100 %}%</strong>{% endif %}.
+                Finished jobs {{ tl.core_h.done }} core-hours{% if tl.core_s.failed %}, failed jobs {{ tl.core_h.failed }}{% endif %}{% if tl.core_s.interrupted %}, jobs ended under by the batch job {{ tl.core_h.interrupted }} (lost){% endif %}{% if tl.core_s.running %}, running {{ tl.core_h.running }}{% endif %}; idle {{ tl.idle_core_h }}.</p>
+            {% if tl.head_idle_s is not None %}
+            <p class="mb-1">First job {{ tl.head_idle_s|fmt_duration }} in; the first pilot finished its last job at {{ tl.first_pilot_done_s|fmt_duration }}, the last job ended at {{ tl.last_job_end_s|fmt_duration }}{% if not tl.bounds_from_jobs %}, the allocation at {{ tl.wall_s|fmt_duration }}{% endif %}.
+                {% if not tl.lanes_from_record %}<span class="text-muted">Lanes are laid out from the jobs' times; the pilot of each job is not in the record.</span>{% endif %}</p>
+            {% endif %}
+            <div class="mb-2">{{ svg }}</div>
+            <div class="mb-3" style="max-width: 60em;">
+                <p class="mb-0"><strong>Reading the plot.</strong> One lane per pilot, the jobs it ran one after another, on the allocation's clock in minutes.
+                    <span style="color:#2e8b57;font-weight:600">Green</span> finished,
+                    <span style="color:#c0392b;font-weight:600">red</span> failed,
+                    <span style="background:#f5d76e;color:#000;padding:0 .2em">light yellow</span> ended under it by the batch job, its work lost,
+                    {% if tl.counts.running %}<span style="background:#7fc8a9;color:#000;padding:0 .2em">pale green</span> running, {% endif %}grey idle.
+                    Hover over a job for its id, outcome and times.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header"><strong>Jobs ({{ job_rows|length }})</strong></div>
+        <div class="card-body">
+            <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
+                <thead><tr><th>Job</th><th>Task</th><th>Status</th><th>Start (min)</th><th>Wall</th><th>Cores</th><th>Errors</th></tr></thead>
+                <tbody>
+                {% for u in job_rows %}
+                    <tr>
+                        <td><a href="{% url 'monitor_app:panda_job_detail' u.unit_id %}">{{ u.unit_id }}</a></td>
+                        <td>{% if u.jeditaskid %}<a href="{% url 'monitor_app:panda_task_detail' u.jeditaskid %}">{{ u.jeditaskid }}</a>{% endif %}</td>
+                        <td class="{{ u.jobstatus|state_class }}">{{ u.jobstatus }}</td>
+                        <td data-order="{{ u.start_s }}">{{ u.start_min|floatformat:1 }}</td>
+                        <td data-order="{{ u.wall_s }}">{{ u.wall_s|fmt_duration }}</td>
+                        <td>{{ u.cores }}</td>
+                        <td>{{ u.errors }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

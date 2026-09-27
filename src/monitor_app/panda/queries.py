@@ -3690,6 +3690,201 @@ def es_slot_timeline(job, es):
     }
 
 
+_PILOT_TASK_RE = re.compile(r'(?:pilotlog-task|-task)(\d+)')
+
+
+def allocation_timeline(harvesterid, workerid):
+    """The occupancy of one batch allocation (a harvester worker): every
+    PanDA job its pilots ran, as bars on the allocation's own clock, in the
+    shape es_slot_timeline gives an Event Service job, so the one renderer
+    (es_plot.slot_plot_svg) draws both. A lane is a pilot, the jobs it ran
+    one after another; a job is green finished, red failed, light yellow
+    when the batch job ended under it (taskbuffer 300, its work lost). The
+    clock is the worker's batch start to its end; when the harvester's
+    worker record has aged out of PanDA (a three-month window) the jobs'
+    own first start and last end stand in, and the timeline says so.
+
+    A lane's pilot comes from the Perlmutter log listing captured off the
+    request path (the srun task index in the file names) when every job
+    has one; otherwise jobs are laid out greedily, which leaves the
+    occupancy unchanged. Returns {'error': ...} on a failed read and None
+    when the worker ran no job."""
+    conn = connections['panda']
+    wcols = ['harvesterid', 'workerid', 'computingsite', 'status', 'batchid',
+             'submittime', 'starttime', 'endtime', 'ncore', 'njobs',
+             'resourcetype', 'diagmessage', 'stdout']
+    jcols = ['pandaid', 'jeditaskid', 'jobstatus', 'computingsite', 'starttime',
+             'endtime', 'corecount', 'nevents', 'piloterrorcode', 'exeerrorcode',
+             'transexitcode', 'taskbuffererrorcode', 'superrorcode']
+    jsel = ', '.join(f'j."{c}"' for c in jcols)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f'SELECT {", ".join(chr(34) + c + chr(34) for c in wcols)} '
+                f'FROM "{PANDA_SCHEMA}"."harvester_workers" '
+                f'WHERE "harvesterid" = %s AND "workerid" = %s',
+                [harvesterid, int(workerid)])
+            wrow = cursor.fetchone()
+            cursor.execute(
+                f'SELECT {jsel} FROM "{PANDA_SCHEMA}"."harvester_rel_jobs_workers" r '
+                f'JOIN "{PANDA_SCHEMA}"."jobsarchived4" j ON j."pandaid" = r."pandaid" '
+                f'WHERE r."harvesterid" = %s AND r."workerid" = %s '
+                f'UNION ALL '
+                f'SELECT {jsel} FROM "{PANDA_SCHEMA}"."harvester_rel_jobs_workers" r '
+                f'JOIN "{PANDA_SCHEMA}"."jobsactive4" j ON j."pandaid" = r."pandaid" '
+                f'WHERE r."harvesterid" = %s AND r."workerid" = %s',
+                [harvesterid, int(workerid), harvesterid, int(workerid)])
+            jrows = cursor.fetchall()
+    except Exception as e:
+        logger.error(f"allocation timeline query failed for {harvesterid}/{workerid}: {e}")
+        return {'error': f'PanDA database read failed: {e}'}
+    worker = dict(zip(wcols, wrow)) if wrow else None
+    jobs = [dict(zip(jcols, r)) for r in jrows]
+    if not jobs:
+        return None
+
+    def epoch(t):
+        if t is None:
+            return None
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=dt_timezone.utc)
+        return t.timestamp()
+
+    now = timezone.now().timestamp()
+    started = [j for j in jobs if j['starttime'] is not None]
+    never_started = len(jobs) - len(started)
+    bounds_from_jobs = not (worker and worker.get('starttime'))
+    if not bounds_from_jobs:
+        t0 = epoch(worker['starttime'])
+        t1 = epoch(worker['endtime']) if worker.get('endtime') else now
+    elif started:
+        t0 = min(epoch(j['starttime']) for j in started)
+        t1 = max(epoch(j['endtime']) if j['endtime'] else now for j in started)
+    else:
+        t0 = t1 = None
+    wall = (t1 - t0) if (t0 is not None and t1 is not None) else 0.0
+
+    units = []
+    counts = {'done': 0, 'failed': 0, 'interrupted': 0, 'running': 0}
+    core_s = {'done': 0.0, 'failed': 0.0, 'interrupted': 0.0, 'running': 0.0}
+    tasks = {}
+    for j in started:
+        js = epoch(j['starttime'])
+        je = epoch(j['endtime']) if j['endtime'] else now
+        if j['jobstatus'] == 'finished':
+            status = 'done'
+        elif j['jobstatus'] in ('failed', 'cancelled', 'closed'):
+            status = 'interrupted' if j.get('taskbuffererrorcode') == 300 else 'failed'
+        else:
+            status = 'running'
+        s, e = max(0.0, js - t0), min(wall, je - t0)
+        if e < s:
+            e = s
+        cores = int(j.get('corecount') or 1)
+        counts[status] += 1
+        core_s[status] += (e - s) * cores
+        errs = [f'{name} {j[key]}' for name, key in (
+                    ('pilot', 'piloterrorcode'), ('taskbuffer', 'taskbuffererrorcode'),
+                    ('supervisor', 'superrorcode'), ('exe', 'exeerrorcode'))
+                if j.get(key) not in (None, 0, '0')]
+        if j.get('transexitcode') not in (None, '', '0', 0):
+            errs.append(f'exit {j["transexitcode"]}')
+        label = {'done': 'finished', 'failed': 'failed', 'interrupted': 'ended under it by the batch job',
+                 'running': j['jobstatus']}[status]
+        title = (f"job {j['pandaid']} (task {j['jeditaskid']}): {label}"
+                 + (f" ({', '.join(errs)})" if errs and status != 'done' else '')
+                 + f", {(e - s) / 60:.1f} min from {s / 60:.1f} min"
+                 + (f", {cores} cores" if cores > 1 else ''))
+        units.append({'unit_id': j['pandaid'], 'status': status, 'start_s': s, 'end_s': e,
+                      'events': int(j.get('nevents') or 0), 'title': title, 'slot': None,
+                      'cores': cores, 'jeditaskid': j['jeditaskid'], 'jobstatus': j['jobstatus'],
+                      'errors': ', '.join(errs) if status != 'done' else '',
+                      'site': j['computingsite'], 'start_min': round(s / 60, 1),
+                      'wall_s': round(e - s, 1)})
+        listing = _nersc_portal_log_urls(j['computingsite'], j['pandaid'], fetch=False) \
+            if str(j['computingsite'] or '').startswith('NERSC') else None
+        m = _PILOT_TASK_RE.search(' '.join(str(v) for v in (listing or {}).values()))
+        if m:
+            tasks[j['pandaid']] = int(m.group(1))
+    units.sort(key=lambda u: u['start_s'])
+    lanes = {}
+    lanes_from_record = bool(units) and all(u['unit_id'] in tasks for u in units)
+    if lanes_from_record:
+        for u in units:
+            lanes.setdefault(tasks[u['unit_id']], []).append(u)
+    else:
+        free_at = []
+        for u in units:
+            lane = next((i for i, t in enumerate(free_at) if t <= u['start_s'] + 0.5), None)
+            if lane is None:
+                lane = len(free_at)
+                free_at.append(0.0)
+            free_at[lane] = u['end_s']
+            lanes.setdefault(lane, []).append(u)
+    ncore = int((worker or {}).get('ncore') or 0)
+    max_cores = max((u['cores'] for u in units), default=1)
+    # The pilots the allocation could have held: its cores over the jobs'
+    # core count. Lanes nobody used stay on the plot, bare.
+    if ncore:
+        for i in range(ncore // max_cores):
+            lanes.setdefault(i, [])
+    rows = []
+    for i in sorted(lanes):
+        us = lanes[i]
+        rows.append({'index': i, 'units': us,
+                     # A job count beside the lane, except on a narrowed plot
+                     # where it would label one lane in eight.
+                     'right_text': (f'{len(us)} job{"s" if len(us) != 1 else ""}'
+                                    if us and len(lanes) <= 40 else ''),
+                     'busy_s': round(sum(u['end_s'] - u['start_s'] for u in us), 1)})
+    cores_allocated = ncore or len(rows) * max_cores
+    allocated = wall * cores_allocated
+    busy = sum(core_s.values())
+    # The idle after a pilot's last job: the cores waiting out the slowest
+    # job of the wave, or the allocation's end.
+    last_ends = [max(u['end_s'] for u in r['units']) for r in rows if r['units']]
+    first_start = min((u['start_s'] for u in units), default=None)
+    return {
+        'worker': worker, 'wall_s': round(wall, 1), 'slots': len(rows),
+        'cores_allocated': cores_allocated or None,
+        'rows': rows, 'closes': [], 'harness': None, 'cut_s': None, 'cut_real': False,
+        # For the shared renderer: pilots, not cores, one job count per lane.
+        'lane_label': 'pilot', 'closes_lane': False, 'compact_lanes': len(rows) > 40,
+        'lanes_from_record': lanes_from_record,
+        'bounds_from_jobs': bounds_from_jobs,
+        'live': bool(worker and not worker.get('endtime')) or counts['running'] > 0,
+        'jobs': len(jobs), 'never_started': never_started, 'counts': counts,
+        'core_s': {k: round(v, 1) for k, v in core_s.items()},
+        # The same in core-hours, the unit an allocation is charged in.
+        'core_h': {k: round(v / 3600, 1) for k, v in core_s.items()},
+        'busy_core_h': round(busy / 3600, 1), 'allocated_core_h': round(allocated / 3600, 1),
+        'idle_core_h': round(max(0.0, allocated - busy) / 3600, 1),
+        'busy_s': round(busy, 1), 'allocated_s': round(allocated, 1),
+        'idle_s': round(max(0.0, allocated - busy), 1),
+        'busy_fraction': round(busy / allocated, 3) if allocated else None,
+        'head_idle_s': round(first_start, 1) if first_start is not None else None,
+        'last_job_end_s': round(max(last_ends), 1) if last_ends else None,
+        'first_pilot_done_s': round(min(last_ends), 1) if last_ends else None,
+        'units': units,
+    }
+
+
+def allocation_of_job(pandaid):
+    """The (harvesterid, workerid) of the allocation a job ran in, from the
+    job-worker links, which PanDA keeps after the worker record itself has
+    aged out; None when the job has no link or the read fails."""
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(
+                f'SELECT "harvesterid", "workerid" FROM "{PANDA_SCHEMA}"."harvester_rel_jobs_workers" '
+                f'WHERE "pandaid" = %s ORDER BY "lastupdate" DESC LIMIT 1', [int(pandaid)])
+            row = cursor.fetchone()
+    except Exception as e:
+        logger.error(f"allocation lookup failed for job {pandaid}: {e}")
+        return None
+    return (row[0], int(row[1])) if row else None
+
+
 def es_from_shipped_record(pandaid):
     """The ``es`` block of a job that ended without its final report, from
     the record the harness shipped off the node as it went (swf-epicprod

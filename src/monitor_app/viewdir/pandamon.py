@@ -1160,6 +1160,16 @@ def panda_job_detail(request, pandaid):
         {'name': key, 'value': '' if value is None else value}
         for key, value in sorted((data.get('job_record') or {}).items())
     ]
+    # The allocation the job ran in, for the pilot occupancy plot; the
+    # link outlives the harvester's worker record.
+    h = data.get('harvester') or {}
+    if h.get('harvesterid') and h.get('workerid') is not None:
+        data['allocation_ref'] = {'harvesterid': h['harvesterid'], 'workerid': int(h['workerid'])}
+    else:
+        from ..panda.queries import allocation_of_job
+        ref = allocation_of_job(pandaid)
+        if ref:
+            data['allocation_ref'] = {'harvesterid': ref[0], 'workerid': ref[1]}
     data['job_parameter_items'] = [
         {'label': label, 'value': job.get(key)}
         for label, key in (
@@ -1601,6 +1611,35 @@ def panda_batch_record(request, pandaid):
             status=404, content_type='text/plain; charset=utf-8')
     return HttpResponse(record['body'],
                         content_type='text/plain; charset=utf-8')
+
+
+def panda_allocation_detail(request, harvesterid, workerid):
+    """One batch allocation (a harvester worker) and the jobs its pilots
+    ran, drawn on the Event Service occupancy plot: what every pilot of
+    the allocation did from the batch start to its end."""
+    from ..panda.queries import allocation_timeline
+    from ..es_plot import slot_plot_svg
+    tl = allocation_timeline(harvesterid, workerid)
+    ctx = {'harvesterid': harvesterid, 'workerid': workerid}
+    if tl is None:
+        ctx['error'] = (f'No PanDA job is linked to worker {workerid} of harvester '
+                        f'{harvesterid}.')
+    elif tl.get('error'):
+        ctx['error'] = tl['error']
+    else:
+        worker = tl.get('worker') or {}
+        for key in ('submittime', 'starttime', 'endtime'):
+            if worker.get(key) is not None and worker[key].tzinfo is None:
+                worker[key] = worker[key].replace(tzinfo=dt_timezone.utc)
+        if worker.get('submittime') and worker.get('starttime'):
+            ctx['batch_wait_s'] = (worker['starttime'] - worker['submittime']).total_seconds()
+        ctx['tl'] = tl
+        ctx['worker'] = worker
+        ctx['svg'] = slot_plot_svg(tl)
+        ctx['site'] = worker.get('computingsite') or next(
+            (u.get('site') for u in tl['units'] if u.get('site')), '')
+        ctx['job_rows'] = sorted(tl['units'], key=lambda u: (u['start_s'], u['unit_id']))
+    return render(request, 'monitor_app/panda_allocation_detail.html', ctx)
 
 
 def panda_harvester_stdout(request, pandaid):
