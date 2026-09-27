@@ -3739,6 +3739,18 @@ def allocation_timeline(harvesterid, workerid):
         logger.error(f"allocation timeline query failed for {harvesterid}/{workerid}: {e}")
         return {'error': f'PanDA database read failed: {e}'}
     worker = dict(zip(wcols, wrow)) if wrow else None
+    if worker is None:
+        # PanDA drops the row after three months; our nightly copy keeps it
+        # (monitor_app.worker_records).
+        from ..worker_records import worker_row
+        try:
+            copy = worker_row(harvesterid, workerid)
+        except Exception as e:
+            logger.error(f"worker record copy unreadable for {harvesterid}/{workerid}: {e}")
+            copy = None
+        if copy:
+            worker = {k: copy.get(k) for k in wcols}
+            worker['from_copy'] = True
     jobs = [dict(zip(jcols, r)) for r in jrows]
     if not jobs:
         return None

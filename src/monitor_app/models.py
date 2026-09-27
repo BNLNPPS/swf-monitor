@@ -1298,6 +1298,34 @@ class CachedProduct(models.Model):
         return self.key
 
 
+class HarvesterWorkerRecord(models.Model):
+    """Our copy of a harvester worker record (one batch allocation) from
+    PanDA's ``harvester_workers``, which drops each row three months after
+    its last update. Copied nightly for the queues whose allocations the
+    allocation page draws (docs: swf-epicprod EPICPROD_OPS.md, Harvester
+    worker records); the allocation timeline reads it once PanDA no longer
+    has the row. ``record`` is the whole PanDA row but the JDL."""
+    harvesterid = models.CharField(max_length=50)
+    workerid = models.BigIntegerField()
+    computingsite = models.CharField(max_length=128, db_index=True)
+    status = models.CharField(max_length=80, blank=True, default='')
+    batchid = models.CharField(max_length=80, blank=True, default='')
+    ncore = models.IntegerField(null=True, blank=True)
+    submittime = models.DateTimeField(null=True, blank=True)
+    starttime = models.DateTimeField(null=True, blank=True)
+    endtime = models.DateTimeField(null=True, blank=True)
+    lastupdate = models.DateTimeField(null=True, blank=True)
+    record = models.JSONField(default=dict)
+    captured_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'swf_harvester_worker_record'
+        unique_together = [('harvesterid', 'workerid')]
+
+    def __str__(self):
+        return f'{self.harvesterid}/{self.workerid}'
+
+
 class ErrorCorrectionRule(models.Model):
     """Label-reliability rule of the error-correction root
     (docs/ERROR_ATTRIBUTION.md): a job error label matching

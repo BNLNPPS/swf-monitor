@@ -66,6 +66,10 @@ Capabilities:
                        our store before the PanDA cache's seven-day purge;
                        finished jobs behind a switch (hourly;
                        docs/EPICPROD_OPS.md, Harvester stdout records).
+  worker_record_capture — copy the harvester worker records of the NERSC
+                       queues into our store before PanDA's three-month
+                       window drops them (nightly; docs/EPICPROD_OPS.md,
+                       Harvester worker records).
   node_guard_cycle   — one cycle of the node guard: the window's terminal
                        production jobs per queue and host judged for black
                        holes, recorded as node_guard_decision; shadow mode
@@ -196,6 +200,8 @@ BATCH_LOG_CAPTURE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / 
 BATCH_LOG_CAPTURE_TIMEOUT = int(os.environ.get("EPICPROD_BATCH_LOG_CAPTURE_TIMEOUT", "1800"))
 HARVESTER_STDOUT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "harvester-stdout-capture.py"
 HARVESTER_STDOUT_TIMEOUT = int(os.environ.get("EPICPROD_HARVESTER_STDOUT_TIMEOUT", "1800"))
+WORKER_RECORD_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "worker-record-capture.py"
+WORKER_RECORD_TIMEOUT = int(os.environ.get("EPICPROD_WORKER_RECORD_TIMEOUT", "1800"))
 BATCH_LOG_CAPTURE_HOURS = os.environ.get("EPICPROD_BATCH_LOG_CAPTURE_HOURS", "26")
 # The learning pass over the captured corpus, after the capture in the same
 # chain so the day's logs are in it (docs/ERROR_ATTRIBUTION.md).
@@ -386,7 +392,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "credential_ping_propose", "certificate_ping_propose",
                    "assessment_completed", "front_cycle", "node_guard_cycle",
                    "harvester_stdout_capture", "cric_declared_state",
-                   "es_closeout_cycle",
+                   "es_closeout_cycle", "worker_record_capture",
                    "health_ping", "shutdown"}
 
     def __init__(self):
@@ -3106,6 +3112,51 @@ class EpicProdOpsAgent(BaseAgent):
         self.logger.info("PRODOPS harvester_stdout_capture done")
         self._log_action('harvester_stdout_capture', t0, username=username,
                          sublevel='normal' if parsed.get('captured') or parsed.get('gone') else 'low',
+                         live_default=False, summary=counts or 'capture complete', **parsed)
+
+    def _handle_worker_record_capture(self, m):
+        """Copy the NERSC queues' harvester worker records into our store
+        before PanDA's three-month window drops them (docs/EPICPROD_OPS.md,
+        Harvester worker records): nightly by cron enqueue, directly
+        invokable."""
+        self.run_in_background(
+            self._do_worker_record_capture, m,
+            dedup_key="worker_record_capture", label="worker_record_capture")
+
+    def _do_worker_record_capture(self, m):
+        cmd = [sys.executable, str(WORKER_RECORD_SCRIPT)]
+        if m.get('days'):
+            cmd += ['--days', str(m['days'])]
+        username = str(m.get('created_by') or '')
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=WORKER_RECORD_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(f"PRODOPS worker_record_capture TIMEOUT after {WORKER_RECORD_TIMEOUT}s")
+            self._log_action('worker_record_capture', t0, outcome='timeout',
+                             reason=f'timed out after {WORKER_RECORD_TIMEOUT}s',
+                             username=username, sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        for line in ((p.stdout or "") + (p.stderr or "")).splitlines():
+            self.logger.info(f"  worker-record-capture: {line}")
+        if p.returncode != 0:
+            reason = self._derive_reason(p)
+            self.logger.error(f"PRODOPS worker_record_capture FAILED rc={p.returncode}")
+            self._log_action('worker_record_capture', t0, outcome='error', reason=reason,
+                             username=username, sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        counts = next((ln for ln in (p.stdout or '').splitlines()
+                       if ln.startswith('read=')), '')
+        parsed = {}
+        for tok in counts.split():
+            k, _, v = tok.partition('=')
+            if v.isdigit():
+                parsed[k] = int(v)
+        self.logger.info("PRODOPS worker_record_capture done")
+        self._log_action('worker_record_capture', t0, username=username, sublevel='low',
                          live_default=False, summary=counts or 'capture complete', **parsed)
 
     def _handle_node_guard_cycle(self, m):

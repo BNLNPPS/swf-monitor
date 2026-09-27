@@ -114,6 +114,12 @@ ACTION_DEFAULTS = {
                        "running Event Service jobs of the listed queues: "
                        "jobs, quiet, closed, failed.",
     },
+    'worker_record_capture': {
+        'sublevel': 'low', 'live': False,
+        'description': "One pass copying the NERSC queues' harvester worker "
+                       "records into our store before PanDA's three-month "
+                       "window drops them: read, created, updated, unchanged.",
+    },
     'harvester_stdout_capture': {
         'sublevel': 'low', 'live': False,
         'description': "One pass copying the harvester's stdout of the jobs "
