@@ -473,6 +473,12 @@ def main():
                          "JEDI makes ranges over; the dispatcher's es mode "
                          "takes the ranges from the pilot's channel and runs "
                          "each through the payload in the task's image")
+    ap.add_argument("--canary-bg-merger", default="",
+                    choices=["", "hepmcmerger", "timeframebuilder"],
+                    help="payload canary: the background merger the payload "
+                         "runs (BG_MERGER; swf-epicprod EPICPROD_PAYLOAD.md, "
+                         "Background merging); timeframebuilder is for "
+                         "validation only")
     ap.add_argument("--canary-threads", type=int, default=0,
                     help="payload canary: cores the job requests and threads "
                          "npsim and eicrecon run with (where the image "
@@ -656,6 +662,9 @@ def main():
         if args.canary_out_rse:
             spec['env'] = dict(spec.get('env') or {}, OUT_RSE=args.canary_out_rse)
             _log(f"canary outputs to {args.canary_out_rse}")
+        if args.canary_bg_merger:
+            spec['env'] = dict(spec.get('env') or {}, BG_MERGER=args.canary_bg_merger)
+            _log(f"canary background merger: {args.canary_bg_merger}")
         if args.es_input_dataset:
             # An Event Service canary: JEDI makes ranges of
             # --es-events-per-range over the input dataset's file; the
