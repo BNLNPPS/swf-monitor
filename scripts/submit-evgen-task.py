@@ -213,12 +213,13 @@ def _assemble_sandbox(spec, proxy_path, root):
     # its parallelism; its units stay single-threaded.
     if 'nEventsPerWorker' not in spec:
         env['EPICPROD_NTHREADS'] = str(max(1, int(spec.get('nCore') or 1)))
-    # Only Event Service jobs carry the report key (Torre, 2026-09-24):
-    # the fleet's reports tripped the bucket's growth guard on 9/18.
-    if 'nEventsPerWorker' in spec:
+    # Only Event Service jobs and trials carry the report key (Torre,
+    # 2026-09-24): the fleet's reports tripped the bucket's growth guard on
+    # 9/18. A trial is one job and the run we read, so it reports.
+    if 'nEventsPerWorker' in spec or spec.get('trial'):
         env.update(_reporting_env())
     else:
-        _log("job reporting off: not an Event Service task")
+        _log("job reporting off: not an Event Service task or a trial")
     with open(os.path.join(sandbox, f"environment-{csv_base}.sh"), "w") as f:
         for k, v in env.items():
             f.write(f'export {k}={v}\n')
@@ -772,6 +773,9 @@ def main():
         # trial, so submitting one needs no flag; --trial with explicit
         # options remains for a submission driven from the command line.
         t = spec.get('trial') or {}
+        if not t:
+            spec['trial'] = {'events': int(args.trial_events),
+                             'outputRoot': args.trial_root}
         if t:
             args.trial_events = int(t.get('events') or args.trial_events)
             args.trial_root = str(t.get('outputRoot') or args.trial_root)
