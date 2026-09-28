@@ -61,9 +61,10 @@ without a deploy. The two axes are genuinely independent: a low-sublevel
 action can be temporarily fascinating (force it live while you watch), and a
 high-sublevel bulk operation can be force-quieted while it floods through.
 
-A **channel** is an importance threshold applied to live events:
-`live_stream_q(min_sublevel)` in `monitor_app/epicprod_logging.py` is the one
-filter every channel uses. Current and planned channels:
+A **channel** applies an importance threshold to live events.
+`live_stream_q(min_sublevel)` in `monitor_app/epicprod_logging.py` supplies
+the live-view filter; the Mattermost subscription uses equivalent axes and
+the channel-specific selection described below. Current and planned channels:
 
 | channel | filter | status |
 |---|---|---|
@@ -148,8 +149,15 @@ plain channel posts never wake DISpatcher. To follow up on an event, @mention
 DISpatcher in a thread under the event post — the post carries everything
 the bot needs to pull the full record and drill into the subject. The
 publisher re-reads its SysConfig knobs every cycle (`epicprod_live_channel`,
-`epicprod_live_min_sublevel`, `epicprod_live_poll_seconds`), so channel
-rename, importance threshold, and cadence are UI adjustments, no deploy. A
+`epicprod_live_poll_seconds`), so channel rename and cadence are UI
+adjustments, no deploy. The importance threshold belongs to the notice
+subscription; `epicprod_live_min_sublevel` is retired. Channel-specific
+selection suppresses routine automated successes, zero-progress stash
+drains, shadow suggestions and repeated identical failures; first failures,
+changed causes and recoveries remain visible. The full action log and other
+subscribers retain every record. The publication and required
+finding/resolution-reporting discipline is in
+[NOTICE_ROUTING.md](NOTICE_ROUTING.md#human-channel-publication-policy). A
 per-cycle post cap (20) guards against floods; overflow is posted as a
 counted summary line, never silently dropped.
 
@@ -189,8 +197,8 @@ catalog-freshness timestamp. Measured 2026-07-05: csv 8 s, association sweep
 
 `SysConfig` (`swf_sys_config`) is the single-record JSON document of
 operator-set configuration — live policy overrides, channel settings
-(`epicprod_live_channel`, `epicprod_live_min_sublevel`,
-`epicprod_live_poll_seconds`), sweep knobs (`questionnaire_csv_url`) —
+(`epicprod_live_channel`, `epicprod_live_poll_seconds`), sweep knobs
+(`questionnaire_csv_url`) —
 viewable and editable at the bottom of the System page. Convention: no
 hidden knobs — every key a component reads from SysConfig is present in the
 document, at its code default when never overridden, so the System page is

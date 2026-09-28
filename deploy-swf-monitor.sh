@@ -361,15 +361,15 @@ if systemctl is-enabled swf-testbed-bot.service >/dev/null 2>&1; then
 fi
 
 if systemctl is-enabled swf-epicprod-live.service >/dev/null 2>&1; then
-    if [ -z "$PREV_RELEASE" ]; then
-        LIVE_PUBLISHER_CHANGED=true
-    elif ! diff -q "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/management/commands/publish_epicprod_live.py" \
-                    "$RELEASE_DIR/src/monitor_app/management/commands/publish_epicprod_live.py" >/dev/null 2>&1; then
-        LIVE_PUBLISHER_CHANGED=true
-    elif ! diff -q "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/epicprod_logging.py" \
-                    "$RELEASE_DIR/src/monitor_app/epicprod_logging.py" >/dev/null 2>&1; then
-        LIVE_PUBLISHER_CHANGED=true
-    fi
+    for publisher_path in management/commands/publish_epicprod_live.py \
+            epicprod_logging.py notice_router.py notice_plugins.py live_notices.py; do
+        if [ -z "$PREV_RELEASE" ] || \
+                ! diff -q "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/$publisher_path" \
+                          "$RELEASE_DIR/src/monitor_app/$publisher_path" >/dev/null 2>&1; then
+            LIVE_PUBLISHER_CHANGED=true
+            break
+        fi
+    done
 fi
 
 # Health check — confirm Apache is serving before restarting bots

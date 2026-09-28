@@ -112,6 +112,7 @@ def route_new_events():
     from monitor_app.models import (AppLog, CapcomNotice,
                                     NoticeSubscription, PersistentState)
     from monitor_app.notice_plugins import PLUGINS
+    from monitor_app.live_notices import STATE_KEY as LIVE_STATE_KEY, select_notice
 
     _init_high_water()
     last_id = int(PersistentState.get_state().get(STATE_KEY) or 0)
@@ -122,14 +123,19 @@ def route_new_events():
     if not rows:
         return 0
     live_policy = get_live_policy()
+    has_live_subscriber = any(s.delivery == 'mattermost-live' for s in subs)
+    failures = dict(PersistentState.get_state().get(LIVE_STATE_KEY) or {})
     delivered = 0
     active_plugins = []
     failed_plugins = set()
     for row in rows:
         extra = row.extra_data if isinstance(row.extra_data, dict) else {}
         action = str(extra.get('action') or '')
+        live_extra = (select_notice(row, extra, failures, live_policy)
+                      if has_live_subscriber and action else extra)
         for sub in subs:
-            if not action or not _matches(sub, row, action, extra,
+            attributes = live_extra if sub.delivery == 'mattermost-live' else extra
+            if attributes is None or not action or not _matches(sub, row, action, attributes,
                                           live_policy):
                 continue
             if sub.delivery == 'buffer':
@@ -157,7 +163,7 @@ def route_new_events():
                 if plugin not in active_plugins:
                     plugin.start_pass()
                     active_plugins.append(plugin)
-                plugin.deliver(row, extra)
+                plugin.deliver(row, attributes)
                 delivered += 1
             except Exception:
                 if plugin not in active_plugins:
@@ -166,7 +172,10 @@ def route_new_events():
                     "notice router: push delivery %r failed for row %s "
                     "(subscription %s ← %s)",
                     sub.delivery, row.id, sub.subscriber, sub.event)
-        PersistentState.update_state({STATE_KEY: int(row.id)})
+        updates = {STATE_KEY: int(row.id)}
+        if has_live_subscriber:
+            updates[LIVE_STATE_KEY] = failures
+        PersistentState.update_state(updates)
     for plugin in active_plugins:
         try:
             plugin.end_pass()

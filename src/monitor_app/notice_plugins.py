@@ -14,7 +14,8 @@ The first plugin is ``mattermost-live``, the #epicprod-live channel
 publisher moved here from the publish_epicprod_live command with its
 formatting unchanged. Its channel is the SysConfig
 ``epicprod_live_channel`` knob, re-read every pass; its event selection
-is the ``epicprod-live`` subscription, not code.
+is the ``epicprod-live`` subscription together with the human-channel
+selection in ``live_notices``. Other delivery modes retain every match.
 """
 import logging
 import os
@@ -138,8 +139,10 @@ class MattermostLivePlugin:
                 subject_key = ''
             subject = f'{subject_type} {subject_key}'.strip()
         username = str(extra.get('username') or '')
-        reason = str(extra.get('reason') or '')
-        summary = str(extra.get('summary') or '')
+        reason = str(extra.get('reason') or (
+            row.message if outcome in ('error', 'timeout', 'partial', 'unrecorded')
+            else '') or '')[:300]
+        summary = str(extra.get('narration') or extra.get('summary') or '')
         dur = extra.get('duration_ms')
         stamp = timezone.localtime(row.timestamp).strftime('%H:%M')
 

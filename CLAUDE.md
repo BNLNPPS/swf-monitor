@@ -82,6 +82,12 @@ the old paths here. This repo's docs cover the platform services:
 
 ## Editing discipline (AI sessions)
 
+Material production findings and resolutions must be reported in
+`epicprod-live`, with affected scope, current status and supporting evidence.
+Private dialog, TJAI coordination and commits are not substitutes. Follow
+`docs/NOTICE_ROUTING.md` (Findings and resolutions); this is forward-only,
+not a requirement to backfill historical investigations.
+
 - The app is served under the `/swf-monitor/` script prefix, which exists
   only in request context. Never bake `reverse()` output into values built
   outside a request — cached products, background threads, shell probes,

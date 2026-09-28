@@ -79,6 +79,7 @@ def main():
         log.error(msg)
         log_epicprod_action('prodops-agent', 'declared_state_sync', outcome='error',
                             username=args.created_by, sublevel='normal', live_default=True,
+                            reason=msg,
                             level=logging.ERROR, message=f'declared state sync failed: {msg}')
         print(json.dumps({'error': msg}))
         return 1
@@ -96,6 +97,7 @@ def main():
         log.exception('CRIC read failed')
         log_epicprod_action('prodops-agent', 'declared_state_sync', outcome='error',
                             username=args.created_by, sublevel='normal', live_default=True,
+                            reason=str(e)[:300],
                             level=logging.ERROR,
                             duration_ms=int((time.monotonic() - t0) * 1000),
                             message=f'declared state sync failed: {str(e)[:300]}')

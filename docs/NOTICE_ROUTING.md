@@ -119,6 +119,58 @@ REST; the `epicprod_live_min_sublevel` SysConfig knob is retired. The
 channel name (`epicprod_live_channel`) and poll cadence
 (`epicprod_live_poll_seconds`) remain SysConfig knobs.
 
+## Human-channel publication policy
+
+`epicprod-live` is the production findings and resolution channel, not a
+mirror of operational logging. The Mattermost delivery applies
+`monitor_app/live_notices.py` after recording and before subscription matching.
+Other subscribers and the complete action log are unchanged.
+
+- Routine successful automated imports, catalog refreshes, sweeps and crash
+  maintenance stay quiet. New imports, associations, crashes, traces and
+  queued studies remain visible when the record reports actual changes;
+  idempotently rewritten row counts alone are not a change.
+- A stash-drain pass with no cataloguing, movement or missing-file discovery
+  stays quiet, regardless of the number of backlog entries or deferrals.
+- Shadow node-guard suggestions stay quiet; actual exclusions remain visible.
+- Assessments, production arrivals, job closeouts, operator actions and
+  substantive findings remain eligible for publication.
+- An automated failure is published on first observation or when its cause
+  changes. Identical repetitions stay quiet. The next successful execution
+  publishes a recovery notice, even when ordinary successes are not live.
+  Automation is identified by the existing requester convention `cron` or
+  a username ending in `_cron`; human-requested actions are not quieted as
+  background mechanics.
+
+Outstanding automated failures are stored in the existing `PersistentState`
+under `epicprod_live_failures`, with the router position in the same update.
+This small delivery state survives publisher restarts; it is not an incident
+archive. Selection changes never replay or delete historical posts. A
+force-live action override explicitly requests the otherwise quiet events;
+force-quiet overrides and subscription filters still apply to recoveries.
+
+### Findings and resolutions
+
+Anyone investigating production, human or AI, must report a material finding
+and its eventual resolution in `epicprod-live`. A private dialog, commit,
+TJAI coordination message or assessment alone does not complete reporting.
+Each report identifies the incident and affected campaign, tasks or endpoint,
+states what is known and what remains uncertain, links supporting evidence,
+and gives the action or owner. A resolution references the original incident,
+distinguishes identified cause, implemented fix, deployment and verified
+recovery, and states any remaining scope limitation. Report new evidence and
+state changes, not every investigative step or routine successful check.
+
+Daily and weekly assessments must read the channel findings in full for their
+reporting interval and reconcile resolution notices with the same incident.
+Historical losses remain in the accounting after resolution, but must not be
+presented as a currently unresolved cause without evidence. Generated
+assessment posts are not independent evidence. An unavailable or incomplete
+channel read is a declared assessment limitation, not proof that no resolution
+was recorded. The scheduled assessment harness includes the channel read in
+its existing evidence bundle. This discipline is forward-only; it requires
+neither backfilling old reports nor a separate incident store.
+
 ## Delivery sequence
 
 1. The router service, the subscription model and REST, buffered-pull
