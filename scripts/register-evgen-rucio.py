@@ -148,9 +148,16 @@ def _xrdfs(args, proxy, timeout):
                           text=True, timeout=timeout, env=env)
 
 
+# The EVGEN input the payload reads (EPICPROD_EVGEN_INPUTS.md): only these
+# files are registered. Other files beside them in a directory, such as the
+# ASCII ``.hepmc`` a sample was converted from, are listed and left out.
+EVGEN_SUFFIX = '.hepmc3.tree.root'
+
+
 def list_files(evgen_path, proxy):
-    """Every regular file under the path on the door: [(door_path, bytes)].
-    NFS silly-rename remnants (``.nfs*``) are skipped and counted."""
+    """Every EVGEN file under the path on the door: [(door_path, bytes)],
+    and the files left out: NFS silly-rename remnants (``.nfs*``) and files
+    that are not ``.hepmc3.tree.root``, each counted."""
     door_path = XRD_BASE + evgen_path
     try:
         p = _xrdfs(['ls', '-l', '-R', door_path], proxy, LISTING_TIMEOUT)
@@ -160,7 +167,7 @@ def list_files(evgen_path, proxy):
         reason = (p.stderr or p.stdout).strip().splitlines()
         raise DoerError(EXIT_LISTING, 'listing failed: '
                         + (reason[-1] if reason else f'rc={p.returncode}'))
-    files, skipped = [], []
+    files, skipped, other = [], [], []
     for line in (p.stdout or '').splitlines():
         parts = line.split(maxsplit=6)
         if len(parts) < 7:
@@ -171,13 +178,17 @@ def list_files(evgen_path, proxy):
         if os.path.basename(path).startswith('.nfs'):
             skipped.append(path)
             continue
+        if not path.endswith(EVGEN_SUFFIX):
+            other.append(path)
+            continue
         try:
             files.append((path, int(size)))
         except ValueError:
             raise DoerError(EXIT_LISTING, f'unparseable listing line: {line!r}')
     if not files:
-        raise DoerError(EXIT_LISTING, f'no files under {door_path}')
-    return files, skipped
+        raise DoerError(EXIT_LISTING, f'no {EVGEN_SUFFIX} files under {door_path}'
+                        + (f' ({len(other)} other files)' if other else ''))
+    return files, skipped, other
 
 
 def checksums(files, proxy):
@@ -416,11 +427,12 @@ def main(argv):
         proxy, summary['proxy'] = resolve_proxy()
         _log(f'proxy {proxy}: {summary["proxy"]["days_left"]} days left')
 
-        files, skipped = list_files(evgen_path, proxy)
+        files, skipped, other = list_files(evgen_path, proxy)
         summary.update(files=len(files), bytes=sum(s for _, s in files),
-                       skipped=len(skipped))
+                       skipped=len(skipped), not_evgen=len(other))
         _log(f'{len(files)} files, {summary["bytes"]} bytes under {XRD_BASE}{evgen_path}'
-             + (f' ({len(skipped)} .nfs remnants skipped)' if skipped else ''))
+             + (f' ({len(skipped)} .nfs remnants skipped)' if skipped else '')
+             + (f' ({len(other)} files not {EVGEN_SUFFIX} left out)' if other else ''))
 
         if args.events_only:
             # The registration's second step: counts recorded on the DIDs
