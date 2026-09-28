@@ -802,6 +802,14 @@ def main():
             f"python3 evgen_job_dispatcher.py %RNDM=0 {spec['csvBase']}"
         )
         spec.update(nJobs=1, maxAttempt=1, skipScout=True)
+        # A trial is the run we read, so everything is on whatever the
+        # configuration says: FULL, RECO and a generated EVGEN registered
+        # through Rucio and the logs uploaded. Set here, before the output
+        # datasets are created from this environment, so the datasets and
+        # the payload agree.
+        spec['env'] = dict(spec.get('env') or {}, COPYFULL='true',
+                           COPYRECO='true', COPYLOG='true', COPYEVGEN='true',
+                           USERUCIO='true')
         if args.trial_queue:
             spec['site'] = args.trial_queue
         _log(f"trial {spec['outDS']} on {spec.get('site') or '(brokered)'}: "
