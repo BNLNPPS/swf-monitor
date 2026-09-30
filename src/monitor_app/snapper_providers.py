@@ -441,6 +441,17 @@ _EPICPROD_TYPE_EXCLUDED_JOB_STATES = frozenset(
     ('activated', 'starting')) | _EPICPROD_DISABLED_PLOT_JOB_STATES
 
 
+def _production_queues():
+    """The production queues (SysConfig front.queues), which always have
+    their own bands; none when unreadable."""
+    try:
+        from swf_epicprod.front import regulated_queues
+        return regulated_queues()
+    except Exception:  # noqa: BLE001
+        logger.exception('production queues unreadable')
+        return []
+
+
 def _queue_stack_members():
     """Members derived from the report series already in hand."""
     return _QUEUE_STACK_CACHE['members']
@@ -643,8 +654,14 @@ def _epicprod_series_transform(series):
             -sum(values[curve_id].get(stamp, 0) * durations[stamp]
                  for stamp in stamps),
             curve_id))
-    selected = [curve_id for curve_id in ranked[:QUEUE_STACK_MAX]
-                if any(values[curve_id].values())]
+    # The production queues (front.queues) always have their own bands,
+    # idle or not, so a production queue never disappears into 'other'
+    # behind a test queue that ran briefly; the remaining bands go by
+    # core-hours over the window.
+    selected = [f'qc_{q}' for q in _production_queues()][:QUEUE_STACK_MAX]
+    selected += [curve_id for curve_id in ranked
+                 if curve_id not in selected and any(values[curve_id].values())
+                 ][:max(0, QUEUE_STACK_MAX - len(selected))]
     members = tuple(curve_id[3:] for curve_id in selected)
     _QUEUE_STACK_CACHE['members'] = members
 
@@ -653,14 +670,14 @@ def _epicprod_series_transform(series):
     for curve_id in selected:
         folded[curve_id] = {
             'label': curve_id[3:],
-            'points': [[stamp, values[curve_id].get(stamp, 0)]
+            'points': [[stamp, values.get(curve_id, {}).get(stamp, 0)]
                        for stamp in stamps],
         }
     folded['qc_other'] = {
         'label': 'other',
         'points': [
             [stamp, max(0, running[stamp] - sum(
-                values[curve_id].get(stamp, 0)
+                values.get(curve_id, {}).get(stamp, 0)
                 for curve_id in selected))]
             for stamp in stamps
         ],
