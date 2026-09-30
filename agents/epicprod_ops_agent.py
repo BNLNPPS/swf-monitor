@@ -261,6 +261,7 @@ STORAGE_SWEEP_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "sto
 # docs/CONTINUOUS_PRODUCTION.md, The dispatcher), five-minutely by cron
 # enqueue; shadow mode records decisions and submits nothing.
 FRONT_CYCLE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "front-cycle.py"
+GKE_PILOT_CYCLE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "gke-pilot-cycle.py"
 NODE_GUARD_TIMEOUT = int(os.environ.get("EPICPROD_NODE_GUARD_TIMEOUT", "240"))
 NODE_GUARD_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "node-guard-cycle.py"
 # The preemption close-out: a PanDA DB read, a store read per running Event
@@ -273,6 +274,7 @@ ES_CLOSEOUT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "es-cl
 DECLARED_STATE_TIMEOUT = int(os.environ.get("EPICPROD_DECLARED_STATE_TIMEOUT", "300"))
 DECLARED_STATE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "cric-declared-state.py"
 FRONT_CYCLE_TIMEOUT = int(os.environ.get("EPICPROD_FRONT_CYCLE_TIMEOUT", "240"))
+GKE_PILOT_CYCLE_TIMEOUT = int(os.environ.get("EPICPROD_GKE_PILOT_CYCLE_TIMEOUT", "240"))
 # An incremental pass is about 36 minutes plus its sixth of the dataset
 # tier (about an hour at the pass's pacing, STORAGE.md); the nightly full
 # pass lists the target campaigns' files. Three hours holds either.
@@ -393,6 +395,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "assessment_completed", "front_cycle", "node_guard_cycle",
                    "harvester_stdout_capture", "cric_declared_state",
                    "es_closeout_cycle", "worker_record_capture",
+                   "gke_pilot_cycle",
                    "health_ping", "shutdown"}
 
     def __init__(self):
@@ -3082,6 +3085,46 @@ class EpicProdOpsAgent(BaseAgent):
                              live_default=False, level=logging.ERROR)
             return
         self.logger.info("PRODOPS front_cycle done")
+
+    def _handle_gke_pilot_cycle(self, m):
+        """One cycle of the BNL_ePIC_GOOGLE_es pilot flow (swf-epicprod
+        docs/GKE_PILOT_FLOW.md): pilot pods started in the GKE cluster in
+        step with the queue's activated jobs. By cron enqueue, directly
+        invokable; deduped so a slow cycle is never doubled."""
+        self.run_in_background(
+            self._do_gke_pilot_cycle, m,
+            dedup_key="gke_pilot_cycle", label="gke_pilot_cycle")
+
+    def _do_gke_pilot_cycle(self, m):
+        """Run the gke-pilot-cycle doer; the doer records its own cycle
+        (gke_pilot_cycle), so this records only a cycle that did not run to
+        completion."""
+        username = str(m.get('created_by') or 'gke_pilots')
+        cmd = [sys.executable, str(GKE_PILOT_CYCLE_SCRIPT), "--created-by", username]
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=GKE_PILOT_CYCLE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS gke_pilot_cycle TIMEOUT after {GKE_PILOT_CYCLE_TIMEOUT}s")
+            self._log_action('gke_pilot_cycle', t0, outcome='timeout',
+                             reason=f'timed out after {GKE_PILOT_CYCLE_TIMEOUT}s',
+                             username=username, sublevel='normal',
+                             live_default=False, level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  gke-pilot-cycle: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  gke-pilot-cycle: {line}")
+        if p.returncode != 0:
+            reason = self._derive_reason(p)
+            self.logger.error(f"PRODOPS gke_pilot_cycle FAILED rc={p.returncode}")
+            self._log_action('gke_pilot_cycle', t0, outcome='error', reason=reason,
+                             username=username, sublevel='normal',
+                             live_default=False, level=logging.ERROR)
+            return
+        self.logger.info("PRODOPS gke_pilot_cycle done")
 
     def _handle_harvester_stdout_capture(self, m):
         """Copy the harvester's stdout of the jobs worth keeping while the
