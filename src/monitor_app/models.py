@@ -1159,6 +1159,7 @@ class PandaTaskOperation(models.Model):
         ('resume', 'Resume'),
         ('retry_failures', 'Retry failed jobs'),
         ('finish', 'Stop and finish task'),
+        ('reassign', 'Move remaining work'),
     ]
     STATUS_CHOICES = [
         ('queued', 'Queued'),

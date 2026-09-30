@@ -3252,68 +3252,29 @@ def rucio_endpoints_all_json(request):
 @login_required
 @user_passes_test(lambda u: u.is_superuser)
 def update_panda_queues_from_github(request):
-    """Update PanDA queues from GitHub main branch. Requires superuser."""
-    import json
-    import urllib.request
+    """Refresh the PanDA queue inventory from PanDA's own queue table
+    (monitor_app/panda/queue_inventory.py), as every pressure-front cycle
+    does. Requires superuser. (The name is historical: the inventory was
+    once loaded from a static file on GitHub.)"""
     from django.contrib import messages
     from django.shortcuts import redirect
-    from datetime import datetime
-    import email.utils
-    
-    github_url = "https://raw.githubusercontent.com/BNLNPPS/swf-testbed/main/config/panda_queues.json"
-    repo_location = "BNLNPPS/swf-testbed"
-    file_path = "config/panda_queues.json"
-    github_file_url = "https://github.com/BNLNPPS/swf-testbed/blob/main/config/panda_queues.json"
-    
+    from .panda.queue_inventory import sync_queue_inventory
     try:
-        # Fetch JSON from GitHub
-        with urllib.request.urlopen(github_url) as response:
-            data = json.loads(response.read().decode())
-        
-        created_count = 0
-        updated_count = 0
-        for queue_name, config in data.items():
-            # Extract key fields from config
-            site = config.get('site', '')
-            queue_type = config.get('type', '')
-            
-            # Determine status based on config
-            status = 'active'  # Default to active
-            if config.get('status') == 'offline':
-                status = 'offline'
-            
-            _queue, created = PandaQueue.objects.update_or_create(
-                queue_name=queue_name,
-                defaults={
-                    'site': site,
-                    'queue_type': queue_type,
-                    'status': status,
-                    'config_data': config,
-                },
-            )
-            if created:
-                created_count += 1
-            else:
-                updated_count += 1
-        
+        result = sync_queue_inventory()
         from .epicprod_logging import log_epicprod_action
         log_epicprod_action(
             'web', 'queues_update',
             username=getattr(request.user, 'username', ''),
             sublevel='normal', live_default=True,
-            created=created_count, updated=updated_count)
-        messages.success(request, 
-            f'Successfully updated PanDA queues from GitHub '
-            f'({created_count} created, {updated_count} updated)<br>'
-            f'<strong>Repository:</strong> {repo_location}<br>'
-            f'<strong>File:</strong> {file_path}<br>'
-            f'<strong>View on GitHub:</strong> <a href="{github_file_url}" target="_blank">Click here to see what was loaded</a>',
-            extra_tags='safe'
-        )
-        
-    except Exception as e:
-        messages.error(request, f'Failed to update from GitHub: {str(e)}')
-    
+            created=result['created'], updated=result['updated'],
+            absent=result['absent'])
+        messages.success(
+            request,
+            f"Queue inventory refreshed from PanDA: {result['queues']} EIC queues, "
+            f"{result['created']} added, {result['updated']} updated, "
+            f"{result['absent']} no longer listed.")
+    except Exception as e:  # noqa: BLE001
+        messages.error(request, f'Queue inventory refresh failed: {e}')
     return redirect('monitor_app:panda_queues_list')
 
 
