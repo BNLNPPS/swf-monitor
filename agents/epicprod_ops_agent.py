@@ -2296,6 +2296,7 @@ class EpicProdOpsAgent(BaseAgent):
         registered = len(summary.get('registered') or [])
         deferred = len(summary.get('deferred') or [])
         undelivered = len(summary.get('undelivered') or [])
+        refused = len(summary.get('refused') or [])
         if p.returncode != 0:
             reason = summary.get('error') or self._derive_reason(p)
             self.logger.error(f"PRODOPS registrar FAILED rc={p.returncode}")
@@ -2306,18 +2307,19 @@ class EpicProdOpsAgent(BaseAgent):
             return
         self.logger.info(
             f"PRODOPS registrar done: {registered} registered, "
-            f"{deferred} deferred, {undelivered} undelivered")
+            f"{deferred} deferred, {undelivered} undelivered, {refused} refused")
+        failed_rows = ((summary.get('undelivered') or []) + (summary.get('refused') or []))
         self._log_action(
             'registrar', t0,
-            outcome='ok' if not undelivered else 'partial',
-            reason=('; '.join(str(u.get('reason')) for u in
-                              (summary.get('undelivered') or [])[:5])
-                    if undelivered else ''),
+            outcome='ok' if not (undelivered or refused) else 'partial',
+            reason=('; '.join(f"{u.get('did')}: {u.get('reason')}" for u in failed_rows[:5])
+                    if failed_rows else ''),
             username=str(m.get('created_by') or ''),
-            sublevel='low', live_default=bool(registered or undelivered),
+            sublevel='low', live_default=bool(registered or undelivered or refused),
             summary=(f"jobs={summary.get('jobs', 0)} registered={registered} "
-                     f"deferred={deferred} undelivered={undelivered}"),
-            registered=registered, deferred=deferred, undelivered=undelivered)
+                     f"deferred={deferred} undelivered={undelivered} refused={refused}"),
+            registered=registered, deferred=deferred, undelivered=undelivered,
+            refused=refused)
 
     def _handle_report_sweep(self, m):
         """Run the payload report sweep off the receiver thread — hourly by

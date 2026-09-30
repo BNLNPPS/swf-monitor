@@ -74,6 +74,9 @@ EXIT_PROXY, EXIT_RUCIO = 5, 6
 # a person rather than a ninth attempt.
 RETRY_INTERVAL_S = int(os.environ.get('REGISTRAR_RETRY_INTERVAL_S', 3600))
 MAX_ATTEMPTS = int(os.environ.get('REGISTRAR_MAX_ATTEMPTS', 8))
+# Rucio's limit on a data identifier name: a longer one is refused on
+# every attempt, so it is recorded refused and never retried.
+DID_NAME_MAX = 250
 DEFAULT_HOURS = 48
 
 
@@ -171,7 +174,7 @@ def _record_attempt(pandaid, did, outcome, reason=''):
 def _due(state, did):
     """Whether this DID is due an attempt now."""
     entry = state.get(did) or {}
-    if entry.get('outcome') == 'registered':
+    if entry.get('outcome') in ('registered', 'refused'):
         return False
     if int(entry.get('attempts') or 0) >= MAX_ATTEMPTS:
         return False
@@ -245,6 +248,9 @@ def stored_file(pfn, proxy):
 def complete(client, rse, did, events, proxy, dry_run=False):
     """Register one pending DID. Returns (outcome, reason)."""
     dataset = did.rsplit('/', 1)[0]
+    if len(did) > DID_NAME_MAX:
+        return 'refused', (f'the name is {len(did)} characters, past '
+                           f"Rucio's {DID_NAME_MAX}; it can never be registered")
     # No read before the write: the registration call ignores a duplicate,
     # so an entry already registered costs one call that changes nothing,
     # where a read first cost every entry a call (the catalog answers
@@ -346,7 +352,7 @@ def main():
 
     since = datetime.now(dt_timezone.utc) - timedelta(hours=args.hours)
     summary = {'window_hours': args.hours, 'rse': args.rse, 'jobs': 0,
-               'registered': [], 'deferred': [], 'undelivered': [],
+               'registered': [], 'deferred': [], 'undelivered': [], 'refused': [],
                'skipped': 0, 'dry_run': bool(args.dry_run)}
 
     work = worklist(since, limit=args.limit)
@@ -411,6 +417,8 @@ def main():
                 summary['registered'].append(did)
             elif outcome == 'undelivered':
                 summary['undelivered'].append({'did': did, 'reason': reason})
+            elif outcome == 'refused':
+                summary['refused'].append({'did': did, 'reason': reason})
             else:
                 summary['deferred'].append({'did': did, 'reason': reason})
 
