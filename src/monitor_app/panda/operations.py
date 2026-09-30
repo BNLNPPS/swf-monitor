@@ -26,13 +26,22 @@ RETRYABLE_TASK_STATUSES = frozenset(
 FINISHABLE_TASK_STATUSES = frozenset(
     ('running', 'paused', 'throttled', 'staging', 'exhausted',
      'ready', 'pending', 'scouting', 'assigning', 'defined', 'registered'))
+# Move remaining work (PanDA task reassign, mode soft): offered while the
+# task has work to generate or run. PanDA accepts a site reassign in any
+# state; a finished, failed or exhausted task moves by a retry with a
+# target queue or a rerun with a site instead.
+MOVABLE_TASK_STATUSES = frozenset(
+    ('defined', 'ready', 'running', 'scouting', 'scouted', 'pending',
+     'assigning', 'throttled', 'paused'))
 BULK_OPERATION_STATUSES = {
     'pause': frozenset(('running',)),
     'resume': frozenset(('paused',)),
     'retry_failures': RETRYABLE_TASK_STATUSES,
     'finish': FINISHABLE_TASK_STATUSES,
+    'reassign': MOVABLE_TASK_STATUSES,
 }
-OPERATION_VERBS = frozenset(('pause', 'resume', 'retry_failures', 'finish'))
+OPERATION_VERBS = frozenset(('pause', 'resume', 'retry_failures', 'finish',
+                             'reassign'))
 MAX_BULK_TASKS = 5000
 
 
@@ -108,8 +117,12 @@ def operation_controls(task, *, authenticated, internal_monitor, pending=None):
 
 
 def queue_task_operation(*, task, operation, requested_by, source='manual',
-                         evidence=None):
-    """Persist and queue one pause/resume request for the prod-ops agent."""
+                         evidence=None, site=''):
+    """Persist and queue one task operation for the prod-ops agent.
+    ``site`` is the target queue of a reassign."""
+    if operation == 'reassign':
+        site = validate_move_site(site)
+        evidence = dict(evidence or {}, site=site, mode='soft')
     record, created = _persist_task_operation(
         task=task,
         operation=operation,
@@ -130,8 +143,23 @@ def queue_task_operation(*, task, operation, requested_by, source='manual',
         'source': source,
         'created_by': requested_by,
     }
+    if operation == 'reassign':
+        msg.update(site=site, mode='soft')
     _send_operation_message(msg, [record])
     return record, True
+
+
+def validate_move_site(site):
+    """The target of a Move: one of the production queues (SysConfig
+    ``front.queues``, the set the pressure front regulates)."""
+    from swf_epicprod.front import regulated_queues
+    site = str(site or '').strip()
+    queues = regulated_queues()
+    if site not in queues:
+        raise PandaTaskOperationError(
+            f'{site or "(none)"} is not a production queue; the production '
+            'queues are ' + ', '.join(queues) + '.')
+    return site
 
 
 def _persist_task_operation(*, task, operation, requested_by, source,
@@ -175,6 +203,12 @@ def _persist_task_operation(*, task, operation, requested_by, source,
             raise PandaTaskOperationError(
                 f'Task failures cannot be retried from status {task_status}.',
                 409)
+    elif operation == 'reassign':
+        if task_status not in MOVABLE_TASK_STATUSES:
+            raise PandaTaskOperationError(
+                f'Work cannot be moved from a task in status {task_status}; '
+                'a finished, failed or exhausted task moves by a retry with '
+                'a target queue or a rerun with a site.', 409)
     elif task_status not in FINISHABLE_TASK_STATUSES:
         raise PandaTaskOperationError(
             f'Task cannot be finished from status {task_status}.', 409)
