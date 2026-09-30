@@ -418,12 +418,14 @@ _QUEUE_STACK_CACHE = {'members': (
     'BNL_OSG_EPIC_PROD_1',
     'UM_GREX_PanDA_1',
     'BNL_ePIC_GOOGLE',
+    'BNL_ePIC_GOOGLE_es',
+    'NERSC_Perlmutter_epic_es',
     'BNL_NPPS_GPU',
     'BNL_PanDA_1',
 )}
 
-# Named bands in the seven-day cores-by-queue stack; every other queue
-# collapses into 'other'.
+# Named bands in the seven-day cores-by-queue stack beyond the production
+# queues, which always have theirs; every other queue collapses into 'other'.
 QUEUE_STACK_MAX = 6
 
 # The categorical palette used by the Site compute usage plots. Queue
@@ -658,7 +660,7 @@ def _epicprod_series_transform(series):
     # idle or not, so a production queue never disappears into 'other'
     # behind a test queue that ran briefly; the remaining bands go by
     # core-hours over the window.
-    selected = [f'qc_{q}' for q in _production_queues()][:QUEUE_STACK_MAX]
+    selected = [f'qc_{q}' for q in _production_queues()]
     selected += [curve_id for curve_id in ranked
                  if curve_id not in selected and any(values[curve_id].values())
                  ][:max(0, QUEUE_STACK_MAX - len(selected))]
