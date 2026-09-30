@@ -551,10 +551,12 @@ def main():
                     help="Event Service canary: memory per core (MBPerCoreFixed); "
                          "on a whole-node queue the job asks for this times the "
                          "node's cores, which must fit the node")
-    ap.add_argument("--es-slots", type=int, default=1,
+    ap.add_argument("--es-slots", default="auto",
                     help="Event Service canary: the node harness's slots, one "
-                         "resident EICrecon and one range at a time each; "
-                         "also the job's core count (default 1)")
+                         "resident EICrecon and one range at a time each. "
+                         "'auto' (default) takes them from the node the job "
+                         "lands on (evgen_job_dispatcher.es_slot_count) and "
+                         "the job declares one core; a number fixes both")
     ap.add_argument("--es-deadline-s", type=int, default=0,
                     help="Event Service canary: seconds of wall after which the "
                          "harness takes no further range and drains (0 = none)")
@@ -720,13 +722,17 @@ def main():
             if args.es_preempt_at_s > 0:
                 close += f"ES_PREEMPT_AT_S={int(args.es_preempt_at_s)} "
                 _log(f"ES PREEMPT (test/demo): sudden end at {int(args.es_preempt_at_s)} s")
+            es_slots = str(args.es_slots).strip().lower()
+            if es_slots != 'auto' and not es_slots.isdigit():
+                _log(f"ERROR: --es-slots is 'auto' or a number, not {args.es_slots!r}")
+                return 2
             spec['exec'] = (f"ES_PAYLOAD_IMAGE={spec.get('containerImage', '')} "
-                            f"ES_SLOTS={int(args.es_slots)} {deadline}{per_unit}{close}"
+                            f"ES_SLOTS={es_slots} {deadline}{per_unit}{close}"
                             f"python3 evgen_job_dispatcher.py es "
                             f"{spec['csvBase']} {args.canary_stamp} "
                             f"$PILOT_EVENTRANGECHANNEL"
                             + (" --accessmode=direct" if args.es_direct_input else ""))
-            spec['nCore'] = int(args.es_slots)
+            spec['nCore'] = 1 if es_slots == 'auto' else int(es_slots)
             if args.es_ram_per_core_mb > 0:
                 # The memory is per core, and a queue that declares a whole
                 # node's cores (NERSC_Perlmutter_epic_es: 256) multiplies it:

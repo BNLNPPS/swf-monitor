@@ -343,6 +343,50 @@ def run_payload_canary(csv_base, stamp, workdir):
 ES_WORK_DIR = "es_work"
 
 
+def _cgroup_cpu_quota():
+    """The CPUs the container's CPU quota allows (a Kubernetes pod's CPU
+    limit is a CFS quota, not a set of cores, so nproc reads the whole
+    node), rounded down; None where no quota is set."""
+    try:
+        with open("/sys/fs/cgroup/cpu.max") as f:                  # cgroup v2
+            quota, period = f.read().split()[:2]
+        if quota != "max":
+            return max(1, int(int(quota) / int(period)))
+        return None
+    except (OSError, ValueError):
+        pass
+    try:                                                            # cgroup v1
+        with open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us") as f:
+            quota = int(f.read().strip())
+        with open("/sys/fs/cgroup/cpu/cpu.cfs_period_us") as f:
+            period = int(f.read().strip())
+        return max(1, int(quota / period)) if quota > 0 else None
+    except (OSError, ValueError):
+        return None
+
+
+def es_slot_count():
+    """The node harness's slot count and where it came from. A number in
+    ES_SLOTS is used as given; ``auto`` (or unset) takes it from the node
+    the job landed on, so a queue need not declare its size: the
+    launcher's or pod's ATHENA_PROC_NUMBER first (the pilot sizes its range
+    fetches by the same number), then the container's CPU quota, then the
+    cores the job may run on."""
+    value = os.environ.get("ES_SLOTS", "auto").strip().lower()
+    if value not in ("", "auto"):
+        return max(1, int(value)), "ES_SLOTS"
+    try:
+        n = int(os.environ.get("ATHENA_PROC_NUMBER", "0"))
+        if n > 0:
+            return n, "ATHENA_PROC_NUMBER"
+    except ValueError:
+        pass
+    quota = _cgroup_cpu_quota()
+    if quota:
+        return quota, "cpu quota"
+    return len(os.sched_getaffinity(0)), "cores available"
+
+
 def run_event_service(csv_base, stamp, workdir, channel):
     """Event Service canary: the node harness over this job's ranges,
     outputs to epic:/TEST/canary/<stamp>; exits 0 when the harness does,
@@ -360,8 +404,10 @@ def run_event_service(csv_base, stamp, workdir, channel):
     work = os.path.join(os.path.dirname(workdir), ES_WORK_DIR)
     summary_path = os.path.join(work, "es_summary.json")
     os.makedirs(work, exist_ok=True)
+    slots, slots_from = es_slot_count()
+    print(f"event service: {slots} slots ({slots_from})", flush=True)
     cmd = [sys.executable, os.path.join(workdir, PAYLOAD_SUBDIR, "es", "es_harness.py"),
-           "--slots", os.environ.get("ES_SLOTS", "1"), "--work", work,
+           "--slots", str(slots), "--work", work,
            "--sandbox", workdir, "--image", image, "--csv-base", csv_base,
            "--stamp", stamp, "--channel", name, "--summary", summary_path,
            "--env", f"CANARY_OUTPUT_DATASET={dataset}",
