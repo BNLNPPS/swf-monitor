@@ -88,10 +88,18 @@ def _upload_sandbox(workdir):
 
 
 def build_task_params(spec, archive_name):
-    """Assemble the taskParamMap from the PCS spec and the uploaded sandbox."""
+    """Assemble the taskParamMap from the PCS spec and the uploaded sandbox.
+
+    The spec must name its queue: production work goes where PCS placed
+    it, never where PanDA's brokerage would (swf-epicprod
+    CONTINUOUS_PRODUCTION.md, Placement), so a spec without a site is
+    refused rather than defaulted."""
+    if not spec.get('site'):
+        raise ValueError('the spec names no site: PCS places every task '
+                         'before submission (CONTINUOUS_PRODUCTION.md, Placement)')
     params = {
         'vo': spec.get('vo', 'epic'),
-        'site': spec.get('site', 'BNL_OSG_PanDA_1'),
+        'site': spec['site'],
         'workingGroup': spec.get('workingGroup', 'EIC'),
         'prodSourceLabel': spec.get('prodSourceLabel', 'test'),
         'processingType': spec.get('processingType', 'epicproduction'),
@@ -313,6 +321,10 @@ def main():
         spec = json.load(f)
     if not spec.get('outDS') or not spec.get('exec'):
         _log("ERROR: spec missing outDS/exec")
+        return 2
+    if not spec.get('site'):
+        _log("ERROR: spec names no site; PCS places every task before "
+             "submission (CONTINUOUS_PRODUCTION.md, Placement)")
         return 2
     if not os.path.isdir(args.workdir):
         _log(f"ERROR: sandbox dir not found: {args.workdir}")
