@@ -34,7 +34,16 @@
         <option value="resume">Resume</option>
         <option value="retry_failures">Restart and retry failures</option>
         <option value="finish">Stop and finish task</option>
+        <option value="reassign">Move remaining work</option>
     </select>
+    {# Move: a soft reassign of every selected task to one production queue; waiting jobs regenerate there, running ones finish in place. #}
+    <span id="panda-bulk-move" class="d-none align-items-center gap-1">
+        <label for="panda-bulk-move-queue" class="ms-2 mb-0">To queue:</label>
+        <select id="panda-bulk-move-queue" class="form-select form-select-sm" style="width: auto;">
+            <option value=""></option>
+            {% for queue_name in production_queues %}<option value="{{ queue_name }}">{{ queue_name }}</option>{% endfor %}
+        </select>
+    </span>
     {# Retry with changed resource requirements: PanDA merges the values into the task and re-executes it with them; both fields optional. #}
     <span id="panda-bulk-params" class="d-none align-items-center gap-1">
         <label for="panda-bulk-ram" class="ms-2 mb-0">RAM per core (MB):</label>
@@ -101,7 +110,9 @@ function taskCheckboxes() {
     return Array.from(document.querySelectorAll('.panda-task-select'));
 }
 
-const BULK_ACTIONS = ['pause', 'resume', 'retry_failures', 'finish'];
+const BULK_ACTIONS = ['pause', 'resume', 'retry_failures', 'finish', 'reassign'];
+const bulkMove = document.getElementById('panda-bulk-move');
+const bulkMoveQueue = document.getElementById('panda-bulk-move-queue');
 
 function checkboxEligible(checkbox, action) {
     if (!action) return false;
@@ -122,6 +133,11 @@ function refreshBulkControls() {
     bulkParams.classList.toggle('d-none', !showParams);
     bulkParams.classList.toggle('d-inline-flex', showParams);
     if (!showParams) { bulkRam.value = ''; bulkWalltime.value = ''; bulkQueue.value = ''; }
+    // A Move needs its target queue.
+    const showMove = action === 'reassign';
+    bulkMove.classList.toggle('d-none', !showMove);
+    bulkMove.classList.toggle('d-inline-flex', showMove);
+    if (!showMove) bulkMoveQueue.value = '';
     taskCheckboxes().forEach(function (checkbox) {
         const actionable = BULK_ACTIONS.some(op => checkboxEligible(checkbox, op));
         const enabled = !bulkBusy && (action ? checkboxEligible(checkbox, action) : actionable);
@@ -131,7 +147,8 @@ function refreshBulkControls() {
     bulkAction.disabled = bulkBusy;
     bulkAll.disabled = bulkBusy;
     bulkNone.disabled = bulkBusy;
-    bulkSubmit.disabled = bulkBusy || !action || selectedTaskIds().length === 0;
+    bulkSubmit.disabled = bulkBusy || !action || selectedTaskIds().length === 0
+        || (action === 'reassign' && !bulkMoveQueue.value);
 }
 
 function showBulkStatus(message, state) {
@@ -224,6 +241,7 @@ bulkNone.addEventListener('click', function () {
     refreshBulkControls();
 });
 bulkAction.addEventListener('change', refreshBulkControls);
+bulkMoveQueue.addEventListener('change', refreshBulkControls);
 document.addEventListener('change', function (event) {
     if (event.target.classList.contains('panda-task-select')) refreshBulkControls();
 });
@@ -238,9 +256,15 @@ bulkForm.addEventListener('submit', async function (event) {
         && !window.confirm(`Stop and finish ${taskIds.length} task${taskIds.length === 1 ? '' : 's'}? Running jobs stop; completed output is kept and the task can be retried later.`)) {
         return;
     }
+    const moveQueue = bulkMoveQueue.value;
+    if (operation === 'reassign'
+        && !window.confirm(`Move the remaining work of ${taskIds.length} task${taskIds.length === 1 ? '' : 's'} to ${moveQueue}? Jobs not yet running are stopped and regenerated there, with the attempt each costs given back; running jobs finish where they are.`)) {
+        return;
+    }
     // Changed resource requirements ride the retry request; read them
     // before the controls reset.
     const requestBody = {operation: operation, jedi_task_ids: taskIds};
+    if (operation === 'reassign') requestBody.site = moveQueue;
     if (operation === 'retry_failures') {
         const newParameters = {};
         if (bulkRam.value) newParameters.ram_count_mb = bulkRam.value;

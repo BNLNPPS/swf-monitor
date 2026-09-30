@@ -4437,7 +4437,7 @@ def get_task_operation_targets(jedi_task_ids):
         return []
     placeholders = ', '.join(['%s'] * len(ids))
     sql = f"""
-        SELECT "jeditaskid", "taskname", "status"
+        SELECT "jeditaskid", "taskname", "status", "site"
         FROM "{PANDA_SCHEMA}"."jedi_tasks"
         WHERE "jeditaskid" IN ({placeholders})
     """
@@ -4450,6 +4450,7 @@ def get_task_operation_targets(jedi_task_ids):
             'jeditaskid': int(row[0]),
             'taskname': row[1] or '',
             'status': row[2] or '',
+            'site': row[3] or '',
         }
         for row in rows
     }

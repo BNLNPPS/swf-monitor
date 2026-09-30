@@ -882,7 +882,8 @@ class EpicProdOpsAgent(BaseAgent):
         operation = m.get('operation')
         items = m.get('items')
         batch_id = str(m.get('batch_id') or '')
-        if operation not in ('pause', 'resume', 'retry_failures', 'finish'):
+        if operation not in ('pause', 'resume', 'retry_failures', 'finish',
+                             'reassign'):
             self.logger.error(
                 f"PRODOPS panda_task_operations: bad operation {operation!r}")
             return
@@ -931,6 +932,10 @@ class EpicProdOpsAgent(BaseAgent):
         # (memory, wall time) for every task of the batch.
         if operation == 'retry_failures' and m.get('new_parameters'):
             cmd += ['--new-parameters', json.dumps(m['new_parameters'])]
+        # A bulk Move sends every task of the batch to one queue.
+        if operation == 'reassign':
+            cmd += ['--site', str(m.get('site') or ''),
+                    '--mode', str(m.get('mode') or 'soft')]
         for item in items:
             self._record_panda_operation_state(item['operation_id'], 'running')
         self.logger.info(

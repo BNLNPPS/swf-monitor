@@ -915,6 +915,15 @@ def panda_jobs_filter_counts(request):
 
 # ── Task list ────────────────────────────────────────────────────────────────
 
+def _production_queues():
+    try:
+        from swf_epicprod.front import regulated_queues
+        return regulated_queues()
+    except Exception:  # noqa: BLE001
+        logger.exception('production queues unreadable')
+        return []
+
+
 def panda_tasks_list(request):
     days = _get_days(request)
     from ..middleware import is_tunnel_request
@@ -927,6 +936,8 @@ def panda_tasks_list(request):
         'panda_queue_names': list(
             PandaQueue.objects.order_by('queue_name')
             .values_list('queue_name', flat=True)),
+        # A Move's targets: the production queues (front.queues).
+        'production_queues': _production_queues(),
         'table_description': f'JEDI tasks from the last {days} days.',
         'ajax_url': reverse('monitor_app:panda_tasks_datatable_ajax'),
         'filter_counts_url': reverse('monitor_app:panda_tasks_filter_counts'),

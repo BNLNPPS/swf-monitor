@@ -307,7 +307,7 @@ def retry_parameters(raw):
 
 
 def queue_task_operations(*, tasks, operation, requested_by,
-                          new_parameters=None):
+                          new_parameters=None, site=''):
     """Persist eligible task records and queue one paced prod-ops batch.
 
     ``new_parameters`` (retry_failures only) are the task parameters the
@@ -321,6 +321,8 @@ def queue_task_operations(*, tasks, operation, requested_by,
     if new_parameters and operation != 'retry_failures':
         raise PandaTaskOperationError(
             'New resource requirements apply to retry_failures only.')
+    if operation == 'reassign':
+        site = validate_move_site(site)
     if not tasks:
         raise PandaTaskOperationError('Select at least one task.')
     if len(tasks) > MAX_BULK_TASKS:
@@ -336,6 +338,9 @@ def queue_task_operations(*, tasks, operation, requested_by,
         jedi_task_id = task.get('jeditaskid')
         task_status = str(task.get('status') or '').lower()
         evidence = {'task_status': task_status, 'batch_id': batch_id}
+        if operation == 'reassign':
+            evidence.update(site=site, mode='soft',
+                            previous_site=str(task.get('site') or ''))
         if new_parameters:
             evidence['new_parameters'] = dict(new_parameters)
         try:
@@ -382,6 +387,8 @@ def queue_task_operations(*, tasks, operation, requested_by,
         }
         if new_parameters:
             message['new_parameters'] = dict(new_parameters)
+        if operation == 'reassign':
+            message.update(site=site, mode='soft')
         _send_operation_message(message, new_records)
     return {
         'batch_id': batch_id,

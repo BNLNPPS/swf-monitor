@@ -255,6 +255,7 @@ def task_operations_request(request):
             operation=str(request.data.get('operation') or ''),
             requested_by=getattr(request.user, 'username', '') or 'operator',
             new_parameters=new_parameters,
+            site=str(request.data.get('site') or ''),
         )
     except operations.PandaTaskOperationError as exc:
         return Response({'error': exc.detail}, status=exc.status)
