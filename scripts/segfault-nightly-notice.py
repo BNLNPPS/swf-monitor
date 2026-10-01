@@ -101,7 +101,11 @@ def census():
             active.setdefault(a['signature'], 0)
             active[a['signature']] += 1
     sigs = list(CrashSignature.objects.all())
-    counts = {'signatures': len(sigs), 'crashes': 0, 'covered': 0, 'covered_crashes': 0,
+    # Frame groups (level trace) gather record signatures crashing in one
+    # frame; they are counted apart, so the categories below sum to the total.
+    counts = {'signatures': sum(1 for s in sigs if s.level != 'trace'),
+              'frame_groups': sum(1 for s in sigs if s.level == 'trace'),
+              'crashes': 0, 'covered': 0, 'covered_crashes': 0,
               'traced_unread': 0, 'settled_unread': 0, 'untraced_runnable': 0,
               'untraced_unrunnable': 0, 'in_flight': 0}
     need_run, need_read, need_reading = [], [], []
@@ -148,7 +152,8 @@ def census():
 def compose(counts, need_run, need_read, need_reading, limit):
     c = counts
     lines = [
-        f"Segfault catalog, nightly: {c['signatures']} signatures, {c['crashes']:,} crashes; "
+        f"Segfault catalog, nightly: {c['signatures']} signatures "
+        f"(and {c['frame_groups']} frame groups over them), {c['crashes']:,} crashes; "
         f"{c['covered']} read by a finding ({c['covered_crashes']:,} crashes); "
         f"{c['in_flight']} with a reproduction in flight; "
         f"{c['untraced_runnable']} with no trace and a runnable row; "
