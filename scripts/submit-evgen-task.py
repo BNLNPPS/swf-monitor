@@ -496,6 +496,12 @@ def main():
                          "instead of the configuration's (a test at JLab's "
                          "EIC-XRD while the production RSE is down, or a test "
                          "RSE); the canary dataset is created there too")
+    ap.add_argument("--canary-jlab-unreachable", action="store_true",
+                    help="TEST ONLY, payload canary: the JLab catalog is made "
+                         "unreachable to the job's registration (payload "
+                         "test_jlab_unreachable.sh), so its outputs take the "
+                         "failover paths: preserved and pending at BNL-XRD, or "
+                         "stashed there from another --canary-out-rse")
     ap.add_argument("--es-direct-input", action="store_true",
                     help="Event Service canary: the pilot hands the input as a "
                          "TURL instead of copying it (its --accessmode=direct, "
@@ -668,6 +674,9 @@ def main():
         if args.canary_bg_merger:
             spec['env'] = dict(spec.get('env') or {}, BG_MERGER=args.canary_bg_merger)
             _log(f"canary background merger: {args.canary_bg_merger}")
+        if args.canary_jlab_unreachable:
+            spec['env'] = dict(spec.get('env') or {}, EPICPROD_TEST_JLAB_UNREACHABLE='1')
+            _log("canary TEST: JLab catalog unreachable at registration")
         if args.es_input_dataset:
             # An Event Service canary: JEDI makes ranges of
             # --es-events-per-range over the input dataset's file; the
