@@ -60,6 +60,27 @@ case "$REF_TYPE" in
         ;;
 esac
 
+# Never during the nightly catalog_sync chain. The deploy restarts the
+# prod-ops agent, which ends the chain mid-step, and the chain does not
+# resume: on 2026-10-01 a 03:10 deploy killed file_events_measure and the
+# delivery rebuild, and the campaign plan stayed a day stale. The agent keeps
+# CHAIN_MARKER while the chain runs (pid, start, current step); a marker whose
+# pid is the running agent refuses the deploy before anything is built. A
+# marker left by a dead agent is ignored. SWF_DEPLOY_DURING_CHAIN=1 overrides:
+# the chain is lost and reruns at its next schedule.
+CHAIN_MARKER="$DEPLOY_ROOT/shared/run/catalog-sync.running"
+if [ -f "$CHAIN_MARKER" ] && [ "${SWF_DEPLOY_DURING_CHAIN:-0}" != "1" ]; then
+    MARK_PID=$(sed -n 's/^pid=//p' "$CHAIN_MARKER" | head -1)
+    AGENT_PID=$(systemctl show -p MainPID --value epicprod-ops-agent.service 2>/dev/null || echo 0)
+    if [ -n "$MARK_PID" ] && [ "$MARK_PID" = "$AGENT_PID" ] && kill -0 "$MARK_PID" 2>/dev/null; then
+        echo "REFUSED: the nightly catalog_sync chain is running in the prod-ops agent"
+        echo "  (started $(sed -n 's/^started=//p' "$CHAIN_MARKER"), step $(sed -n 's/^step=//p' "$CHAIN_MARKER"))."
+        echo "  A deploy restarts the agent and loses the chain. Deploy after it ends, or"
+        echo "  set SWF_DEPLOY_DURING_CHAIN=1 to deploy anyway (the chain reruns at its next schedule)."
+        exit 3
+    fi
+fi
+
 # Unique staging directory per deploy: the release 'current' serves is
 # never deleted or rebuilt in place. The whole build happens here while
 # the old release keeps serving; the current symlink flips to the fully

@@ -145,6 +145,10 @@ MONITOR_API_TOKEN = (os.environ.get("SWFMON_TOKEN")
 
 # Managed scratch/cache root (shared with the doer and the web view).
 SWF_TMP_DIR = os.environ.get("SWF_TMP_DIR", "/data/swf-tmp")
+# Present while the nightly catalog_sync chain runs; deploy-swf-monitor.sh
+# refuses to restart the agent then (2026-10-01: a deploy cut the chain).
+CHAIN_MARKER = Path(os.environ.get("EPICPROD_CHAIN_MARKER",
+                                   "/opt/swf-monitor/shared/run/catalog-sync.running"))
 
 # Hard backstop on the doer subprocess. Longer than the doer's own xrdcp timeout
 # so the doer fails first and cleanly; this only catches a wholly-wedged run.
@@ -1529,8 +1533,14 @@ class EpicProdOpsAgent(BaseAgent):
              lambda msg: self._do_storage_sweep(dict(msg, mode='full'))),
             ('campaign_config_propose', self._do_campaign_config_propose),
         ]
-        failed, retried, raised = self._run_sync_chain(
-            steps, dict(m, created_by=created_by))
+        # The marker the deploy script checks: a deploy restarts this agent
+        # and would end the chain mid-step (deploy-swf-monitor.sh, CHAIN_MARKER).
+        self._chain_marker(step='starting')
+        try:
+            failed, retried, raised = self._run_sync_chain(
+                steps, dict(m, created_by=created_by))
+        finally:
+            self._chain_marker(clear=True)
         failed_names = [name for name, _ in failed]
         self._log_action(
             'catalog_sync', t0,
@@ -1547,6 +1557,25 @@ class EpicProdOpsAgent(BaseAgent):
             steps=len(steps), failed=failed_names, retried=retried,
             raised=raised)
 
+    def _chain_marker(self, step='', clear=False):
+        """Keep CHAIN_MARKER while the catalog_sync chain runs: this pid, the
+        chain's start and its current step, which the deploy script reads to
+        refuse a restart mid-chain. Written atomically; a failure to write or
+        clear is logged, never raised, since the chain matters more."""
+        try:
+            if clear:
+                CHAIN_MARKER.unlink(missing_ok=True)
+                self._chain_started = None
+                return
+            if not getattr(self, '_chain_started', None):
+                self._chain_started = datetime.now(timezone.utc).astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')
+            CHAIN_MARKER.parent.mkdir(parents=True, exist_ok=True)
+            tmp = CHAIN_MARKER.with_suffix('.tmp')
+            tmp.write_text(f"pid={os.getpid()}\nstarted={self._chain_started}\nstep={step}\n")
+            os.replace(tmp, CHAIN_MARKER)
+        except OSError as e:
+            self.logger.warning(f"PRODOPS catalog_sync: chain marker {CHAIN_MARKER}: {e}")
+
     def _run_sync_chain(self, steps, msg):
         """Run the chain's steps in order. A step's outcome is the action
         record it logged last; a step that raises is an error. The first
@@ -1557,6 +1586,7 @@ class EpicProdOpsAgent(BaseAgent):
         failed, retried, raised = [], [], []
         stall_waited = False
         for name, step in steps:
+            self._chain_marker(step=name)
             outcome, reason = self._run_sync_step(name, step, msg, raised)
             if (outcome not in ('ok', 'warning', 'skipped') and not stall_waited
                     and any(mark in reason for mark in RUCIO_STALL_MARKS)):
