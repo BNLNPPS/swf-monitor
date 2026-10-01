@@ -110,8 +110,10 @@ def worklist(since, limit=None):
         SELECT m."pandaid", m."metadata"
         FROM "{PANDA_SCHEMA}"."metatable" m
         JOIN "{PANDA_SCHEMA}"."jobsarchived4" j ON j."pandaid" = m."pandaid"
-        WHERE j."modificationtime" >= %s AND j."processingtype" = 'epicproduction'
+        WHERE j."modificationtime" >= %s AND j."processingtype" IN ('epicproduction', 'canary')
     """
+    # Canaries included: a canary's pending registration completes like
+    # production's, which is how the failover chain is proven.
     try:
         with connections['panda'].cursor() as cursor:
             cursor.execute(sql, [since])
@@ -364,13 +366,13 @@ def main():
     try:
         proxy, summary['proxy'] = _evgen.resolve_proxy()
     except _evgen.DoerError as e:
-        summary['error'] = e.msg
+        summary['error'] = str(e)
         print(json.dumps(summary))
         return EXIT_PROXY
     try:
         client = _evgen.rucio_client(proxy)
     except _evgen.DoerError as e:
-        summary['error'] = e.msg
+        summary['error'] = str(e)
         print(json.dumps(summary))
         return EXIT_RUCIO
 

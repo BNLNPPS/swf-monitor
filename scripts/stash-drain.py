@@ -103,8 +103,11 @@ def stashed_entries(since, limit=None):
         SELECT m."pandaid", m."metadata"
         FROM "{PANDA_SCHEMA}"."metatable" m
         JOIN "{PANDA_SCHEMA}"."jobsarchived4" j ON j."pandaid" = m."pandaid"
-        WHERE j."modificationtime" >= %s AND j."processingtype" = 'epicproduction'
+        WHERE j."modificationtime" >= %s AND j."processingtype" IN ('epicproduction', 'canary')
     """
+    # Canaries included: their /TEST/ outputs stash and drain like
+    # production's, and a canary is how the failover chain is proven
+    # (swf-epicprod docs/RUCIO_FAILOVER_STASH.md, Sequencing).
     try:
         with connections['panda'].cursor() as cursor:
             cursor.execute(sql, [since])
