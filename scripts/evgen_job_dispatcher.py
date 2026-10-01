@@ -30,6 +30,7 @@ import json
 import os
 import subprocess
 import sys
+from collections import deque
 from itertools import islice
 
 # The payload travels in the sandbox as payload/ (the epicprod payload,
@@ -417,7 +418,15 @@ def run_event_service(csv_base, stamp, workdir, channel):
         if os.environ.get(key):
             cmd += [f"--{key[3:].lower().replace('_', '-')}", os.environ[key]]
     print(f"event service: harness {' '.join(cmd[1:])}", flush=True)
-    rc = subprocess.run(cmd, text=True).returncode
+    # The harness's stderr passes through as before; its tail is kept for the
+    # job report, the one record that leaves a node whose logs are not kept
+    # (a pod's work directory goes with it).
+    proc = subprocess.Popen(cmd, text=True, stderr=subprocess.PIPE)
+    stderr_tail = deque(maxlen=40)
+    for line in proc.stderr:
+        sys.stderr.write(line)
+        stderr_tail.append(line.rstrip("\n"))
+    rc = proc.wait()
     summary = {}
     try:
         with open(summary_path) as f:
@@ -427,7 +436,9 @@ def run_event_service(csv_base, stamp, workdir, channel):
     write_job_report(0, workdir, extra={
         "payload_version": payload_version(workdir),
         "es": {"kind": "event_service", "stamp": stamp, "dataset": f"epic:/{dataset}",
-               "image": image, "harness_rc": rc, "slots": summary.get("slots"),
+               "image": image, "harness_rc": rc,
+               "harness_stderr_tail": list(stderr_tail) if rc else [],
+               "slots": summary.get("slots"),
                "wall_s": summary.get("wall_s"),
                "untaken_at_deadline": summary.get("untaken_at_deadline"),
                "ranges_done": summary.get("done", []),
