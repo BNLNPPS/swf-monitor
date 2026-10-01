@@ -67,3 +67,7 @@ httpx>=0.28,<1
 # Starlette enters only via mcp. Pin past CVE-2026-48710 ("BadHost" Host-header
 # auth bypass; fixed in 1.0.1). See docs/MCP.md → Architecture.
 starlette>=1.2.1
+# The GKE pilot flow (swf-epicprod docs/GKE_PILOT_FLOW.md): a service-account
+# key mints the cluster token; the Kubernetes client starts the pilot pods.
+google-auth>=2.20
+kubernetes>=30
