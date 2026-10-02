@@ -1,0 +1,15 @@
+{
+  "outDS": "group.EIC.logfallback.npps0.%STAMP%",
+  "exec": "echo log-fallback trial payload; hostname; date",
+  "site": "BNL_NPPS_GPU",
+  "prodSourceLabel": "test",
+  "processingType": "canary",
+  "nJobs": 1,
+  "nEventsPerJob": 1,
+  "nCore": 1,
+  "memory": 2048,
+  "walltimeHours": 0.5,
+  "skipScout": true,
+  "maxAttempt": 1,
+  "containerImage": "/cvmfs/singularity.opensciencegrid.org/eicweb/eic_xl:26.07.1-stable"
+}
