@@ -67,7 +67,12 @@ archive the alarm row.
 3. Yield `Detection(...)` objects from `swf_alarms.common`.
 4. Share helper code under `swf_alarms/common/`.
 5. Add a corresponding `Entry(kind='alarm', context='swf-alarms')` with
-   `data.entry_id='alarm_<name>'`.
+   `data.entry_id='alarm_<name>'` and `data.enabled=False`.
+
+**New alarms are email off.** An alarm is created with `data.enabled=False`
+and stays that way until Torre turns its email on; the engine treats a
+missing flag as off. Detection, events and the dashboard work the same
+either way.
 
 The engine dispatches by module name. There is no central registry.
 

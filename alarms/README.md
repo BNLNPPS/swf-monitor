@@ -65,8 +65,9 @@ Summary:
    `def detect(client, params)`, yielding `Detection(...)` objects.
 2. Share math via `swf_alarms/common/*`; there is no central registry.
 3. Create an `Entry` row (kind='alarm', context='swf-alarms',
-   data.entry_id matching the module name) via data migration or
-   Django shell.
+   data.entry_id matching the module name, data.enabled=False) via data
+   migration or Django shell. New alarms are email off; only Torre turns
+   an alarm's email on. A missing `enabled` reads as off.
 4. Next cron tick picks it up automatically.
 
 The contract: `detect` must not email, must not raise on transient
@@ -81,7 +82,8 @@ False (not raise) so one stuck channel can't cascade.
 
 ## "Disabled" (per-alarm) semantics
 
-Each alarm's `data.enabled` flag controls **only the email side**. When
+Each alarm's `data.enabled` flag controls **only the email side**, and it
+is off for every new alarm and whenever the flag is missing. When
 False:
 
 - The algorithm still runs every tick.
