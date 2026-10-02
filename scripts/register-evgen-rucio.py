@@ -152,12 +152,16 @@ def _xrdfs(args, proxy, timeout):
 # files are registered. Other files beside them in a directory, such as the
 # ASCII ``.hepmc`` a sample was converted from, are listed and left out.
 EVGEN_SUFFIX = '.hepmc3.tree.root'
+# Files set aside by the production team live in a subdirectory of this
+# name, at any depth, and are never registered.
+OBSOLETE_DIR = 'obsolete'
 
 
 def list_files(evgen_path, proxy):
     """Every EVGEN file under the path on the door: [(door_path, bytes)],
-    and the files left out: NFS silly-rename remnants (``.nfs*``) and files
-    that are not ``.hepmc3.tree.root``, each counted."""
+    and the files left out: NFS silly-rename remnants (``.nfs*``), files
+    that are not ``.hepmc3.tree.root``, and files under a directory named
+    ``obsolete``, each counted."""
     door_path = XRD_BASE + evgen_path
     try:
         p = _xrdfs(['ls', '-l', '-R', door_path], proxy, LISTING_TIMEOUT)
@@ -167,13 +171,16 @@ def list_files(evgen_path, proxy):
         reason = (p.stderr or p.stdout).strip().splitlines()
         raise DoerError(EXIT_LISTING, 'listing failed: '
                         + (reason[-1] if reason else f'rc={p.returncode}'))
-    files, skipped, other = [], [], []
+    files, skipped, other, obsolete = [], [], [], []
     for line in (p.stdout or '').splitlines():
         parts = line.split(maxsplit=6)
         if len(parts) < 7:
             continue
         flags, _owner, _group, size, _date, _time, path = parts
         if flags.startswith('d'):
+            continue
+        if OBSOLETE_DIR in path[len(door_path):].split('/')[:-1]:
+            obsolete.append(path)
             continue
         if os.path.basename(path).startswith('.nfs'):
             skipped.append(path)
@@ -187,8 +194,9 @@ def list_files(evgen_path, proxy):
             raise DoerError(EXIT_LISTING, f'unparseable listing line: {line!r}')
     if not files:
         raise DoerError(EXIT_LISTING, f'no {EVGEN_SUFFIX} files under {door_path}'
-                        + (f' ({len(other)} other files)' if other else ''))
-    return files, skipped, other
+                        + (f' ({len(other)} other files)' if other else '')
+                        + (f' ({len(obsolete)} under {OBSOLETE_DIR}/)' if obsolete else ''))
+    return files, skipped, other, obsolete
 
 
 def checksums(files, proxy):
@@ -427,12 +435,13 @@ def main(argv):
         proxy, summary['proxy'] = resolve_proxy()
         _log(f'proxy {proxy}: {summary["proxy"]["days_left"]} days left')
 
-        files, skipped, other = list_files(evgen_path, proxy)
+        files, skipped, other, obsolete = list_files(evgen_path, proxy)
         summary.update(files=len(files), bytes=sum(s for _, s in files),
-                       skipped=len(skipped), not_evgen=len(other))
+                       skipped=len(skipped), not_evgen=len(other), obsolete=len(obsolete))
         _log(f'{len(files)} files, {summary["bytes"]} bytes under {XRD_BASE}{evgen_path}'
              + (f' ({len(skipped)} .nfs remnants skipped)' if skipped else '')
-             + (f' ({len(other)} files not {EVGEN_SUFFIX} left out)' if other else ''))
+             + (f' ({len(other)} files not {EVGEN_SUFFIX} left out)' if other else '')
+             + (f' ({len(obsolete)} files under {OBSOLETE_DIR}/ left out)' if obsolete else ''))
 
         if args.events_only:
             # The registration's second step: counts recorded on the DIDs
