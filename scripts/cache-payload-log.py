@@ -44,6 +44,9 @@ KEEP = {"payload.stdout", "payload.stderr", "pilotlog.txt", "pandatracerlog.txt"
 DONE_MARKER = ".done"
 
 
+GHOST = False  # the replica record is PanDA's empty log entry
+
+
 def log(msg):
     print(msg, file=sys.stderr, flush=True)
 
@@ -84,6 +87,11 @@ def resolve_pfn(scope, name):
         if not line:
             continue
         rec = json.loads(line)
+        # PanDA registers a failed job's log AVAILABLE with zero bytes and no
+        # checksum whether or not a file was written (LOG_STAGEOUT_FALLBACK.md);
+        # a rescued log keeps that entry, so the copy is still tried.
+        global GHOST
+        GHOST = not rec.get("bytes") and not rec.get("adler32")
         pfns = rec.get("pfns") or {}
         for url in pfns:                       # prefer the xrootd door
             if url.startswith("root://"):
@@ -126,6 +134,10 @@ def xrdcp(pfn, dest):
                            timeout=XRDCP_TIMEOUT)
     except subprocess.TimeoutExpired:
         fail(f"xrdcp timed out after {XRDCP_TIMEOUT}s")
+    if p.returncode != 0 and GHOST:
+        fail("no log was written for this job: the catalog holds an empty entry "
+             "(0 B, no checksum) with no file behind it. A log held in the stage-out "
+             "bucket is moved there by the hourly log rescue.")
     if p.returncode != 0:
         fail(f"xrdcp failed (rc={p.returncode}): {p.stderr.strip()}")
 
