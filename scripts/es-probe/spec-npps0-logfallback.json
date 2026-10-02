@@ -1,6 +1,6 @@
 {
   "outDS": "group.EIC.logfallback.npps0.%STAMP%",
-  "exec": "echo log-fallback trial payload; hostname; date",
+  "exec": "hostname",
   "site": "BNL_NPPS_GPU",
   "prodSourceLabel": "test",
   "processingType": "canary",
