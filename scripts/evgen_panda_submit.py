@@ -158,6 +158,11 @@ def build_task_params(spec, archive_name):
             'value': f"{spec['outDS']}.${{SN}}.log.tgz",
             'dataset': spec['outDS'] + '_log/',
             'hidden': True,
+            # A log the pilot could not stage out but held in the stage-out
+            # bucket (swf-epicprod docs/LOG_STAGEOUT_FALLBACK.md) is absent
+            # from the pilot's report; the adder then sets it to nooutput
+            # rather than failing a job whose payload registered its output.
+            'allowNoOutput': True,
         },
     }
 
