@@ -161,7 +161,9 @@ def main(argv: list[str] | None = None) -> int:
 
         # Per-alarm email gate. When False, event rows still fire and
         # active/clear still tick — we just don't ship mail.
-        email_enabled = bool(data.get("enabled", True))
+        # Email only when an alarm explicitly says so; emails are off unless
+        # Torre turns one on.
+        email_enabled = bool(data.get("enabled", False))
         send_mail = email_enabled and not args.dry_run
 
         # Bundle buckets: at most ONE email per alarm per tick, listing
