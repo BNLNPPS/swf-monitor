@@ -564,7 +564,25 @@ sudo systemctl status httpd swf-monitor-mcp-asgi swf-panda-bot swf-testbed-bot p
 
 ### SSL/TLS Configuration
 
-The SWF Monitor works with the existing Apache SSL setup. SSL configuration is handled by the system's ssl.conf file, not the swf-monitor specific configuration.
+TLS for the host is set in `/etc/httpd/conf.d/10-pandaserver02.conf`, which
+the swf-monitor repository does not manage. The host certificate is an
+InCommon ACME certificate issued by certbot
+(`/etc/letsencrypt/live/pandaserver02.sdcc.bnl.gov/`, server
+`acme-us.certinext.io`); `/etc/grid-security/hostcert.pem` and `hostkey.pem`
+link to it, and `SSLCertificateChainFile` names certbot's `chain.pem` in the
+same directory, so a renewed certificate and its intermediate change
+together. The chain was once pinned to a fixed InCommon CA 3 file: when the
+certificate was replaced by one issued from CA 4 (2026-10-01) and Apache
+next reloaded, every client that verifies the chain, the MCP endpoint's
+among them, failed with "unable to verify the first certificate" until the
+chain was repointed (2026-10-02, backup beside the file).
+
+certbot here has no renewal schedule and no deploy hook, so a renewed
+certificate reaches Apache only at its next reload. Renewal should run
+`apachectl graceful` as a deploy hook; until then, reload Apache after any
+certificate change and check the served chain with
+`openssl s_client -connect pandaserver02.sdcc.bnl.gov:443` (verify return
+code 0).
 
 ### File Permissions
 
