@@ -239,6 +239,8 @@ STASH_DRAIN_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "stash
 STASH_DRAIN_TIMEOUT = int(os.environ.get("EPICPROD_STASH_DRAIN_TIMEOUT", "1800"))
 LOG_GRANT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "log-grant.py"
 LOG_GRANT_TIMEOUT = int(os.environ.get("EPICPROD_LOG_GRANT_TIMEOUT", "60"))
+LOG_RESCUE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "log-rescue.py"
+LOG_RESCUE_TIMEOUT = int(os.environ.get("EPICPROD_LOG_RESCUE_TIMEOUT", "1800"))
 CONTENT_VALIDATE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "content-validate.py"
 CONTENT_VALIDATE_TIMEOUT = int(os.environ.get("EPICPROD_CONTENT_VALIDATE_TIMEOUT", "1800"))
 # Acceptance of a dataset's content (swf-epicprod docs/EPICPROD_VALIDATION.md,
@@ -395,6 +397,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "segfault_diagnose", "segfault_diagnosis_completed",
                    "report_sweep", "outputs_ingest", "registrar",
                    "content_validate", "content_accept", "stash_drain", "log_grant",
+                   "log_rescue",
                    "node_measure_ingest", "dataset_definitions_sweep",
                    "storage_sweep", "campaign_config_propose",
                    "credential_ping_propose", "certificate_ping_propose",
@@ -1998,6 +2001,55 @@ class EpicProdOpsAgent(BaseAgent):
         self._log_action('log_grant', t0, subject_type='panda_job',
                          subject_key=str(m['pandaid']), sublevel='low', live_default=False,
                          site=str(m['site']))
+
+    def _handle_log_rescue(self, m):
+        """Move held logs to their datasets off the receiver thread — hourly,
+        also directly invokable."""
+        self.run_in_background(
+            self._do_log_rescue, m,
+            dedup_key="log_rescue", label="log_rescue")
+
+    def _do_log_rescue(self, m):
+        """Put each log a pilot held in the stage-out bucket at its queue's
+        log RSE and in its log dataset in BNL Rucio, before the bucket's
+        seven-day expiry (swf-epicprod docs/LOG_STAGEOUT_FALLBACK.md)."""
+        cmd = [sys.executable, str(LOG_RESCUE_SCRIPT)]
+        if m.get('hours'):
+            cmd += ['--hours', str(m['hours'])]
+        if m.get('dry_run'):
+            cmd.append('--dry-run')
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=LOG_RESCUE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(f"PRODOPS log_rescue TIMEOUT after {LOG_RESCUE_TIMEOUT}s")
+            self._log_action('log_rescue', t0, outcome='timeout',
+                             reason=f'timed out after {LOG_RESCUE_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='normal', level=logging.ERROR)
+            return
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  log-rescue: {line}")
+        summary_line = ((p.stdout or '').strip().splitlines() or [''])[-1]
+        try:
+            summary = json.loads(summary_line)
+        except (ValueError, TypeError):
+            summary = {}
+        failed = summary.get('failed') or []
+        if p.returncode != 0:
+            self.logger.error(f"PRODOPS log_rescue FAILED rc={p.returncode}")
+            self._log_action('log_rescue', t0, outcome='error',
+                             reason=summary.get('error') or self._derive_reason(p),
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True, level=logging.ERROR)
+            return
+        self._log_action('log_rescue', t0, outcome='ok' if not failed else 'partial',
+                         reason='; '.join(str(f) for f in failed[:3]),
+                         username=str(m.get('created_by') or ''),
+                         sublevel='low' if not failed else 'normal',
+                         live_default=bool(failed),
+                         held=int(summary.get('held') or 0),
+                         moved=int(summary.get('done') or 0))
 
     def _handle_stash_drain(self, m):
         """Drain the failover stash off the receiver thread — hourly, also
