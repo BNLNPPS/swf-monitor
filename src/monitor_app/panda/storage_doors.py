@@ -74,6 +74,11 @@ def down_windows(hours=24, now=None):
                     extra_data__action='storage_door_verdict')
             .order_by('timestamp')
             .values_list('timestamp', 'extra_data'))
+    # A door found down may have died at any time since the probe before,
+    # one interval earlier: the span opens there. On 2026-10-02 BNL-XRD's
+    # disk filled before the 10:23 probe saw it, and jobs that failed on it
+    # at 10:21 tripped a GREX node as if the node were at fault.
+    lead = timedelta(hours=settings()['interval_h'])
     for stamp, extra in rows:
         extra = extra or {}
         rse = str(extra.get('subject_key') or '')
@@ -82,7 +87,7 @@ def down_windows(hours=24, now=None):
         verdict = str(extra.get('verdict') or '')
         if verdict == 'down' and rse not in opened:
             opened[rse] = {'rse': rse, 'door': str(extra.get('door') or ''),
-                           'start': stamp, 'end': None}
+                           'start': stamp - lead, 'end': None}
         elif verdict != 'down' and rse in opened:
             span = opened.pop(rse)
             span['end'] = stamp
