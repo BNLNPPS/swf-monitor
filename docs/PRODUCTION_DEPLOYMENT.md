@@ -577,10 +577,13 @@ next reloaded, every client that verifies the chain, the MCP endpoint's
 among them, failed with "unable to verify the first certificate" until the
 chain was repointed (2026-10-02, backup beside the file).
 
-certbot here has no renewal schedule and no deploy hook, so a renewed
-certificate reaches Apache only at its next reload. Renewal should run
-`apachectl graceful` as a deploy hook; until then, reload Apache after any
-certificate change and check the served chain with
+certbot here has no renewal schedule. Its deploy hook,
+`/etc/letsencrypt/renewal-hooks/deploy/reload-apache.sh`, runs
+`apachectl configtest && apachectl graceful`, so a certificate renewed
+through certbot reaches Apache at once; one installed by hand still needs a
+reload. The `tls_served_chain` alarm verifies the chain served at this host
+and the other endpoints the agents use every five minutes, as the agents
+verify it, and fires when it does not verify. By hand:
 `openssl s_client -connect pandaserver02.sdcc.bnl.gov:443` (verify return
 code 0).
 
