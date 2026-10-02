@@ -35,9 +35,11 @@ import argparse
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
+import zlib
 from datetime import datetime, timedelta, timezone as dt_timezone
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -127,6 +129,11 @@ def save_state(state):
 
 
 def rucio_clients():
+    # The upload client reads a configuration file even when handed a client;
+    # the ePIC client configuration on CVMFS is the one the pilots use.
+    os.environ.setdefault('RUCIO_CONFIG', '/cvmfs/eic.opensciencegrid.org/rucio-clients/rucio.cfg')
+    os.environ.setdefault('X509_CERT_DIR', '/etc/grid-security/certificates')  # the configuration's ca_cert
+    os.environ.setdefault('X509_USER_PROXY', _op.X509_PROXY)  # the upload path reads the proxy from here
     from rucio.client import Client
     from rucio.client.uploadclient import UploadClient
     client = Client(rucio_host=_op.RUCIO_URL, auth_host=_op.RUCIO_URL, account=_op.RUCIO_ACCOUNT,
@@ -136,15 +143,43 @@ def rucio_clients():
     return client, UploadClient(_client=client)
 
 
-def has_replica(client, scope, lfn):
+def catalog_entry(client, scope, lfn):
+    """The file's replica record, or None when the catalog has no such file.
+
+    PanDA registers the log of a failed job at the queue's log RSE, AVAILABLE
+    with zero bytes and no checksum, whether or not any file was written: a
+    ghost. A record with bytes and a checksum is a real replica.
+    """
     try:
-        for rep in client.list_replicas([{'scope': scope, 'name': lfn}]):
-            if rep.get('states') and 'AVAILABLE' in rep['states'].values():
-                return True
+        for rep in client.list_replicas([{'scope': scope, 'name': lfn}], schemes=['root', 'davs']):
+            return rep
     except Exception as exc:  # DataIdentifierNotFound: not yet registered
         if 'not found' not in str(exc).lower():
             raise
-    return False
+    return None
+
+
+def fill_ghost(client, scope, lfn, rep, path):
+    """Write the log to the path its ghost replica names and record its size and checksum."""
+    pfns = [p for pfns in (rep.get('rses') or {}).values() for p in pfns]
+    pfn = next((p for p in pfns if p.startswith('root://')), None)
+    if pfn is None and pfns:  # a davs door on an xrootd port speaks root too
+        pfn = 'root://' + pfns[0].split('://', 1)[1]
+    if pfn is None:
+        raise RuntimeError(f'ghost {scope}:{lfn} names no replica path')
+    proc = subprocess.run(['xrdcp', '--nopbar', path, pfn], capture_output=True, text=True, timeout=600)
+    if proc.returncode != 0:
+        raise RuntimeError(f'xrdcp to {pfn} failed: {(proc.stderr or proc.stdout).strip()[:300]}')
+    size = os.path.getsize(path)
+    with open(path, 'rb') as fp:
+        adler = f'{zlib.adler32(fp.read()) & 0xffffffff:08x}'
+    note = ''
+    for key, value in (('bytes', size), ('adler32', adler)):
+        try:
+            client.set_metadata(scope=scope, name=lfn, key=key, value=value)
+        except Exception as exc:
+            note += f'; {key} not recorded: {type(exc).__name__}: {str(exc)[:120]}'
+    return f'filled ghost at {pfn} ({size} B, ad:{adler}){note}'
 
 
 def ensure_open(client, scope, dataset):
@@ -162,13 +197,17 @@ def rescue(client, uploader, s3, entry, dry_run):
     key = f'logs/{site}/{dataset}/{lfn}'
     if not rse or rse == BUCKET_STORAGE:
         return 'bucket', f'{site} keeps its logs in the bucket'
-    if has_replica(client, scope, lfn):
+    rep = catalog_entry(client, scope, lfn)
+    if rep and rep.get('bytes') and rep.get('adler32'):
         return 'done', f'{scope}:{lfn} already at an RSE'
     if dry_run:
-        return 'dry_run', f'would move {key} to {rse} and attach to {scope}:{dataset}'
+        what = 'fill the ghost replica of' if rep else f'move to {rse} and attach to {scope}:{dataset}'
+        return 'dry_run', f'would {what} {key}'
     with tempfile.TemporaryDirectory(prefix='log-rescue-') as tmp:
         path = os.path.join(tmp, lfn)
         s3.download_file(BUCKET, key, path)
+        if rep:
+            return 'done', fill_ghost(client, scope, lfn, rep, path)
         ensure_open(client, scope, dataset)
         uploader.upload([{'path': path, 'rse': rse, 'did_scope': scope, 'did_name': lfn,
                           'guid': guid, 'dataset_scope': scope, 'dataset_name': dataset,
