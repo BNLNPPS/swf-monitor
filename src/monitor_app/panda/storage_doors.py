@@ -25,7 +25,7 @@ defaults on first read so every knob is visible on the System page.
 """
 import logging
 import os
-from datetime import timedelta
+from datetime import timedelta, timezone as dt_timezone
 
 from django.utils import timezone
 
@@ -110,6 +110,10 @@ def set_aside_door(rows, spans, parse=None):
     for row in rows:
         error = str(row.get('error') or '')
         when = parse(str(row.get('endtime') or '')) if row.get('endtime') else None
+        if when is not None and when.tzinfo is None:
+            # PanDA's times are naive UTC; the spans come from the action
+            # stream, aware.
+            when = when.replace(tzinfo=dt_timezone.utc)
         if (row.get('jobstatus') == 'failed' and error in REGISTRATION_ERRORS
                 and when is not None
                 and any(s['start'] <= when and (s['end'] is None or when <= s['end'])
