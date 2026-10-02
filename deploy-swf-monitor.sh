@@ -326,6 +326,7 @@ fi
 # directly (systemctl kill) is never used: it leaves no stop job and therefore no
 # timeout, and on 2026-09-07 that left the agent wedged in a drain with no bound
 # at all. The previous release stays on disk meanwhile (the last five are kept).
+AGENTS_RESTARTED_AT=$(date '+%Y-%m-%d %H:%M:%S')
 if systemctl is-enabled epicprod-ops-agent.service >/dev/null 2>&1; then
     OPS_PID=$(systemctl show -p MainPID --value epicprod-ops-agent.service 2>/dev/null || echo 0)
     OPS_STATE=$(curl -k -s "https://localhost/swf-monitor/api/systemagents/" \
@@ -350,6 +351,32 @@ if systemctl is-enabled canary-agent.service >/dev/null 2>&1; then
     log "Restarting canary agent (canary-agent) to pick up new code/env..."
     systemctl restart canary-agent.service
 fi
+
+# A restarted agent must reach READY. On 2026-10-02 the prod-ops agent could
+# not reach the monitor over TLS after a deploy, restart-looped for 19
+# minutes, and an operator's pause batch was lost, while the deploy reported
+# success on the web health check alone. Wait up to two minutes for each
+# restarted agent's "state -> READY" line; fail the deploy loudly otherwise.
+AGENT_FAILURES=""
+for unit in epicprod-ops-agent canary-agent; do
+    systemctl is-enabled "$unit.service" >/dev/null 2>&1 || continue
+    ready=false
+    for _ in $(seq 1 24); do
+        if journalctl -u "$unit.service" --since "$AGENTS_RESTARTED_AT" --no-pager 2>/dev/null \
+                | grep -q "state -> READY"; then
+            ready=true
+            break
+        fi
+        sleep 5
+    done
+    if $ready; then
+        log "✅ $unit reached READY"
+    else
+        tls=$(journalctl -u "$unit.service" --since "$AGENTS_RESTARTED_AT" --no-pager 2>/dev/null | grep -c SSLError || true)
+        log "❌ ERROR: $unit did not reach READY within two minutes (SSLError lines: $tls); see journalctl -u $unit"
+        AGENT_FAILURES="$AGENT_FAILURES $unit"
+    fi
+done
 
 # Detect bot code changes before health check (bots restart after)
 PREV_RELEASE=$(ls -1t "$DEPLOY_ROOT/releases" | sed -n '2p')
@@ -433,6 +460,11 @@ log "Cleaning up old releases..."
 cd "$DEPLOY_ROOT/releases"
 ls -1t | tail -n +6 | xargs rm -rf 2>/dev/null || true
 
+if [ -n "$AGENT_FAILURES" ]; then
+    log "❌ DEPLOYMENT INCOMPLETE: agents not running:$AGENT_FAILURES"
+    log "Active release: $(basename "$RELEASE_DIR")"
+    exit 2
+fi
 log "Deployment completed successfully!"
 log "Active release: $(basename "$RELEASE_DIR")"
 log "Git commit: $(cd $RELEASE_DIR && git rev-parse --short HEAD)"
