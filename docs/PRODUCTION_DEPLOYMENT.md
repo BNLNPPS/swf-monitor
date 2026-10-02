@@ -587,6 +587,26 @@ verify it, and fires when it does not verify. By hand:
 `openssl s_client -connect pandaserver02.sdcc.bnl.gov:443` (verify return
 code 0).
 
+The PanDA server on pandaserver01 (port 25443) carries the same kind of
+certificate and failed the same way. Its httpd runs as `atlpan`, which cannot
+read `/etc/letsencrypt/live`, so it reads copies in `/opt/panda/etc/certs`
+(`hostcert.pem`, `hostkey.pem`, `chain.pem`, owned by `atlpan`) through
+`/opt/panda/etc/panda/panda_server-httpd.conf`. On 2026-10-02 the server was
+restarted at 14:22 ET on the CA 4 certificate while that file still named the
+CA 3 intermediate, and pandaharvester01, whose own trust bundle
+(`/etc/pki/tls/certs/CA-bundles.pem`, its `ca_cert`) held only the CA 3 path,
+fetched no jobs and sent no updates for any queue it serves until 18:43. The
+server now serves certbot's chain from that copy, and the harvester's bundle
+also trusts the emSign root that the chain ends in (backups beside both files,
+dated 2026-10-02). The certbot deploy hook
+`/etc/letsencrypt/renewal-hooks/deploy/panda-httpd.sh` copies a renewed
+certificate, key and chain there (keeping the old ones in a dated backup
+directory), tests the configuration as `atlpan`, and reloads gracefully; a
+failed test restores the old files and does not reload. Never point that
+configuration at `/etc/letsencrypt/live`: `httpd -t` passes as root, and the
+graceful reload, which runs as `atlpan`, then cannot read the file and the
+server exits.
+
 ### File Permissions
 
 ```bash
