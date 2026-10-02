@@ -159,6 +159,11 @@ def catalog_entry(client, scope, lfn):
     return None
 
 
+class Occupied(Exception):
+    """The ghost's path already holds a file: a log of another attempt under
+    the same name (PanDA reuses a log name across a job's attempts)."""
+
+
 def fill_ghost(client, scope, lfn, rep, path):
     """Write the log to the path its ghost replica names and record its size and checksum."""
     pfns = [p for pfns in (rep.get('rses') or {}).values() for p in pfns]
@@ -167,7 +172,20 @@ def fill_ghost(client, scope, lfn, rep, path):
         pfn = 'root://' + pfns[0].split('://', 1)[1]
     if pfn is None:
         raise RuntimeError(f'ghost {scope}:{lfn} names no replica path')
-    proc = subprocess.run(['xrdcp', '--nopbar', path, pfn], capture_output=True, text=True, timeout=600)
+    # A JLab door admits the JLab production proxy, not the BNL one, and its
+    # TLS refuses a proxy file readable by others, as the agent's BNL copy is
+    # (the payload-log fetch routes the same way).
+    env = dict(os.environ)
+    if '.jlab.org' in pfn.split('/')[2]:
+        jlab_proxy = os.environ.get('EVGEN_X509_PROXY', '')
+        if not jlab_proxy:
+            raise RuntimeError(f'EVGEN_X509_PROXY is not set; the JLab door at {pfn} needs it')
+        env['X509_USER_PROXY'] = jlab_proxy
+    proc = subprocess.run(['xrdcp', '--nopbar', path, pfn], capture_output=True, text=True,
+                          timeout=600, env=env)
+    if proc.returncode != 0 and 'file exists' in (proc.stderr or proc.stdout).lower():
+        raise Occupied(f'{pfn} already holds a file; another attempt wrote this log name, '
+                       'and it is never overwritten. The held copy stays in the bucket until it expires.')
     if proc.returncode != 0:
         raise RuntimeError(f'xrdcp to {pfn} failed: {(proc.stderr or proc.stdout).strip()[:300]}')
     size = os.path.getsize(path)
@@ -207,7 +225,10 @@ def rescue(client, uploader, s3, entry, dry_run):
         path = os.path.join(tmp, lfn)
         s3.download_file(BUCKET, key, path)
         if rep:
-            return 'done', fill_ghost(client, scope, lfn, rep, path)
+            try:
+                return 'done', fill_ghost(client, scope, lfn, rep, path)
+            except Occupied as exc:
+                return 'occupied', str(exc)
         ensure_open(client, scope, dataset)
         uploader.upload([{'path': path, 'rse': rse, 'did_scope': scope, 'did_name': lfn,
                           'guid': guid, 'dataset_scope': scope, 'dataset_name': dataset,
@@ -224,7 +245,7 @@ def main():
 
     since = datetime.now(dt_timezone.utc) - timedelta(hours=args.hours)
     entries = held_logs(since.replace(tzinfo=None), args.pandaid)
-    summary = {'held': len(entries), 'done': 0, 'bucket': 0, 'failed': [], 'skipped': 0}
+    summary = {'held': len(entries), 'done': 0, 'bucket': 0, 'occupied': 0, 'failed': [], 'skipped': 0}
     if not entries:
         print(json.dumps(summary))
         return 0
@@ -243,7 +264,7 @@ def main():
     for entry in entries:
         pandaid = str(entry[0])
         record = state.get(pandaid, {})
-        if record.get('outcome') in ('done', 'bucket'):
+        if record.get('outcome') in ('done', 'bucket', 'occupied'):
             summary[record['outcome']] += 1
             continue
         if record.get('attempts', 0) >= MAX_ATTEMPTS:
