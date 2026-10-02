@@ -237,6 +237,8 @@ SEGFAULT_DIAGNOSIS_ENFORCE_SCRIPT = Path(__file__).resolve().parent.parent / "sc
 # retry — one gentle attempt per job, then bounded attempts from one process.
 STASH_DRAIN_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "stash-drain.py"
 STASH_DRAIN_TIMEOUT = int(os.environ.get("EPICPROD_STASH_DRAIN_TIMEOUT", "1800"))
+LOG_GRANT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "log-grant.py"
+LOG_GRANT_TIMEOUT = int(os.environ.get("EPICPROD_LOG_GRANT_TIMEOUT", "60"))
 CONTENT_VALIDATE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "content-validate.py"
 CONTENT_VALIDATE_TIMEOUT = int(os.environ.get("EPICPROD_CONTENT_VALIDATE_TIMEOUT", "1800"))
 # Acceptance of a dataset's content (swf-epicprod docs/EPICPROD_VALIDATION.md,
@@ -392,7 +394,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "segfault_inventory", "segfault_dig", "segfault_study", "segfault_notice", "segfault_package",
                    "segfault_diagnose", "segfault_diagnosis_completed",
                    "report_sweep", "outputs_ingest", "registrar",
-                   "content_validate", "content_accept", "stash_drain",
+                   "content_validate", "content_accept", "stash_drain", "log_grant",
                    "node_measure_ingest", "dataset_definitions_sweep",
                    "storage_sweep", "campaign_config_propose",
                    "credential_ping_propose", "certificate_ping_propose",
@@ -1953,6 +1955,49 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              sublevel='low', live_default=False,
                              summary=((p.stdout or '').splitlines() or [''])[-1])
+
+    def _handle_log_grant(self, m):
+        """Sign a log upload grant off the receiver thread. Deduped per job:
+        a pilot polls the endpoint while the grant is signed."""
+        missing = [k for k in ("pandaid", "lfn", "site", "dataset") if not m.get(k)]
+        if missing:
+            self.logger.error(f"PRODOPS log_grant: missing fields {missing}")
+            return
+        self.run_in_background(
+            self._do_log_grant, m,
+            dedup_key=f"log_grant:{m['pandaid']}",
+            label=f"log_grant pandaid={m['pandaid']}")
+
+    def _do_log_grant(self, m):
+        """A presigned POST for one job's log in the stage-out bucket, for a
+        pilot whose log transfer failed (swf-epicprod
+        docs/LOG_STAGEOUT_FALLBACK.md). The endpoint checked the job against
+        the PanDA record and serves the grant from the shared cache."""
+        cmd = [sys.executable, str(LOG_GRANT_SCRIPT),
+               "--pandaid", str(m["pandaid"]), "--lfn", str(m["lfn"]),
+               "--site", str(m["site"]), "--dataset", str(m["dataset"])]
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=LOG_GRANT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(f"PRODOPS log_grant TIMEOUT after {LOG_GRANT_TIMEOUT}s pandaid={m['pandaid']}")
+            self._log_action('log_grant', t0, outcome='timeout',
+                             reason=f'timed out after {LOG_GRANT_TIMEOUT}s',
+                             subject_type='panda_job', subject_key=str(m['pandaid']),
+                             sublevel='normal', level=logging.ERROR)
+            return
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  log-grant: {line}")
+        if p.returncode != 0:
+            reason = self._derive_reason(p)
+            self.logger.error(f"PRODOPS log_grant FAILED rc={p.returncode} pandaid={m['pandaid']}")
+            self._log_action('log_grant', t0, outcome='error', reason=reason,
+                             subject_type='panda_job', subject_key=str(m['pandaid']),
+                             sublevel='normal', level=logging.ERROR)
+            return
+        self._log_action('log_grant', t0, subject_type='panda_job',
+                         subject_key=str(m['pandaid']), sublevel='low', live_default=False,
+                         site=str(m['site']))
 
     def _handle_stash_drain(self, m):
         """Drain the failover stash off the receiver thread — hourly, also
