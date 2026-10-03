@@ -31,9 +31,12 @@ PARAMS = {
     "grace_hours": 1,
     # Service identities swf-remote presents over the tunnel. They are
     # auto-created as accounts here and hold no authority by design; the
-    # list is swf-remote's ACCOUNT_USERNAME_BLACKLIST.
+    # list is swf-remote's ACCOUNT_USERNAME_BLACKLIST. The host reporters'
+    # token accounts carry no person either; those created before the
+    # check's start date are outside its window.
     "service_accounts": ["swf-remote-authority", "swf-remote-proxy",
-                         "swf-remote-sync", "swf-sweeper", "swf-alarms"],
+                         "swf-remote-sync", "swf-sweeper", "swf-alarms",
+                         "pandaharvester01-reporter"],
 }
 
 FAILED_QUERY = """
