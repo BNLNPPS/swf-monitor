@@ -25,6 +25,8 @@
         <span class="text-muted mx-1">&middot;</span>
         {% if es %}<a href="#event-service">Event Service</a>
         <span class="text-muted mx-1">&middot;</span>{% endif %}
+        {% if harvester %}<a href="#job-fetching">Job fetching</a>
+        <span class="text-muted mx-1">&middot;</span>{% endif %}
         <a href="#submission">Submission</a>
         <span class="text-muted mx-1">&middot;</span>
         <a href="#schedconfig">Declared configuration</a>
@@ -240,6 +242,46 @@
                     <td>{{ es.events_per_job_hour }} events an hour of job wall, over {{ es.job_wall_h }} job-hours</td></tr>
                 {% endif %}
                 {% endif %}
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if harvester %}
+    <div class="card mb-3" id="job-fetching">
+        <div class="card-header queue-section-header">
+            <strong>Job fetching</strong>
+            <span class="ms-2">reported by {{ harvester.host }}
+                <span data-relative-time="{{ harvester.reported_at|date:'c' }}"></span>,
+                covering the {{ harvester.interval_seconds|default:"?" }} s before it</span>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-sm table-striped mb-0">
+                <tr><td class="fw-bold" style="width:24%">Last fetch</td>
+                    <td>{% if harvester.fetch.last %}
+                        {{ harvester.fetch.last.at }} (UTC): asked for {{ harvester.fetch.last.asked|default:"?" }},
+                        got {{ harvester.fetch.last.got }}
+                        <span class="{% if harvester.fetch.last.error_class %}text-danger fw-bold{% endif %}"
+                              style="word-break: break-word">({{ harvester.fetch.last.outcome }})</span>
+                        {% else %}none in the interval{% endif %}</td></tr>
+                <tr><td class="fw-bold">Fetches in the interval</td>
+                    <td>{{ harvester.fetch.attempts|default:"0" }} attempts,
+                        {{ harvester.fetch.jobs_got|default:"0" }} jobs got,
+                        <span class="{% if harvester.fetch.failed %}text-danger fw-bold{% endif %}">{{ harvester.fetch.failed|default:"0" }} failed</span>
+                        {% for cls, n in harvester.fetch.errors.items %}{% if forloop.first %}({% endif %}{{ cls }} {{ n }}{% if forloop.last %}){% else %}, {% endif %}{% endfor %}</td></tr>
+                <tr><td class="fw-bold">Workers</td>
+                    <td>{{ harvester.submit.workers_submitted|default:"0" }} submitted in the interval;
+                        {% if harvester.submit.workers_status %}
+                        last read {{ harvester.submit.workers_status.nRunning }} running,
+                        {{ harvester.submit.workers_status.nQueue }} queued,
+                        {{ harvester.submit.workers_status.nNewWorkers }} new allowed
+                        {% endif %}</td></tr>
+                {% for daemon, calls in harvester.failed_calls.items %}
+                <tr><td class="fw-bold text-danger">Failed calls to PanDA ({{ daemon }})</td>
+                    <td style="word-break: break-word">{{ calls.failed }} in the interval, all queues:
+                        {% for key, n in calls.by_call_and_class.items %}{% if not forloop.first %}, {% endif %}{{ key }} {{ n }}{% endfor %}
+                        {% if calls.last %}<br><span class="text-muted">last: {{ calls.last.line }}</span>{% endif %}</td></tr>
+                {% endfor %}
             </table>
         </div>
     </div>

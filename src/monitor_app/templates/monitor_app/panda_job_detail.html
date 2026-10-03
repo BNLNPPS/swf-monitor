@@ -52,6 +52,11 @@
                         <tr><td><strong>PanDA ID</strong></td><td>{{ job.pandaid }} {% copy_btn job.pandaid %}</td></tr>
                         {% if job.jobname %}<tr><td><strong>Job Name</strong></td><td style="word-break:break-all;">{{ job.jobname }}</td></tr>{% endif %}
                         <tr><td><strong>Status</strong></td><td class="{{ job.jobstatus|state_class }}" title="{{ job.jobstatus|state_title }}">{{ job.jobstatus }}</td></tr>
+                        {% if harvester_fetch %}<tr><td><strong>Harvester fetch</strong></td><td style="word-break:break-word;">
+                            {% if harvester_fetch.fetch.last %}{{ harvester_fetch.host }} last asked PanDA for {{ job.computingsite }} jobs at {{ harvester_fetch.fetch.last.at }} (UTC):
+                            got {{ harvester_fetch.fetch.last.got }} <span class="{% if harvester_fetch.fetch.last.error_class %}text-danger fw-bold{% endif %}">({{ harvester_fetch.fetch.last.outcome }})</span>;
+                            {{ harvester_fetch.fetch.failed|default:"0" }} of {{ harvester_fetch.fetch.attempts|default:"0" }} fetches failed in the interval{% else %}{{ harvester_fetch.host }} recorded no fetch for {{ job.computingsite }} in its last interval{% endif %}
+                            <span class="text-muted">(reported <span data-relative-time="{{ harvester_fetch.reported_at|date:'c' }}"></span>; <a href="{% url 'monitor_app:epic_queue_detail' job.computingsite %}#job-fetching">queue</a>)</span></td></tr>{% endif %}
                         {% if epicprod_diagnosis.phase %}<tr><td><strong>ePIC Phase</strong></td><td>{{ epicprod_diagnosis.phase }}</td></tr>{% endif %}
                         {% if epicprod_diagnosis.failure_summary %}<tr><td><strong>ePIC Failure</strong></td><td class="text-danger" style="word-break:break-word;">{{ epicprod_diagnosis.failure_summary }}</td></tr>{% endif %}
                         {% if job.jobsubstatus %}<tr><td><strong>Substatus</strong></td><td>{{ job.jobsubstatus }}</td></tr>{% endif %}

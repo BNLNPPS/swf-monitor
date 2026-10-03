@@ -1167,6 +1167,13 @@ def panda_job_detail(request, pandaid):
         job['transformation_view_url'] = _panda_view_text_url(trf)
     if job.get('jeditaskid'):
         data['pcs_task'] = _pcs_task_for_panda_task(data.get('task') or job)
+    # A job waiting to be fetched has no worker and no worker logs; why it
+    # waits is the harvester's last fetch for its queue.
+    if job.get('jobstatus') in ('activated', 'defined', 'assigned') and job.get('computingsite'):
+        try:
+            data['harvester_fetch'] = _reported_harvester(job['computingsite'])
+        except Exception as e:                               # noqa: BLE001
+            logger.error('harvester fetch reading failed for job %s: %s', pandaid, e)
     data['job_record_items'] = [
         {'name': key, 'value': '' if value is None else value}
         for key, value in sorted((data.get('job_record') or {}).items())
@@ -2620,6 +2627,38 @@ def _reported_submission(queue_name):
     }
 
 
+HARVESTER_HOSTS = ('pandaharvester01',)
+
+
+def _reported_harvester(queue_name):
+    """How one queue gets work, as its harvester host reports it: the last
+    job fetch and its outcome, the interval's fetches and workers, and the
+    failed calls to the PanDA server (docs/HARVESTER_REPORTER.md).
+
+    None for a queue no reporting harvester serves, so the page shows
+    nothing rather than an empty card."""
+    from ..host_reports import latest
+    for host in HARVESTER_HOSTS:
+        report = latest(host) or {}
+        record = report.get('record') or {}
+        fetch = ((record.get('fetching') or {}).get('queues') or {}).get(queue_name)
+        submit = ((record.get('submission') or {}).get('queues') or {}).get(queue_name)
+        if not isinstance(fetch, dict) and not isinstance(submit, dict):
+            continue
+        calls = record.get('failed_calls') or {}
+        return {
+            'host': host,
+            'reported_at': report.get('reported_at'),
+            'age_seconds': report.get('age_seconds'),
+            'interval_seconds': (record.get('interval') or {}).get('seconds'),
+            'fetch': fetch or {},
+            'submit': submit or {},
+            'failed_calls': {d: v for d, v in calls.items()
+                             if isinstance(v, dict) and v.get('failed')},
+        }
+    return None
+
+
 def _batch_knowledge():
     """The batch-record knowledge base as the learning pass last built it.
 
@@ -2907,6 +2946,9 @@ def epic_queue_detail(request, queue_name):
         'observed': _with_measurements(_queue_observed_product(queue_name), queue_name),
         'declines_days': SPARK_SPAN_DAYS,
         'submission': _reported_submission(queue_name),
+        # How the harvester fetches this queue's jobs, from its host
+        # reporter's stored record (docs/HARVESTER_REPORTER.md).
+        'harvester': _reported_harvester(queue_name),
         # How full the batch pool this queue's workers wait in is, and
         # how deep the queue ahead of them; from the pool reporter's
         # stored record, never a collector call in the render.

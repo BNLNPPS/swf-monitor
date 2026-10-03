@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # `bnl-scdf` is a pool rather than a host: the pool reporter runs here
 # and reports what its collector answers (docs/POOL_REPORTER.md), which
 # is the same kind of record from the same kind of reporter.
-REPORTING_HOSTS = {'osgsub01', 'pandaserver01', 'bnl-scdf'}
+REPORTING_HOSTS = {'osgsub01', 'pandaserver01', 'bnl-scdf', 'pandaharvester01'}
 
 # A record is a summary, not a payload. Anything larger is a reporter
 # defect and is refused with its size named, rather than stored.
