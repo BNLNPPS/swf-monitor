@@ -85,6 +85,8 @@ urlpatterns = [
          name='panda-task-operation-update'),
     path('panda/jobs/', panda_api.jobs_list, name='panda-api-jobs-list'),
     path('panda/activity/', panda_api.activity, name='panda-api-activity'),
+    path('panda/harvester-instances/', panda_api.harvester_instances,
+         name='panda-api-harvester-instances'),
     path('panda/seconds-per-event/', panda_api.seconds_per_event, name='panda-api-seconds-per-event'),
     path('users/', users_list, name='users-list'),
     # Who may act on the system, written by swf-remote at sign-in

@@ -339,6 +339,18 @@ def seconds_per_event(request):
 @api_view(['GET'])
 @authentication_classes(_AUTH)
 @permission_classes([AllowAny])
+def harvester_instances(request):
+    """GET /api/panda/harvester-instances/ — each harvester instance and how
+    long ago it last reached the PanDA server."""
+    result = queries.harvester_instances()
+    if 'error' in result:
+        return Response(result, status=http_status.HTTP_500_INTERNAL_SERVER_ERROR)
+    return Response(result)
+
+
+@api_view(['GET'])
+@authentication_classes(_AUTH)
+@permission_classes([AllowAny])
 def activity(request):
     """GET /api/panda/activity/ — aggregate counts by task and job status.
 

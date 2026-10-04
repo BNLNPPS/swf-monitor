@@ -259,6 +259,30 @@ def _aggregate_effective_user_counts(rows):
     return sorted(counts.items(), key=lambda item: item[1], reverse=True)
 
 
+def harvester_instances():
+    """Every harvester instance PanDA knows, with the time it last reached
+    the server (``harvester_instances.lastupdate``, written on each of its
+    calls) and that age in seconds. A harvester that cannot reach the server
+    stops advancing it, whatever the cause."""
+    sql = f"""
+        SELECT "harvester_id", "hostname", "sw_version", "lastupdate",
+               EXTRACT(EPOCH FROM (now() AT TIME ZONE 'UTC') - "lastupdate") AS age_s
+        FROM "{PANDA_SCHEMA}"."harvester_instances"
+        ORDER BY "harvester_id"
+    """
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(sql)
+            columns = [col[0] for col in cursor.description]
+            rows = [row_to_dict(row, columns) for row in cursor.fetchall()]
+    except Exception as e:
+        logger.error("harvester_instances failed: %s", e)
+        return {'error': str(e)}
+    for row in rows:
+        row['age_s'] = None if row.get('age_s') is None else int(row['age_s'])
+    return {'instances': rows}
+
+
 def _get_task_record(jeditaskid):
     sql = f"""
         SELECT *

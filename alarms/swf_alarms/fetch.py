@@ -61,3 +61,6 @@ class Client:
 
     def activity(self, *, days: int = 1) -> dict:
         return self._get("/api/panda/activity/", {"days": days})
+
+    def harvester_instances(self) -> dict:
+        return self._get("/api/panda/harvester-instances/")
