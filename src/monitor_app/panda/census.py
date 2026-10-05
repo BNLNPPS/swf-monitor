@@ -28,8 +28,13 @@ from .constants import PANDA_SCHEMA
 
 logger = logging.getLogger(__name__)
 
-NOT_STARTED = ('defined', 'waiting', 'assigned', 'activated', 'sent', 'starting')
-RUNNING = ('running',)
+# A starting job is on a slot: a job is recorded running late and works
+# for most of its life as starting (2026-10-05, median of the last 200
+# finished: 87 of 115 min at BNL_OSG_EPIC_PROD_1, 4.9 of 5.1 min at
+# UM_GREX_PanDA_1), so it counts as running, as in the ePIC job
+# throttler (swf-epicprod swf_epicprod/jedi/epic_job_throttler.py).
+NOT_STARTED = ('defined', 'waiting', 'assigned', 'activated', 'sent')
+RUNNING = ('running', 'starting')
 FINISHING = ('holding', 'transferring', 'merging')
 CALIBRATION_DAYS = 14
 GATE_HOURS = 6
@@ -147,7 +152,7 @@ def _calibration():
             UNION ALL
             SELECT "computingsite", "starttime", 1
             FROM "{PANDA_SCHEMA}"."jobsactive4"
-            WHERE "jobstatus" = 'running' AND "starttime" IS NOT NULL
+            WHERE "jobstatus" IN ('running', 'starting') AND "starttime" IS NOT NULL
         )
         SELECT s, MAX(run) FROM (
             SELECT s, SUM(d) OVER (PARTITION BY s ORDER BY t, d ROWS UNBOUNDED PRECEDING) AS run
