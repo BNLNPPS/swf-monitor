@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # `osgsub01-harvester` is the harvester reporter on osgsub01, whose own key
 # belongs to the OSG submit reporter (docs/HARVESTER_REPORTER.md).
 REPORTING_HOSTS = {'osgsub01', 'pandaserver01', 'bnl-scdf', 'pandaharvester01',
-                   'osgsub01-harvester'}
+                   'pandaharvester02', 'osgsub01-harvester'}
 
 # A record is a summary, not a payload. Anything larger is a reporter
 # defect and is refused with its size named, rather than stored.

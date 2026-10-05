@@ -1,6 +1,6 @@
 # Harvester host reporter
 
-A reporter on each harvester host we can reach (pandaharvester01, osgsub01) delivers to swf-monitor
+A reporter on each harvester host (pandaharvester01, pandaharvester02, osgsub01) delivers to swf-monitor
 what only that host knows about how its queues get work: when the harvester
 last asked PanDA for jobs for each queue, how many it asked for and got, and
 why it got none; how many workers it submitted and for which jobs; and every
@@ -83,9 +83,9 @@ when the harvester last asked, and what it got.
    (`--report-as osgsub01-harvester`), since `osgsub01` is the OSG submit
    reporter's key.
 
-pandaharvester02 runs a third harvester instance, operated by PanDA
-operations; the reporter runs there once its database read access is
-granted.
+The reporter also runs on pandaharvester02, the third harvester
+instance, under its own host key; everything it reads there is readable
+by the account.
 
 Verified on 2026-10-02 for the account (`wenauseic`, group `eic`): the
 harvester logs are world-readable, cron is permitted, the host's `python3`
