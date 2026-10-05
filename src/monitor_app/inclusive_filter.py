@@ -19,7 +19,9 @@ with ``n``, the same syntax, pairs a row must ALL carry (an intersection,
 what a count on another page means); clicks widen within that frame and
 clear all drops it. A page that had one parameter per facet names them
 in ``legacy``; those meant an intersection and are read into ``n``, so
-old links open exactly what they opened before.
+old links open exactly what they opened before. The Match control
+switches the selections between any (the union, the default) and all
+(``match=all``, the intersection).
 
 Usage, on a view whose rows are plain mappings::
 
@@ -74,19 +76,30 @@ SEARCH_PARAM = 'q'
 # name an intersection (the completion panel's cells, the former
 # one-per-facet links). Clicks on the page add to f, never to n.
 NARROW_PARAM = 'n'
+# The match mode: ``any`` (the default, absent from the URL), a row shows
+# when it carries any selection; ``all``, only when it carries every one.
+MATCH_PARAM = 'match'
+MATCH_ANY = 'any'
+MATCH_ALL = 'all'
 
 
 class InclusiveFilter:
-    """The selections in ``query`` (``f``, a union), a narrowing frame
-    (``n``, an intersection: every pair must hold), and a free-text
-    search (``q``), applied in the browser over each row: a row shows when
-    it carries every narrowing pair, matches any selection (or none is
-    made), and contains the search text. A page's former one-per-facet
-    parameters meant an intersection, so they are read into the frame."""
+    """The selections in ``query`` (``f``), matched as a union or, with
+    ``match=all``, as an intersection; a narrowing frame (``n``, an
+    intersection: every pair must hold); and a free-text search (``q``),
+    applied in the browser over each row: a row shows when it carries
+    every narrowing pair, matches any selection (every selection under
+    ``match=all``; or none is made), and contains the search text. A
+    page's former one-per-facet parameters meant an intersection, so they
+    are read into the frame. ``noun`` names what a row is on the page
+    ("configurations"), for the text the include shows."""
 
-    def __init__(self, query, param=PARAM, legacy=None):
+    def __init__(self, query, param=PARAM, legacy=None, noun='rows'):
         self.param = param
         self.legacy = dict(legacy or {})
+        self.noun = noun
+        self.match = (MATCH_ALL if query and (query.get(MATCH_PARAM) or '').strip() == MATCH_ALL
+                      else MATCH_ANY)
         self.search = ((query.get(SEARCH_PARAM) or '').strip()
                        if query else '')
         self.selections = []
@@ -137,6 +150,8 @@ class InclusiveFilter:
             out[NARROW_PARAM] = self.encode(self.narrow)
         if self.selections:
             out[self.param] = self.encode()
+            if self.match == MATCH_ALL:
+                out[MATCH_PARAM] = MATCH_ALL
         return out
 
     def _wanted(self):
@@ -147,7 +162,7 @@ class InclusiveFilter:
 
     def matches(self, row, facets):
         """Whether the row carries every narrowing pair and ANY selected
-        value (or none is made)."""
+        value (EVERY selected value under ``match=all``; or none is made)."""
         by_key = {f.key: f for f in facets}
         for key, value in self.narrow:
             facet = by_key.get(key)
@@ -155,6 +170,9 @@ class InclusiveFilter:
                 return False
         if not self.selections:
             return True
+        if self.match == MATCH_ALL:
+            return all(by_key.get(key) is not None and value in by_key[key].values(row)
+                       for key, value in self.selections)
         for key, values in self._wanted().items():
             facet = by_key.get(key)
             if facet is not None and values & set(facet.values(row)):
@@ -162,8 +180,8 @@ class InclusiveFilter:
         return False
 
     def apply(self, rows, facets):
-        """The rows within the frame matching ANY selection; all rows
-        when nothing is in force."""
+        """The rows within the frame matching ANY selection (EVERY one
+        under ``match=all``); all rows when nothing is in force."""
         if not self.active:
             return list(rows)
         return [row for row in rows if self.matches(row, facets)]
@@ -192,19 +210,26 @@ class InclusiveFilter:
             shown += 0 if row['if_hidden'] else 1
         return shown
 
-    def _url(self, request, selections, narrow=None):
+    def _url(self, request, selections, narrow=None, match=None):
         params = request.GET.copy()
         for legacy_param in self.legacy.values():
             params.pop(legacy_param, None)
         params.pop(self.param, None)
         params.pop(NARROW_PARAM, None)
+        params.pop(MATCH_PARAM, None)
         narrow = self.narrow if narrow is None else narrow
+        match = self.match if match is None else match
         if narrow:
             params[NARROW_PARAM] = self.encode(narrow)
         if selections:
             params[self.param] = self.encode(selections)
+        if match == MATCH_ALL:
+            params[MATCH_PARAM] = MATCH_ALL
         encoded = params.urlencode()
         return f'{request.path}?{encoded}' if encoded else request.path
+
+    def match_url(self, request, match):
+        return self._url(request, self.selections, match=match)
 
     def toggle_url(self, request, key, value):
         pair = (key, value)
@@ -288,6 +313,11 @@ class InclusiveFilter:
             'active': self.active,
             'param': self.param,
             'narrow_param': NARROW_PARAM,
+            'match': self.match,
+            'match_param': MATCH_PARAM,
+            'match_any_url': self.match_url(request, MATCH_ANY),
+            'match_all_url': self.match_url(request, MATCH_ALL),
+            'noun': self.noun,
             'search': self.search,
             'search_param': SEARCH_PARAM,
             'legacy_json': json.dumps(sorted(self.legacy.values())),

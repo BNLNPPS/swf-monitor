@@ -10,15 +10,20 @@ plan page (swf-epicprod `pcs/views.py`, `pcs_campaign_plan`).
 - Every facet lists every value with its count over all rows. Nothing
   disappears when a selection is made; a selected value with no rows
   stays listed at zero.
-- Clicking a value selects it, shown bold and underlined. The rows shown
-  are the union of every selected value, across facets as well as
-  within one: Process DIS plus Beam 10x100 shows the rows that are DIS
-  or at 10x100.
+- Clicking a value selects it, shown bold and underlined. The Match
+  control at the top decides what the selections show. Match any, the
+  default: the union of every selected value, across facets as well as
+  within one, so Process DIS plus Beam 10x100 shows the rows that are
+  DIS or at 10x100. Match all: only the rows carrying every selected
+  value, so the same two show the DIS rows at 10x100. The control
+  states both in one line, in the page's own noun (the plan says
+  "configurations"; `InclusiveFilter(..., noun=...)`, default "rows").
 - Clicking a selected value deselects it. A facet's All clears that
   facet. Clear all clears everything. With nothing selected every row
   is shown.
 - The statement under the facet rows names the selections in click
-  order: "Showing rows matching any of: Process: DIS Beam: 10x100".
+  order: "Showing rows matching any of: Process: DIS Beam: 10x100"
+  ("all of" under Match all).
 - A click costs no request. The server renders every row once with its
   facet values and the initial hidden state; the include's script
   applies each click to the page: the bold marks, the rows, the shown
@@ -34,6 +39,9 @@ bookmark opens it. Back leaves the page.
 
     ?f=process:DIS|beam:10x100
 
+Match all adds `match=all`; Match any, the default, is the parameter's
+absence.
+
 A link may frame the page with `n`, the same syntax: pairs every row
 must carry, an intersection, which is what a count on another page
 means (the completion panel's "priority 1, below target" cell opens
@@ -46,7 +54,7 @@ A page that previously carried one parameter per facet lists them in
 the frame and dropped from the URLs the filter writes; old links open
 exactly what they opened before. Consumers that carry a page's filter
 state forward (the campaign plan's Time history embed and the Snapper
-Campaign focus view) carry `n`, `f` and `q`. A value containing `|`
+Campaign focus view) carry `n`, `f`, `match` and `q`. A value containing `|`
 cannot be encoded; no filtered value on the plan carries one.
 
 ## Usage

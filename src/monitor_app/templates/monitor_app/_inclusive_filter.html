@@ -16,8 +16,12 @@ server URLs, so a middle click or a page without script still works.
   .swf-if .swf-if-box.swf-if-active { padding: .35em .8em; border-radius: .5em; border: 2px solid #d39e00; background-color: rgba(255, 193, 7, .12); }
   .swf-if-restriped > tbody > tr.swf-if-odd > * { --bs-table-accent-bg: var(--bs-table-striped-bg); color: var(--bs-table-striped-color); }
 </style>
-<div class="card mb-3 swf-if" data-if-param="{{ inclusive_filter.param }}" data-if-narrow-param="{{ inclusive_filter.narrow_param }}" data-if-search-param="{{ inclusive_filter.search_param }}" data-if-legacy="{{ inclusive_filter.legacy_json }}" data-if-selections="{{ inclusive_filter.selections_json }}" data-if-narrow="{{ inclusive_filter.narrow_json }}">
+<div class="card mb-3 swf-if" data-if-param="{{ inclusive_filter.param }}" data-if-narrow-param="{{ inclusive_filter.narrow_param }}" data-if-search-param="{{ inclusive_filter.search_param }}" data-if-match-param="{{ inclusive_filter.match_param }}" data-if-match="{{ inclusive_filter.match }}" data-if-noun="{{ inclusive_filter.noun }}" data-if-legacy="{{ inclusive_filter.legacy_json }}" data-if-selections="{{ inclusive_filter.selections_json }}" data-if-narrow="{{ inclusive_filter.narrow_json }}">
     <div class="card-body">
+        <div class="mb-2"><strong>Match:</strong>
+            <a href="{{ inclusive_filter.match_any_url }}" data-if-match-mode="any" class="ms-1 me-1{% if inclusive_filter.match == 'any' %} swf-if-on{% endif %}">any</a>|<a href="{{ inclusive_filter.match_all_url }}" data-if-match-mode="all" class="ms-1 me-3{% if inclusive_filter.match == 'all' %} swf-if-on{% endif %}">all</a>
+            <span><strong>Match any:</strong> each selection adds the {{ inclusive_filter.noun }} that carry it. <strong>Match all:</strong> only {{ inclusive_filter.noun }} carrying every selection are shown.</span>
+        </div>
         <div class="mb-2 d-flex align-items-center gap-2">
             <strong>Search:</strong>
             <input type="search" class="form-control form-control-sm swf-if-search" style="max-width: 24em;" value="{{ inclusive_filter.search }}" placeholder="text in any column" title="Rows whose text contains this, in any column; applies together with the selections below">
@@ -26,18 +30,18 @@ server URLs, so a middle click or a page without script still works.
         <div data-if-label="{{ label }}"><strong>{{ label }}:</strong>
             <a href="{{ f.all_url }}" data-if-all="{{ f.key }}" class="me-2{% if f.all_active %} swf-if-on{% endif %}">All</a>
             {% for item in f.items %}
-            <a href="{{ item.url }}" class="me-2 swf-if-value{% if item.active %} swf-if-on{% endif %}" data-if-key="{{ f.key }}" data-if-value="{{ item.raw }}" data-if-display="{{ item.value }}" title="{% if item.active %}Selected: click to remove{% else %}Click to add its rows{% endif %}">{{ item.value }} ({{ item.count }})</a>
+            <a href="{{ item.url }}" class="me-2 swf-if-value{% if item.active %} swf-if-on{% endif %}" data-if-key="{{ f.key }}" data-if-value="{{ item.raw }}" data-if-display="{{ item.value }}" title="{% if item.active %}Selected: click to remove{% else %}Click to select{% endif %}">{{ item.value }} ({{ item.count }})</a>
             {% endfor %}
         </div>
         {% endfor %}
         <div class="mt-2 swf-if-box{% if inclusive_filter.active %} swf-if-active{% endif %}">
             <span class="swf-if-statement">
             {% if inclusive_filter.active %}
-            {% if inclusive_filter.narrow_filters %}<strong>Showing rows within</strong> {% for label, value in inclusive_filter.narrow_filters %}<span class="me-2">{{ label }}: <strong>{{ value }}</strong></span>{% endfor %}{% if inclusive_filter.union_filters %}<span class="me-2">matching any of:</span>{% endif %}{% else %}<strong>Showing rows matching any of:</strong>{% endif %}
+            {% if inclusive_filter.narrow_filters %}<strong>Showing {{ inclusive_filter.noun }} within</strong> {% for label, value in inclusive_filter.narrow_filters %}<span class="me-2">{{ label }}: <strong>{{ value }}</strong></span>{% endfor %}{% if inclusive_filter.union_filters %}<span class="me-2">matching {{ inclusive_filter.match }} of:</span>{% endif %}{% else %}<strong>Showing {{ inclusive_filter.noun }} matching {{ inclusive_filter.match }} of:</strong>{% endif %}
             {% for label, value in inclusive_filter.union_filters %}<span class="me-2">{{ label }}: <strong>{{ value }}</strong></span>{% endfor %}
             <a href="{{ inclusive_filter.clear_url }}" data-if-clear class="btn btn-link btn-sm p-0 ms-2">clear all</a>
             {% else %}
-            <strong>Filters:</strong> <span class="text-muted">none selected, all rows shown. Click a value to select it; each further click adds its rows.</span>
+            <strong>Filters:</strong> none selected, all {{ inclusive_filter.noun }} shown. Click a value to select it.
             {% endif %}
             </span>
         </div>
@@ -59,6 +63,10 @@ server URLs, so a middle click or a page without script still works.
   const PARAM = root.dataset.ifParam || 'f';
   const SEARCH_PARAM = root.dataset.ifSearchParam || 'q';
   const NARROW_PARAM = root.dataset.ifNarrowParam || 'n';
+  const MATCH_PARAM = root.dataset.ifMatchParam || 'match';
+  const NOUN = root.dataset.ifNoun || 'rows';
+  // any: a row shows when it carries any selection; all: every selection.
+  let match = root.dataset.ifMatch === 'all' ? 'all' : 'any';
   const LEGACY = JSON.parse(root.dataset.ifLegacy || '[]');
   let selections = JSON.parse(root.dataset.ifSelections || '[]');
   // The frame a link opened the page with: pairs every row must carry.
@@ -90,14 +98,17 @@ server URLs, so a middle click or a page without script still works.
   function encode(sel) {
     return sel.map(function (p) { return p[0] + ':' + p[1]; }).join('|');
   }
-  function urlFor(sel) {
+  function urlFor(sel, m) {
+    const mode = m || match;
     const url = new URL(window.location.href);
     LEGACY.forEach(function (k) { url.searchParams.delete(k); });
     url.searchParams.delete(PARAM);
     url.searchParams.delete(SEARCH_PARAM);
     url.searchParams.delete(NARROW_PARAM);
+    url.searchParams.delete(MATCH_PARAM);
     if (narrow.length) url.searchParams.set(NARROW_PARAM, encode(narrow));
     if (sel.length) url.searchParams.set(PARAM, encode(sel));
+    if (mode === 'all') url.searchParams.set(MATCH_PARAM, 'all');
     if (search) url.searchParams.set(SEARCH_PARAM, search);
     return url;
   }
@@ -107,7 +118,8 @@ server URLs, so a middle click or a page without script still works.
       if ((values[narrow[k][0]] || []).indexOf(narrow[k][1]) < 0) return false;
     }
     if (!selections.length) return true;
-    return selections.some(function (p) { return (values[p[0]] || []).indexOf(p[1]) >= 0; });
+    const carries = function (p) { return (values[p[0]] || []).indexOf(p[1]) >= 0; };
+    return match === 'all' ? selections.every(carries) : selections.some(carries);
   }
   function restripe() {
     const tables = new Set();
@@ -141,7 +153,7 @@ server URLs, so a middle click or a page without script still works.
       const key = a.dataset.ifKey, value = a.dataset.ifValue;
       const on = has(key, value);
       a.classList.toggle('swf-if-on', on);
-      a.title = on ? 'Selected: click to remove' : 'Click to add its rows';
+      a.title = on ? 'Selected: click to remove' : 'Click to select';
       const next = on ? selections.filter(function (p) { return !(p[0] === key && p[1] === value); })
                       : selections.concat([[key, value]]);
       a.href = urlFor(next).toString();
@@ -152,17 +164,21 @@ server URLs, so a middle click or a page without script still works.
       a.classList.toggle('swf-if-on', rest.length === selections.length);
       a.href = urlFor(rest).toString();
     });
+    root.querySelectorAll('[data-if-match-mode]').forEach(function (a) {
+      a.classList.toggle('swf-if-on', a.dataset.ifMatchMode === match);
+      a.href = urlFor(selections, a.dataset.ifMatchMode).toString();
+    });
     const box = root.querySelector('.swf-if-box');
     const statement = root.querySelector('.swf-if-statement');
     box.classList.toggle('swf-if-active', selections.length > 0 || narrow.length > 0 || !!search);
     if (!selections.length && !narrow.length && !search) {
-      statement.innerHTML = '<strong>Filters:</strong> <span class="text-muted">none selected, '
-        + 'all rows shown. Click a value to select it; each further click adds its rows.</span>';
+      statement.innerHTML = '<strong>Filters:</strong> none selected, all '
+        + esc(NOUN) + ' shown. Click a value to select it.';
       return;
     }
     let html = '';
     if (narrow.length) {
-      html += '<strong>Showing rows within</strong> ';
+      html += '<strong>Showing ' + esc(NOUN) + ' within</strong> ';
       narrow.forEach(function (p) {
         const a = root.querySelector('.swf-if-value[data-if-key="' + CSS.escape(p[0])
                                      + '"][data-if-value="' + CSS.escape(p[1]) + '"]');
@@ -170,14 +186,14 @@ server URLs, so a middle click or a page without script still works.
         html += '<span class="me-2">' + esc(holder ? holder.dataset.ifLabel : p[0]) + ': <strong>'
               + esc(a ? a.dataset.ifDisplay : p[1]) + '</strong></span>';
       });
-      html += selections.length ? '<span class="me-2">matching any of:</span>' : '';
+      html += selections.length ? '<span class="me-2">matching ' + match + ' of:</span>' : '';
     } else {
-      html += selections.length ? '<strong>Showing rows matching any of:</strong> '
-                                : '<strong>Showing rows</strong> ';
+      html += selections.length ? '<strong>Showing ' + esc(NOUN) + ' matching ' + match + ' of:</strong> '
+                                : '<strong>Showing ' + esc(NOUN) + '</strong> ';
     }
     if (search) {
       html += '<span class="me-2">containing <strong>' + esc(search) + '</strong></span>'
-            + (selections.length ? '<span class="me-2">and any of:</span>' : '');
+            + (selections.length ? '<span class="me-2">and ' + match + ' of:</span>' : '');
     }
     selections.forEach(function (p) {
       const a = root.querySelector('.swf-if-value[data-if-key="' + CSS.escape(p[0])
@@ -197,7 +213,8 @@ server URLs, so a middle click or a page without script still works.
     document.dispatchEvent(new CustomEvent('swf-if-change', {detail: {
       selections: selections.map(function (p) { return p.slice(); }),
       query: [narrow.length ? NARROW_PARAM + '=' + encodeURIComponent(encode(narrow)) : '',
-              selections.length ? PARAM + '=' + encodeURIComponent(encode(selections)) : '']
+              selections.length ? PARAM + '=' + encodeURIComponent(encode(selections)) : '',
+              selections.length && match === 'all' ? MATCH_PARAM + '=all' : '']
              .filter(Boolean).join('&'),
       shown: shown,
     }}));
@@ -205,7 +222,11 @@ server URLs, so a middle click or a page without script still works.
   root.addEventListener('click', function (ev) {
     const a = ev.target.closest('a');
     if (!a || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
-    if (a.classList.contains('swf-if-value')) {
+    if (a.dataset.ifMatchMode !== undefined) {
+      ev.preventDefault();
+      match = a.dataset.ifMatchMode === 'all' ? 'all' : 'any';
+      update();
+    } else if (a.classList.contains('swf-if-value')) {
       ev.preventDefault();
       const key = a.dataset.ifKey, value = a.dataset.ifValue;
       if (has(key, value)) {
