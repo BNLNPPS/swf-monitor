@@ -54,7 +54,9 @@ A page that previously carried one parameter per facet lists them in
 the frame and dropped from the URLs the filter writes; old links open
 exactly what they opened before. Consumers that carry a page's filter
 state forward (the campaign plan's Time history embed and the Snapper
-Campaign focus view) carry `n`, `f`, `match` and `q`. A value containing `|`
+Campaign focus view) carry `n`, `f` and `match`. The search, `q`,
+narrows the table in the browser only: no consumer carries it and the
+server-side apply does not read it. A value containing `|`
 cannot be encoded; no filtered value on the plan carries one.
 
 ## Usage
