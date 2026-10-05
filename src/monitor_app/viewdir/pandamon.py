@@ -2643,7 +2643,12 @@ def _reported_harvester(queue_name):
         record = report.get('record') or {}
         fetch = ((record.get('fetching') or {}).get('queues') or {}).get(queue_name)
         submit = ((record.get('submission') or {}).get('queues') or {}).get(queue_name)
-        if not isinstance(fetch, dict) and not isinstance(submit, dict):
+        db = record.get('harvester_db') or {}
+        limits = next((q for q in (db.get('launch_limits') or [])
+                       if isinstance(q, dict) and q.get('queue') == queue_name), None)
+        not_finished = db.get('not_finished') or {}
+        nf_site = (not_finished.get('sites') or {}).get(queue_name)
+        if not isinstance(fetch, dict) and not isinstance(submit, dict) and limits is None:
             continue
         calls = record.get('failed_calls') or {}
         return {
@@ -2655,6 +2660,14 @@ def _reported_harvester(queue_name):
             'submit': submit or {},
             'failed_calls': {d: v for d, v in calls.items()
                              if isinstance(v, dict) and v.get('failed')},
+            # From the harvester's database and condor logs (reporter 1.1).
+            'limits': limits,
+            'workers_now': (db.get('workers_now') or {}).get(queue_name)
+                           if isinstance(db.get('workers_now'), dict) else None,
+            'ended': ((db.get('workers_ended') or {}).get('sites') or {}).get(queue_name),
+            'not_finished': nf_site,
+            'not_finished_hours': not_finished.get('hours'),
+            'db_error': db.get('error'),
         }
     return None
 

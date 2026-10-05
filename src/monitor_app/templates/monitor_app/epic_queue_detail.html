@@ -25,7 +25,7 @@
         <span class="text-muted mx-1">&middot;</span>
         {% if es %}<a href="#event-service">Event Service</a>
         <span class="text-muted mx-1">&middot;</span>{% endif %}
-        {% if harvester %}<a href="#job-fetching">Job fetching</a>
+        {% if harvester %}<a href="#job-fetching">Harvester</a>
         <span class="text-muted mx-1">&middot;</span>{% endif %}
         <a href="#submission">Submission</a>
         <span class="text-muted mx-1">&middot;</span>
@@ -250,7 +250,7 @@
     {% if harvester %}
     <div class="card mb-3" id="job-fetching">
         <div class="card-header queue-section-header">
-            <strong>Job fetching</strong>
+            <strong>Harvester</strong>
             <span class="ms-2">reported by {{ harvester.host }}
                 <span data-relative-time="{{ harvester.reported_at|date:'c' }}"></span>,
                 covering the {{ harvester.interval_seconds|default:"?" }} s before it</span>
@@ -276,6 +276,36 @@
                         {{ harvester.submit.workers_status.nQueue }} queued,
                         {{ harvester.submit.workers_status.nNewWorkers }} new allowed
                         {% endif %}</td></tr>
+                {% if harvester.limits %}
+                <tr><td class="fw-bold">Launch limits</td>
+                    <td>at most {{ harvester.limits.max_workers }} workers, {{ harvester.limits.n_queue_limit_worker }} queued;
+                        {{ harvester.limits.n_new_workers }} new workers last decided
+                        <span class="text-muted ms-2">last submission {{ harvester.limits.submit_time|default:"none" }} (UTC)</span></td></tr>
+                {% endif %}
+                {% if harvester.workers_now %}
+                <tr><td class="fw-bold">Harvester's workers now</td>
+                    <td>{% for status, n in harvester.workers_now.items %}{{ n }} {{ status }}{% if not forloop.last %}, {% endif %}{% endfor %}</td></tr>
+                {% endif %}
+                {% if harvester.ended %}
+                <tr><td class="fw-bold">Workers ended in the interval</td>
+                    <td>{% for status, n in harvester.ended.by_status.items %}{{ n }} {{ status }}{% if not forloop.last %}, {% endif %}{% endfor %}{% if harvester.ended.median_finished_run_s is not None %};
+                        the finished ran {{ harvester.ended.median_finished_run_s|fmt_duration }} (median){% endif %}</td></tr>
+                {% endif %}
+                {% if harvester.limits or harvester.not_finished %}
+                <tr><td class="fw-bold{% if harvester.not_finished %} text-danger{% endif %}">Workers that did not finish, last {{ harvester.not_finished_hours|default:"24" }} h</td>
+                    <td style="word-break: break-word">{% if harvester.not_finished %}{{ harvester.not_finished.workers }}, by the batch system's reason:
+                        <ul class="mb-0 ps-3">
+                        {% for r in harvester.not_finished.reasons %}
+                        <li><strong>{{ r.count }}</strong> {{ r.status }}: {{ r.reason }}
+                            <span class="text-muted">({{ r.source }}; last {{ r.last_ended }} UTC{% for ex in r.examples %}{% if ex.batch_log %}; <a href="{{ ex.batch_log }}">worker {{ ex.workerid }} log</a>{% endif %}{% endfor %})</span></li>
+                        {% endfor %}
+                        </ul>{% if harvester.not_finished.reasons_dropped %}<span class="text-muted">and {{ harvester.not_finished.reasons_dropped }} rarer reasons</span>{% endif %}
+                        {% else %}none{% endif %}</td></tr>
+                {% endif %}
+                {% if harvester.db_error %}
+                <tr><td class="fw-bold text-danger">Harvester database</td>
+                    <td>not read: {{ harvester.db_error }}</td></tr>
+                {% endif %}
                 {% for daemon, calls in harvester.failed_calls.items %}
                 <tr><td class="fw-bold text-danger">Failed calls to PanDA ({{ daemon }})</td>
                     <td style="word-break: break-word">{{ calls.failed }} in the interval, all queues:

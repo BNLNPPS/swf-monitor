@@ -54,6 +54,8 @@ MAX_CONDOR_LOGS = 300
 CONDOR_LOG_TAIL = 256 * 1024
 EXAMPLES = 3
 REASONS_KEEP = 25
+# The window over which the workers that did not finish are reported.
+REASON_HOURS = 24
 DB_TIMEOUT_S = 60
 FETCHER_LOG = os.path.join(LOG_DIR, 'panda-job_fetcher.log')
 SUBMITTER_LOG = os.path.join(LOG_DIR, 'panda-submitter.log')
@@ -362,11 +364,12 @@ def median(values):
     return values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2.0
 
 
-def harvester_db(since, until):
+def harvester_db(since, until, cache):
     """The harvester's launch limits per queue, its workers now, the workers
-    that ended in (since, until] with the batch system's reason for each
-    that did not finish, and its latest service metrics. Each part that
-    cannot be read is an error field."""
+    that ended in (since, until], the workers that did not finish over the
+    last REASON_HOURS with the batch system's reason for each, and its
+    latest service metrics. Each part that cannot be read is an error
+    field."""
     out = {'window': {'since': since, 'until': until}}
     try:
         conf = db_conf()
@@ -398,6 +401,11 @@ def harvester_db(since, until):
         out['workers_ended'] = {'error': '{}: {}'.format(exc.__class__.__name__, exc)}
 
     try:
+        out['not_finished'] = not_finished(conf, until, cache)
+    except Exception as exc:                                  # noqa: BLE001
+        out['not_finished'] = {'error': '{}: {}'.format(exc.__class__.__name__, exc)}
+
+    try:
         rows = query(conf, 'SELECT hostName, creationTime, LEFT(metrics, 2000) FROM sm_table '
                            'ORDER BY creationTime DESC LIMIT 5')
         metrics = {}
@@ -416,54 +424,78 @@ def harvester_db(since, until):
 
 
 def workers_ended(conf, since, until):
-    """Per site: the workers that ended in the window by status, their
-    median run, and every worker that did not finish (or finished with a
-    nonzero batch exit) grouped by the batch system's reason, read from
-    its condor log, else the harvester's diagnostic."""
+    """Per site, the workers that ended in the interval, by status, and
+    the median run of the finished ones."""
     rows = query(conf, (
-        "SELECT workerID, batchID, computingSite, status, nativeStatus, nativeExitCode, "
-        "TIMESTAMPDIFF(SECOND, startTime, endTime), endTime, LEFT(diagMessage, 300), "
-        "JSON_UNQUOTE(JSON_EXTRACT(workAttributes, '$.batchLog')), nodeID, computingElement "
-        "FROM work_table WHERE endTime > '{}' AND endTime <= '{}' ORDER BY endTime DESC"
+        "SELECT computingSite, status, TIMESTAMPDIFF(SECOND, startTime, endTime) "
+        "FROM work_table WHERE endTime > '{}' AND endTime <= '{}'"
     ).format(since, until))
-    roots = log_roots()
-    sites, logs_read, log_errors = {}, 0, 0
-    for (worker, batch, site, status, native, exit_code, run_s, ended, diag,
-         batch_log, node, ce) in rows:
-        s = sites.setdefault(site or '', {'ended': 0, 'by_status': {}, '_runs': [], 'reasons': {}})
+    sites = {}
+    for site, status, run_s in rows:
+        s = sites.setdefault(site or '', {'ended': 0, 'by_status': {}, '_runs': []})
         s['ended'] += 1
         s['by_status'][status] = s['by_status'].get(status, 0) + 1
         # A worker removed before it ran has no run; the median is of finished workers.
         if status == 'finished' and run_s is not None and int(run_s) >= 0:
             s['_runs'].append(int(run_s))
-        if status == 'finished' and exit_code in (None, '', '0'):
-            continue
-        reason = None
-        path = local_log(batch_log, roots)
-        if path and logs_read < MAX_CONDOR_LOGS:
-            logs_read += 1
-            found, error = condor_reason(path)
-            if error:
-                log_errors += 1
-            reason = found
-        text = (reason or {}).get('reason') or (diag or '').strip() or (native or status)
+    for s in sites.values():
+        s['median_finished_run_s'] = median(s.pop('_runs'))
+    return {'sites': sites, 'workers': len(rows)}
+
+
+def not_finished(conf, until, cache):
+    """Per site, over the REASON_HOURS before ``until``: every worker that
+    did not finish, or finished with a nonzero batch exit, grouped by the
+    batch system's reason, read from its condor log, else the harvester's
+    diagnostic. ``cache`` (the reporter's state, workerID to reason) keeps
+    a log read once; entries older than the window are dropped."""
+    floor = (datetime.strptime(until, '%Y-%m-%d %H:%M:%S')
+             - timedelta(hours=REASON_HOURS)).strftime('%Y-%m-%d %H:%M:%S')
+    rows = query(conf, (
+        "SELECT workerID, batchID, computingSite, status, nativeStatus, endTime, "
+        "LEFT(diagMessage, 300), JSON_UNQUOTE(JSON_EXTRACT(workAttributes, '$.batchLog')), "
+        "nodeID, computingElement FROM work_table "
+        "WHERE endTime > '{}' AND endTime <= '{}' AND (status <> 'finished' "
+        "OR (nativeExitCode IS NOT NULL AND nativeExitCode <> 0)) ORDER BY endTime DESC"
+    ).format(floor, until))
+    roots = log_roots()
+    sites, logs_read, log_errors, seen = {}, 0, 0, set()
+    for worker, batch, site, status, native, ended, diag, batch_log, node, ce in rows:
+        seen.add(worker)
+        reason = cache.get(worker)
+        if reason is None:
+            path = local_log(batch_log, roots)
+            found = None
+            if path and logs_read < MAX_CONDOR_LOGS:
+                logs_read += 1
+                found, error = condor_reason(path)
+                if error:
+                    log_errors += 1
+            if found or logs_read < MAX_CONDOR_LOGS:
+                # A log not read for the run's cap is tried again next run.
+                reason = {'text': (found or {}).get('reason'), 'event': (found or {}).get('code')}
+                cache[worker] = reason
+        text = ((reason or {}).get('text') or (diag or '').strip() or native or status)
+        s = sites.setdefault(site or '', {'workers': 0, 'reasons': {}})
+        s['workers'] += 1
         key = '{} | {}'.format(status, text)
         entry = s['reasons'].setdefault(key, {
             'status': status, 'native_status': native,
-            'source': 'condor log' if reason else 'harvester diagnostic',
-            'event': (reason or {}).get('code'), 'reason': text, 'count': 0, 'examples': []})
+            'source': 'condor log' if (reason or {}).get('text') else 'harvester diagnostic',
+            'event': (reason or {}).get('event'), 'reason': text, 'count': 0,
+            'last_ended': ended, 'examples': []})
         entry['count'] += 1
         if len(entry['examples']) < EXAMPLES:
             entry['examples'].append({'workerid': int(worker), 'batchid': batch, 'ended': ended,
                                       'node': node, 'ce': ce, 'batch_log': batch_log})
+    for worker in [w for w in cache if w not in seen]:
+        del cache[worker]
     for s in sites.values():
-        runs = s.pop('_runs')
-        s['median_finished_run_s'] = median(runs)
         reasons = sorted(s['reasons'].values(), key=lambda e: -e['count'])
         s['reasons'] = reasons[:REASONS_KEEP]
         s['reasons_dropped'] = max(0, len(reasons) - REASONS_KEEP)
-    return {'sites': sites, 'workers': len(rows), 'condor_logs_read': logs_read,
-            'condor_log_errors': log_errors}
+    return {'hours': REASON_HOURS, 'sites': sites, 'workers': len(rows),
+            'condor_logs_read': logs_read, 'condor_log_errors': log_errors}
 
 
 def collect(state):
@@ -497,8 +529,11 @@ def collect(state):
             since = datetime.strptime(last_run, '%Y-%m-%dT%H:%M:%SZ')
         except ValueError:
             pass
+    # The reason cache rides the state; JSON keys are strings, as are the
+    # worker IDs the mysql client returns.
+    cache = state.setdefault('reasons', {})
     record['harvester_db'] = harvester_db(since.strftime('%Y-%m-%d %H:%M:%S'),
-                                          until.strftime('%Y-%m-%d %H:%M:%S'))
+                                          until.strftime('%Y-%m-%d %H:%M:%S'), cache)
     record['collect_seconds'] = round(time.time() - started, 2)
     state['last_run_at'] = record['collected_at']
     return record

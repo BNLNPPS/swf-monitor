@@ -35,15 +35,19 @@ run sets the positions and counts nothing).
 | Harvester processes | the process table | the count of harvester processes |
 | Launch limits | the harvester database, `pq_table` | per queue: the queued-worker limit, the maximum workers, the new workers last decided, the last job fetch and submission times |
 | Workers now | `work_table` | per site, the live workers by status |
-| Workers ended | `work_table` and each worker's condor event log | per site, the workers that ended in the interval by status and the median run of the finished ones; every worker that did not finish, or finished with a nonzero batch exit, grouped by the batch system's reason, with up to three examples (worker, batch ID, node, CE, log URL) |
+| Workers ended | `work_table` | per site, the workers that ended in the interval by status and the median run of the finished ones |
+| Workers not finished | `work_table` and each worker's condor event log | per site, over the last 24 hours, every worker that did not finish or finished with a nonzero batch exit, grouped by the batch system's reason, with up to three examples (worker, batch ID, node, CE, log URL) |
 | Service metrics | `sm_table` | the harvester's latest metrics for its host |
 
 The reason for a worker that did not finish is the last terminal or hold
 event of its condor event log (aborted, held, terminated, shadow exception,
 disconnected), with its detail lines: "Job was aborted. removed by
 SYSTEM_PERIODIC_REMOVE due to job restarted undesirably." The harvester's
-own diagnostic, which PanDA also carries, cuts that to "removed by SY". The
-log path is the worker's `batchLog` URL mapped to the local log directory
+own diagnostic carries the remove or hold reason too; the condor log adds
+the event, its time and the other terminations (exit codes, signals,
+shadow exceptions) the diagnostic does not. The reasons cover the last 24
+hours on every run; each worker's reason is read once and kept in the
+reporter's state. The log path is the worker's `batchLog` URL mapped to the local log directory
 through the queue configuration (`logBaseURL`, `logDir`); a worker without
 a readable log falls back to the harvester's diagnostic, and the record
 says which source each reason came from. A run reads at most 300 condor
