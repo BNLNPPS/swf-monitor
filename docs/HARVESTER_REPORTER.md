@@ -1,6 +1,6 @@
 # Harvester host reporter
 
-A reporter on the harvester host (pandaharvester01) delivers to swf-monitor
+A reporter on each harvester host we can reach (pandaharvester01, osgsub01) delivers to swf-monitor
 what only that host knows about how its queues get work: when the harvester
 last asked PanDA for jobs for each queue, how many it asked for and got, and
 why it got none; how many workers it submitted and for which jobs; and every
@@ -33,8 +33,25 @@ run sets the positions and counts nothing).
 | Calls to the PanDA server | `panda-communicator.log`, `panda-propagator.log` | failed calls in the interval by daemon, call and error class, with the last such line |
 | Daemon log freshness | `/var/log/harvester/panda-*.log` | seconds since each log's last write, and its size |
 | Harvester processes | the process table | the count of harvester processes |
+| Launch limits | the harvester database, `pq_table` | per queue: the queued-worker limit, the maximum workers, the new workers last decided, the last job fetch and submission times |
+| Workers now | `work_table` | per site, the live workers by status |
+| Workers ended | `work_table` and each worker's condor event log | per site, the workers that ended in the interval by status and the median run of the finished ones; every worker that did not finish, or finished with a nonzero batch exit, grouped by the batch system's reason, with up to three examples (worker, batch ID, node, CE, log URL) |
+| Service metrics | `sm_table` | the harvester's latest metrics for its host |
 
-Times in the harvester logs are UTC and are delivered as such. Every source
+The reason for a worker that did not finish is the last terminal or hold
+event of its condor event log (aborted, held, terminated, shadow exception,
+disconnected), with its detail lines: "Job was aborted. removed by
+SYSTEM_PERIODIC_REMOVE due to job restarted undesirably." The harvester's
+own diagnostic, which PanDA also carries, cuts that to "removed by SY". The
+log path is the worker's `batchLog` URL mapped to the local log directory
+through the queue configuration (`logBaseURL`, `logDir`); a worker without
+a readable log falls back to the harvester's diagnostic, and the record
+says which source each reason came from. A run reads at most 300 condor
+logs, newest first. The database is read through the `mysql` client with
+the harvester's own read settings from `panda_harvester.cfg`; nothing is
+written to it.
+
+Times in the harvester logs and database are UTC and are delivered as such. Every source
 that cannot be read is a field, never dropped; an unreachable monitor
 buffers records locally and posts the backlog on the next run.
 
@@ -51,10 +68,20 @@ when the harvester last asked, and what it got.
 
 1. The script at `~/.local/bin/harvester-reporter.py` and its environment
    file `~/.swf-harvester-reporter.env` (mode 600, `SWF_MONITOR_URL` and
-   `SWF_REPORT_TOKEN`); state and buffer in `~/.swf-harvester-reporter/`.
-   The account's home directory is shared across the SCDF hosts.
-2. The per-host token, of the Django user `pandaharvester01-reporter`.
-3. A cron entry for the account on pandaharvester01, every five minutes.
+   `SWF_REPORT_TOKEN`); state and buffer in `~/.swf-harvester-reporter/`
+   for pandaharvester01 and `~/.swf-harvester-reporter-<key>/` for any
+   other host key. The account's home directory is shared across the SCDF
+   hosts, so one copy of the script serves every host.
+2. The token, of the Django user `pandaharvester01-reporter`, serves both
+   hosts through the shared environment file.
+3. A cron entry for the account on each host, every five minutes. On
+   osgsub01 the record is stored as `osgsub01-harvester`
+   (`--report-as osgsub01-harvester`), since `osgsub01` is the OSG submit
+   reporter's key.
+
+pandaharvester02 runs a third harvester instance, operated by PanDA
+operations; the reporter runs there once its database read access is
+granted.
 
 Verified on 2026-10-02 for the account (`wenauseic`, group `eic`): the
 harvester logs are world-readable, cron is permitted, the host's `python3`

@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """harvester-reporter.py — how the harvester's queues get work.
 
-Runs on pandaharvester01 and posts one record per run to swf-monitor
-(docs/HARVESTER_REPORTER.md): per queue, the harvester's job fetches since
-the last run (asked, got, the outcome, the last attempt), the workers it
-submitted and for which jobs, the worker counts the submitter last read;
-every failed call to the PanDA server by daemon, call and error class; the
-age of every harvester log; and the harvester's process count.
+Runs on a harvester host (pandaharvester01, osgsub01) and posts one record
+per run to swf-monitor (docs/HARVESTER_REPORTER.md): per queue, the
+harvester's job fetches since the last run (asked, got, the outcome, the
+last attempt), the workers it submitted and for which jobs, the worker
+counts the submitter last read; every failed call to the PanDA server by
+daemon, call and error class; the age of every harvester log; the
+harvester's process count; and, from the harvester's own database and its
+condor logs, its launch limits per queue, its workers now, the workers
+that ended in the interval with the batch system's reason for each that
+did not finish, and its service metrics.
 
 Standard library only, written to the host's Python 3.6. Every source that
 cannot be read is delivered as an error field rather than dropped. The logs
@@ -18,24 +22,39 @@ Usage::
 
     harvester-reporter.py                 # collect and post
     harvester-reporter.py --print         # collect and print, post nothing
+    harvester-reporter.py --report-as osgsub01-harvester   # the record's host key
 
 Configuration, from the environment or an environment file named by
 --env (mode 600): SWF_MONITOR_URL, SWF_REPORT_TOKEN.
 """
 import argparse
 import ast
+import configparser
 import glob
 import json
 import os
 import re
+import socket
 import ssl
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
-HOST = 'pandaharvester01'
+# The record's host key; --report-as overrides it.
+HOST = socket.gethostname().split('.')[0]
 LOG_DIR = '/var/log/harvester'
+HARVESTER_CFG = '/opt/harvester/etc/panda/panda_harvester.cfg'
+QUEUE_CONFIG = '/opt/harvester/etc/panda/panda_queueconfig.json'
+# Worker states the harvester leaves; every other state is a live worker.
+TERMINAL = ('finished', 'failed', 'cancelled', 'missed')
+# Condor logs read per run (the workers that did not finish, newest first),
+# the bytes read from the end of each, and the examples kept per reason.
+MAX_CONDOR_LOGS = 300
+CONDOR_LOG_TAIL = 256 * 1024
+EXAMPLES = 3
+REASONS_KEEP = 25
+DB_TIMEOUT_S = 60
 FETCHER_LOG = os.path.join(LOG_DIR, 'panda-job_fetcher.log')
 SUBMITTER_LOG = os.path.join(LOG_DIR, 'panda-submitter.log')
 CALL_LOGS = (('communicator', os.path.join(LOG_DIR, 'panda-communicator.log')),
@@ -233,10 +252,224 @@ def processes():
     return {'harvester': len(rows)}
 
 
+# ── The harvester's database and condor logs ────────────────────────────
+
+def db_conf():
+    """The harvester's database settings from its configuration file."""
+    parser = configparser.RawConfigParser(strict=False)
+    if not parser.read(HARVESTER_CFG):
+        raise RuntimeError('cannot read {}'.format(HARVESTER_CFG))
+    section = parser['db']
+    return {key: (section.get(key) or '').strip()
+            for key in ('engine', 'host', 'port', 'user', 'password', 'schema')}
+
+
+UNESCAPE_RE = re.compile(r'\\(.)')
+UNESCAPE = {'n': '\n', 't': '\t', '0': '\0', '\\': '\\'}
+
+
+def query(conf, sql):
+    """Rows of ``sql`` from the harvester's MariaDB through the mysql client
+    (standard library only), NULL as None. Raises with the client's error."""
+    env = dict(os.environ, MYSQL_PWD=conf['password'])
+    cmd = ['mysql', '--batch', '--skip-column-names', '-u', conf['user'],
+           '-h', conf['host'] or 'localhost', '-P', conf['port'] or '3306',
+           conf['schema'], '-e', sql]
+    done = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          universal_newlines=True, timeout=DB_TIMEOUT_S, env=env)
+    if done.returncode != 0:
+        raise RuntimeError((done.stderr or 'mysql exit {}'.format(done.returncode)).strip()[:LINE_KEEP])
+    rows = []
+    for line in done.stdout.splitlines():
+        rows.append([None if cell == 'NULL' else
+                     UNESCAPE_RE.sub(lambda m: UNESCAPE.get(m.group(1), m.group(1)), cell)
+                     for cell in line.split('\t')])
+    return rows
+
+
+def log_roots():
+    """(logBaseURL, logDir) pairs from the queue configuration: a worker's
+    log URL under a base URL is the file under that directory here."""
+    try:
+        with open(QUEUE_CONFIG) as handle:
+            config = json.load(handle)
+    except (OSError, ValueError):
+        return []
+    pairs = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get('logBaseURL') and node.get('logDir'):
+                pairs.add((node['logBaseURL'].rstrip('/'), node['logDir'].rstrip('/')))
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+    walk(config)
+    return sorted(pairs, key=lambda p: -len(p[0]))
+
+
+def local_log(url, roots):
+    if not url:
+        return None
+    for base, directory in roots:
+        if url.startswith(base):
+            return directory + '/' + url[len(base):].lstrip('/')
+    return None
+
+
+EVENT_RE = re.compile(r'^(\d{3}) \(([\d.]+)\) (\S+ \S+) (.*)$')
+# The events that end a worker or explain why it did not run on.
+REASON_EVENTS = {'005', '007', '009', '012', '021', '022', '024'}
+
+
+def condor_reason(path):
+    """The batch system's own account of how the worker ended: the last
+    terminal or hold event of its condor event log, with its detail lines
+    (``Job was aborted. removed by SYSTEM_PERIODIC_REMOVE due to ...``)."""
+    try:
+        size = os.path.getsize(path)
+        with open(path, 'rb') as handle:
+            handle.seek(max(0, size - CONDOR_LOG_TAIL))
+            text = handle.read().decode('utf-8', 'replace')
+    except OSError as exc:
+        return None, 'cannot read: {}'.format(exc)
+    last, current = None, None
+    for line in text.splitlines():
+        hit = EVENT_RE.match(line)
+        if hit:
+            current = {'code': hit.group(1), 'at': hit.group(3), 'text': [hit.group(4).strip()]}
+            if current['code'] in REASON_EVENTS:
+                last = current
+            continue
+        if line.startswith('...'):
+            current = None
+        elif current is not None and line.strip():
+            current['text'].append(line.strip())
+    if last is None:
+        return None, None
+    reason = ' '.join(last['text'])
+    return {'code': last['code'], 'at': last['at'],
+            'reason': re.sub(r'\s+', ' ', reason)[:LINE_KEEP]}, None
+
+
+def median(values):
+    values = sorted(v for v in values if v is not None)
+    if not values:
+        return None
+    mid = len(values) // 2
+    return values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2.0
+
+
+def harvester_db(since, until):
+    """The harvester's launch limits per queue, its workers now, the workers
+    that ended in (since, until] with the batch system's reason for each
+    that did not finish, and its latest service metrics. Each part that
+    cannot be read is an error field."""
+    out = {'window': {'since': since, 'until': until}}
+    try:
+        conf = db_conf()
+    except Exception as exc:                                  # noqa: BLE001
+        return dict(out, error='{}: {}'.format(exc.__class__.__name__, exc))
+
+    try:
+        cols = ('queue', 'site', 'job_type', 'resource_type', 'n_queue_limit_worker',
+                'max_workers', 'n_new_workers', 'n_queue_limit_job', 'job_fetch_time', 'submit_time')
+        rows = query(conf, 'SELECT queueName, siteName, jobType, resourceType, nQueueLimitWorker, '
+                           'maxWorkers, nNewWorkers, nQueueLimitJob, jobFetchTime, submitTime FROM pq_table')
+        out['launch_limits'] = [dict(zip(cols, r)) for r in rows]
+    except Exception as exc:                                  # noqa: BLE001
+        out['launch_limits'] = {'error': '{}: {}'.format(exc.__class__.__name__, exc)}
+
+    try:
+        rows = query(conf, "SELECT computingSite, status, COUNT(*) FROM work_table "
+                           "WHERE status NOT IN ('{}') GROUP BY 1, 2".format("','".join(TERMINAL)))
+        now = {}
+        for site, status, n in rows:
+            now.setdefault(site or '', {})[status] = int(n)
+        out['workers_now'] = now
+    except Exception as exc:                                  # noqa: BLE001
+        out['workers_now'] = {'error': '{}: {}'.format(exc.__class__.__name__, exc)}
+
+    try:
+        out['workers_ended'] = workers_ended(conf, since, until)
+    except Exception as exc:                                  # noqa: BLE001
+        out['workers_ended'] = {'error': '{}: {}'.format(exc.__class__.__name__, exc)}
+
+    try:
+        rows = query(conf, 'SELECT hostName, creationTime, LEFT(metrics, 2000) FROM sm_table '
+                           'ORDER BY creationTime DESC LIMIT 5')
+        metrics = {}
+        for host, created, raw in rows:
+            if host in metrics:
+                continue
+            try:
+                value = json.loads(raw) if raw else None
+            except ValueError:
+                value = raw
+            metrics[host or ''] = {'at': created, 'metrics': value}
+        out['service_metrics'] = metrics
+    except Exception as exc:                                  # noqa: BLE001
+        out['service_metrics'] = {'error': '{}: {}'.format(exc.__class__.__name__, exc)}
+    return out
+
+
+def workers_ended(conf, since, until):
+    """Per site: the workers that ended in the window by status, their
+    median run, and every worker that did not finish (or finished with a
+    nonzero batch exit) grouped by the batch system's reason, read from
+    its condor log, else the harvester's diagnostic."""
+    rows = query(conf, (
+        "SELECT workerID, batchID, computingSite, status, nativeStatus, nativeExitCode, "
+        "TIMESTAMPDIFF(SECOND, startTime, endTime), endTime, LEFT(diagMessage, 300), "
+        "JSON_UNQUOTE(JSON_EXTRACT(workAttributes, '$.batchLog')), nodeID, computingElement "
+        "FROM work_table WHERE endTime > '{}' AND endTime <= '{}' ORDER BY endTime DESC"
+    ).format(since, until))
+    roots = log_roots()
+    sites, logs_read, log_errors = {}, 0, 0
+    for (worker, batch, site, status, native, exit_code, run_s, ended, diag,
+         batch_log, node, ce) in rows:
+        s = sites.setdefault(site or '', {'ended': 0, 'by_status': {}, '_runs': [], 'reasons': {}})
+        s['ended'] += 1
+        s['by_status'][status] = s['by_status'].get(status, 0) + 1
+        # A worker removed before it ran has no run; the median is of finished workers.
+        if status == 'finished' and run_s is not None and int(run_s) >= 0:
+            s['_runs'].append(int(run_s))
+        if status == 'finished' and exit_code in (None, '', '0'):
+            continue
+        reason = None
+        path = local_log(batch_log, roots)
+        if path and logs_read < MAX_CONDOR_LOGS:
+            logs_read += 1
+            found, error = condor_reason(path)
+            if error:
+                log_errors += 1
+            reason = found
+        text = (reason or {}).get('reason') or (diag or '').strip() or (native or status)
+        key = '{} | {}'.format(status, text)
+        entry = s['reasons'].setdefault(key, {
+            'status': status, 'native_status': native,
+            'source': 'condor log' if reason else 'harvester diagnostic',
+            'event': (reason or {}).get('code'), 'reason': text, 'count': 0, 'examples': []})
+        entry['count'] += 1
+        if len(entry['examples']) < EXAMPLES:
+            entry['examples'].append({'workerid': int(worker), 'batchid': batch, 'ended': ended,
+                                      'node': node, 'ce': ce, 'batch_log': batch_log})
+    for s in sites.values():
+        runs = s.pop('_runs')
+        s['median_finished_run_s'] = median(runs)
+        reasons = sorted(s['reasons'].values(), key=lambda e: -e['count'])
+        s['reasons'] = reasons[:REASONS_KEEP]
+        s['reasons_dropped'] = max(0, len(reasons) - REASONS_KEEP)
+    return {'sites': sites, 'workers': len(rows), 'condor_logs_read': logs_read,
+            'condor_log_errors': log_errors}
+
+
 def collect(state):
     """The record this run delivers; ``state`` is advanced in place."""
     started = time.time()
-    record = {'host': HOST, 'collected_at': now_iso(), 'reporter_version': '1.0'}
+    record = {'host': HOST, 'collected_at': now_iso(), 'reporter_version': '1.1'}
     positions = state.setdefault('positions', {})
     last_run = state.get('last_run_at')
     first_run = not last_run
@@ -255,6 +488,17 @@ def collect(state):
     record['failed_calls'] = failed_calls(positions, first_run)
     record['daemons'] = daemons()
     record['processes'] = processes()
+    # The database window: since the previous run, or the last five
+    # minutes on a first run. Harvester times are UTC.
+    until = datetime.utcnow()
+    since = until - timedelta(minutes=5)
+    if last_run:
+        try:
+            since = datetime.strptime(last_run, '%Y-%m-%dT%H:%M:%SZ')
+        except ValueError:
+            pass
+    record['harvester_db'] = harvester_db(since.strftime('%Y-%m-%d %H:%M:%S'),
+                                          until.strftime('%Y-%m-%d %H:%M:%S'))
     record['collect_seconds'] = round(time.time() - started, 2)
     state['last_run_at'] = record['collected_at']
     return record
@@ -342,12 +586,19 @@ def buffer_record(state_dir, record):
 
 
 def main():
+    global HOST
     parser = argparse.ArgumentParser()
     parser.add_argument('--print', dest='show', action='store_true',
                         help='print the record, post nothing, leave the state untouched')
     parser.add_argument('--env', default=os.path.expanduser('~/.swf-harvester-reporter.env'))
-    parser.add_argument('--state', default=DEFAULT_STATE)
+    parser.add_argument('--report-as', default=HOST,
+                        help='the host key the record is stored under (default: this host)')
+    parser.add_argument('--state', default=None,
+                        help='state directory (default: one per host key; the home is shared across hosts)')
     args = parser.parse_args()
+    HOST = args.report_as
+    if args.state is None:
+        args.state = DEFAULT_STATE if HOST == 'pandaharvester01' else '{}-{}'.format(DEFAULT_STATE, HOST)
 
     state = load_state(args.state)
     record = collect(state)

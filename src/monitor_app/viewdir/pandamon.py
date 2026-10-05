@@ -2627,7 +2627,7 @@ def _reported_submission(queue_name):
     }
 
 
-HARVESTER_HOSTS = ('pandaharvester01',)
+HARVESTER_HOSTS = ('pandaharvester01', 'osgsub01-harvester')
 
 
 def _reported_harvester(queue_name):
