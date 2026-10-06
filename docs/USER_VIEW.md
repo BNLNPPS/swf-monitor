@@ -47,7 +47,10 @@ user nav takes the class `nav-user-item` for the blue.
 
 - Current campaign is the campaign plan (`pcs/plan/`) without the
   delivery map; the view does not build the snapper embed under
-  `user_view=1`.
+  `user_view=1`. It lists each physics configuration once, as its
+  newest edition with a task of its own: a production edition over an
+  EVGEN-stage record, a current edition over a withdrawn one, then the
+  newest release (`pcs.views._campaign_plan_state`).
 - The home page is the production root with the parameter; the hub
   view renders the user home template there. `pcs/user/` redirects to
   it.
