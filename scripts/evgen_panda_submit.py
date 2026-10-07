@@ -274,6 +274,12 @@ def build_task_params(spec, archive_name):
     # spends an attempt but not a failure (JEDI maxFailure).
     if spec.get('maxFailure'):
         params['maxFailure'] = int(spec['maxFailure'])
+    # The PanDA server's reassignment off: JEDI flags each generated job
+    # relocationFlag=2, which both copyArchive rules (inactive site, two
+    # days activated) skip. Production places and moves its own work; a
+    # reassignment costs every waiting input an attempt.
+    if spec.get('disableReassign'):
+        params['disableReassign'] = True
 
     if spec.get('containerImage'):
         params['container_name'] = spec['containerImage']
