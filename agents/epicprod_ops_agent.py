@@ -282,6 +282,8 @@ ES_CLOSEOUT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "es-cl
 DECLARED_STATE_TIMEOUT = int(os.environ.get("EPICPROD_DECLARED_STATE_TIMEOUT", "300"))
 DECLARED_STATE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "cric-declared-state.py"
 FRONT_CYCLE_TIMEOUT = int(os.environ.get("EPICPROD_FRONT_CYCLE_TIMEOUT", "240"))
+NERSC_ALLOCATION_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "nersc-allocation-read.py"
+NERSC_ALLOCATION_TIMEOUT = int(os.environ.get("EPICPROD_NERSC_ALLOCATION_TIMEOUT", "120"))
 GKE_PILOT_CYCLE_TIMEOUT = int(os.environ.get("EPICPROD_GKE_PILOT_CYCLE_TIMEOUT", "240"))
 # An incremental pass is about 36 minutes plus its sixth of the dataset
 # tier (about an hour at the pass's pacing, STORAGE.md); the nightly full
@@ -404,7 +406,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "assessment_completed", "front_cycle", "node_guard_cycle",
                    "harvester_stdout_capture", "cric_declared_state",
                    "es_closeout_cycle", "worker_record_capture",
-                   "gke_pilot_cycle",
+                   "gke_pilot_cycle", "nersc_allocation_read",
                    "health_ping", "shutdown"}
 
     def __init__(self):
@@ -3212,6 +3214,46 @@ class EpicProdOpsAgent(BaseAgent):
                              live_default=False, level=logging.ERROR)
             return
         self.logger.info("PRODOPS front_cycle done")
+
+    def _handle_nersc_allocation_read(self, m):
+        """Read the NERSC allocation balance (swf-epicprod
+        docs/CONTINUOUS_PRODUCTION.md, Closed queues): hourly by cron
+        enqueue, directly invokable. The doer records the read itself
+        (nersc_allocation_read); deduped so reads never overlap."""
+        self.run_in_background(
+            self._do_nersc_allocation_read, m,
+            dedup_key="nersc_allocation_read", label="nersc_allocation_read")
+
+    def _do_nersc_allocation_read(self, m):
+        username = str(m.get('created_by') or 'nersc_allocation')
+        cmd = [sys.executable, str(NERSC_ALLOCATION_SCRIPT), "--created-by", username]
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=NERSC_ALLOCATION_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS nersc_allocation_read TIMEOUT after {NERSC_ALLOCATION_TIMEOUT}s")
+            self._log_action('nersc_allocation_read', t0, outcome='timeout',
+                             reason=f'timed out after {NERSC_ALLOCATION_TIMEOUT}s',
+                             username=username, sublevel='normal',
+                             live_default=False, level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  nersc-allocation: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  nersc-allocation: {line}")
+        if p.returncode != 0:
+            self.logger.error(f"PRODOPS nersc_allocation_read FAILED rc={p.returncode}")
+            # A doer that reached its summary recorded the unreadable
+            # balance with its reason; one that died before it did not.
+            if 'SUMMARY ' not in (p.stdout or ''):
+                self._log_action('nersc_allocation_read', t0, outcome='error',
+                                 reason=self._derive_reason(p), username=username,
+                                 sublevel='normal', live_default=False,
+                                 level=logging.ERROR)
+            return
+        self.logger.info("PRODOPS nersc_allocation_read done")
 
     def _handle_gke_pilot_cycle(self, m):
         """One cycle of the BNL_ePIC_GOOGLE_es pilot flow (swf-epicprod
