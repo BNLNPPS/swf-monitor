@@ -32,6 +32,13 @@ Each run posts one record.
 | Pool admission | `condor_status` against the pool collectors | total slots; slots the queue's requirements admit; slots the exclusions remove, by site and node |
 | Pool composition | the same | slots per site, operating system, user-namespace and CVMFS availability |
 | Submission health | `condor_q` on the local schedd | workers idle, running and held per queue, with held reasons |
+| Idle pilots | `condor_q` and `condor_q -better-analyze` | per queue: idle pilots and the oldest one's age; for a queue with at least 100 idle, condor's match analysis of its oldest idle pilot (the pool's slots, those the pilot's requirements reject, those whose own requirements reject it, those willing, those that would match if drained, the last successful and failed match and the failure reason) |
+
+The schedd keeps about an hour and a half of job history and half an
+hour of its log, so a stall in pilot starts outlasts condor's own
+record of it. The reporter therefore also appends each run's idle
+analysis to `match-analysis.jsonl` in its state directory and keeps
+seven days of it on the host.
 
 Every failure to read a source is delivered as a field, never dropped;
 an unreachable swf-monitor buffers records locally and posts the

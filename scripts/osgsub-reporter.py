@@ -213,6 +213,106 @@ def schedd():
     return out_rec
 
 
+IDLE_ANALYZE_MIN = 100
+ANALYSIS_LOG = 'match-analysis.jsonl'
+ANALYSIS_KEEP_S = 7 * 24 * 3600
+QUEUE_ARG_RE = re.compile(r'-q (\S+)')
+ANALYSIS_PATTERNS = (
+    ('slots', re.compile(r'Of (\d+) slots on (\d+) machines')),
+    ('rejected_by_job', re.compile(r'(\d+) slots are rejected by your job')),
+    ('reject_job', re.compile(r'(\d+) slots reject your job')),
+    ('willing', re.compile(r'(\d+) slots match and are willing')),
+    ('if_drained', re.compile(r'(\d+) slots would match if drained')),
+    ('last_match', re.compile(r'Last successful match: (.+)$')),
+    ('last_failed_match', re.compile(r'Last failed match: (.+)$')),
+    ('failed_reason', re.compile(r'^\s*Reason: (.+)$')),
+)
+
+
+def _analysis(job_id):
+    """condor's own account of why one idle pilot is not running: the
+    pool's slots split by who rejects whom, and the last match times."""
+    out, err = run(['condor_q', '-better-analyze', job_id])
+    if err:
+        return {'error': err}
+    found = {}
+    for line in (out or '').splitlines():
+        for key, pattern in ANALYSIS_PATTERNS:
+            m = pattern.search(line)
+            if m and key not in found:
+                found[key] = (int(m.group(1)) if m.group(1).isdigit()
+                              else m.group(1).strip())
+    return found
+
+
+def idle_analysis(state_dir):
+    """Per OSG queue with at least IDLE_ANALYZE_MIN idle pilots: the idle
+    count, the oldest idle pilot's age, and condor's match analysis of
+    that pilot. Each run's result is also appended to a seven-day log in
+    the state directory, since the schedd keeps about an hour and a half
+    of history and a stall outlasts it (BNL_OSG_EPIC_PROD_1, 10/6 22:00 to
+    10/7 03:00 UTC, unexplained once the history had rotated)."""
+    out, err = run(['condor_q', '-all', '-constraint', 'JobStatus == 1',
+                    '-af', 'ClusterId', 'ProcId', 'QDate', 'Args'])
+    if err:
+        return {'error': 'condor_q unavailable: {}'.format(err)}
+    queues = {}
+    for line in (out or '').splitlines():
+        parts = line.split(None, 3)
+        if len(parts) < 4:
+            continue
+        m = QUEUE_ARG_RE.search(parts[3])
+        if not m:
+            continue
+        q = queues.setdefault(m.group(1), {'idle': 0, 'oldest_qdate': None})
+        q['idle'] += 1
+        try:
+            qdate = int(parts[2])
+        except ValueError:
+            continue
+        if q['oldest_qdate'] is None or qdate < q['oldest_qdate']:
+            q['oldest_qdate'] = qdate
+            q['job'] = '{}.{}'.format(parts[0], parts[1])
+    now = time.time()
+    result = {}
+    for name, q in sorted(queues.items()):
+        entry = {'idle': q['idle']}
+        if q['oldest_qdate'] is not None:
+            entry['oldest_idle_minutes'] = int((now - q['oldest_qdate']) / 60)
+        if q['idle'] >= IDLE_ANALYZE_MIN and q.get('job'):
+            entry['job'] = q['job']
+            entry['analysis'] = _analysis(q['job'])
+        result[name] = entry
+    _append_analysis(state_dir, {'at': now_iso(), 'queues': result})
+    return result
+
+
+def _append_analysis(state_dir, line):
+    """Append one run's analysis and keep seven days of them."""
+    path = os.path.join(state_dir, ANALYSIS_LOG)
+    cutoff = datetime.utcfromtimestamp(time.time() - ANALYSIS_KEEP_S).strftime(
+        '%Y-%m-%dT%H:%M:%SZ')
+    try:
+        os.makedirs(state_dir, exist_ok=True)
+        kept = []
+        if os.path.exists(path):
+            with open(path) as handle:
+                for raw in handle:
+                    try:
+                        if json.loads(raw).get('at', '') >= cutoff:
+                            kept.append(raw if raw.endswith('\n') else raw + '\n')
+                    except ValueError:
+                        continue
+        kept.append(json.dumps(line, sort_keys=True) + '\n')
+        tmp = path + '.tmp'
+        with open(tmp, 'w') as handle:
+            handle.writelines(kept)
+        os.replace(tmp, path)
+    except OSError as exc:
+        print('could not write the match analysis log: {}'.format(exc),
+              file=sys.stderr)
+
+
 HARVESTER_LOG_DIR = '/var/log/harvester'
 
 
@@ -296,10 +396,10 @@ def health():
     return out
 
 
-def collect(with_pool=True):
+def collect(with_pool=True, state_dir=DEFAULT_STATE):
     """The record this run delivers."""
     record = {'host': HOST, 'collected_at': now_iso(),
-              'reporter_version': '1.0'}
+              'reporter_version': '1.1'}
     started = time.time()
     record['submit_descriptions'] = submit_descriptions()
     record['queues'] = queue_map()
@@ -323,6 +423,7 @@ def collect(with_pool=True):
         record['pool'] = pool(prod.get('requirements'),
                               prod.get('excluded_site_nodes') or [])
         record['schedd'] = schedd()
+        record['idle_analysis'] = idle_analysis(state_dir)
     record['collect_seconds'] = round(time.time() - started, 2)
     return record
 
@@ -397,7 +498,7 @@ def main():
     parser.add_argument('--state', default=DEFAULT_STATE)
     args = parser.parse_args()
 
-    record = collect(with_pool=args.pool)
+    record = collect(with_pool=args.pool, state_dir=args.state)
     if args.show:
         print(json.dumps(record, indent=2, sort_keys=True))
         return 0
