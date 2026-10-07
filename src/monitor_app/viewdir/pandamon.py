@@ -539,8 +539,19 @@ def _compute_usage_dates(request):
     return (start_date, end_date, bucket), ''
 
 
+COMPUTE_USAGE_WORK = {'epicproduction': 'ePIC production'}
+
+
+def _compute_usage_work(request):
+    """The page's work selection: a processing type from
+    COMPUTE_USAGE_WORK (``processingtype=epicproduction``), or all work
+    at the queues when absent or unknown."""
+    value = (request.GET.get('processingtype') or '').strip()
+    return value if value in COMPUTE_USAGE_WORK else ''
+
+
 def _query_compute_usage(start_date, end_date, bucket, site=None,
-                         series_rollup=False):
+                         series_rollup=False, processingtype=''):
     """Plot-ready resource data for an inclusive Eastern date range,
     served as a cached product (docs/CACHED_PRODUCTS.md): the PanDA-DB
     aggregation never builds in the request path once a key is
@@ -559,6 +570,7 @@ def _query_compute_usage(start_date, end_date, bucket, site=None,
             site=site,
             series_rollup=series_rollup,
             execute_sites=True,
+            processingtype=processingtype or None,
         )
         if usage.get('error'):
             raise RuntimeError(usage['error'])
@@ -570,7 +582,8 @@ def _query_compute_usage(start_date, end_date, bucket, site=None,
         return usage
 
     key = (f'compute_usage:v6:{start_date}:{end_date}:{bucket}'
-           f":{site or ''}:{int(series_rollup)}")
+           f":{site or ''}:{int(series_rollup)}"
+           + (f':{processingtype}' if processingtype else ''))
     try:
         product = get_product(key, build, ttl_seconds=300)
     except Exception as e:                                  # noqa: BLE001
@@ -593,6 +606,7 @@ def _compute_usage(request):
         end_date,
         bucket,
         site=(request.GET.get('site') or '').strip() or None,
+        processingtype=_compute_usage_work(request),
     )
 
 
@@ -612,6 +626,7 @@ def compute_usage(request):
     execute sites, so it alone gets an execute-site breakdown block
     beneath the site table and the umbrella label 'OSG Pool'."""
     today = datetime.now(ZoneInfo(settings.TIME_ZONE)).date()
+    work = _compute_usage_work(request)
     selection, error = _compute_usage_dates(request)
     if selection:
         selected_start, selected_end, bucket = selection
@@ -624,6 +639,7 @@ def compute_usage(request):
             loaded_end,
             'day',
             series_rollup=True,
+            processingtype=work,
         )
         start = str(selected_start)
         end = str(selected_end)
@@ -679,6 +695,9 @@ def compute_usage(request):
         'end': end,
         'bucket': bucket,
         'periods': periods,
+        'work': work,
+        'work_label': COMPUTE_USAGE_WORK.get(work, ''),
+        'work_options': COMPUTE_USAGE_WORK,
     })
 
 

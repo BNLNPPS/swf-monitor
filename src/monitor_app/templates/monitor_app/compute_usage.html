@@ -87,7 +87,7 @@
   <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
     <div>
       <h1 class="h3 mb-1">Site compute usage</h1>
-      <div class="text-muted">Finished PanDA jobs, grouped by computing site and completion time, with failed job counts alongside.</div>
+      <div class="text-muted">Finished PanDA jobs{% if work %} of {{ work_label }} alone{% else %}, all work{% endif %}, grouped by computing site and completion time, with failed job counts alongside.</div>
     </div>
   </div>
 
@@ -117,10 +117,19 @@
       </select>
     </div>
     <div class="col-sm-3 col-lg-2">
+      <label class="form-label mb-1" for="usage-work" title="All work that ran at the queues, or one processing type's jobs alone">Work</label>
+      <select class="form-select form-select-sm" id="usage-work" name="processingtype">
+        <option value=""{% if not work %} selected{% endif %}>All work</option>
+        {% for value, label in work_options.items %}
+        <option value="{{ value }}"{% if work == value %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-sm-3 col-lg-2">
       <button class="btn btn-sm btn-primary" type="submit">Apply period</button>
     </div>
-    <div class="col-lg-4 text-lg-end small">
-      <a id="usage-json-link" href="{% url 'monitor_app:compute_usage_data' %}?start={{ start|urlencode }}&amp;end={{ end|urlencode }}&amp;bucket={{ bucket|urlencode }}">JSON data</a>
+    <div class="col-lg-2 text-lg-end small">
+      <a id="usage-json-link" href="{% url 'monitor_app:compute_usage_data' %}?start={{ start|urlencode }}&amp;end={{ end|urlencode }}&amp;bucket={{ bucket|urlencode }}{% if work %}&amp;processingtype={{ work|urlencode }}{% endif %}">JSON data</a>
     </div>
   </form>
 
@@ -688,6 +697,16 @@
     if (includeTest) includeTest.addEventListener('change', () => { applyTestQueues(); updateLocation(); render(); });
     applyTestQueues();
     metric.addEventListener('change', () => { updateLocation(); render(); });
+    // The work selection changes the data itself, so it reloads the page
+    // with every other piece of URL state kept.
+    const workInput = document.getElementById('usage-work');
+    if (workInput) workInput.addEventListener('change', () => {
+      const params = new URLSearchParams(window.location.search);
+      if (workInput.value) params.set('processingtype', workInput.value);
+      else params.delete('processingtype');
+      const query = params.toString();
+      window.location.assign(window.location.pathname + (query ? `?${query}` : ''));
+    });
     sortButtons.forEach(button => button.addEventListener('click', () => {
       const nextKey = button.dataset.sort;
       if (nextKey === sortKey) {

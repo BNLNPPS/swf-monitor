@@ -2233,8 +2233,10 @@ def queue_types():
 
 def resource_usage(days=30, site=None, username=None, taskid=None,
                    start_time=None, end_time=None, bucket=None,
-                   series_rollup=False, execute_sites=False):
-    """Aggregate resource usage for finished jobs.
+                   series_rollup=False, execute_sites=False,
+                   processingtype=None):
+    """Aggregate resource usage for finished jobs, optionally of one
+    processing type (``epicproduction`` for ePIC production alone).
 
     With ``bucket`` and ``execute_sites``, the result also carries the
     OSG pool's execute-site breakdown: ``execute_series``, the same
@@ -2299,6 +2301,10 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
     if taskid:
         filters += ' AND "jeditaskid" = %s'
         extra_params.append(taskid)
+    if processingtype:
+        clause, val = like_or_eq('processingtype', processingtype)
+        filters += f' AND {clause}'
+        extra_params.append(val)
 
     base_where = (
         '"endtime" >= %s'
@@ -2537,6 +2543,7 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
             "site": site,
             "username": username,
             "taskid": taskid,
+            "processingtype": processingtype,
             "start_time": window_start.isoformat(),
             "end_time": window_end.isoformat(),
             "bucket": bucket or None,
