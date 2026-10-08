@@ -33,8 +33,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('--text', required=True)
     ap.add_argument('--created-by', default='jev_like')
+    ap.add_argument('--response-url', default='',
+                    help='a Mattermost slash command response URL to post the answer to')
     args = ap.parse_args()
-    value = run(args.text, created_by=args.created_by)
+    value = run(args.text, created_by=args.created_by, response_url=args.response_url)
     print('SUMMARY ' + json.dumps({'key': value['key'], 'ranked': len(value['ranked']),
                                    'error': value['error']}))
     return 1 if value['error'] else 0

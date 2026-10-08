@@ -2700,6 +2700,44 @@ def users_list(request):
 @api_view(['POST'])
 @authentication_classes([])
 @permission_classes([AllowAny])
+def jev_slash_command(request):
+    """Handle /jev from Mattermost: the physics configurations that answer
+    a request in plain words, ranked by Jev (swf-epicprod docs/JEV.md).
+
+    POST with token, text, user_name, response_url. A query ranked within
+    the week is answered at once; otherwise the prod-ops agent ranks it and
+    posts the answer to the response URL, and this reply says so."""
+    from decouple import config as decouple_config
+    from pcs.services import ServiceError, jev_like_request
+    from swf_epicprod.jev_like import mattermost_text
+
+    expected_token = decouple_config('MATTERMOST_JEV_SLASH_TOKEN', default='')
+    if not expected_token or request.data.get('token', '') != expected_token:
+        return JsonResponse({'text': 'Unauthorized.'}, status=401)
+    text = (request.data.get('text') or '').strip()
+    if not text:
+        return JsonResponse({'response_type': 'ephemeral', 'text': (
+            'Usage: `/jev <physics in your own words>`, for example '
+            '`/jev 18 on 275 neutral current DIS above Q2 of 10, radiative`. '
+            'Returns the physics configurations that answer it, ranked by Jev '
+            '(TypeSafe AI); experimental.')})
+    user = request.data.get('user_name', 'unknown')
+    try:
+        out = jev_like_request(text=text, created_by=f'mattermost:{user}',
+                               response_url=request.data.get('response_url', ''))
+    except ServiceError as exc:
+        return JsonResponse({'response_type': 'ephemeral', 'text': f'Jev: {exc}'})
+    if out.get('answer'):
+        return JsonResponse({'response_type': 'in_channel',
+                             'text': mattermost_text(out['answer'])})
+    return JsonResponse({'response_type': 'ephemeral',
+                         'text': f'Jev is ranking configurations for "{text}"; '
+                                 'the answer follows here in a few seconds.'})
+
+
+@api_view(['POST'])
+@authentication_classes([])
+@permission_classes([AllowAny])
 def panda_slash_command(request):
     """Handle /panda slash commands from Mattermost.
 

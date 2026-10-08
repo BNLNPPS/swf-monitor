@@ -9,6 +9,7 @@ from .views import (
     get_next_run_number, get_next_agent_id, get_next_workflow_execution_id,
     ensure_namespace,
     ai_memory_record, ai_memory_load, dpid_verify, panda_slash_command,
+    jev_slash_command,
     users_list,
 )
 from .host_reports import host_report
@@ -63,6 +64,7 @@ urlpatterns = [
     path('ai-memory/', ai_memory_load, name='ai-memory-load'),
     path('dpid/verify/', dpid_verify, name='dpid-verify'),
     path('slash/panda/', panda_slash_command, name='panda-slash-command'),
+    path('slash/jev/', jev_slash_command, name='jev-slash-command'),
     path('corun-callback/', corun_callback, name='corun-callback'),
     # Host reporters push what only their own host can see
     # (docs/OSG_SUBMIT_REPORTER.md).

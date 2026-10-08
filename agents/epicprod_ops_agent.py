@@ -3318,6 +3318,8 @@ class EpicProdOpsAgent(BaseAgent):
         username = str(m.get('created_by') or 'jev_like')
         cmd = [sys.executable, str(JEV_LIKE_SCRIPT), "--text", str(m['text']),
                "--created-by", username]
+        if m.get('response_url'):
+            cmd += ["--response-url", str(m['response_url'])]
         t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
