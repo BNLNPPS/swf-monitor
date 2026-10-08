@@ -130,12 +130,15 @@ Other subscribers and the complete action log are unchanged.
   maintenance stay quiet. New imports, associations, crashes, traces and
   queued studies remain visible when the record reports actual changes;
   idempotently rewritten row counts alone are not a change.
-- A stash-drain pass with no cataloguing, movement or missing-file discovery
-  stays quiet, regardless of the number of backlog entries or deferrals.
+- Automated maintenance passes (`MAINTENANCE` in `live_notices.py`: stash
+  drain, storage sweep, log rescue, the registrar, the ES close-out cycle and
+  the other drains, captures, ingests and refreshes) stay quiet, failures and
+  recoveries included. Their outcomes remain in the action log and the alarm
+  system; a live-policy override still publishes one.
 - Shadow node-guard suggestions stay quiet; actual exclusions remain visible.
 - Assessments, production arrivals, job closeouts, operator actions and
   substantive findings remain eligible for publication.
-- An automated failure is published on first observation or when its cause
+- Any other automated failure is published on first observation or when its cause
   changes. Identical repetitions stay quiet. The next successful execution
   publishes a recovery notice, even when ordinary successes are not live.
   Automation is identified by the existing requester convention `cron` or

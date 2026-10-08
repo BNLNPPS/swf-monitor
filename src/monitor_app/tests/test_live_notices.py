@@ -22,17 +22,17 @@ class LiveNoticeSelectionTests(TestCase):
             with self.subTest(action=action):
                 self.assertIsNone(self.select(action=action))
 
-    def test_unchanged_stash_is_quiet_with_or_without_deferrals(self):
-        for summary in ('entries=1 catalogued=0 missing=0 moved=0 deferred=0 jlab=True',
-                        'entries=42619 catalogued=0 missing=0 moved=0 deferred=50 jlab=True'):
-            self.assertIsNone(self.select(action='stash_drain', summary=summary))
+    def test_maintenance_is_quiet_including_failures_and_recoveries(self):
+        for action in ('stash_drain', 'storage_sweep', 'log_rescue'):
+            with self.subTest(action=action):
+                self.assertIsNone(self.select(action=action, summary='moved=2'))
+                self.assertIsNone(self.select(action=action, outcome='partial', reason='x'))
+                self.assertIsNone(self.select(action=action))
 
-    def test_stash_progress_or_missing_files_remains_visible(self):
-        for field in ('catalogued', 'moved', 'missing'):
-            self.assertIsNotNone(self.select(action='stash_drain', summary=f'{field}=2'))
-
-    def test_missing_stash_counters_do_not_silently_hide_a_record(self):
-        self.assertIsNotNone(self.select(action='stash_drain', summary='unexpected output'))
+    def test_maintenance_live_override_still_publishes(self):
+        notice = select_notice(self.row, dict(self.extra, action='stash_drain'),
+                               self.failures, {'stash_drain': True})
+        self.assertIsNotNone(notice)
 
     def test_actual_changes_inside_routine_passes_remain_visible(self):
         for action, summary in (

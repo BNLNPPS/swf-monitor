@@ -14,6 +14,17 @@ ROUTINE_SUCCESSES = frozenset({
     'association_sweep', 'rucio_sweep', 'evgen_sweep', 'segfault_inventory',
     'segfault_dig', 'segfault_study', 'segfault_notice', 'storage_door_cycle',
 })
+# Maintenance passes: their automated runs never reach the channel, failures
+# and recoveries included (Torre, 2026-10-08); the action log and the alarms
+# keep them.
+MAINTENANCE = frozenset({
+    'stash_drain', 'storage_sweep', 'storage_door_cycle', 'log_rescue', 'log_grant',
+    'registrar', 'report_sweep', 'node_measure_ingest', 'harvester_stdout_capture',
+    'batch_log_capture', 'batch_log_learn', 'file_events_measure',
+    'panda_sandbox_keepalive', 'es_closeout_cycle', 'system_status_refresh',
+    'snapper_capture', 'rucio_snapshot_update', 'rucio_arrivals_sweep',
+    'delivery_daily_rebuild', 'campaign_progress_refresh',
+})
 FAILURE_OUTCOMES = frozenset({'error', 'timeout', 'partial', 'unrecorded'})
 PROGRESS_PATTERNS = {
     'catalog_import': r'\b(\d+) new\b',
@@ -47,7 +58,9 @@ def select_notice(row, extra, failures, live_policy):
         notice['reason'] = str(notice.get('summary') or row.message or '')[:300]
 
     quiet = False
-    if automated:
+    if automated and action in MAINTENANCE:
+        quiet = True
+    elif automated:
         key = json.dumps([action, row.instance_name,
                           extra.get('subject_type'), extra.get('subject_key'),
                           extra.get('source'), extra.get('operation')])
@@ -71,14 +84,6 @@ def select_notice(row, extra, failures, live_policy):
             if pattern and any(int(v) for v in re.findall(
                     pattern, str(extra.get('summary') or ''))):
                 quiet = False
-            if action == 'stash_drain':
-                metrics = {k: int(v) for k, v in re.findall(
-                    r'\b(catalogued|missing|moved)=(\d+)',
-                    str(extra.get('summary') or ''))}
-                if isinstance(extra.get('moved'), (int, float)):
-                    metrics['moved'] = extra['moved']
-                # The backlog size and number deferred are not new progress.
-                quiet = bool(metrics) and not any(metrics.values())
         elif action == 'node_guard_decision' and outcome == 'would_exclude':
             quiet = True
 
