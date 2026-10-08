@@ -284,6 +284,8 @@ DECLARED_STATE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "cr
 FRONT_CYCLE_TIMEOUT = int(os.environ.get("EPICPROD_FRONT_CYCLE_TIMEOUT", "240"))
 NERSC_ALLOCATION_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "nersc-allocation-read.py"
 NERSC_ALLOCATION_TIMEOUT = int(os.environ.get("EPICPROD_NERSC_ALLOCATION_TIMEOUT", "120"))
+JEV_NEIGHBORS_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "jev-config-neighbors.py"
+JEV_NEIGHBORS_TIMEOUT = int(os.environ.get("EPICPROD_JEV_NEIGHBORS_TIMEOUT", "3600"))
 GKE_PILOT_CYCLE_TIMEOUT = int(os.environ.get("EPICPROD_GKE_PILOT_CYCLE_TIMEOUT", "240"))
 # An incremental pass is about 36 minutes plus its sixth of the dataset
 # tier (about an hour at the pass's pacing, STORAGE.md); the nightly full
@@ -407,6 +409,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "harvester_stdout_capture", "cric_declared_state",
                    "es_closeout_cycle", "worker_record_capture",
                    "gke_pilot_cycle", "nersc_allocation_read",
+                   "jev_config_neighbors",
                    "health_ping", "shutdown"}
 
     def __init__(self):
@@ -3254,6 +3257,48 @@ class EpicProdOpsAgent(BaseAgent):
                                  level=logging.ERROR)
             return
         self.logger.info("PRODOPS nersc_allocation_read done")
+
+    def _handle_jev_config_neighbors(self, m):
+        """Configurations like this one (swf-epicprod docs/JEV.md): all
+        configurations nightly by cron enqueue, or those named in
+        ``labels``. The doer records the run (jev_config_neighbors);
+        deduped per selection so a nightly pass is never doubled."""
+        labels = [str(x) for x in (m.get('labels') or []) if str(x).strip()]
+        self.run_in_background(
+            self._do_jev_config_neighbors, m,
+            dedup_key="jev_config_neighbors:" + (",".join(sorted(labels)) or "all"),
+            label="jev_config_neighbors")
+
+    def _do_jev_config_neighbors(self, m):
+        username = str(m.get('created_by') or 'jev_config_neighbors')
+        cmd = [sys.executable, str(JEV_NEIGHBORS_SCRIPT), "--created-by", username]
+        for label in (m.get('labels') or []):
+            if str(label).strip():
+                cmd += ["--label", str(label).strip()]
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=JEV_NEIGHBORS_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS jev_config_neighbors TIMEOUT after {JEV_NEIGHBORS_TIMEOUT}s")
+            self._log_action('jev_config_neighbors', t0, outcome='timeout',
+                             reason=f'timed out after {JEV_NEIGHBORS_TIMEOUT}s',
+                             username=username, sublevel='normal',
+                             live_default=False, level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines()[-20:]:
+            self.logger.info(f"  jev-config-neighbors: {line}")
+        for line in (p.stderr or "").splitlines()[-20:]:
+            self.logger.info(f"  jev-config-neighbors: {line}")
+        if p.returncode != 0 and 'SUMMARY ' not in (p.stdout or ''):
+            self.logger.error(f"PRODOPS jev_config_neighbors FAILED rc={p.returncode}")
+            self._log_action('jev_config_neighbors', t0, outcome='error',
+                             reason=self._derive_reason(p), username=username,
+                             sublevel='normal', live_default=False,
+                             level=logging.ERROR)
+            return
+        self.logger.info("PRODOPS jev_config_neighbors done")
 
     def _handle_gke_pilot_cycle(self, m):
         """One cycle of the BNL_ePIC_GOOGLE_es pilot flow (swf-epicprod
