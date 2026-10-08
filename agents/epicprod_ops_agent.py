@@ -121,6 +121,7 @@ See docs/EPICPROD_OPS.md.
 import json
 import logging
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -286,6 +287,8 @@ NERSC_ALLOCATION_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "
 NERSC_ALLOCATION_TIMEOUT = int(os.environ.get("EPICPROD_NERSC_ALLOCATION_TIMEOUT", "120"))
 JEV_NEIGHBORS_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "jev-config-neighbors.py"
 JEV_NEIGHBORS_TIMEOUT = int(os.environ.get("EPICPROD_JEV_NEIGHBORS_TIMEOUT", "3600"))
+JEV_LIKE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "jev-like.py"
+JEV_LIKE_TIMEOUT = int(os.environ.get("EPICPROD_JEV_LIKE_TIMEOUT", "120"))
 GKE_PILOT_CYCLE_TIMEOUT = int(os.environ.get("EPICPROD_GKE_PILOT_CYCLE_TIMEOUT", "240"))
 # An incremental pass is about 36 minutes plus its sixth of the dataset
 # tier (about an hour at the pass's pacing, STORAGE.md); the nightly full
@@ -409,7 +412,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "harvester_stdout_capture", "cric_declared_state",
                    "es_closeout_cycle", "worker_record_capture",
                    "gke_pilot_cycle", "nersc_allocation_read",
-                   "jev_config_neighbors",
+                   "jev_config_neighbors", "jev_like",
                    "health_ping", "shutdown"}
 
     def __init__(self):
@@ -3299,6 +3302,44 @@ class EpicProdOpsAgent(BaseAgent):
                              level=logging.ERROR)
             return
         self.logger.info("PRODOPS jev_config_neighbors done")
+
+    def _handle_jev_like(self, m):
+        """Configurations for a request in plain words, ranked by Jev
+        (swf-epicprod docs/JEV.md), asked from the find page. Deduped per
+        query key so a double click asks once."""
+        key = str(m.get('key') or '')
+        if not (m.get('text') and re.fullmatch(r'[0-9a-f]{16}', key)):
+            self.logger.error(f"PRODOPS jev_like: missing text or bad key {key!r}")
+            return
+        self.run_in_background(self._do_jev_like, m,
+                               dedup_key=f"jev_like:{key}", label="jev_like")
+
+    def _do_jev_like(self, m):
+        username = str(m.get('created_by') or 'jev_like')
+        cmd = [sys.executable, str(JEV_LIKE_SCRIPT), "--text", str(m['text']),
+               "--created-by", username]
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=JEV_LIKE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self._log_action('jev_like', t0, outcome='timeout',
+                             reason=f'timed out after {JEV_LIKE_TIMEOUT}s',
+                             username=username, sublevel='normal',
+                             live_default=False, level=logging.ERROR)
+            p = None
+        if p is not None:
+            for line in (p.stdout or "").splitlines()[-5:]:
+                self.logger.info(f"  jev-like: {line}")
+            if p.returncode != 0 and 'SUMMARY ' not in (p.stdout or ''):
+                self._log_action('jev_like', t0, outcome='error',
+                                 reason=self._derive_reason(p), username=username,
+                                 sublevel='normal', live_default=False,
+                                 level=logging.ERROR)
+        # The page waits on this event whatever the outcome; the stored
+        # answer carries the error when there is one.
+        self.send_message('/topic/epictopic', {'msg_type': 'jev_like_ready',
+                                               'key': str(m['key'])})
 
     def _handle_gke_pilot_cycle(self, m):
         """One cycle of the BNL_ePIC_GOOGLE_es pilot flow (swf-epicprod
