@@ -196,7 +196,7 @@ def save_state(state):
 def due(entry_state):
     """Whether this entry is due an attempt now: never after it is home,
     once an hour otherwise, and a bounded number of times."""
-    if entry_state.get('outcome') == 'home':
+    if entry_state.get('outcome') in ('home', 'missing'):
         return False
     if int(entry_state.get('attempts') or 0) >= MAX_ATTEMPTS:
         return False
@@ -212,12 +212,17 @@ def due(entry_state):
 
 def register_in_place(entry, events, jlab, proxy, rse):
     """One stashed file registered by logical name at the RSE it lies on,
-    the registrar's way, and verified AVAILABLE. Returns ('home', '') or
-    ('failed', reason)."""
+    the registrar's way, and verified AVAILABLE. Returns ('home', ''),
+    ('missing', reason) when the storage answers that the file is not
+    there, or ('failed', reason)."""
     owes = entry['owes']
     # The registrar's completion reads the replica back and answers
     # 'registered' only when it reads AVAILABLE at the RSE.
     outcome, reason = _reg.complete(jlab, rse, owes, events, proxy)
+    if outcome == 'undelivered':
+        # Settled at first sight: a file the storage says is absent does
+        # not arrive later, and retrying it only repeats the report.
+        return 'missing', reason
     if outcome != 'registered':
         return 'failed', f'registration {outcome}: {reason}'
     if owes.startswith('/TEST/'):
@@ -298,7 +303,8 @@ def register_all(entries, state, rse, summary, proxy, dry_run=False):
                 summary['home'].append(entry['owes'])
             else:
                 summary['failed'].append(f'{name}: {reason}')
-                if 'undelivered' in reason:
+                if outcome == 'missing':
+                    entry_state['missing_at'] = now
                     summary['missing_at_stash'] += 1
             saved[0] += 1
             if saved[0] % 20 == 0:

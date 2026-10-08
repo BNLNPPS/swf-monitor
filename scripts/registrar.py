@@ -214,8 +214,15 @@ def rse_pfn_prefix(client, rse):
     raise _evgen.DoerError(EXIT_RUCIO, f'no readable protocol on RSE {rse}')
 
 
+class StorageProbeFailed(Exception):
+    """The storage could not say whether the file is there."""
+
+
 def stored_file(pfn, proxy):
-    """(bytes, adler32) of the file at a PFN, or None when it is not there.
+    """(bytes, adler32) of the file at a PFN, or None when the storage
+    answers that it is not there. Raises StorageProbeFailed when the
+    storage does not answer either way: a failed probe is not an absent
+    file, and reading it as one loses nothing but reports a loss.
 
     The storage is asked, never the catalog: the question is whether the
     upload stood, and the catalog is the thing that could not answer.
@@ -227,7 +234,10 @@ def stored_file(pfn, proxy):
         stat = subprocess.run(['xrdfs', door_url, 'stat', f'/{path}'],
                               capture_output=True, text=True, timeout=120, env=env)
         if stat.returncode != 0:
-            return None
+            answer = f'{stat.stdout or ""} {stat.stderr or ""}'
+            if '[3011]' in answer or 'No such file' in answer:
+                return None
+            raise StorageProbeFailed(f'stat rc={stat.returncode}: {answer.strip()[:200]}')
         size = None
         for line in (stat.stdout or '').splitlines():
             if line.strip().startswith('Size:'):
@@ -240,11 +250,14 @@ def stored_file(pfn, proxy):
             if len(parts) >= 2 and parts[0].startswith('adler32'):
                 adler = parts[1]
         if size is None or not adler:
-            return None
+            raise StorageProbeFailed(f'the file is there but its size or checksum did not read '
+                                     f'(size {size}, checksum rc={check.returncode})')
         return size, adler
+    except StorageProbeFailed:
+        raise
     except Exception as e:                                    # noqa: BLE001
         _log(f'WARNING: storage probe failed for {pfn}: {e}')
-        return None
+        raise StorageProbeFailed(f'{type(e).__name__}: {e}') from e
 
 
 def complete(client, rse, did, events, proxy, dry_run=False):
@@ -262,7 +275,10 @@ def complete(client, rse, did, events, proxy, dry_run=False):
     except Exception as e:                                    # noqa: BLE001
         return 'deferred', f'catalog unreachable (RSE protocols): {e}'
     pfn = f'{prefix.rstrip("/")}/{did.lstrip("/")}'
-    found = stored_file(pfn, proxy)
+    try:
+        found = stored_file(pfn, proxy)
+    except StorageProbeFailed as e:
+        return 'deferred', f'storage probe failed, presence unknown: {e}'
     if found is None:
         return 'undelivered', ('the output is not at the storage, so the upload '
                                'did not complete; this is a residual rerun, not '
