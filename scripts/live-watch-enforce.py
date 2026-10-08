@@ -144,7 +144,12 @@ def main():
     verdict = artifact.get('verdict', 'ok')
     found = spec.issue_set(artifact)
     last = state.get('last_registered')
-    changed = found != last and not (verdict == 'ok' and (last is None or last.get('verdict') == 'ok'))
+    if last:
+        # Runs registered before real problems were compared by action and
+        # component carry cause keys; compare them the same way.
+        last = dict(last, real_problems=sorted({k.split('~', 1)[0]
+                                                for k in last.get('real_problems') or []}))
+    changed =found != last and not (verdict == 'ok' and (last is None or last.get('verdict') == 'ok'))
     now = timezone.now().isoformat(timespec='seconds')
     latest = {'at': now, 'verdict': verdict, 'floor': (bundle.get('floor') or {}).get('verdict'),
               'narration': artifact.get('narration', ''), 'issue_set': found,
