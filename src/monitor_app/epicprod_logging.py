@@ -354,6 +354,24 @@ ACTION_DEFAULTS = {
                        "agent; the submission is segfault_diagnosis_triggered "
                        "and the result segfault_diagnosis.",
     },
+    'live_watch_triggered': {
+        'sublevel': 'low', 'live': False,
+        'description': "A live watch run submitted to corun-ai "
+                       "(scripts/live-watch-trigger.py; swf-epicprod "
+                       "EPICPROD_ASSESSMENTS.md, The live watch): the channel's "
+                       "posts and the action record's failure groups as a hidden "
+                       "bundle page, the run created with the live_watch "
+                       "definition; outcome error when the submission failed.",
+    },
+    'live_watch': {
+        'sublevel': 'low', 'live': False,
+        'description': "A live watch run's result enforced "
+                       "(scripts/live-watch-enforce.py): the verdict, the noise "
+                       "in the channel and the recurring real problems; notify "
+                       "set when what it found changed from the last registered "
+                       "run, which is then registered as an assessment; live "
+                       "only for a changed alarm.",
+    },
     'segfault_diagnosis_triggered': {
         'sublevel': 'normal', 'live': True,
         'description': "A crash signature's LLM study submitted to corun-ai "

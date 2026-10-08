@@ -181,6 +181,10 @@ def _dispatch_assessment(payload):
         # The segfault diagnosis rides the same harness with its own
         # enforcement (SEGFAULT_DIAGNOSIS.md, Diagnosis).
         msg_type = 'segfault_diagnosis_completed'
+    elif definition_name == 'live_watch':
+        # The live watch rides the same harness (swf-epicprod
+        # EPICPROD_ASSESSMENTS.md, The live watch).
+        msg_type = 'live_watch_completed'
     elif definition_name.startswith(
             config('CORUN_ASSESSMENT_DEFINITION_NAME',
                    default='campaign_assessment')):

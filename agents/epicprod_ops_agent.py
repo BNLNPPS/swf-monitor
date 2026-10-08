@@ -233,6 +233,8 @@ SEGFAULT_DIG_AUTO = int(os.environ.get("EPICPROD_SEGFAULT_DIG_AUTO", "10"))
 SEGFAULT_PACKAGE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "segfault-repro-package.py"
 SEGFAULT_DIAGNOSIS_TRIGGER_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "segfault-diagnosis-trigger.py"
 SEGFAULT_DIAGNOSIS_ENFORCE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "segfault-diagnosis-enforce.py"
+LIVE_WATCH_TRIGGER_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "live-watch-trigger.py"
+LIVE_WATCH_ENFORCE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "live-watch-enforce.py"
 # The registrar (swf-epicprod docs/RUCIO_RESILIENCE.md, Measure 2): completes
 # the registrations the payload left pending, hourly, and holds the only
 # retry — one gentle attempt per job, then bounded attempts from one process.
@@ -413,6 +415,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "es_closeout_cycle", "worker_record_capture",
                    "gke_pilot_cycle", "nersc_allocation_read",
                    "jev_config_neighbors", "jev_like",
+                   "live_watch", "live_watch_completed",
                    "health_ping", "shutdown"}
 
     def __init__(self):
@@ -2822,6 +2825,61 @@ class EpicProdOpsAgent(BaseAgent):
             'classification': str(summary.get('classification') or ''),
             'reason': str(summary.get('error') or '')[:300]})
         self.logger.info(f"PRODOPS segfault_diagnosis enforce {key}: {summary}")
+
+    def _handle_live_watch(self, m):
+        """Submit one live watch run (swf-epicprod EPICPROD_ASSESSMENTS.md,
+        The live watch): every four hours by cron enqueue, or on request."""
+        self.run_in_background(self._do_live_watch, m,
+                               dedup_key="live_watch", label="live_watch")
+
+    def _do_live_watch(self, m):
+        cmd = [sys.executable, str(LIVE_WATCH_TRIGGER_SCRIPT),
+               '--requested-by', str(m.get('requested_by') or m.get('created_by') or '')]
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        except subprocess.TimeoutExpired:
+            self._log_action('live_watch_triggered', t0, outcome='timeout',
+                             reason='trigger timed out after 600s',
+                             sublevel='normal', live_default=True, level=logging.ERROR)
+            return
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  live-watch-trigger: {line[:300]}")
+        # The trigger records its own live_watch_triggered action.
+        self.logger.info(f"PRODOPS live_watch: rc={p.returncode} "
+                         f"{(p.stdout or '').strip()[-300:]} in {time.monotonic() - t0:.1f}s")
+
+    def _handle_live_watch_completed(self, m):
+        """The corun completion callback for a live_watch run: enforce the
+        artifact, keep the report, register it when what it found changed."""
+        job_id = str(m.get('job_id') or '')
+        if not job_id:
+            self.logger.warning("PRODOPS live_watch_completed: no job_id, dropping")
+            return
+        self.run_in_background(
+            self._do_live_watch_enforce, m,
+            dedup_key=f"live_watch_enforce:{job_id}", label="live_watch_enforce")
+
+    def _do_live_watch_enforce(self, m):
+        cmd = [sys.executable, str(LIVE_WATCH_ENFORCE_SCRIPT),
+               '--job-id', str(m.get('job_id') or ''),
+               '--prompt-group-id', str(m.get('prompt_group_id') or ''),
+               '--page-group-id', str(m.get('page_group_id') or ''),
+               '--status', str(m.get('status') or '')]
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=ASSESSMENT_ENFORCE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self._log_action('live_watch', t0, outcome='timeout',
+                             reason=f'enforcement timed out after {ASSESSMENT_ENFORCE_TIMEOUT}s',
+                             sublevel='normal', live_default=True, level=logging.ERROR)
+            return
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  live-watch-enforce: {line[:300]}")
+        # The enforcement records the live_watch action itself.
+        self.logger.info(f"PRODOPS live_watch enforce: rc={p.returncode} "
+                         f"{(p.stdout or '').strip()[-300:]}")
 
     def _do_segfault_dig_auto(self, m):
         """The nightly automatic dig (catalog_sync chain step): the largest
