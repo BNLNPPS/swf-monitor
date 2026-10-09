@@ -12,9 +12,9 @@ quarantines it.
 A valid run is kept as the cached product ``live_watch`` (the latest
 report) and recorded as a ``live_watch`` action. It is registered as an
 assessment, and its action marked ``notify`` for the Capcom feed, only
-when what it found changed from the last registered run: a new verdict,
-a new real problem, new noise, or the return to clean after a registered
-finding. An alarm verdict reaches the channel; nothing else the watch
+when it is news (``spec.news``): a new verdict, the return to clean
+included, or a real problem or noise action not named since the verdict
+began. A newsworthy alarm reaches the channel; nothing else the watch
 does posts there.
 
     cd /data/wenauseic/github/swf-monitor/src
@@ -143,13 +143,8 @@ def main():
     report = spec.render_report(bundle, artifact)
     verdict = artifact.get('verdict', 'ok')
     found = spec.issue_set(artifact)
-    last = state.get('last_registered')
-    if last:
-        # Runs registered before real problems were compared by action and
-        # component carry cause keys; compare them the same way.
-        last = dict(last, real_problems=sorted({k.split('~', 1)[0]
-                                                for k in last.get('real_problems') or []}))
-    changed =found != last and not (verdict == 'ok' and (last is None or last.get('verdict') == 'ok'))
+    # Before the episode was kept, the last registered run stood for it.
+    changed, episode = spec.news(found, state.get('episode') or state.get('last_registered'))
     now = timezone.now().isoformat(timespec='seconds')
     latest = {'at': now, 'verdict': verdict, 'floor': (bundle.get('floor') or {}).get('verdict'),
               'narration': artifact.get('narration', ''), 'issue_set': found,
@@ -178,6 +173,7 @@ def main():
         page_group_id = result.get('corun_page_group_id') or ''
         state['last_registered'] = found
         state['last_registered_at'] = now
+    state['episode'] = episode
     state['last'] = {'at': now, 'verdict': verdict, 'issue_set': found, 'registered': changed}
     _mark(state, 'accepted', job_id=args.job_id, accepted_at=now, page_group_id=page_group_id)
     _log('ok', notify=changed, live=(verdict == 'alarm' and changed), username=requested_by,
