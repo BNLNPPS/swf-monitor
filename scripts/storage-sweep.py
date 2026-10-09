@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""storage-sweep.py — the storage pass: placement state of production
-data on every JLab RSE, kept in the storage store and published as the
-epicprod ``storage`` Snapper component.
+"""storage-sweep.py — the storage pass: production output on the JLab
+RSEs from registration until it settles, kept in the storage store and
+published as the epicprod ``storage`` Snapper component.
 
-The prod-ops agent's doer for the ``storage_sweep`` step (nightly in
-the ``catalog_sync`` chain as a full pass; every four hours by cron
-enqueue as an incremental pass). Logic in ``swf_epicprod/analytics/storage.py``,
+The prod-ops agent's doer for the ``storage_sweep`` message, enqueued
+by cron every four hours. Logic in ``swf_epicprod/analytics/storage.py``,
 publication in ``monitor_app/snapper_storage.py``; design in
 ``swf-epicprod/docs/STORAGE.md``. Django-bootstrap standalone script —
 also usable by hand.
@@ -14,7 +13,7 @@ Usage::
 
     cd /data/wenauseic/github/swf-monitor/src
     source ../../swf-testbed/.venv/bin/activate && source ~/.env
-    python ../scripts/storage-sweep.py [--census | --full] [--campaigns 26.07]
+    python ../scripts/storage-sweep.py [--campaigns 26.07]
                                        [--limit-files N] [--limit-datasets N]
                                        [--resume PASS_ID] [--publish-only]
                                        [--no-publish] [--dump projection.json]
@@ -50,18 +49,13 @@ def main():
     # the process with its pass row left as if still running.
     signal.signal(signal.SIGTERM, _on_signal)
     parser = argparse.ArgumentParser()
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument('--census', action='store_true',
-                      help='every file under the production roots, once')
-    mode.add_argument('--full', action='store_true',
-                      help='every dataset; the target campaigns\' files')
-    mode.add_argument('--publish-only', action='store_true',
-                      help='no crawl: publish the projection of the store\'s '
-                           'last completed pass (after a failed publish)')
+    parser.add_argument('--publish-only', action='store_true',
+                        help='no catalog reads: publish the projection of '
+                             'the store\'s last completed pass (after a '
+                             'failed publish)')
     parser.add_argument('--campaigns', default='',
                         help='comma-separated campaign families '
-                             '(default: the delivery record\'s targets, or '
-                             'every family in a census)')
+                             '(default: the delivery record\'s targets)')
     parser.add_argument('--limit-files', type=int, default=0,
                         help='cap the file tier for a validation run '
                              '(works on a copy of the store, no publish)')
@@ -76,7 +70,7 @@ def main():
                         help='write the projection JSON to this path')
     parser.add_argument('--created-by', default='prodops_agent')
     args = parser.parse_args()
-    mode_name = 'census' if args.census else 'full' if args.full else 'incremental'
+    mode_name = 'incremental'
     campaigns = tuple(c.strip() for c in args.campaigns.split(',')
                       if c.strip()) or None
     validation = bool(args.limit_files or args.limit_datasets)
@@ -85,13 +79,13 @@ def main():
         summary, data = project_store()
     else:
         try:
-            summary, data = run_pass(mode_name, campaigns=campaigns,
+            summary, data = run_pass(campaigns=campaigns,
                                      limit_files=args.limit_files,
                                      limit_datasets=args.limit_datasets,
                                      resume_pass=args.resume or None)
         except PassInProgress as exc:
-            # Another pass holds the store, the census or a full pass still
-            # running when the cron enqueue lands: skipped, not failed.
+            # Another pass holds the store when the cron enqueue lands:
+            # skipped, not failed.
             print('SUMMARY ' + json.dumps({'mode': mode_name,
                                            'skipped': str(exc)}))
             return 4

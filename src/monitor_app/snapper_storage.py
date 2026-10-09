@@ -33,17 +33,17 @@ PROVENANCE_KEYS = ("interval", "pass")
 STORAGE_REGISTRATION = {
     "title": "Production data placement on JLab RSEs",
     "description": (
-        "Placement state of production data on every JLab Rucio Storage "
-        "Element, sampled by the storage pass: per RSE the inventory by "
+        "Production output on the JLab Rucio Storage Elements from "
+        "registration until it settles, read by the storage pass as "
+        "production activity selects: per disk RSE the inventory by "
         "replica state, campaign and root, dataset placement, rules and "
         "locks, the copying backlog with its ages, ghosts (registered "
         "files with no available replica anywhere), capacity against "
         "the production account's limit, and cumulative counters of "
-        "arrivals, completed transfers, deletions and ghost movement; "
-        "per campaign the replica protection, archival backlog, "
-        "catalog quality, dataset state and pipeline latencies; bounded "
-        "exception listings. Counters are monotonic from the census and "
-        "differenced by every consumer."
+        "arrivals, completed transfers and ghosts appeared; per "
+        "campaign the disk copies, catalog quality, dataset state and "
+        "pipeline latencies; bounded exception listings. Counters are "
+        "monotonic from the census and differenced by every consumer."
     ),
     "visibility": "public",
     "owning_subsystem": "SWF production catalog",
@@ -66,9 +66,9 @@ STORAGE_REGISTRATION = {
             "required": True,
             "kind": "provenance",
             "description": (
-                "The pass that produced this publication: mode (census, "
-                "full, incremental), campaigns covered, files and "
-                "datasets checked, duration, and read failures."
+                "The pass that produced this publication: mode, "
+                "campaigns covered, files and datasets checked, "
+                "duration, and read failures."
             ),
         },
         "rses": {

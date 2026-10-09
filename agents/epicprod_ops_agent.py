@@ -1545,8 +1545,6 @@ class EpicProdOpsAgent(BaseAgent):
             ('file_events_measure', self._do_file_events_measure),
             ('delivery_daily_rebuild', self._do_delivery_daily_rebuild),
             ('request_sizes_build', self._do_request_sizes_build),
-            ('storage_sweep',
-             lambda msg: self._do_storage_sweep(dict(msg, mode='full'))),
             ('campaign_config_propose', self._do_campaign_config_propose),
         ]
         # The marker the deploy script checks: a deploy restarts this agent
@@ -3154,9 +3152,8 @@ class EpicProdOpsAgent(BaseAgent):
                          if (p.stdout or '').strip() else 'built')
 
     def _handle_storage_sweep(self, m):
-        """Run the storage pass (swf-epicprod STORAGE.md): the nightly full
-        pass as a catalog_sync chain step, the four-hourly incremental pass
-        by cron enqueue; directly invokable with mode 'full' or 'incremental'."""
+        """Run the storage pass (swf-epicprod STORAGE.md), four-hourly by
+        cron enqueue; directly invokable."""
         self.run_in_background(
             self._do_storage_sweep, m,
             dedup_key="storage_sweep", label="storage_sweep")
@@ -3165,14 +3162,12 @@ class EpicProdOpsAgent(BaseAgent):
         """One storage pass through the storage-sweep doer, which crawls
         the JLab catalog into the storage store and publishes the storage
         component. The doer exits 4 for a skipped pass, when another pass
-        holds the store (the census, or a full pass still running), and 3
-        for a pass that completed and published with read errors."""
-        mode = 'full' if str(m.get('mode') or '') == 'full' else 'incremental'
+        holds the store, and 3 for a pass that completed and published
+        with read errors."""
+        mode = 'incremental'
         username = str(m.get('created_by') or '')
         cmd = [sys.executable, str(STORAGE_SWEEP_SCRIPT),
                "--created-by", str(m.get('created_by') or 'prodops_agent')]
-        if mode == 'full':
-            cmd.append("--full")
         self.logger.info(f"PRODOPS storage_sweep: {mode} pass")
         t0 = time.monotonic()
         try:

@@ -2191,10 +2191,7 @@ def _storage_curve_values(state):
                 ('first_copy_bytes', f'stoba_{rse}_first', True),
                 ('replica_bytes', f'stoba_{rse}_replica', True),
                 ('transfers_completed', f'stoft_{rse}_transfers', False),
-                ('deleted_files', f'stoft_{rse}_deleted', False),
-                ('deleted_bytes', f'stobt_{rse}_deleted', True),
-                ('ghosts_appeared', f'stoxe_{rse}_appeared', False),
-                ('ghosts_cleared', f'stoxe_{rse}_cleared', False)):
+                ('ghosts_appeared', f'stoxe_{rse}_appeared', False)):
             if key in flow:
                 values[curve_id] = (_storage_tb(flow[key]) if as_tb
                                     else int(flow[key] or 0))
@@ -2268,10 +2265,6 @@ def _storage_curve_values(state):
         if protection:
             values[f'stopc_{segment}_single'] = int(protection.get('single_copy') or 0)
             values[f'stopc_{segment}_two_plus'] = int(protection.get('two_plus') or 0)
-            for member in ('disk_only', 'tape_only', 'disk_and_tape'):
-                values[f'stopp_{segment}_{member}'] = int(protection.get(member) or 0)
-        if 'archival_backlog_bytes' in block:
-            values[f'stopa_{segment}'] = _storage_tb(block.get('archival_backlog_bytes'))
         if 'unattached_files' in block:
             values[f'stopq_{segment}_unattached'] = int(block.get('unattached_files') or 0)
         if 'no_events_attr' in block:
@@ -2287,9 +2280,7 @@ def _storage_curve_values(state):
         flow = block.get('flow') or {}
         for key, curve_id, as_tb in (
                 ('arrived_files', f'stopf_{segment}_arrived', False),
-                ('archived_files', f'stopf_{segment}_archived', False),
-                ('arrived_bytes', f'stopb_{segment}_arrived', True),
-                ('archived_bytes', f'stopb_{segment}_archived', True)):
+                ('arrived_bytes', f'stopb_{segment}_arrived', True)):
             if key in flow:
                 values[curve_id] = (_storage_tb(flow[key]) if as_tb
                                     else int(flow[key] or 0))
@@ -2306,48 +2297,43 @@ def _storage_curve_parts(curve_id):
 
 # Members with semantic color: replica states on the house vocabulary
 # (available blue, copying the warning color, unavailable and bad the
-# failure color), completion green, deletions and tape grey, the limit
-# a dark neutral line. Campaign, root and latency members take the
+# failure color), completion green, the limit a dark neutral line. Campaign, root and latency members take the
 # palette.
 _STORAGE_MEMBER_COLORS = {
     'AVAILABLE': '#1565c0', 'COPYING': '#f9a825',
     'TEMPORARY_UNAVAILABLE': '#ef6c00', 'UNAVAILABLE': '#c62828',
     'BAD': '#b71c1c',
     'first': '#1565c0', 'replica': '#8ab6e8',
-    'transfers': '#2e7d32', 'deleted': '#78909c',
+    'transfers': '#2e7d32',
     'copying': '#f9a825', 'over': '#c62828',
-    'appeared': '#c62828', 'cleared': '#2e7d32',
+    'appeared': '#c62828',
     'replicating': '#f9a825', 'stuck': '#c62828',
     'account': '#1565c0', 'account_files': '#1565c0',
     'used': '#8ab6e8', 'limit': '#424242', 'files': '#8ab6e8',
     'median': '#8ab6e8', 'p90': '#1565c0', 'max': '#0d47a1',
     'single': '#f9a825', 'two_plus': '#2e7d32',
-    'disk_only': '#f9a825', 'tape_only': '#78909c',
-    'disk_and_tape': '#2e7d32',
     'unattached': '#ef6c00', 'no_events': '#7e57c2',
     'open': '#1565c0', 'partial_anywhere': '#f9a825',
     'quiet_open': '#8a8a8a', 'stalled': '#c62828',
-    'arrived': '#1565c0', 'archived': '#78909c',
+    'arrived': '#1565c0',
     'yield': '#c62828',
 }
 _STORAGE_PALETTE_CODES = frozenset(
-    ('fm', 'bm', 'fc', 'bc', 'fh', 'fo', 'bo', 'fr', 'br', 'pa', 'pl'))
+    ('fm', 'bm', 'fc', 'bc', 'fh', 'fo', 'bo', 'fr', 'br', 'pl'))
 _STORAGE_MEMBER_LABELS = {
     'first': 'first copies', 'replica': 'replicas',
-    'transfers': 'transfers completed', 'deleted': 'deleted',
+    'transfers': 'transfers completed',
     'copying': 'copying', 'over': 'over the stuck threshold',
     'median': 'median age', 'p90': '90th percentile age', 'max': 'oldest',
-    'appeared': 'ghosts appeared', 'cleared': 'ghosts cleared',
+    'appeared': 'ghosts appeared',
     'replicating': 'replicating locks', 'stuck': 'stuck locks',
     'account': 'eicprod usage', 'account_files': 'eicprod files',
     'used': 'RSE-wide usage', 'limit': 'eicprod limit',
     'single': 'single copy', 'two_plus': 'two or more copies',
-    'disk_only': 'disk only', 'tape_only': 'tape only',
-    'disk_and_tape': 'disk and tape',
     'unattached': 'unattached files', 'no_events': 'no event count',
     'open': 'open', 'partial_anywhere': 'partial somewhere',
     'quiet_open': 'quiet and open', 'stalled': 'stalled',
-    'arrived': 'arrived', 'archived': 'archived',
+    'arrived': 'arrived',
     'yield': 'ghost yield',
 }
 
@@ -2444,12 +2430,10 @@ def _storage_campaign_families(campaigns, quantity, panels='lifecycle'):
     if panels != 'lifecycle':
         return names
     for name in campaigns:
-        names += [f'Storage copies {name}', f'Storage placement {name}',
+        names += [f'Storage copies {name}',
                   f'Storage catalog quality {name}',
                   f'Storage datasets {name}', f'Storage latency {name}',
                   f'Storage arrived {name} {quantity}']
-    if campaigns:
-        names.append('Storage archival backlog')
     names.append('Storage consequences')
     return names
 
@@ -2485,15 +2469,15 @@ def _storage_groups():
                 'counter_flow': True, 'end_stamped': True, 'stacked': True,
                 'panel_px': 150, 'units': units,
                 'empty_note': 'No arrivals in this window'})
+            # Completed transfers carry a file count alone, so the panel
+            # counts files under either counting.
             groups.append({
                 'name': f'Storage transfers {rse} {quantity}',
-                'title': f'Transfers and deletions · {rse}',
-                'prefixes': [f'sto{q}t_{rse}_'], 'ids': [],
-                'order': [f'sto{q}t_{rse}_transfers',
-                          f'sto{q}t_{rse}_deleted'],
-                'counter_flow': True, 'end_stamped': True, 'stacked': True,
-                'panel_px': 110, 'units': units,
-                'empty_note': 'No transfers or deletions in this window'})
+                'title': f'Transfers completed · {rse}',
+                'prefixes': [], 'ids': [f'stoft_{rse}_transfers'],
+                'counter_flow': True, 'end_stamped': True,
+                'panel_px': 110, 'units': 'files',
+                'empty_note': 'No transfers in this window'})
             for lens, code in backlog_code.items():
                 backlog = {
                     'name': f'Storage backlog {rse} {quantity} {lens}',
@@ -2628,13 +2612,12 @@ def _storage_groups():
             'panel_px': 110, 'units': 'hours', **closed})
         groups.append({
             'name': f'Storage ghost flow {rse}',
-            'title': f'Ghosts appeared and cleared · {rse}',
+            'title': f'Ghosts appeared · {rse}',
             'prefixes': [],
-            'ids': [f'stoxe_{rse}_appeared', f'stoxe_{rse}_cleared'],
-            'order': [f'stoxe_{rse}_appeared', f'stoxe_{rse}_cleared'],
-            'counter_flow': True, 'end_stamped': True, 'stacked': True,
+            'ids': [f'stoxe_{rse}_appeared'],
+            'counter_flow': True, 'end_stamped': True,
             'panel_px': 110, 'units': 'files',
-            'empty_note': 'No ghost movement in this window', **closed})
+            'empty_note': 'No ghosts appeared in this window', **closed})
         # Ghost yield: ghosts appeared over registrations (first copies
         # arrived plus ghosts appeared) per bin, derived at series time
         # from the two projected flows (_storage_series_transform).
@@ -2654,16 +2637,9 @@ def _storage_groups():
     for name in inventory['campaigns']:
         segment = _storage_slug(name)
         copies = [f'stopc_{segment}_single', f'stopc_{segment}_two_plus']
-        placement = [f'stopp_{segment}_{m}'
-                     for m in ('disk_only', 'tape_only', 'disk_and_tape')]
         groups.append({
-            'name': f'Storage copies {name}', 'title': f'Copies · {name}',
+            'name': f'Storage copies {name}', 'title': f'Disk copies · {name}',
             'prefixes': [], 'ids': copies, 'order': copies,
-            'stacked': True, 'panel_px': 150, 'units': 'files'})
-        groups.append({
-            'name': f'Storage placement {name}',
-            'title': f'Placement · {name}',
-            'prefixes': [], 'ids': placement, 'order': placement,
             'stacked': True, 'panel_px': 150, 'units': 'files'})
         groups.append({
             'name': f'Storage catalog quality {name}',
@@ -2686,21 +2662,13 @@ def _storage_groups():
             q = quantity[0]
             groups.append({
                 'name': f'Storage arrived {name} {quantity}',
-                'title': f'Arrived and archived · {name}',
+                'title': f'Arrived · {name}',
                 'prefixes': [],
-                'ids': [f'stop{q}_{segment}_arrived', f'stop{q}_{segment}_archived'],
-                'order': [f'stop{q}_{segment}_arrived',
-                          f'stop{q}_{segment}_archived'],
-                'counter_flow': True, 'end_stamped': True, 'stacked': True,
+                'ids': [f'stop{q}_{segment}_arrived'],
+                'counter_flow': True, 'end_stamped': True,
                 'panel_px': 110,
                 'units': 'files' if quantity == 'files' else 'TB',
                 'empty_note': 'No arrivals in this window'})
-    if inventory['campaigns']:
-        groups.append({
-            'name': 'Storage archival backlog',
-            'title': 'Archival backlog · on disk and not on tape',
-            'prefixes': ['stopa_'], 'ids': [],
-            'panel_px': 110, 'units': 'TB'})
     # The consequences strip (SNAPPER_STORAGE.md): the jobs that failed
     # at storage — the error record's entries with payload exit 78,
     # the output upload or registration failure whatever the pilot's
@@ -2743,7 +2711,7 @@ def _storage_groups():
 
 def _storage_focus_view():
     """The Storage focus tab (docs/SNAPPER_STORAGE.md): the data
-    lifecycle per RSE — arrivals, transfers and deletions, the copying
+    lifecycle per RSE — arrivals, completed transfers, the copying
     backlog, ghosts, inventory, rule locks and capacity — with the
     campaign families pinned after the ranked RSE sections, and the
     cut narrowed to the storage component's card. The clean page lands
@@ -2794,8 +2762,8 @@ def _storage_focus_view():
         'default_window': '7d',
         'note': ('Per RSE: status (arrivals and ghosts per bin, with '
                  'usage against the eicprod limit), RSE capacity alone, '
-                 'ghosts, or all panels: arrivals, transfers and '
-                 'deletions, copying backlog, ghosts, inventory, rule '
+                 'ghosts, or all panels: arrivals, completed '
+                 'transfers, copying backlog, ghosts, inventory, rule '
                  'locks, capacity. State panels hold the last storage '
                  'pass\'s values until the next pass; bytes plot in TB. '
                  'Click the plot for the RSE table at that instant.'),
@@ -5053,14 +5021,9 @@ def _storage_card(data, previous_data, ctx):
                     ('replicas', 'replica_files', 'replica_bytes',
                      f'sto{quantity_code}a_{rse}_replica'),
                     ('transfers completed', 'transfers_completed', None,
-                     f'sto{quantity_code}t_{rse}_transfers'),
-                    ('deleted', 'deleted_files', 'deleted_bytes',
-                     f'sto{quantity_code}t_{rse}_deleted'),
+                     f'stoft_{rse}_transfers'),
                     ('ghosts appeared', 'ghosts_appeared', None,
-                     f'stoxe_{rse}_appeared'),
-                    ('ghosts cleared', 'ghosts_cleared', None,
-                     f'stoxe_{rse}_cleared'),
-                    ('bad replicas appeared', 'bad_appeared', None, '')):
+                     f'stoxe_{rse}_appeared')):
                 flow_rows.append({
                     'label': label, 'curve': curve,
                     'files': _fmt_count(_since(files_key)),
@@ -5181,10 +5144,6 @@ def _storage_card(data, previous_data, ctx):
             'single': _fmt_count(int(protection.get('single_copy') or 0)),
             'single_old': int(protection.get('single_copy_old') or 0),
             'two_plus': _fmt_count(int(protection.get('two_plus') or 0)),
-            'disk_only': _fmt_count(int(protection.get('disk_only') or 0)),
-            'tape_only': _fmt_count(int(protection.get('tape_only') or 0)),
-            'disk_and_tape': _fmt_count(int(protection.get('disk_and_tape') or 0)),
-            'archival_tb': _tb(block.get('archival_backlog_bytes')),
             'unattached': _fmt_count(int(block.get('unattached_files') or 0)),
             'no_events': _fmt_count(int(block.get('no_events_attr') or 0)),
             'datasets': block.get('datasets') or {},
@@ -5196,8 +5155,6 @@ def _storage_card(data, previous_data, ctx):
                 for kind, entry in sorted((block.get('latency_s') or {}).items())],
             'arrived_files': _fmt_count(_campaign_since('arrived_files')),
             'arrived_tb': _tb(_campaign_since('arrived_bytes')),
-            'archived_files': _fmt_count(_campaign_since('archived_files')),
-            'archived_tb': _tb(_campaign_since('archived_bytes')),
             'basis': basis_text if base else '',
         })
 

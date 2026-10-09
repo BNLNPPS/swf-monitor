@@ -1,14 +1,13 @@
 # Snapper Storage — the Storage view
 
-The placement state of production data on the JLab Rucio Storage
-Elements (RSEs) is recorded in Snapper by the `storage` component
-(swf-epicprod
+Production output on the JLab Rucio Storage Elements (RSEs), from
+registration until it settles, is recorded in Snapper by the `storage`
+component (swf-epicprod
 [STORAGE.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/STORAGE.md)):
-per RSE the inventory by replica state, the copying backlog and its
-ages, ghosts, rules, capacity, and cumulative counters of arrivals,
-transfers, deletions and ghost movement; per campaign the replica
-protection, archival backlog, catalog quality, dataset state and
-pipeline latencies. This document is the design of the Storage view
+per disk RSE the inventory by replica state, the copying backlog and
+its ages, ghosts, rules, capacity, and cumulative counters of
+arrivals, completed transfers and ghosts appeared; per campaign the
+disk copies, catalog quality, dataset state and pipeline latencies. This document is the design of the Storage view
 over that record: a dedicated focus view showing the data lifecycle
 per RSE on one time axis, with the RSE's standing at the cut. It
 follows the focus-view mechanism and display laws of the Site,
@@ -24,11 +23,10 @@ document remains their design of record.
 ## The record the view reads
 
 The `storage` component is published by the storage pass after every
-run: a census once, a full pass nightly in the `catalog_sync` chain,
-an incremental pass every four hours. A pass in which nothing moved is
-affirmed unchanged, so the component's snaps are the passes that
-changed something, at most one per pass, four-hourly between the
-nightly full passes. The view derives nothing from the pass's
+run, every four hours, each pass reading only what production changed
+(STORAGE.md, The pass). A pass in which nothing moved is affirmed
+unchanged, so the component's snaps are the passes that changed
+something, at most one per pass. The view derives nothing from the pass's
 store or from Rucio: every plotted value is a field of the published
 projection (DESIGN.md, invariants 1 and 4). The exception listings
 beyond the component's bounded heads live on the Storage exceptions
@@ -41,14 +39,12 @@ The quantities, by kind, as the projection carries them:
   by campaign and by root, dataset placement counts, rule locks by
   state, the copying backlog with its age distribution, the ghost
   population by state and by campaign. Per campaign: files and bytes,
-  replica protection, unattached and count-less files, archival
-  backlog bytes, dataset state.
+  disk copies, unattached and count-less files, dataset state.
 - **Cumulative counters**, monotonic from the census with an
   arbitrary origin, per RSE: arrived files and bytes as first copies
-  and as replicas, transfers completed, deleted files and bytes,
-  ghosts appeared and cleared, bad replicas appeared. Per campaign:
-  arrived and archived files and bytes. Every consumer differences
-  two instants; the view bins them at render.
+  and as replicas, transfers completed, ghosts appeared. Per campaign:
+  arrived files and bytes. Every consumer differences two instants;
+  the view bins them at render.
 - **Interval assessments**, per campaign: the latencies of the
   interval's arrivals as count, median and 90th percentile.
 - **Exception heads**: the oldest fifty ghosts, stuck rules and
@@ -56,9 +52,8 @@ The quantities, by kind, as the projection carries them:
 - **Assessment**: per-RSE and per-campaign verdicts against the
   SysConfig thresholds and the overall verdict.
 
-The RSEs recorded today are ASGC-XRD, BNL-XRD, EIC-CLOUD-LOG,
-EIC-XRD, EIC-XRD-LOG, JLAB-TAPE-SE (tape), MANITOBA-XRD and XRD6,
-with the pseudo-RSE `none` holding registered files that have no
+The disk RSEs recorded today are ASGC-XRD, BNL-XRD, EIC-CLOUD-LOG,
+EIC-XRD, EIC-XRD-LOG, MANITOBA-XRD and XRD6, with the pseudo-RSE `none` holding registered files that have no
 replica row. The roots are RECO, FULL and EVGEN. The target campaigns
 are the delivery record's: the current and last campaigns and any
 campaign producing.
@@ -78,8 +73,7 @@ jump list, and the RSE's detail docked beneath its own panels.
 
 - focus `rse`: one option per recorded RSE, default all. With several
   shown, presentation follows the peak arrival rate over the window,
-  first copies and replicas together, since a tape RSE receives only
-  replicas: RSEs ordered by that peak, idle RSEs last in alphabetical
+  first copies and replicas together: RSEs ordered by that peak, idle RSEs last in alphabetical
   order with their sections closed, and a jump list under the tick row
   in the same order with each peak in brackets; open all and close all
   fold every section at once.
@@ -105,8 +99,8 @@ jump list, and the RSE's detail docked beneath its own panels.
   element names, the target campaigns with every other campaign folded
   into `other` as the record folds them. No other panel is grouped.
 - **Show** selector: status (the default and the landing, the moving
-  picture per RSE: arrivals per bin, ghosts appeared and cleared per
-  bin, and usage against the limit, with the campaigns' arrivals after
+  picture per RSE: arrivals per bin, ghosts appeared per bin, and
+  usage against the limit, with the campaigns' arrivals after
   the RSE sections and the capacity table across RSEs on the card), RSE
   capacity alone (each RSE's usage against its limit over time, and
   directly beneath the panels the capacity table at the cut instant,
@@ -129,9 +123,8 @@ docked above its own panel.
    cumulative arrival counters projected to per-interval deltas at
    render (the counter-flow mode). Under bytes counting the same from
    the byte counters.
-2. *Transfers and deletions* — completed transfers and deleted files
-   per bin, two flows on one panel. Under bytes counting, deleted
-   bytes; the record carries no byte count for completed transfers.
+2. *Transfers completed* — completed transfers per bin, in files under
+   either counting, since the record carries no byte count for them.
 3. *Copying backlog* — files in the copying state at the pass
    instant, stacked by the grouping (campaign or root from the
    inventory maps; under the state grouping the panel is the copying
@@ -142,8 +135,8 @@ docked above its own panel.
    grouping: by state and by campaign from the record; the record
    carries no ghosts by root, so under the root grouping the panel
    shows the total until the pass records it (see Record additions).
-   Under bytes counting the total only. *Ghosts appeared and cleared*
-   follows: per-bin flows from the two counters. *Ghost yield* follows
+   Under bytes counting the total only. *Ghosts appeared* follows: the
+   per-bin flow from its counter. *Ghost yield* follows
    that: ghosts appeared over registrations (first copies arrived plus
    ghosts appeared) per bin, derived at series time, the upload
    failure rate of the RSE read against its arrival rate.
@@ -165,20 +158,16 @@ docked above its own panel.
 **Scope-level families**, after the RSE sections, one family per
 target campaign where the record is per campaign:
 
-- *Copies* — single-copy and two-or-more-copy files, stacked.
-- *Placement* — disk-only, tape-only and disk-and-tape files, stacked.
-- *Archival backlog* — bytes on disk and not on tape, one line per
-  campaign on one panel.
+- *Disk copies* — single-copy and two-or-more-copy files, stacked.
 - *Catalog quality* — unattached files and files without the event
   count the registration contract requires, per campaign.
 - *Datasets* — open, partial-anywhere, quiet-open and stalled dataset
   counts per campaign.
 - *Latency medians* — job end to registration, registration to
-  availability, first to second copy, disk to tape, in hours, per
-  campaign, plotted at the pass stamp as the interval's assessment.
-  Kinds the pass has not yet observed are absent.
-- *Arrived and archived* — the campaign's arrival and archive counters
-  as per-bin flows.
+  availability, first to second copy, in hours, per campaign, plotted
+  at the pass stamp as the interval's assessment. Kinds the pass has
+  not yet observed are absent.
+- *Arrived* — the campaign's arrival counters as per-bin flows.
 
 **Consequences**: the jobs that failed at storage, as an event-flow
 strip beneath the panels with the terminal-state chips of the Errors
@@ -208,7 +197,7 @@ is four-hourly and a quiet pass affirms the state unchanged, so the last
 pass's gauges are the state until the next pass; flows stay per-bin.
 Units on every panel title; house state colors where a state is
 drawn (available blue, copying the warning color, unavailable and
-bad the failure color, tape grey); campaign and root members take the
+bad the failure color); campaign and root members take the
 palette. Counter-flow bins come from the window's round ladder on the
 ET-midnight grid, as the Site completions panel draws them.
 
@@ -237,16 +226,15 @@ own panels as the Site view docks its queue slice:
   files beside them, the limit, the quota left and the fill fraction
   against the account's usage;
 - the flow since the window's left edge, differenced from the
-  counters at the basis snap: first copies, replicas, transfers,
-  deletions, ghosts appeared and cleared, bad replicas.
+  counters at the basis snap: first copies, replicas, transfers
+  completed, ghosts appeared.
 
 After the RSE sections the card renders the scope section once. It
 opens with the capacity table across every recorded RSE at the cut
 instant, the rows of `rucio account limit list eicprod` with the
 record's additions: RSE, type, usage, limit, quota left, fill
 percent, files, and the time of the usage record. Then per target
-campaign the files and bytes, protection, archival backlog,
-dataset state, latencies and the flow since the window start; then
+campaign the files and bytes, disk copies, dataset state, latencies and the flow since the window start; then
 the exception heads the component carries, ghosts, stuck rules and
 stalled datasets, each dataset a link to its DID page, with the
 overflow counts and a link to the Storage exceptions page for the

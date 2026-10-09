@@ -530,12 +530,10 @@
         {% endfor %}
         <tr><td><span data-curve="stopc_{{ c.segment }}_single" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>single copy</td><td class="text-end">{{ c.single }}{% if c.single_old %} · {{ c.single_old }} older than the warning age{% endif %}</td></tr>
         <tr><td><span data-curve="stopc_{{ c.segment }}_two_plus" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>two or more copies</td><td class="text-end">{{ c.two_plus }}</td></tr>
-        <tr><td>disk only · tape only · disk and tape</td><td class="text-end">{{ c.disk_only }} · {{ c.tape_only }} · {{ c.disk_and_tape }}</td></tr>
-        <tr><td><span data-curve="stopa_{{ c.segment }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>archival backlog</td><td class="text-end">{{ c.archival_tb|default_if_none:"—" }} TB</td></tr>
         <tr><td><span data-curve="stopq_{{ c.segment }}_unattached" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>unattached files</td><td class="text-end">{{ c.unattached }}</td></tr>
         <tr><td><span data-curve="stopq_{{ c.segment }}_no_events" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>files without an event count</td><td class="text-end">{{ c.no_events }}</td></tr>
         <tr><td>datasets open · partial · quiet · stalled</td><td class="text-end">{{ c.datasets.open|default_if_none:"0" }} · {{ c.datasets.partial_anywhere|default_if_none:"0" }} · {{ c.datasets.quiet_open|default_if_none:"0" }} · {{ c.datasets.stalled|default_if_none:"0" }}</td></tr>
-        <tr><td>arrived · archived since {% if c.basis %}{{ c.basis }}{% else %}window start{% endif %}</td><td class="text-end">{{ c.arrived_files }} files, {{ c.arrived_tb|default_if_none:"—" }} TB · {{ c.archived_files }} files, {{ c.archived_tb|default_if_none:"—" }} TB</td></tr>
+        <tr><td>arrived since {% if c.basis %}{{ c.basis }}{% else %}window start{% endif %}</td><td class="text-end">{{ c.arrived_files }} files, {{ c.arrived_tb|default_if_none:"—" }} TB</td></tr>
         </tbody>
       </table>
       {% if c.latency %}
