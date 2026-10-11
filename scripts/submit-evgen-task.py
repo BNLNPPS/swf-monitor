@@ -546,9 +546,6 @@ def main():
                          "ranges ends fg_partial, counts against --es-max-attempt "
                          "only, so on a preemptible queue set --es-max-attempt "
                          "high and bound the passes without progress here")
-    ap.add_argument("--es-loop", action="store_true",
-                    help="TEST AND DEMO ONLY: the harness replays the file's events "
-                         "(unreported filler units) until the deadline margin")
     ap.add_argument("--es-preempt-at-s", type=int, default=0,
                     help="TEST AND DEMO ONLY: the harness ends suddenly at this many "
                          "seconds, as a preempted node does, and records the processing "
@@ -720,12 +717,6 @@ def main():
             per_unit = (f"ES_EVENTS_PER_UNIT={int(args.es_events_per_range)} "
                         if args.es_fine_grained and args.es_events_per_range > 0 else "")
             close = f"ES_CLOSE_S={int(args.es_close_s)} " if args.es_close_s > 0 else ""
-            # TEST AND DEMO ONLY: replay the file's events until the deadline
-            # margin so the slots work to the wall (swf-epicprod es_harness.py
-            # --loop). Never set on production submissions.
-            if args.es_loop:
-                close += f"ES_LOOP=1 ES_EXPECTED_EVENTS={int(args.es_events)} "
-                _log("ES LOOP (test/demo): replaying events to the deadline")
             # TEST AND DEMO ONLY: a sudden end (swf-epicprod es_harness.py
             # --preempt-at-s). Never set on production submissions.
             if args.es_preempt_at_s > 0:
