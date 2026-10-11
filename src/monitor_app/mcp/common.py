@@ -402,7 +402,7 @@ def get_available_tools_list() -> list:
         },
         {
             "name": "panda_harvester_workers",
-            "description": "Live Harvester pilot/worker counts across EIC queues — running, submitted, finished by site.",
+            "description": "Harvester workers (pilots) from PanDA's harvester_workers table: those existing now (waiting, running) and those submitted, started and ended in the window, by queue.",
             "parameters": ["site", "hours"],
         },
         {

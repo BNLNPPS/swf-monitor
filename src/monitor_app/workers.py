@@ -109,6 +109,108 @@ def worker_reading(queue_name, refresh=False):
     return value
 
 
+# A worker in one of these states has ended; any other state is a worker
+# that exists now (waiting to start, or running).
+FINAL_STATES = ('finished', 'failed', 'cancelled', 'missed')
+# A worker that has not ended is still updated by its harvester; rows not
+# updated for this long are left out of the present count as abandoned.
+STALE_DAYS = 7
+MAX_HOURS = 168
+
+
+def worker_counts(site=None, hours=1):
+    """Harvester workers (pilots) across the ePIC queues, read directly
+    from PanDA's ``harvester_workers`` table.
+
+    Two readings are kept apart, because confusing them has misled before
+    (BigPanDA's tally of workers that ended was read as jobs, 25-fold, on
+    10/6 and 10/7):
+
+    - ``now``: the workers that exist at this moment, by state (a
+      ``submitted`` worker waits in the batch system, a ``running`` one
+      runs), by queue and resource type, with their cores;
+    - ``window``: what happened in the last ``hours``: workers submitted,
+      started, and ended, the ended ones by final state. A ``finished``
+      worker is a batch job that ended normally; it says nothing about
+      whether the PanDA jobs bound to it succeeded.
+
+    ``site`` is a queue name (computingsite), a SQL LIKE pattern when it
+    contains ``%``. Raises on a failed read.
+    """
+    hours = max(1, min(int(hours or 1), MAX_HOURS))
+    now = timezone.now()
+    cutoff = now - timedelta(hours=hours)
+    stale = now - timedelta(days=STALE_DAYS)
+    site_sql, site_args = '', []
+    if site:
+        site_sql = (' AND "computingsite" LIKE %s' if '%' in site
+                    else ' AND "computingsite" = %s')
+        site_args = [site]
+    final = ', '.join(f"'{s}'" for s in FINAL_STATES)
+    table = f'"{PANDA_SCHEMA}"."harvester_workers"'
+    with connections['panda'].cursor() as cursor:
+        cursor.execute(
+            f'SELECT "computingsite", "status", "resourcetype", count(*), '
+            f'coalesce(sum("ncore"), 0) FROM {table} '
+            f'WHERE "status" NOT IN ({final}) AND "lastupdate" > %s{site_sql} '
+            f'GROUP BY 1, 2, 3', [stale] + site_args)
+        present = cursor.fetchall()
+        cursor.execute(
+            f'SELECT "computingsite", count(*) FROM {table} '
+            f'WHERE "submittime" > %s{site_sql} GROUP BY 1', [cutoff] + site_args)
+        submitted = dict(cursor.fetchall())
+        cursor.execute(
+            f'SELECT "computingsite", count(*) FROM {table} '
+            f'WHERE "starttime" > %s{site_sql} GROUP BY 1', [cutoff] + site_args)
+        started = dict(cursor.fetchall())
+        cursor.execute(
+            f'SELECT "computingsite", "status", "resourcetype", count(*), '
+            f'coalesce(sum("njobs"), 0) FROM {table} '
+            f'WHERE "endtime" > %s AND "status" IN ({final}){site_sql} '
+            f'GROUP BY 1, 2, 3', [cutoff] + site_args)
+        ended = cursor.fetchall()
+
+    def tally(rows):
+        by_status, by_site, by_resourcetype = {}, {}, {}
+        for computingsite, status, resourcetype, count, _ in rows:
+            by_status[status] = by_status.get(status, 0) + count
+            per_site = by_site.setdefault(computingsite, {})
+            per_site[status] = per_site.get(status, 0) + count
+            rt = resourcetype or 'unset'
+            by_resourcetype[rt] = by_resourcetype.get(rt, 0) + count
+        return by_status, by_site, by_resourcetype
+
+    now_status, now_site, now_rt = tally(present)
+    cores = {}
+    for _, status, _, _, ncore in present:
+        cores[status] = cores.get(status, 0) + int(ncore)
+    ended_status, ended_site, ended_rt = tally(ended)
+    return {
+        'now': {
+            'workers': sum(now_status.values()),
+            'by_status': now_status,
+            'cores_by_status': cores,
+            'by_site': now_site,
+            'by_resourcetype': now_rt,
+        },
+        'window': {
+            'hours': hours,
+            'from': cutoff.isoformat(),
+            'to': now.isoformat(),
+            'submitted': sum(submitted.values()),
+            'started': sum(started.values()),
+            'ended': sum(ended_status.values()),
+            'ended_by_status': ended_status,
+            'jobs_bound_to_ended': sum(int(r[4]) for r in ended),
+            'by_site': {
+                s: {'submitted': submitted.get(s, 0), 'started': started.get(s, 0),
+                    'ended': ended_site.get(s, {})}
+                for s in sorted(set(submitted) | set(started) | set(ended_site))},
+            'ended_by_resourcetype': ended_rt,
+        },
+    }
+
+
 # An allocation's occupancy timeline is kept as it is first built: the
 # harvester's worker record ages out of PanDA after three months, and the
 # plot of a slot must not lose its batch start and end with it.

@@ -523,44 +523,54 @@ async def panda_harvester_workers(
     hours: int = 1,
 ) -> dict:
     """
-    Live Harvester pilot/worker counts across EIC compute queues.
+    Harvester workers (pilots) at the ePIC queues, read directly from
+    PanDA's harvester_workers table.
 
-    Shows how many pilots are running, submitted, finished, etc. at each site.
-    Useful for checking if Perlmutter or other sites are actively processing.
+    Two separate readings; never add one to the other:
+    - now: the workers that exist at this moment. A 'submitted' worker is
+      waiting in the batch system and runs nothing yet; a 'running' one
+      runs. At a push-mode queue each submitted worker holds a PanDA job
+      bound to it, which PanDA shows as 'starting'.
+    - window: the last `hours`: workers submitted, started and ended, the
+      ended ones by final state. A 'finished' worker is a batch job that
+      ended normally; it is not a finished PanDA job, and says nothing
+      about whether its jobs succeeded. jobs_bound_to_ended is the number
+      of PanDA jobs those workers carried.
 
     Args:
-        site: Filter to a specific queue (e.g. 'NERSC_Perlmutter_epic'). Default: all sites.
-        hours: Time window in hours to look back (default 1).
+        site: A queue (computingsite), e.g. 'UM_GREX_PanDA_1'; SQL LIKE
+            with %. Default: every queue.
+        hours: The window in hours (default 1, at most 168).
 
     Returns:
-        nworkers_total: Grand total across all statuses.
-        nworkers_by_status: Counts by worker status (running, submitted, finished, etc.).
-        nworkers_by_site: Counts by computing site.
-        pivot: Breakdown by status × jobtype × resourcetype.
+        summary: One line stating both readings.
+        now: workers, by_status, cores_by_status, by_site (status counts
+            per queue), by_resourcetype.
+        window: hours, from, to, submitted, started, ended,
+            ended_by_status, jobs_bound_to_ended, by_site (submitted,
+            started, ended by status per queue), ended_by_resourcetype.
+        source: Where the counts come from.
     """
-    from datetime import datetime, timedelta, timezone
-    from askpanda_atlas.harvester_worker_impl import fetch_worker_stats
-    from decouple import config
+    from monitor_app.workers import worker_counts
 
-    base_url = config('PANDA_BASE_URL', default='https://pandamon01.sdcc.bnl.gov')
-    now = datetime.now(timezone.utc)
-    from_dt = (now - timedelta(hours=hours)).isoformat()
-    to_dt = now.isoformat()
-    raw = await sync_to_async(fetch_worker_stats)(
-        base_url, from_dt, to_dt, site=site,
-    )
-    if raw.get('error'):
-        return {"error": raw['error']}
+    try:
+        counts = await sync_to_async(worker_counts)(site=site, hours=hours)
+    except Exception as e:
+        return {"error": f"PanDA harvester_workers read failed: {e}"}
+    now, window = counts['now'], counts['window']
+    where = f" at {site}" if site else " across the ePIC queues"
+    ended = ', '.join(f"{n} {s}" for s, n in sorted(window['ended_by_status'].items()))
     return {
         "summary": (
-            f"{raw.get('nworkers_total', 0)} pilots total"
-            + (f" at {site}" if site else " across all EIC sites")
-            + f" (last {hours}h)"
+            f"Now{where}: {now['by_status'].get('submitted', 0)} workers waiting "
+            f"to start, {now['by_status'].get('running', 0)} running "
+            f"({now['workers']} in all). Last {window['hours']}h: "
+            f"{window['submitted']} submitted, {window['started']} started, "
+            f"{window['ended']} ended" + (f" ({ended})" if ended else "") + "."
         ),
-        "by_status": raw.get('nworkers_by_status', {}),
-        "by_site": raw.get('nworkers_by_site', {}),
-        "by_resourcetype": raw.get('nworkers_by_resourcetype', {}),
-        "time_window": {"from": from_dt, "to": to_dt},
+        "now": now,
+        "window": window,
+        "source": "PanDA database, harvester_workers (direct read)",
     }
 
 
