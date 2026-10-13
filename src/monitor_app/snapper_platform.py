@@ -628,7 +628,7 @@ SUBMIT_DAEMONS = SUBMIT_HEARTBEAT_DAEMONS + SUBMIT_DEMAND_DAEMONS
 # group, about a minute for the JEDI task and message daemons).
 SERVER_HEARTBEAT_DAEMONS = (
     'DBProxy', 'DBProxyPool', 'JediDBProxy', 'Entry', 'msg_bkr_utils',
-    'api_harvester', 'JobGenerator', 'GenJobThrottler', 'JobThrottler',
+    'api_harvester', 'JobGenerator', 'EpicProdJobThrottler', 'JobThrottler',
     'TaskBuffer', 'TaskSetupper', 'TaskRefiner', 'ContentsFeeder',
     'WatchDog', 'GenWatchDog', 'AsyncRequestWatchDog',
     'async_request_processor', 'add_main', 'SiteMapper', 'daemons',
