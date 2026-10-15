@@ -224,6 +224,17 @@ development checkout. Before deploying, inspect every local package checkout
 that the script freezes into the release virtual environment, including
 swf-epicprod, snapper-ai, site-canary, and swf-common-lib.
 
+### swf-epicprod deploys itself
+
+A merge or push to swf-epicprod `main` runs a deploy on this host
+through a self-hosted GitHub Actions runner: no deploy, the lightweight
+deploy, or the full deploy, chosen from the changed paths, and a stop on
+a PCS migration. A session does not deploy its own swf-epicprod push by
+hand; it follows the run in that repository's Actions tab. That
+lightweight deploy also syncs this repository's dev tree, so pushed
+swf-monitor work not yet deployed goes live with it. See
+swf-epicprod `docs/AUTODEPLOY.md`.
+
 ### Lightweight UI/MCP Deploy
 
 For rapid development on UI and MCP changes, use `deploy-lightweight-ui-mcp.sh`
