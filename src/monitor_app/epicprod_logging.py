@@ -413,6 +413,15 @@ ACTION_DEFAULTS = {
                        "rows for services, agents, and external monitor "
                        "endpoints.",
     },
+    'release_overdue': {
+        'sublevel': 'normal', 'live': False,
+        'description': "The release cadence check found a core repo's work "
+                       "branch past release_overdue_days without a merge to "
+                       "main, or main carrying merges the work branch lacks "
+                       "for as long (docs/SYSTEM_STATUS.md, release-cadence). "
+                       "Recorded once per Eastern day while it stands; "
+                       "Capcom receives it as a warning.",
+    },
     'snapper_publication_too_large': {
         'sublevel': 'normal', 'live': False,
         'description': "A Snapper component publication rejected at "
