@@ -26,7 +26,9 @@ def seed(apps, schema_editor):
                  'next tick.'),
         data={
             'entry_id': 'alarm_pings',
-            'enabled': True,
+            # Email off: an alarm emails only once an operator turns it on
+            # (docs/alarms.md). Detection runs regardless.
+            'enabled': False,
             'severity': 'ping',
             'recipients': '@prodops',
             'renotification_window_hours': 168,

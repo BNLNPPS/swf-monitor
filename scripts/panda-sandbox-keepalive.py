@@ -207,18 +207,25 @@ def _touch(source_url, tarball):
 MANIFEST_HARVEST_PER_RUN = 100
 
 
-def _harvest_manifests(tasks, cap):
+def _harvest_manifests(tasks, cap, unreachable=()):
     """Record the manifest of each candidate attempt still lacking one.
-    Returns the harvest summary."""
+    ``unreachable`` holds the tasks this run already found without a
+    sandbox (none recorded, or purged from the cache): they are skipped
+    rather than spending the cap, so they cannot starve the rest night
+    after night. Returns the harvest summary."""
     from pcs import manifests
     from pcs.models import PandaTasks
 
     ids = [jedi_task_id for jedi_task_id, _ in tasks]
     harvested, absent, errors, pending = [], [], [], 0
+    skipped = 0
     rows = (PandaTasks.objects.filter(jedi_task_id__in=ids)
             .order_by("-jedi_task_id"))
     for row in rows:
         if manifests.record_of(row):
+            continue
+        if row.jedi_task_id in unreachable:
+            skipped += 1
             continue
         if len(harvested) + len(absent) + len(errors) >= cap:
             pending += 1
@@ -235,7 +242,8 @@ def _harvest_manifests(tasks, cap):
                                   "reason": reason})
             _log(f"manifest for task {row.jedi_task_id}: {reason}")
     return {"harvested": len(harvested), "absent": absent,
-            "errors": errors, "pending": pending}
+            "errors": errors, "pending": pending,
+            "skipped_no_sandbox": skipped}
 
 
 def main():
@@ -290,7 +298,11 @@ def main():
     else:
         lifetimes = _refresh_log_lifetimes(
             [jedi_task_id for jedi_task_id, _ in tasks], final_days)
-        manifests_summary = _harvest_manifests(tasks, MANIFEST_HARVEST_PER_RUN)
+        unreachable = set(no_sandbox)
+        for record in missing:
+            unreachable.update(record["tasks"])
+        manifests_summary = _harvest_manifests(
+            tasks, MANIFEST_HARVEST_PER_RUN, unreachable)
 
     summary = {
         "final_days": final_days,

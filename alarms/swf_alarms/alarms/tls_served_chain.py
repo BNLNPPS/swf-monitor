@@ -17,6 +17,7 @@ import socket
 import ssl
 
 from ..common import Detection
+from ..fetch import FetchError
 
 PARAMS = {
     # host or host:port, comma separated; port defaults to 443.
@@ -42,6 +43,7 @@ def _targets(raw):
 def detect(client, params):
     context = ssl.create_default_context()
     timeout = float(params.get("timeout_seconds", 15))
+    unreached = []
     for host, port in _targets(params.get("hosts", "")):
         try:
             with socket.create_connection((host, port), timeout=timeout) as sock:
@@ -59,7 +61,11 @@ def detect(client, params):
                     "certificate and chain files."),
                 extra_data={"host": host, "port": port, "error": str(exc)[:300]},
             )
-        except (OSError, ssl.SSLError):
+        except (OSError, ssl.SSLError) as exc:
             # Unreachable or a non-verification handshake failure: not this
             # alarm's question, and a transient network fault must not fire.
-            continue
+            unreached.append(f"{host}:{port} ({exc})")
+    if unreached:
+        # No verdict for these hosts this tick: report the probe unavailable
+        # so the runner keeps their active alarms instead of clearing them.
+        raise FetchError("no TLS verdict for " + "; ".join(unreached)[:500])

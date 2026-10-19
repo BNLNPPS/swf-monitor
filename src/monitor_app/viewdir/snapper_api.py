@@ -12,6 +12,9 @@ explicit JSON, never empty results.
 
 from django.http import JsonResponse
 from django.utils.dateparse import parse_datetime
+from rest_framework.authentication import SessionAuthentication, TokenAuthentication
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.permissions import AllowAny
 
 from snapper_ai.queries import (InvalidQuery, SnapNotFound, SnapperError,
                                 changes_between, component_history,
@@ -209,6 +212,8 @@ def segfault_catalog_api(request):
         limit = int(request.GET.get('limit') or 200)
     except ValueError:
         return JsonResponse({'error': 'limit must be an integer'}, status=400)
+    if limit < 1:
+        return JsonResponse({'error': 'limit must be positive'}, status=400)
     rows, counts = catalog(status=request.GET.get('status') or None,
                            class_hint=request.GET.get('class') or None,
                            limit=min(limit, 2000))
@@ -228,12 +233,17 @@ def segfault_signature_api(request, key):
         jobs_limit = min(int(request.GET.get('jobs_limit') or 200), 5000)
     except ValueError:
         return JsonResponse({'error': 'jobs_limit must be an integer'}, status=400)
+    if jobs_limit < 0:
+        return JsonResponse({'error': 'jobs_limit must not be negative'}, status=400)
     detail = signature_detail(key, jobs_limit=jobs_limit)
     if detail is None:
         return JsonResponse({'error': f'no crash signature {key}'}, status=404)
     return JsonResponse(detail, json_dumps_params={'default': str})
 
 
+@api_view(['GET', 'POST'])
+@authentication_classes([SessionAuthentication, TokenAuthentication])
+@permission_classes([AllowAny])
 def segfault_findings_api(request):
     """GET /api/segfaults/findings/ — the curated findings joined to the
     catalog (the payload of panda_segfault_findings).
@@ -247,17 +257,11 @@ def segfault_findings_api(request):
         entries, error = findings()
         return JsonResponse({'findings': entries, 'error': error or None},
                             json_dumps_params={'default': str})
-    if request.method != 'POST':
-        return JsonResponse({'error': 'GET or POST'}, status=405)
-    token_ok = False
-    try:
-        from rest_framework.authentication import TokenAuthentication
-        auth = TokenAuthentication().authenticate(request)
-        token_ok = auth is not None
-    except Exception:                                         # noqa: BLE001
-        token_ok = False
-    if not token_ok and not request.user.is_authenticated:
+    # A DRF view, so a token POST needs no CSRF cookie while a session POST
+    # keeps CSRF protection (SessionAuthentication enforces it).
+    if not request.user.is_authenticated:
         return JsonResponse({'error': 'a token or a signed-in account is required'}, status=403)
+    token_ok = request.auth is not None
     try:
         body = _json.loads(request.body or b'{}')
     except ValueError:
@@ -270,8 +274,8 @@ def segfault_findings_api(request):
                                    'model_reading') if k in body}
     if not fields:
         return JsonResponse({'error': 'nothing to set'}, status=400)
-    who = (request.user.username if request.user.is_authenticated
-           else str(body.get('changed_by') or 'token'))
+    who = (str(body.get('changed_by') or request.user.username) if token_ok
+           else request.user.username)
     entry, created = set_finding(name, fields, who)
     return JsonResponse({'name': name, 'created': created, 'versions': entry.versions.count(),
                          'title': entry.title, 'standing': entry.status})

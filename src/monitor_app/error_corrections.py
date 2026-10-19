@@ -13,6 +13,7 @@ documented meanings.
 """
 import json
 import logging
+import re
 import time
 
 logger = logging.getLogger(__name__)
@@ -62,8 +63,17 @@ def _rules():
     return _cache['rules']
 
 
-def match(component, code, diag):
-    """The first active rule matching this label, else None."""
+def _like(pattern, value):
+    """SQL LIKE semantics: % any run, _ one character, whole value."""
+    regex = ''.join('.*' if ch == '%' else '.' if ch == '_' else re.escape(ch)
+                    for ch in pattern)
+    return re.fullmatch(regex, str(value or '')) is not None
+
+
+def match(component, code, diag, sites=None):
+    """The first active rule matching this label, else None. A rule with a
+    queue_scope applies only when every site in ``sites`` (the job's
+    computingsite, or a summary entry's sites) matches the scope."""
     for rule in _rules():
         try:
             if rule.component != str(component or ''):
@@ -74,6 +84,10 @@ def match(component, code, diag):
             continue
         if rule.diag_substring and rule.diag_substring not in str(diag or ''):
             continue
+        if rule.queue_scope:
+            in_scope = [s for s in (sites or []) if s]
+            if not in_scope or not all(_like(rule.queue_scope, s) for s in in_scope):
+                continue
         return rule
     return None
 
@@ -143,7 +157,8 @@ def apply_to_summary(entries):
         try:
             rule = match(entry.get('error_source'),
                          entry.get('error_code'),
-                         entry.get('error_diag'))
+                         entry.get('error_diag'),
+                         sites=entry.get('sites'))
             if rule is not None:
                 entry['correction'] = correction(
                     rule, entry.get('exit_counts') or {})

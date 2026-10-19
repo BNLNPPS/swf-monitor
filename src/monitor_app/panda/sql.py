@@ -134,7 +134,8 @@ def extract_errors(job_dict):
     exit_profile = {str(transexitcode).strip(): 1} if has_exit else {}
     for err in errors:
         try:
-            rule = match(err['component'], err['code'], err['diag'])
+            rule = match(err['component'], err['code'], err['diag'],
+                         sites=[job_dict.get('computingsite')])
             if rule is not None:
                 err['correction'] = correction(rule, exit_profile)
         except Exception as e:

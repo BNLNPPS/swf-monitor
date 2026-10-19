@@ -42,7 +42,10 @@ def detect(client, params):
                             "owner": data.get("owner") or ""},
             )
             continue
-        lead = int(data.get("lead_days") or default_lead)
+        # An explicit 0 means "on the due date"; only a missing value
+        # takes the default.
+        lead_days = data.get("lead_days")
+        lead = int(default_lead if lead_days in (None, "") else lead_days)
         days_left = (due - today).days
         if days_left > lead:
             continue
