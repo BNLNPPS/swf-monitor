@@ -199,9 +199,11 @@ def rse_pfn_prefix(client, rse):
     property of the RSE, not of the file."""
     if rse in _PREFIX_CACHE:
         return _PREFIX_CACHE[rse]
-    protocols = client.get_protocols(rse)
-    for protocol in sorted(protocols, key=lambda p: p.get('domains', {})
-                           .get('wan', {}).get('read', 99)):
+    # A protocol with no WAN read priority (null, or Rucio's 0) is not a read
+    # door: BNL-XRD's third-party-copy davs entry carries read: null.
+    protocols = [p for p in client.get_protocols(rse)
+                 if ((p.get('domains') or {}).get('wan') or {}).get('read')]
+    for protocol in sorted(protocols, key=lambda p: p['domains']['wan']['read']):
         scheme = protocol.get('scheme')
         host = protocol.get('hostname')
         if not (scheme and host):

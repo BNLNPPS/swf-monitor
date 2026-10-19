@@ -141,7 +141,7 @@ def hand_entry(owes):
     at its deterministic path on the stash RSE."""
     owes = '/' + owes.lstrip('/')
     return (0, {'stashed_as': owes, 'path': stash_path(owes), 'owes': owes,
-                'reason': 'registered by hand from the stash'}, None)
+                'reason': 'registered by hand from the stash', 'by_hand': True}, None)
 
 
 def stored_at(door, path, proxy):
@@ -193,12 +193,13 @@ def save_state(state):
         _log(f'ERROR: the drain state was not written to {STATE_PATH}: {e}')
 
 
-def due(entry_state):
+def due(entry_state, by_hand=False):
     """Whether this entry is due an attempt now: never after it is home,
-    once an hour otherwise, and a bounded number of times."""
+    once an hour otherwise, and a bounded number of times unless an
+    operator names it by hand."""
     if entry_state.get('outcome') in ('home', 'missing'):
         return False
-    if int(entry_state.get('attempts') or 0) >= MAX_ATTEMPTS:
+    if not by_hand and int(entry_state.get('attempts') or 0) >= MAX_ATTEMPTS:
         return False
     last = entry_state.get('last_attempt')
     if not last:
@@ -260,7 +261,7 @@ def register_all(entries, state, rse, summary, proxy, dry_run=False):
     for pandaid, entry, report in entries:
         name = entry['stashed_as']
         entry_state = state.setdefault(name, {})
-        if not due(entry_state):
+        if not due(entry_state, by_hand=entry.get('by_hand', False)):
             if entry_state.get('outcome') != 'home':
                 summary['deferred'].append({'stashed_as': name, 'owes': entry['owes'],
                                             'reason': entry_state.get('reason', '')})
@@ -356,7 +357,15 @@ def main():
     state = load_state()
 
     entries = list(stashed_entries(since, limit=args.limit))
-    entries += [hand_entry(owes) for owes in args.entry]
+    # A name given by hand is tried past the attempt ceiling. A report that
+    # carries it supplies the entry, so the registration keeps its event
+    # count; a name no report carries is a bare entry at its path.
+    named = {'/' + owes.lstrip('/') for owes in args.entry}
+    for _pandaid, entry, _report in entries:
+        if entry.get('owes') in named:
+            entry['by_hand'] = True
+    reported = {entry.get('owes') for _pandaid, entry, _report in entries}
+    entries += [hand_entry(owes) for owes in sorted(named - reported)]
     summary['entries'] = len(entries)
 
     evgen = _reg._evgen
