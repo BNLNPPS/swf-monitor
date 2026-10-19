@@ -56,6 +56,16 @@ DEFAULT_PCLIENT_SETUP = os.path.expanduser("~/pclient/run/setup.sh")
 DEFAULT_AUTH_VO = "EIC.production"
 SUBMIT_TMP_ROOT = os.path.join(os.environ.get("SWF_TMP_DIR", "/data/swf-tmp"), "submit-evgen")
 BG_CONFIG_BASE = "https://eicweb.phy.anl.gov/EIC/campaigns/datasets/-/raw/{dataset_tag}/config_data"
+# A developer's payload canary (swf-epicprod docs/DEVELOPING_THE_PAYLOAD.md):
+# the payload of a pull request or branch, from a bare mirror of
+# swf-epicprod; switches named EPICPROD_SWITCH_*; the token file shipped
+# for a token-only canary.
+PAYLOAD_REPO = "BNLNPPS/swf-epicprod"
+PAYLOAD_SOURCE_MIRROR = os.environ.get(
+    "PAYLOAD_SOURCE_MIRROR", "/opt/swf-monitor/shared/payload-sources/swf-epicprod.git")
+PAYLOAD_REF_RE = re.compile(r"^(pr:\d{1,7}|(?:[A-Za-z0-9][A-Za-z0-9-]{0,38}:)?[A-Za-z0-9][A-Za-z0-9_./-]{0,199})$")
+PAYLOAD_SWITCH_RE = re.compile(r"^EPICPROD_SWITCH_[A-Z0-9_]{1,60}=[A-Za-z0-9_.,:/+=-]{0,200}$")
+TOKEN_SANDBOX_NAME = "bearer-token"
 
 # The submission kernel + the in-job dispatcher live beside this doer.
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -184,12 +194,51 @@ def _stage_bg_files(env, sandbox):
     env['BG_FILES'] = bg_base
 
 
-def _assemble_sandbox(spec, proxy_path, root):
+def _git(args, cwd=None, timeout=180):
+    p = subprocess.run(["git"] + list(args), cwd=cwd, capture_output=True, text=True,
+                       timeout=timeout)
+    if p.returncode != 0:
+        raise RuntimeError(f"git {args[0]}: {(p.stderr or p.stdout).strip()[:300]}")
+    return p.stdout
+
+
+def _payload_from_ref(ref, dest):
+    """The payload of a pull request (pr:<N>), a branch, or a fork's branch
+    (<owner>:<branch>), fetched into the bare mirror and exported at its
+    commit under ``dest``. Returns (payload_dir, commit)."""
+    mirror = PAYLOAD_SOURCE_MIRROR
+    if not os.path.isdir(mirror):
+        os.makedirs(os.path.dirname(mirror), exist_ok=True)
+        _git(["clone", "--bare", "--quiet", f"https://github.com/{PAYLOAD_REPO}.git", mirror])
+    if ref.startswith("pr:"):
+        source, src_ref, local = "origin", f"refs/pull/{ref[3:]}/head", f"refs/canary/pr/{ref[3:]}"
+    elif ":" in ref:
+        owner, branch = ref.split(":", 1)
+        source = f"https://github.com/{owner}/{PAYLOAD_REPO.split('/')[1]}.git"
+        src_ref, local = f"refs/heads/{branch}", f"refs/canary/fork/{owner}/{branch}"
+    else:
+        source, src_ref, local = "origin", f"refs/heads/{ref}", f"refs/canary/branch/{ref}"
+    _git(["fetch", "--quiet", "--no-tags", source, f"+{src_ref}:{local}"], cwd=mirror)
+    commit = _git(["rev-parse", local], cwd=mirror).strip()
+    tar = subprocess.run(["git", "archive", commit, "swf_epicprod/payload"], cwd=mirror,
+                         capture_output=True, timeout=180)
+    if tar.returncode != 0:
+        raise RuntimeError(f"git archive {commit[:12]}: {tar.stderr.decode(errors='replace')[:300]}")
+    subprocess.run(["tar", "-x", "-C", dest], input=tar.stdout, check=True, timeout=180)
+    payload_dir = os.path.join(dest, "swf_epicprod", "payload")
+    if not os.path.isfile(os.path.join(payload_dir, "run.sh")):
+        raise RuntimeError(f"{ref} at {commit[:12]} has no swf_epicprod/payload/run.sh")
+    return payload_dir, commit
+
+
+def _assemble_sandbox(spec, proxy_path, root, payload_dir=None, token_path=None):
     """Build the submission dir: spec.json + a sandbox/ holding the worker-facing
     files (manifest, env, dispatcher, proxy). Returns the submission dir path.
 
     The kernel and spec live OUTSIDE sandbox/ so they are not shipped to the
-    worker; only the four worker files travel in the tarball.
+    worker; only the four worker files travel in the tarball. A developer's
+    canary ships ``payload_dir`` instead of the deployed payload, and with
+    ``token_path`` ships that token as BEARER_TOKEN_FILE and no proxy.
     """
     os.makedirs(root, exist_ok=True)
     workdir = tempfile.mkdtemp(prefix=f"{spec['csvBase']}.", dir=root)
@@ -205,7 +254,10 @@ def _assemble_sandbox(spec, proxy_path, root):
     # basename rides here; run.sh reads X509_USER_PROXY back.
     proxy_base = os.path.basename(proxy_path)
     env = dict(spec.get('env') or {})
-    env['X509_USER_PROXY'] = proxy_base
+    if token_path:
+        env['BEARER_TOKEN_FILE'] = TOKEN_SANDBOX_NAME
+    else:
+        env['X509_USER_PROXY'] = proxy_base
     _stage_bg_files(env, sandbox)
     # The payload runs npsim and eicrecon with the task's core count as
     # their thread count, where the image supports it (swf-epicprod
@@ -226,12 +278,16 @@ def _assemble_sandbox(spec, proxy_path, root):
 
     # In-job dispatcher (named to match spec['exec']) and the proxy.
     shutil.copy(DISPATCHER_SCRIPT, os.path.join(sandbox, "evgen_job_dispatcher.py"))
-    shutil.copy(proxy_path, os.path.join(sandbox, proxy_base))
+    if token_path:
+        shutil.copy(token_path, os.path.join(sandbox, TOKEN_SANDBOX_NAME))
+        os.chmod(os.path.join(sandbox, TOKEN_SANDBOX_NAME), 0o600)
+    else:
+        shutil.copy(proxy_path, os.path.join(sandbox, proxy_base))
 
-    # The epicprod payload, whole, from the frozen package: the dispatcher
-    # runs sandbox/payload/run.sh. Its version rides on the submission
-    # record.
-    payload_dir = _payload_dir()
+    # The epicprod payload, whole, from the frozen package unless a
+    # developer's canary names another: the dispatcher runs
+    # sandbox/payload/run.sh. Its version rides on the submission record.
+    payload_dir = payload_dir or _payload_dir()
     shutil.copytree(payload_dir, os.path.join(sandbox, "payload"),
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     spec['payload_version'] = _payload_version(payload_dir)
@@ -480,6 +536,21 @@ def main():
                          "runs (BG_MERGER; swf-epicprod EPICPROD_PAYLOAD.md, "
                          "Background merging); timeframebuilder is for "
                          "validation only")
+    ap.add_argument("--canary-payload-ref", default="",
+                    help="payload canary: run the payload of this pull request "
+                         "(pr:<N>), branch (<branch>) or fork branch "
+                         "(<owner>:<branch>) of swf-epicprod instead of the "
+                         "deployed one (swf-epicprod docs/DEVELOPING_THE_PAYLOAD.md)")
+    ap.add_argument("--canary-switch", action="append", default=[],
+                    help="payload canary: EPICPROD_SWITCH_<NAME>=<value> in the "
+                         "job's environment; repeatable")
+    ap.add_argument("--canary-credential", choices=["x509", "token"], default="x509",
+                    help="payload canary: x509 ships the eicprod proxy (default); "
+                         "token ships no proxy and the token file of "
+                         "--canary-token-file as BEARER_TOKEN_FILE")
+    ap.add_argument("--canary-token-file", default=os.environ.get("CANARY_TOKEN_FILE", ""),
+                    help="payload canary, token credential: the token file shipped "
+                         "(default $CANARY_TOKEN_FILE)")
     ap.add_argument("--canary-threads", type=int, default=0,
                     help="payload canary: cores the job requests and threads "
                          "npsim and eicrecon run with (where the image "
@@ -589,6 +660,30 @@ def main():
     if args.canary_defer_datasets and not args.canary_stamp:
         _log("ERROR: --canary-defer-datasets is for payload canaries only")
         return 2
+    # A developer's canary (swf-epicprod docs/DEVELOPING_THE_PAYLOAD.md):
+    # its settings are checked before anything is fetched or submitted.
+    developer = bool(args.canary_payload_ref or args.canary_switch
+                     or args.canary_credential != "x509")
+    if developer and not args.canary_stamp:
+        _log("ERROR: --canary-payload-ref, --canary-switch and --canary-credential "
+             "are for payload canaries only")
+        return 2
+    if args.canary_payload_ref and not PAYLOAD_REF_RE.match(args.canary_payload_ref):
+        _log(f"ERROR: payload source {args.canary_payload_ref!r} is not pr:<N>, "
+             f"<branch> or <owner>:<branch>")
+        return 2
+    for switch in args.canary_switch:
+        if not PAYLOAD_SWITCH_RE.match(switch):
+            _log(f"ERROR: switch {switch!r} is not EPICPROD_SWITCH_<NAME>=<value> "
+                 f"(value without spaces or shell characters)")
+            return 2
+    token_path = None
+    if args.canary_credential == "token":
+        token_path = args.canary_token_file
+        if not token_path or not os.path.isfile(token_path):
+            _log("ERROR: a token-only canary needs a token file, and none is configured "
+                 "(CANARY_TOKEN_FILE)")
+            return 2
 
     if not args.swf_monitor_url:
         _log("ERROR: no --swf-monitor-url / SWF_MONITOR_URL")
@@ -820,6 +915,32 @@ def main():
     _log(f"EVGEN spec for {args.task_name}: outDS={spec['outDS']} "
          f"nJobs={spec.get('nJobs')} skipScout={spec.get('skipScout')}")
 
+    # A developer's canary: its switches ride in the job's environment, its
+    # payload is fetched before anything is created, and the source, the
+    # commit and the credential ride on the submission record.
+    payload_override = None
+    if developer:
+        if args.canary_switch:
+            spec['env'] = dict(spec.get('env') or {},
+                               **dict(s.split('=', 1) for s in args.canary_switch))
+            _log(f"canary switches: {', '.join(args.canary_switch)}")
+        if args.canary_payload_ref:
+            try:
+                os.makedirs(SUBMIT_TMP_ROOT, exist_ok=True)
+                payload_override, commit = _payload_from_ref(
+                    args.canary_payload_ref,
+                    tempfile.mkdtemp(prefix="payload-ref.", dir=SUBMIT_TMP_ROOT))
+            except Exception as e:                                # noqa: BLE001
+                _log(f"ERROR: payload source {args.canary_payload_ref}: {e}")
+                _record_submission_failure(args, f"payload source {args.canary_payload_ref}: {e}")
+                return 3
+            spec['payload_ref'], spec['payload_commit'] = args.canary_payload_ref, commit
+            # The canary CLI reads this line onto the run.
+            _log(f"payload commit: {commit} ({args.canary_payload_ref})")
+        spec['canary_credential'] = args.canary_credential
+        spec['canary_switches'] = list(args.canary_switch)
+        _log(f"canary credential: {args.canary_credential}")
+
     # 2. The output datasets exist before the task does: created with
     # their rule and metadata under the production account, so the jobs
     # register files into them and carry no dataset-level work
@@ -844,7 +965,8 @@ def main():
 
     # 3. Assemble the sandbox.
     try:
-        workdir = _assemble_sandbox(spec, args.proxy, SUBMIT_TMP_ROOT)
+        workdir = _assemble_sandbox(spec, args.proxy, SUBMIT_TMP_ROOT,
+                                    payload_dir=payload_override, token_path=token_path)
     except Exception as e:
         _log(f"ERROR: could not assemble sandbox: {e}")
         _record_submission_failure(args, f"could not assemble sandbox: {e}")

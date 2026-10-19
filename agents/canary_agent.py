@@ -230,6 +230,9 @@ class CanaryAgent(BaseAgent):
         dedup = f"payload_canary:{task}:{queue}"
         if m.get("signature"):
             dedup += f":{m.get('signature')}:{m.get('pandaid') or ''}"
+        # Two developers' canaries of one task differ by their source.
+        if m.get("payload_ref"):
+            dedup += f":{m.get('payload_ref')}"
         enqueued = self.run_in_background(
             self._do_payload_canary, m, dedup_key=dedup, label="payload_canary")
         if not enqueued:
@@ -265,6 +268,18 @@ class CanaryAgent(BaseAgent):
             args += ["--container", str(m["container"])]
         if m.get("request_id"):
             args += ["--request-id", str(m["request_id"])]
+        # A developer's canary (swf-epicprod DEVELOPING_THE_PAYLOAD.md): the
+        # payload source, its switches, the credential, the threads; the
+        # sender is recorded on the run. The CLI and the doer check them.
+        if m.get("threads"):
+            args += ["--threads", str(int(m["threads"]))]
+        if m.get("payload_ref"):
+            args += ["--payload-ref", str(m["payload_ref"])]
+        for switch in m.get("switches") or []:
+            args += ["--switch", str(switch)]
+        if m.get("credential"):
+            args += ["--credential", str(m["credential"])]
+        args += ["--sender", created_by]
         ok, error = self._run_doer_detail(args, PROBE_TIMEOUT)
         self.logger.info(
             f"CANARY payload_canary {'submitted' if ok else 'FAILED'} "
