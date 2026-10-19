@@ -312,13 +312,22 @@ class SystemAgentViewSet(viewsets.ModelViewSet):
             defaults=defaults
         )
 
-        # The agent's own report of its ActiveMQ connection, kept in metadata:
-        # an agent that lost the broker still heartbeats here but receives nothing.
+        # The agent's own reports, merged into metadata (other keys stay):
+        # its heartbeat 'metadata' dict, and its ActiveMQ connection, since an
+        # agent that lost the broker still heartbeats here but receives nothing.
+        reported = request.data.get('metadata')
+        if reported is not None and not isinstance(reported, dict):
+            logger.warning(
+                f"Heartbeat from {instance_name}: metadata is "
+                f"{type(reported).__name__}, not an object; ignored")
+            reported = None
+        reported = dict(reported or {})
         if 'mq_connected' in request.data:
-            mq_connected = bool(request.data['mq_connected'])
+            reported['mq_connected'] = bool(request.data['mq_connected'])
+        if reported:
             metadata = dict(agent.metadata or {})
-            if metadata.get('mq_connected') != mq_connected:
-                metadata['mq_connected'] = mq_connected
+            if any(metadata.get(k) != v for k, v in reported.items()):
+                metadata.update(reported)
                 agent.metadata = metadata
                 agent.save(update_fields=['metadata'])
 
