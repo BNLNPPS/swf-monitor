@@ -388,7 +388,7 @@ def _attempt(sig, entry, run, now, memory_fraction=None):
         'run_id': str(run.id) if run is not None else '',
         'request_id': (entry or {}).get('request_id') or d.get('request_id') or '',
         'signature': sig.key,
-        'kind': 'memory' if _is_memory(sig) else 'crash',
+        'kind': 'himem' if _is_memory(sig) else 'segfault',
         'level': sig.level,
         'member_of': (sig.data or {}).get('member_of', ''),
         'frame': (sig.trace or {}).get('frame', ''),

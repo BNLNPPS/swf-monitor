@@ -1932,8 +1932,8 @@ def panda_segfaults(request):
         r['repro_state'] = states.get(r['key'], '')
         r['repro_state_label'] = REPRODUCTION_STATE_LABELS.get(r['repro_state'], r['repro_state'])
     facets = [
-        # A payload crash or a job killed for memory (SEGFAULT_DIAGNOSIS.md,
-        # Memory kills): the first split a reader makes.
+        # A segfault or a himem job (SEGFAULT_DIAGNOSIS.md, Memory kills):
+        # the first split a reader makes.
         Facet('kind', 'Kind', lambda r: r['kind'],
               display=lambda v: KIND_LABELS.get(v, v), order=KIND_ORDER),
         Facet('class', 'Class', lambda r: r['class'],
@@ -1955,8 +1955,8 @@ def panda_segfaults(request):
         'shown': shown,
         'total': len(rows_all),
         'crashes_total': sum(r['crashes'] for r in rows_all
-                             if r['level'] == 'record' and r['kind'] == 'crash'),
-        'memory_kills_total': sum(r['crashes'] for r in rows_all if r['kind'] == 'memory'),
+                             if r['level'] == 'record' and r['kind'] == 'segfault'),
+        'memory_kills_total': sum(r['crashes'] for r in rows_all if r['kind'] == 'himem'),
         'repro_counts': global_counts(att),
         'run_needed': sum(1 for r in rows_all if r['repro_state'] == 'run_needed' and r['level'] == 'record'),
         'narrowing_filter': flt.context(rows_all, facets, request),
