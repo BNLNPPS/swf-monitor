@@ -6063,6 +6063,38 @@ def _health_url():
     return reverse('monitor_app:system_status')
 
 
+def _publication_too_large(scope, name, size, limit):
+    """Record a Snapper publication rejected at snapper-ai's data limit as
+    an alarm incident; the capcom subscription delivers it. snapper-ai
+    calls this inside the publication's transaction, which then rolls
+    back, so the record is written from a separate thread on that
+    thread's own database connection and survives the rollback."""
+    import threading
+
+    from django.db import connections
+
+    from .epicprod_logging import log_epicprod_action
+
+    def record():
+        try:
+            log_epicprod_action(
+                'snapper', 'snapper_publication_too_large',
+                subject_type='snapper_component', subject_key=f'{scope}:{name}',
+                outcome='error', sublevel='normal', level=logging.ERROR,
+                message=(f'Snapper {scope}:{name} publication rejected: '
+                         f'{size} bytes, over the {limit}-byte limit'),
+                severity='alarm',
+                reason=(f'{size} canonical bytes, over the {limit}-byte limit; '
+                        f'the component record stops advancing'),
+                size_bytes=size, limit_bytes=limit)
+        finally:
+            connections.close_all()
+
+    worker = threading.Thread(target=record, name='snapper-too-large')
+    worker.start()
+    worker.join()
+
+
 def register_snapper_providers():
     """Register the swf scopes and host hooks with the snapper core.
 
@@ -6121,4 +6153,5 @@ def register_snapper_providers():
         scheduler_status=_scheduler_status,
         health_url=_health_url,
         series_cache=_series_cache,
+        publication_too_large=_publication_too_large,
     )

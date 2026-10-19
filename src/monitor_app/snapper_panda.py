@@ -32,7 +32,6 @@ MAX_STATUSES = 32
 MAX_SITES = 32
 MAX_TASK_TYPES = 32
 MAX_JOB_TYPES = 16
-MAX_SERIALIZED_BYTES = 64 * 1024
 TASK_TERMINAL_STATUSES = (
     "done",
     "finished",
@@ -54,7 +53,6 @@ PANDA_REGISTRATION = {
     "visibility": "public",
     "owning_subsystem": "SWF PanDA production monitor",
     "assessment_policy": ASSESSMENT_POLICY_VERSION,
-    "max_serialized_bytes": MAX_SERIALIZED_BYTES,
     "quantities": {
         "window_hours": {
             "path": "window_hours",

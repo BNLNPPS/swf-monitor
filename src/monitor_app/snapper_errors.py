@@ -82,8 +82,6 @@ PATTERN_DIAG_CHARS = 160
 # interval this far back rather than swallowing all recorded history
 # into one interval; earlier history is the backfill's to write.
 FIRST_INTERVAL_MINUTES = 5
-# A full interval of MAX_ENTRIES rows serializes near 150 KB.
-MAX_SERIALIZED_BYTES = 256 * 1024
 
 ERRORS_REGISTRATION = {
     "title": "Curated epicprod PanDA error state",
@@ -108,7 +106,6 @@ ERRORS_REGISTRATION = {
     "visibility": "public",
     "owning_subsystem": "SWF PanDA production monitor",
     "assessment_policy": ASSESSMENT_POLICY_VERSION,
-    "max_serialized_bytes": MAX_SERIALIZED_BYTES,
     "quantities": {
         "interval": {
             "path": "interval",
@@ -484,12 +481,6 @@ def errors_projection(now=None, mark=None):
         projection["overflow"] = {
             "total": overflow_total, "by_category": overflow_categories,
             "held_by_category": overflow_held}
-    serialized = len(json.dumps(projection, separators=(",", ":")))
-    if serialized > MAX_SERIALIZED_BYTES:
-        raise ValueError(
-            f"errors projection serializes to {serialized} bytes, over "
-            f"the {MAX_SERIALIZED_BYTES} bound"
-        )
     return projection, observed_at
 
 

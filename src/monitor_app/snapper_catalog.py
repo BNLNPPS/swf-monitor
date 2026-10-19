@@ -52,7 +52,6 @@ ASSESSMENT_POLICY_VERSION = "swf-jlab-catalog-v1"
 COMPONENT_SCHEMA_VERSION = 1
 COMPONENT_NAME = "catalog"
 SCOPE = "epicprod"
-MAX_SERIALIZED_BYTES = 64 * 1024
 MAX_QUEUES = 32
 FIRST_INTERVAL_MINUTES = 5
 REGISTRAR_WINDOW_HOURS = 24
@@ -87,7 +86,6 @@ CATALOG_REGISTRATION = {
     "visibility": "public",
     "owning_subsystem": "SWF PanDA production monitor",
     "assessment_policy": ASSESSMENT_POLICY_VERSION,
-    "max_serialized_bytes": MAX_SERIALIZED_BYTES,
     "quantities": {
         "interval": {
             "path": "interval", "type": "object", "required": True, "kind": "window",
@@ -458,10 +456,6 @@ def catalog_projection(now=None, mark=None, probe=True):
         "registrar": registrar,
         "assessment": assess(probe_reading_, registrations, registrar, thresholds),
     }
-    serialized = len(json.dumps(projection, separators=(",", ":"), default=str))
-    if serialized > MAX_SERIALIZED_BYTES:
-        raise ValueError(f"catalog projection serializes to {serialized} bytes, over "
-                         f"the {MAX_SERIALIZED_BYTES} bound")
     return projection, observed_at
 
 

@@ -413,6 +413,14 @@ ACTION_DEFAULTS = {
                        "rows for services, agents, and external monitor "
                        "endpoints.",
     },
+    'snapper_publication_too_large': {
+        'sublevel': 'normal', 'live': False,
+        'description': "A Snapper component publication rejected at "
+                       "snapper-ai's 1 MiB data limit, the one size limit "
+                       "on component data; the component's record stops "
+                       "advancing until its projection fits. Capcom "
+                       "receives it as an alarm.",
+    },
     'questionnaire_import': {
         'sublevel': 'normal', 'live': True,
         'description': "Import the PWG/DSC production-request questionnaire "

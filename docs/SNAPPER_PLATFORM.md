@@ -41,8 +41,8 @@ A component, internal name `platform`, in the epicprod scope, published
 by a maintainer module (`monitor_app/snapper_platform.py`) beside the
 PanDA activity and error-state maintainers on the same 5-minute
 System-status refresh. Publisher identity `swf-monitor:panda-platform`,
-assessment policy `swf-panda-platform-v1`, schema version 1, canonical
-JSON bounded at 64 KiB. Every publication carries the owner's assessed
+assessment policy `swf-panda-platform-v1`, schema version 1. Every
+publication carries the owner's assessed
 values; the view derives nothing from raw records (DESIGN.md,
 invariants 1 and 4).
 

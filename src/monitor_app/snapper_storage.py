@@ -26,7 +26,6 @@ PUBLISHER_IDENTITY = "swf-monitor:storage"
 ASSESSMENT_POLICY_VERSION = "swf-storage-v1"
 COMPONENT_NAME = "storage"
 SCOPE = "epicprod"
-MAX_SERIALIZED_BYTES = 64 * 1024
 # Keys that change on every pass without a change of recorded state.
 PROVENANCE_KEYS = ("interval", "pass")
 
@@ -48,7 +47,6 @@ STORAGE_REGISTRATION = {
     "visibility": "public",
     "owning_subsystem": "SWF production catalog",
     "assessment_policy": ASSESSMENT_POLICY_VERSION,
-    "max_serialized_bytes": MAX_SERIALIZED_BYTES,
     "quantities": {
         "interval": {
             "path": "interval",
@@ -155,11 +153,6 @@ def _recorded_state(data):
 def publish_storage(data, since=None) -> StoragePublication:
     """Register and publish one pass's projection; affirm unchanged when
     the recorded state equals the current component's."""
-    serialized = len(json.dumps(data, separators=(",", ":")))
-    if serialized > MAX_SERIALIZED_BYTES:
-        raise ValueError(
-            f"storage projection {serialized} bytes exceeds "
-            f"{MAX_SERIALIZED_BYTES}")
     observed_at = timezone.now()
     current = _current_data()
     quiet = current is not None and (

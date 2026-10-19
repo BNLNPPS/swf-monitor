@@ -54,7 +54,6 @@ SCOPE = "epicprod"
 
 MAX_SITES = 32
 MAX_APPS = 16
-MAX_SERIALIZED_BYTES = 64 * 1024
 # Heartbeat-age tiers in minutes: part of the recorded vocabulary (the
 # view's curves are named by them), so a constant, not a knob.
 STALENESS_TIERS_MINUTES = (30, 60, 120)
@@ -114,7 +113,6 @@ PLATFORM_REGISTRATION = {
     "visibility": "public",
     "owning_subsystem": "SWF PanDA production monitor",
     "assessment_policy": ASSESSMENT_POLICY_VERSION,
-    "max_serialized_bytes": MAX_SERIALIZED_BYTES,
     "quantities": {
         "interval": {
             "path": "interval",
@@ -1103,11 +1101,6 @@ def platform_projection(now=None, mark=None):
         # what a reader needs and drops the per-file submit-description
         # text, which the host-report store already holds whole.
         projection["submit_host"] = _submit_host_projection(submit_host)
-    serialized = len(json.dumps(projection, separators=(",", ":"), default=str))
-    if serialized > MAX_SERIALIZED_BYTES:
-        raise ValueError(
-            f"platform projection serializes to {serialized} bytes, over "
-            f"the {MAX_SERIALIZED_BYTES} bound")
     return projection, observed_at
 
 

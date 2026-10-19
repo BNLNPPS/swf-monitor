@@ -39,8 +39,7 @@ Internal name `catalog`, epicprod scope, published by a maintainer
 module (`monitor_app/snapper_catalog.py`) beside the platform and
 error-state maintainers on the same five-minute System-status refresh.
 Publisher identity `swf-monitor:jlab-catalog`, assessment policy
-`swf-jlab-catalog-v1`, schema version 1, canonical JSON bounded at
-64 KiB. Four groups, each with its kind:
+`swf-jlab-catalog-v1`, schema version 1. Four groups, each with its kind:
 
 **Probe (gauges, measured by the maintainer).** From the swf-monitor
 host, timed: a TLS handshake with the Rucio server (`rucio.cfg`'s

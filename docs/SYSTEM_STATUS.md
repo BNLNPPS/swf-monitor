@@ -90,6 +90,10 @@ The agent starts a periodic refresh loop:
 - `EPICPROD_SYSTEM_STATUS_INITIAL_DELAY`, default `30` seconds
 - `EPICPROD_SYSTEM_STATUS_TIMEOUT`, default `60` seconds
 
+Snapper component data has one size limit, snapper-ai's 1 MiB. A publication
+over it is rejected and recorded as the `snapper_publication_too_large`
+incident, which a `capcom` subscription delivers to Capcom as an alarm.
+
 Manual refresh from the page posts to `panda/system/refresh/`, which queues the
 same `refresh_system_status` message to the ops agent. It does not run checks in
 the Apache request.
