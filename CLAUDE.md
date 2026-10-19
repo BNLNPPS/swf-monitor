@@ -1,25 +1,22 @@
-# swf-monitor — Claude Code Guidelines
+# swf-monitor
 
-The common monitor, web, and database services of the swf platform: Django web
-app, REST API, MCP server, and the platform machinery (action stream, SysConfig,
-alarms, SSE relay), hosting the production applications installed from
-`swf-epicprod` and running the ePIC production-operations agent. Part of the SWF
-core (coordinated branches with `swf-testbed` and `swf-common-lib`).
-Shared workspace rules — doc-first, git policy, environment — live in the
-workspace `../CLAUDE.md`. This file is the repo's doc index and the one pattern
-every designer/implementer should hold in mind. The official system-level
-documentation for the whole WFMS is <https://epic-wfms-docs.readthedocs.io>
-(workspace repo `epic-wfms-docs/`); this repo's docs carry the implementation
-detail beneath it.
-
-The workspace rule "Stay Within Scope Without Stopping" is mandatory here:
-do not overreach beyond the requested change, and do not respond to a scope
-correction by stopping or discarding the requested work. Keep the valid part,
-remove only the unauthorized part, and continue inside the clarified boundary.
+Start from the SWF workspace guide, `../swf-testbed/CLAUDE.md`
+(<https://github.com/BNLNPPS/swf-testbed/blob/main/CLAUDE.md>): the
+system, the workspace, how to work, production and collaboration. This
+file adds what is particular to swf-monitor, the platform's monitor, web
+and database services: the Django web app, REST API, MCP server, and the
+platform machinery (action stream, SysConfig, alarms, SSE relay), hosting
+the production applications installed from `swf-epicprod` and running
+the production operations agent. It is a core repository, developed on
+the current `infra/baseline-vNN` branch with swf-testbed and
+swf-common-lib. This file is the repository's doc index and carries the
+one pattern every designer and implementer holds in mind; its documents
+carry the implementation detail beneath the WFMS documentation
+(<https://epic-wfms-docs.readthedocs.io>).
 
 ## Key pattern — credentialed async action with live browser push
 
-We are building a live, automated, responsive production system. The standard way
+The system is a live, automated, responsive production system. The standard way
 to add a credentialed, slow, or hang-prone capability is the prod-ops agent
 pattern — not a poller, not a blocking request, and never a credential in the web
 tier:
@@ -84,7 +81,7 @@ the old paths here. This repo's docs cover the platform services:
 
 Material production findings and resolutions must be reported in
 `epicprod-live`, with affected scope, current status and supporting evidence.
-Private dialog, TJAI coordination and commits are not substitutes. Follow
+Private dialog, LLM messages and commits are not substitutes. Follow
 `docs/NOTICE_ROUTING.md` (Findings and resolutions); this is forward-only,
 not a requirement to backfill historical investigations.
 
@@ -182,6 +179,7 @@ page template:
 
 ## Deploy
 
+Maintainers deploy on the production host (pandaserver02):
 `sudo bash deploy-swf-monitor.sh branch <current infra/baseline-vNN>` — pulls from
 git, so commit + push first. Run it in the foreground.
 
@@ -196,9 +194,3 @@ sync: `sudo ./deploy-lightweight-ui-mcp.sh --ui` and/or `--mcp` (add
 `--static` when assets changed). Use the full deploy whenever migrations,
 requirements, Apache config, systemd units, ops-agent code, or bot code are
 involved. Commit first either way.
-
-## TeamComms
-
-Developers' LLM sessions message each other through TeamComms, for questions
-and answers across people and providers (Claude Code, Codex). Joining and use:
-<https://github.com/eic/epic-wfms-docs/blob/main/docs/teamcomms.md>.
