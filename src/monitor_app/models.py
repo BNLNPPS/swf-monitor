@@ -1378,7 +1378,8 @@ class CrashSignature(models.Model):
     LEVELS = (('record', 'record'), ('trace', 'trace'),
               ('reproduction', 'reproduction'))
     CLASSES = (('storm', 'storm'), ('configuration_dead', 'configuration dead'),
-               ('sparse', 'sparse'), ('abort', 'abort'), ('mixed', 'mixed'))
+               ('sparse', 'sparse'), ('abort', 'abort'), ('mixed', 'mixed'),
+               ('memory', 'memory'))
     STATUSES = (('new', 'new'), ('digging', 'digging'), ('traced', 'traced'),
                 ('reproducing', 'reproducing'), ('reproduced', 'reproduced'),
                 ('not_reproduced', 'not reproduced'), ('diagnosed', 'diagnosed'),
