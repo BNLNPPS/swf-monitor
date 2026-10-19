@@ -57,11 +57,17 @@ def _upload_sandbox(workdir):
         archive_path = os.path.join(tmpdir, archive_name)
         _log(f"packing sandbox {workdir} -> {archive_name}")
         with tarfile.open(archive_path, 'w:gz') as tar:
-            for fname in sorted(os.listdir(workdir)):
-                fpath = os.path.join(workdir, fname)
-                if os.path.isfile(fpath):
-                    tar.add(fpath, arcname=fname)   # flat: name only, no path
-                    _log(f"  + {fname}")
+            # Every file under the sandbox with its path relative to the
+            # sandbox root: a flat sandbox (the production CSV and runner)
+            # packs exactly as before, and a sandbox carrying a package
+            # tree (the canary kit) keeps it, so the job can import it.
+            for root, dirs, files in os.walk(workdir):
+                dirs[:] = sorted(d for d in dirs if d != '__pycache__')
+                for fname in sorted(files):
+                    fpath = os.path.join(root, fname)
+                    arcname = os.path.relpath(fpath, workdir)
+                    tar.add(fpath, arcname=arcname)
+                    _log(f"  + {arcname}")
         old_cwd = os.getcwd()
         os.chdir(tmpdir)
         try:
@@ -82,10 +88,18 @@ def _upload_sandbox(workdir):
 
 
 def build_task_params(spec, archive_name):
-    """Assemble the taskParamMap from the PCS spec and the uploaded sandbox."""
+    """Assemble the taskParamMap from the PCS spec and the uploaded sandbox.
+
+    The spec must name its queue: production work goes where PCS placed
+    it, never where PanDA's brokerage would (swf-epicprod
+    CONTINUOUS_PRODUCTION.md, Placement), so a spec without a site is
+    refused rather than defaulted."""
+    if not spec.get('site'):
+        raise ValueError('the spec names no site: PCS places every task '
+                         'before submission (CONTINUOUS_PRODUCTION.md, Placement)')
     params = {
         'vo': spec.get('vo', 'epic'),
-        'site': spec.get('site', 'BNL_OSG_PanDA_1'),
+        'site': spec['site'],
         'workingGroup': spec.get('workingGroup', 'EIC'),
         'prodSourceLabel': spec.get('prodSourceLabel', 'test'),
         'processingType': spec.get('processingType', 'epicproduction'),
@@ -109,7 +123,14 @@ def build_task_params(spec, archive_name):
         'sourceURL': _source_url(),
         'coreCount': int(spec.get('nCore', 1)),
         'ramCount': int(spec.get('memory', 4096)),
-        'ramUnit': 'MBPerCore',                      # producer envelope (commands.py)
+        # Fixed: JEDI's watchdog scout-data pass resets a MBPerCore task's
+        # ramCount from its first finished jobs' PSS (75th percentile plus
+        # 10 percent), and the job request is 0.9 of that; task 39951's
+        # retries went out asking 2,556 MB against a 2,790 MB RSS footprint
+        # and died where the glidein polices request_memory (segfault
+        # finding f-12). MBPerCoreFixed keeps the submitted memory through
+        # the run; a job's own memory retry still climbs.
+        'ramUnit': 'MBPerCoreFixed',
         'nEvents': int(spec.get('nJobs', 1)),       # one job per manifest row
         'nEventsPerJob': int(spec.get('nEventsPerJob', 1)),
         'jobParameters': [
@@ -128,9 +149,20 @@ def build_task_params(spec, archive_name):
         'log': {
             'type': 'template',
             'param_type': 'log',
-            'value': f"{spec['outDS']}.$JEDITASKID.${{SN}}.log.tgz",
+            # ${SN} only. JEDI substitutes $JEDITASKID here for a task carrying
+            # the test label, and not for a production one: job 2721298 staged
+            # out against the literal name and died on pilot error 1165 with
+            # its physics already made and registered, while the canary an hour
+            # earlier got its task id substituted from this same template. The
+            # log dataset is per-task, so the serial alone names the file.
+            'value': f"{spec['outDS']}.${{SN}}.log.tgz",
             'dataset': spec['outDS'] + '_log/',
             'hidden': True,
+            # A log the pilot could not stage out but held in the stage-out
+            # bucket (swf-epicprod docs/LOG_STAGEOUT_FALLBACK.md) is absent
+            # from the pilot's report; the adder then sets it to nooutput
+            # rather than failing a job whose payload registered its output.
+            'allowNoOutput': True,
         },
     }
 
@@ -145,6 +177,84 @@ def build_task_params(spec, archive_name):
     # dispatch and bookkeeping.
     if spec.get('nEventsPerWorker'):
         params['nEventsPerWorker'] = int(spec['nEventsPerWorker'])
+    # Fine-grained processing: the server's Event Service flavor without
+    # the merge step (JEDI TaskRefinerBase fineGrainedProc; job flag 6).
+    # Every event of the input is a range; a job's finished ranges count
+    # at its end and the rest go back to the file for the next job
+    # (check_fine_grained_processing), so nothing merges and no consumer
+    # is spawned. The ordinary flavor closes a consumer by generating an
+    # ES merge job, which has no place in a payload that registers per
+    # range (job 3556339: every range done, the job failed on the merge
+    # job's insert). Exclusive with nEventsPerWorker.
+    if spec.get('fineGrainedProc'):
+        params.pop('nEventsPerWorker', None)
+        params['fineGrainedProc'] = True
+    # An Event Service job runs its payload in one step outside the
+    # pilot's container (the harness starts the image itself), so the
+    # container's pre- and post-process steps have nothing to do: the
+    # post-process runGen ran after the single-step one had removed its
+    # work directory and failed, and every Event Service job carried
+    # pilot error 1357 "Post-process command failed" though the server
+    # finished it (jobs 3556341-3556349).
+    if params.get('nEventsPerWorker') or params.get('fineGrainedProc'):
+        params.pop('multiStepExec', None)
+
+    # A PanDA input dataset (the ES shape that finishes: JEDI makes and
+    # completes ranges over files of type input only, NODE_EVENT_DISPATCHER.md,
+    # The round trip). The pilot stages the files in; the payload reads
+    # what it reads. nEventsPerInputFile tells JEDI the events per file
+    # when the catalog carries no event count.
+    if spec.get('inputDataset'):
+        params.pop('noInput', None)
+        params['jobParameters'].append({
+            'type': 'template', 'param_type': 'input',
+            'value': '-i "${IN/T}"', 'dataset': spec['inputDataset'],
+            'expand': True, 'exclude': r'\.log\.tgz(\.\d+)*$',
+        })
+        params['nFilesPerJob'] = int(spec.get('nFilesPerJob', 1))
+        if spec.get('nEventsPerInputFile'):
+            params['nEventsPerInputFile'] = int(spec['nEventsPerInputFile'])
+        # Over real input nEvents is the events to process, not the job
+        # count the noInput shape encodes in it.
+        params['nEvents'] = params['nEventsPerJob'] * int(spec.get('nJobs', 1))
+        # Input handed to the payload as a TURL, not staged: runGen's
+        # --givenPFN takes the input names as given and skips its check
+        # for a local copy, which otherwise ends the job before the
+        # payload starts (job 3556333, "No input file is available"). The
+        # pilot's own switch (--accessmode=direct) rides in the exec.
+        if spec.get('directInput'):
+            params['jobParameters'].append({'type': 'constant', 'value': '--givenPFN'})
+
+    # Storage records the job carries for the pilot (--overwriteStorageData,
+    # the pilot's job-level master source for StorageData): the pilot
+    # otherwise knows storages only from ATLAS CRIC, and an Event Service
+    # consumer must resolve the es_events storage to an id before it can
+    # stage a range's receipt and report the range finished (job 3492644:
+    # "Failed to load storage details for ddms=['BNL_PROD_DISK_1']" after
+    # every range had been processed). The pilot tokenizes the job
+    # parameters with shlex and takes the option's value as the next
+    # token, read as a Python literal (jobdata.parse_args): the record
+    # goes as a separate double-quoted token in Python's own syntax
+    # (job 3493147 got it as one --option=json token and passed it to
+    # runGen, which knows no such option).
+    if spec.get('storageData'):
+        record = repr(spec['storageData'])
+        params['jobParameters'].append({
+            'type': 'constant', 'value': f'--overwriteStorageData "{record}"'})
+
+    # Files the pilot stages out and registers, by name (one job: the LFN
+    # is the file's name in the job directory, no serial). Production
+    # payloads self-register to JLab and use none of this; a PCS spec's
+    # 'outputs' is its JLab datasets, another thing.
+    if spec.get('stageOutFiles'):
+        params.pop('noOutput', None)
+        for name in spec['stageOutFiles']:
+            params['jobParameters'].append({
+                'type': 'template', 'param_type': 'output',
+                'value': f"{spec['outDS']}.{name}",
+                'dataset': f"{spec['outDS']}_{name.split('.')[0]}/",
+                'hidden': True,
+            })
 
     # Scouts off -> walltime used directly; scouts on -> HS06 per-event routing
     # (avoids the noInput pseudo-input 1MB-file walltime inflation).
@@ -154,14 +264,43 @@ def build_task_params(spec, archive_name):
         params['cpuTimeUnit'] = 'HS06sPerEvent'
     params['walltime'] = int(float(spec.get('walltimeHours', 2.0)) * 3600)
 
+    # Job retry ceiling. Production leaves JEDI's default; a canary probe
+    # sets 1 so a failed landing reads as a failed probe rather than being
+    # blurred by automatic retries.
+    if spec.get('maxAttempt'):
+        params['maxAttempt'] = int(spec['maxAttempt'])
+    # Passes that failed outright, apart from all passes: a fine-grained
+    # Event Service job that credits ranges ends finished (fg_partial) and
+    # spends an attempt but not a failure (JEDI maxFailure).
+    if spec.get('maxFailure'):
+        params['maxFailure'] = int(spec['maxFailure'])
+    # The PanDA server's reassignment off: JEDI flags each generated job
+    # relocationFlag=2, which both copyArchive rules (inactive site, two
+    # days activated) skip. Production places and moves its own work; a
+    # reassignment costs every waiting input an attempt.
+    if spec.get('disableReassign'):
+        params['disableReassign'] = True
+
     if spec.get('containerImage'):
         params['container_name'] = spec['containerImage']
+
+    # No log dataset at all (the prun --noSeparateLog shape): nothing for
+    # the refiner to validate against Rucio and nothing for the Adder to
+    # register. For queues whose log stage-out is an object store outside
+    # the Rucio catalog, BNL_NPPS_GPU among them.
+    if spec.get('noLog'):
+        del params['log']
 
     # -a <sandbox>
     params['jobParameters'].append({'type': 'constant', 'value': f'-a {archive_name}'})
 
-    # %RNDM=X -> ${SEQNUMBER}; add the pseudo_input template (one job per row).
-    exec_cmd = spec['exec']
+    # The job's own PanDA id, handed to the payload explicitly. The pilot
+    # sets PANDAID in its own environment, but it launches the container
+    # with --cleanenv, so nothing of the pilot's environment reaches the
+    # payload; the server substitutes $PANDAID into job parameters
+    # unconditionally, which does. The payload names the objects it
+    # reports with it (swf-epicprod docs/JOB_REPORTING.md).
+    exec_cmd = f"PANDAID=$PANDAID {spec['exec']}"
     rndm = re.search(r'%RNDM(:|=)(\d+)', exec_cmd)
     if rndm:
         offset = rndm.group(2)
@@ -193,6 +332,10 @@ def main():
         spec = json.load(f)
     if not spec.get('outDS') or not spec.get('exec'):
         _log("ERROR: spec missing outDS/exec")
+        return 2
+    if not spec.get('site'):
+        _log("ERROR: spec names no site; PCS places every task before "
+             "submission (CONTINUOUS_PRODUCTION.md, Placement)")
         return 2
     if not os.path.isdir(args.workdir):
         _log(f"ERROR: sandbox dir not found: {args.workdir}")

@@ -1,0 +1,453 @@
+#!/usr/bin/env python3
+"""registrar.py — complete the registrations the payload left pending.
+
+The production-ops agent's doer for the second half of Measure 2
+(swf-epicprod docs/RUCIO_RESILIENCE.md). A job whose output is written and
+uploaded but whose catalog entry could not be made no longer fails: it
+records the registration pending in its payload report and exits on its
+physics. This reads those reports and finishes the job's bookkeeping.
+
+Retry lives here and only here, so a struggling catalog sees one gentle
+attempt per job and then a bounded number of hour-scale attempts from one
+process, instead of thousands of jobs retrying at once. An outage
+therefore produces a registration backlog that costs no compute.
+
+Worklist, from two places, because a pending job now exits success:
+  * the PanDA metatable, which holds the payload report of every finished
+    job — the normal case;
+  * the reports the sweeper filed on EpicProdJob for failed jobs, for a
+    job that went pending and then died for another reason.
+
+For each pending DID the file is looked for at the RSE's deterministic
+path. Present means the upload stood and only the catalog entry is
+missing: the replica is registered with the size and checksum the storage
+reports, attached to its dataset, and given the event count the report
+carries. Absent means the upload itself did not complete, which is not a
+pending registration but an undelivered output, and it is reported as
+such and left to the residual rerun rather than invented into the
+catalog.
+
+Attempts are recorded on the job record under
+``data['payload_report']['registrar']``, so a DID is retried at most once
+an hour and gives up after a bounded number of tries with its reason kept.
+
+Django-bootstrap standalone script — also usable by hand::
+
+    cd /data/wenauseic/github/swf-monitor/src
+    ../../swf-testbed/.venv/bin/python ../scripts/registrar.py \
+        [--hours 48] [--limit N] [--dry-run]
+
+The last stdout line is a JSON summary; progress and errors go to stderr.
+Exit codes: 0 ok · 5 proxy unusable · 6 Rucio unreachable.
+"""
+import argparse
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timedelta, timezone as dt_timezone
+
+THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(THIS_DIR, '..', 'src'))
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'swf_monitor_project.settings')
+
+import django  # noqa: E402
+django.setup()
+
+from django.db import connections  # noqa: E402
+
+from monitor_app.models import EpicProdJob  # noqa: E402
+from monitor_app.panda.constants import PANDA_SCHEMA  # noqa: E402
+
+# The credential and the client are the EVGEN registration doer's, so the
+# two writers into the JLab catalog cannot drift on identity, proxy renewal
+# or account checking. Imported rather than copied for that reason.
+_spec = importlib.util.spec_from_file_location(
+    'register_evgen_rucio', os.path.join(THIS_DIR, 'register-evgen-rucio.py'))
+_evgen = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_evgen)
+
+RUCIO_SCOPE = _evgen.RUCIO_SCOPE
+EXIT_PROXY, EXIT_RUCIO = 5, 6
+# One attempt an hour, and a DID that has refused eight times is a case for
+# a person rather than a ninth attempt.
+RETRY_INTERVAL_S = int(os.environ.get('REGISTRAR_RETRY_INTERVAL_S', 3600))
+MAX_ATTEMPTS = int(os.environ.get('REGISTRAR_MAX_ATTEMPTS', 8))
+# Rucio's limit on a data identifier name: a longer one is refused on
+# every attempt, so it is recorded refused and never retried.
+DID_NAME_MAX = 250
+DEFAULT_HOURS = 48
+
+
+def _log(msg):
+    print(msg, file=sys.stderr, flush=True)
+
+
+def _pending_from_report(report):
+    """The DIDs a payload report says are pending, or []."""
+    registration = (report or {}).get('registration') or {}
+    if (registration.get('outcome') or '') != 'pending':
+        return []
+    return [d for d in (registration.get('dids') or []) if str(d).startswith('/')]
+
+
+def _events_for(report, did):
+    """The event count the report gives for the output named by this DID."""
+    outputs = (report or {}).get('outputs') or {}
+    stem = did.rsplit('/', 1)[-1]
+    for entry in outputs.values():
+        if isinstance(entry, dict) and entry.get('file') == stem:
+            events = entry.get('events')
+            return int(events) if isinstance(events, int) else None
+    return None
+
+
+def worklist(since, limit=None):
+    """Jobs with a pending registration: [(pandaid, report, [did, ...])]."""
+    found, seen = [], set()
+    sql = f"""
+        SELECT m."pandaid", m."metadata"
+        FROM "{PANDA_SCHEMA}"."metatable" m
+        JOIN "{PANDA_SCHEMA}"."jobsarchived4" j ON j."pandaid" = m."pandaid"
+        WHERE j."modificationtime" >= %s AND j."processingtype" IN ('epicproduction', 'canary')
+    """
+    # Canaries included: a canary's pending registration completes like
+    # production's, which is how the failover chain is proven.
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(sql, [since])
+            for pandaid, raw in cursor.fetchall():
+                try:
+                    metadata = json.loads(raw) if isinstance(raw, str) else raw
+                except (ValueError, TypeError):
+                    continue
+                report = (metadata or {}).get('payload')
+                dids = _pending_from_report(report)
+                if dids:
+                    seen.add(int(pandaid))
+                    found.append((int(pandaid), report, dids))
+    except Exception as e:                                    # noqa: BLE001
+        _log(f'ERROR: metatable worklist query failed: {e}')
+
+    try:
+        for job in EpicProdJob.objects.filter(updated_at__gte=since).only(
+                'pandaid', 'data').iterator():
+            if int(job.pandaid) in seen:
+                continue
+            report = ((job.data or {}).get('payload_report') or {}).get('report')
+            dids = _pending_from_report(report)
+            if dids:
+                found.append((int(job.pandaid), report, dids))
+    except Exception as e:                                    # noqa: BLE001
+        _log(f'ERROR: filed-report worklist query failed: {e}')
+
+    return found[:limit] if limit else found
+
+
+def _registrar_state(pandaid):
+    job = EpicProdJob.objects.filter(pandaid=pandaid).only('data').first()
+    filed = ((job.data if job else None) or {}).get('payload_report') or {}
+    return filed.get('registrar') or {}
+
+
+def _record_attempt(pandaid, did, outcome, reason=''):
+    """Keep the attempt on the job record. No table, no migration: the
+    registrar's state is a few fields beside the report it acts on."""
+    try:
+        job, _ = EpicProdJob.objects.get_or_create(pandaid=pandaid)
+        data = dict(job.data or {})
+        filed = dict(data.get('payload_report') or {})
+        state = dict(filed.get('registrar') or {})
+        entry = dict(state.get(did) or {})
+        entry['attempts'] = int(entry.get('attempts') or 0) + 1
+        entry['last_attempt'] = datetime.now(dt_timezone.utc).isoformat()
+        entry['outcome'] = outcome
+        entry['reason'] = reason
+        state[did] = entry
+        filed['registrar'] = state
+        data['payload_report'] = filed
+        job.data = data
+        job.save(update_fields=['data', 'updated_at'])
+    except Exception as e:                                    # noqa: BLE001
+        _log(f'ERROR: attempt not recorded for {pandaid} {did}: {e}')
+
+
+def _due(state, did):
+    """Whether this DID is due an attempt now."""
+    entry = state.get(did) or {}
+    if entry.get('outcome') in ('registered', 'refused'):
+        return False
+    if int(entry.get('attempts') or 0) >= MAX_ATTEMPTS:
+        return False
+    last = entry.get('last_attempt')
+    if not last:
+        return True
+    try:
+        when = datetime.fromisoformat(last)
+    except ValueError:
+        return True
+    return (datetime.now(dt_timezone.utc) - when).total_seconds() >= RETRY_INTERVAL_S
+
+
+_PREFIX_CACHE = {}
+
+
+def rse_pfn_prefix(client, rse):
+    """The deterministic PFN prefix of an RSE, from its own protocol entry,
+    so nothing here hardcodes a door. Read once per process: it is a
+    property of the RSE, not of the file."""
+    if rse in _PREFIX_CACHE:
+        return _PREFIX_CACHE[rse]
+    # A protocol with no WAN read priority (null, or Rucio's 0) is not a read
+    # door: BNL-XRD's third-party-copy davs entry carries read: null.
+    protocols = [p for p in client.get_protocols(rse)
+                 if ((p.get('domains') or {}).get('wan') or {}).get('read')]
+    for protocol in sorted(protocols, key=lambda p: p['domains']['wan']['read']):
+        scheme = protocol.get('scheme')
+        host = protocol.get('hostname')
+        if not (scheme and host):
+            continue
+        port = protocol.get('port')
+        prefix = protocol.get('prefix') or '/'
+        netloc = f'{host}:{port}' if port else host
+        _PREFIX_CACHE[rse] = f'{scheme}://{netloc}/{prefix.lstrip("/")}'
+        return _PREFIX_CACHE[rse]
+    raise _evgen.DoerError(EXIT_RUCIO, f'no readable protocol on RSE {rse}')
+
+
+class StorageProbeFailed(Exception):
+    """The storage could not say whether the file is there."""
+
+
+def stored_file(pfn, proxy):
+    """(bytes, adler32) of the file at a PFN, or None when the storage
+    answers that it is not there. Raises StorageProbeFailed when the
+    storage does not answer either way: a failed probe is not an absent
+    file, and reading it as one loses nothing but reports a loss.
+
+    The storage is asked, never the catalog: the question is whether the
+    upload stood, and the catalog is the thing that could not answer.
+    """
+    door, _, path = pfn.partition('//')[2].partition('/')
+    door_url = f"{pfn.split('//')[0]}//{door}"
+    env = dict(os.environ, X509_USER_PROXY=proxy)
+    try:
+        stat = subprocess.run(['xrdfs', door_url, 'stat', f'/{path}'],
+                              capture_output=True, text=True, timeout=120, env=env)
+        if stat.returncode != 0:
+            answer = f'{stat.stdout or ""} {stat.stderr or ""}'
+            if '[3011]' in answer or 'No such file' in answer:
+                return None
+            raise StorageProbeFailed(f'stat rc={stat.returncode}: {answer.strip()[:200]}')
+        size = None
+        for line in (stat.stdout or '').splitlines():
+            if line.strip().startswith('Size:'):
+                size = int(line.split(':', 1)[1].strip())
+        check = subprocess.run(['xrdfs', door_url, 'query', 'checksum', f'/{path}'],
+                               capture_output=True, text=True, timeout=300, env=env)
+        adler = ''
+        if check.returncode == 0:
+            parts = (check.stdout or '').split()
+            if len(parts) >= 2 and parts[0].startswith('adler32'):
+                adler = parts[1]
+        if size is None or not adler:
+            raise StorageProbeFailed(f'the file is there but its size or checksum did not read '
+                                     f'(size {size}, checksum rc={check.returncode})')
+        return size, adler
+    except StorageProbeFailed:
+        raise
+    except Exception as e:                                    # noqa: BLE001
+        _log(f'WARNING: storage probe failed for {pfn}: {e}')
+        raise StorageProbeFailed(f'{type(e).__name__}: {e}') from e
+
+
+def complete(client, rse, did, events, proxy, dry_run=False):
+    """Register one pending DID. Returns (outcome, reason)."""
+    dataset = did.rsplit('/', 1)[0]
+    if len(did) > DID_NAME_MAX:
+        return 'refused', (f'the name is {len(did)} characters, past '
+                           f"Rucio's {DID_NAME_MAX}; it can never be registered")
+    # No read before the write: the registration call ignores a duplicate,
+    # so an entry already registered costs one call that changes nothing,
+    # where a read first cost every entry a call (the catalog answers
+    # about one call a second under load, 2026-09-18).
+    try:
+        prefix = rse_pfn_prefix(client, rse)
+    except Exception as e:                                    # noqa: BLE001
+        return 'deferred', f'catalog unreachable (RSE protocols): {e}'
+    pfn = f'{prefix.rstrip("/")}/{did.lstrip("/")}'
+    try:
+        found = stored_file(pfn, proxy)
+    except StorageProbeFailed as e:
+        return 'deferred', f'storage probe failed, presence unknown: {e}'
+    if found is None:
+        return 'undelivered', ('the output is not at the storage, so the upload '
+                               'did not complete; this is a residual rerun, not '
+                               'a registration')
+    size, adler = found
+    if dry_run:
+        return 'would register', f'{size} bytes, adler32 {adler}'
+
+    entry = {'scope': RUCIO_SCOPE, 'name': did, 'bytes': size, 'adler32': adler}
+    # One call registers the replica and attaches the file to its dataset,
+    # committed together (the payload's own registration since 0.19.1, the
+    # pilot's stage-out call). The dataset exists by contract
+    # (RUCIO_REGISTRATION_CONTRACT.md § 2); one that does not is reported,
+    # never created here: three calls a file (add_replicas, add_dataset,
+    # attach_dids) were two too many against a catalog this size.
+    try:
+        client.add_files_to_datasets(
+            [{'scope': RUCIO_SCOPE, 'name': dataset, 'rse': rse, 'dids': [entry]}],
+            ignore_duplicate=True)
+    except Exception as e:                                    # noqa: BLE001
+        text = str(e).lower()
+        if 'not found' in text or 'does not exist' in text:
+            return 'deferred', f'the output dataset {dataset} is not in the catalog: {e}'
+        if not ('already' in text or 'duplicate' in text):
+            return 'deferred', f'add_files_to_datasets: {e}'
+    # Read back. A DID the job's own upload attempt had registered before
+    # the catalog failed it (the temporary replica since tombstoned) exists
+    # with no replica; the one call above skips such a DID as a duplicate
+    # and adds nothing, so the replica is added to the existing DID and the
+    # attachment made explicitly (1,699 of the first 16,000 stashed files,
+    # 2026-09-18).
+    try:
+        replicas = list(client.list_replicas(
+            [{'scope': RUCIO_SCOPE, 'name': did}], all_states=True))
+    except Exception as e:                                    # noqa: BLE001
+        return 'deferred', f'registered, but the read-back failed: {e}'
+    available = any((r.get('states') or {}).get(rse) == 'AVAILABLE' for r in replicas)
+    if not available:
+        state_at_rse = next(((r.get('states') or {}).get(rse) for r in replicas
+                             if (r.get('states') or {}).get(rse)), None)
+        if state_at_rse:
+            # The job's own failed upload left the replica row UNAVAILABLE
+            # and tombstoned (register_to_rucio's cleanup of a COPYING
+            # replica); the file at that path is the stash. The row is
+            # made AVAILABLE, which the dataset's rule then locks.
+            try:
+                client.update_replicas_states(
+                    rse, files=[{'scope': RUCIO_SCOPE, 'name': did, 'state': 'A'}])
+            except Exception as e:                            # noqa: BLE001
+                return 'deferred', f'the {state_at_rse} replica could not be made AVAILABLE: {e}'
+        else:
+            try:
+                client.add_replicas(rse=rse, files=[entry], ignore_availability=True)
+            except Exception as e:                            # noqa: BLE001
+                if 'already' not in str(e).lower():
+                    return 'deferred', f'add_replicas on the existing DID: {e}'
+        try:
+            client.attach_dids(scope=RUCIO_SCOPE, name=dataset,
+                               dids=[{'scope': RUCIO_SCOPE, 'name': did}])
+        except Exception as e:                                # noqa: BLE001
+            if 'already' not in str(e).lower():
+                return 'deferred', f'attach_dids on the existing DID: {e}'
+        try:
+            replicas = list(client.list_replicas(
+                [{'scope': RUCIO_SCOPE, 'name': did}], all_states=True))
+        except Exception as e:                                # noqa: BLE001
+            return 'deferred', f'registered, but the read-back failed: {e}'
+        if not any((r.get('states') or {}).get(rse) == 'AVAILABLE' for r in replicas):
+            return 'deferred', f'the replica at {rse} does not read AVAILABLE after registration'
+    if events is not None:
+        try:
+            client.set_metadata(RUCIO_SCOPE, did, 'events', int(events))
+        except Exception as e:                                # noqa: BLE001
+            # The registration stands; the count is reported, never invented.
+            _log(f'WARNING: events not set on {did}: {e}')
+    return 'registered', ''
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--hours', type=float, default=DEFAULT_HOURS,
+                        help='how far back to look for pending registrations')
+    parser.add_argument('--limit', type=int, default=None)
+    parser.add_argument('--rse', default=os.environ.get('REGISTRAR_RSE', 'BNL-XRD'),
+                        help='the RSE the payload uploaded to')
+    parser.add_argument('--dry-run', action='store_true',
+                        help='find and probe, register nothing')
+    args = parser.parse_args()
+
+    since = datetime.now(dt_timezone.utc) - timedelta(hours=args.hours)
+    summary = {'window_hours': args.hours, 'rse': args.rse, 'jobs': 0,
+               'registered': [], 'deferred': [], 'undelivered': [], 'refused': [],
+               'skipped': 0, 'dry_run': bool(args.dry_run)}
+
+    work = worklist(since, limit=args.limit)
+    summary['jobs'] = len(work)
+    if not work:
+        print(json.dumps(summary))
+        return 0
+
+    try:
+        proxy, summary['proxy'] = _evgen.resolve_proxy()
+    except _evgen.DoerError as e:
+        summary['error'] = str(e)
+        print(json.dumps(summary))
+        return EXIT_PROXY
+    try:
+        client = _evgen.rucio_client(proxy)
+    except _evgen.DoerError as e:
+        summary['error'] = str(e)
+        print(json.dumps(summary))
+        return EXIT_RUCIO
+
+    # One pass is bounded in time (the agent's timeout is the ceiling) and
+    # in consecutive catalog failures: a catalog that answers nothing is
+    # noted once and the rest of the worklist waits for the next pass
+    # rather than being asked a thousand times. Nothing here raises past
+    # an entry: a crash records no attempt and defers nothing (the passes
+    # of 2026-09-17 died on the first 503, every hour, for 14 hours).
+    import time as _time
+    started = _time.monotonic()
+    budget_s = float(os.environ.get('REGISTRAR_PASS_BUDGET_S', 1500))
+    unreachable_streak = 0
+    max_streak = int(os.environ.get('REGISTRAR_UNREACHABLE_STREAK', 5))
+    stopped = ''
+    for pandaid, report, dids in work:
+        if stopped:
+            break
+        state = _registrar_state(pandaid)
+        for did in dids:
+            if _time.monotonic() - started > budget_s:
+                stopped = f'pass budget of {budget_s:.0f}s reached'
+                break
+            if unreachable_streak >= max_streak:
+                stopped = f'catalog unreachable {unreachable_streak} times in a row'
+                break
+            if not _due(state, did):
+                summary['skipped'] += 1
+                continue
+            try:
+                outcome, reason = complete(
+                    client, args.rse, did, _events_for(report, did), proxy,
+                    dry_run=args.dry_run)
+            except Exception as e:                            # noqa: BLE001
+                outcome, reason = 'deferred', f'{type(e).__name__}: {e}'
+            if outcome == 'deferred' and 'unreachable' in reason:
+                unreachable_streak += 1
+            else:
+                unreachable_streak = 0
+            _log(f'{pandaid} {did}: {outcome}{" — " + reason if reason else ""}')
+            if not args.dry_run:
+                _record_attempt(pandaid, did, outcome, reason)
+            if outcome == 'registered' or outcome == 'would register':
+                summary['registered'].append(did)
+            elif outcome == 'undelivered':
+                summary['undelivered'].append({'did': did, 'reason': reason})
+            elif outcome == 'refused':
+                summary['refused'].append({'did': did, 'reason': reason})
+            else:
+                summary['deferred'].append({'did': did, 'reason': reason})
+
+    if stopped:
+        summary['stopped'] = stopped
+        _log(f'pass ended early: {stopped}; the rest of the worklist waits for the next pass')
+    print(json.dumps(summary))
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

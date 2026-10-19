@@ -27,7 +27,6 @@ PUBLISHER_IDENTITY = "swf-monitor:campaign-delivery"
 ASSESSMENT_POLICY_VERSION = "swf-campaign-delivery-v1"
 MAX_CAMPAIGNS = 8
 MAX_LEAVES = 1024
-MAX_SERIALIZED_BYTES = 192 * 1024
 
 DELIVERY_REGISTRATION = {
     "title": "Campaign delivered data",
@@ -43,7 +42,6 @@ DELIVERY_REGISTRATION = {
     "visibility": "public",
     "owning_subsystem": "SWF production catalog",
     "assessment_policy": ASSESSMENT_POLICY_VERSION,
-    "max_serialized_bytes": MAX_SERIALIZED_BYTES,
     "quantities": {
         "campaigns": {
             "path": "campaigns",
@@ -196,11 +194,6 @@ def delivery_projection():
     projection = {
         "campaigns": {name: _campaign_leaves(name) for name in campaigns},
     }
-    serialized = len(json.dumps(projection, separators=(",", ":")))
-    if serialized > MAX_SERIALIZED_BYTES:
-        raise ValueError(
-            f"delivery projection {serialized} bytes exceeds "
-            f"{MAX_SERIALIZED_BYTES}")
     return projection, timezone.now()
 
 

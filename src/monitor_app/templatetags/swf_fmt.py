@@ -27,8 +27,16 @@ _UNKNOWN_STATE_COLOR = '#6c757d'  # neutral gray fallback
 
 @register.filter(name='is_url')
 def is_url(value):
-    """True for HTTP(S) URL strings."""
-    return str(value or '').strip().startswith(('http://', 'https://'))
+    """True for HTTP(S) URL strings.
+
+    A value that starts with a scheme but carries whitespace or a pipe is a
+    compound field, not a URL: the PanDA pilotid is
+    '<stdout url>|Condor|PR|<version>' and linking it whole gives a 404.
+    """
+    text = str(value or '').strip()
+    if not text.startswith(('http://', 'https://')):
+        return False
+    return not any(c in text for c in ' \t\n|')
 
 
 @register.filter(name='url_href')
@@ -76,6 +84,28 @@ def fmt_value(value):
     if isinstance(value, (datetime, date)):
         return fmt_dt(value)
     return value
+
+
+@register.filter(name='fmt_duration')
+def fmt_duration(seconds):
+    """Format a number of seconds as a compact duration: ``45 s``,
+    ``12 min``, ``1 h 05 min``, ``2 d 3 h``; '' for None."""
+    if seconds is None or seconds == '':
+        return ''
+    try:
+        seconds = int(float(seconds))
+    except (TypeError, ValueError):
+        return str(seconds)
+    if seconds < 60:
+        return f'{seconds} s'
+    minutes = seconds // 60
+    if minutes < 60:
+        return f'{minutes} min'
+    hours, minutes = divmod(minutes, 60)
+    if hours < 48:
+        return f'{hours} h {minutes:02d} min'
+    days, hours = divmod(hours, 24)
+    return f'{days} d {hours} h'
 
 
 @register.filter(name='fmt_ago')

@@ -26,12 +26,43 @@ class _AiApiView(APIView):
 
 class ProposalProposeView(_AiApiView):
     def post(self, request):
-        """Create AI propagation proposals (AI_PROPOSALS.md).
-
-        Body: ``names``, ``state``, ``comment`` (required), ``replaced_by``,
-        ``proposer``, ``scan_version``, ``batch_id``.
+        """Create AI proposals (AI_PROPOSALS.md), by ``action``:
+        propagation (default; ``names``, ``state``, ``comment``,
+        ``replaced_by``), ping (``items``: title, due, lead_days, owner,
+        note, url, comment), or ping_fulfil (``ping_id``, ``comment``);
+        plus ``proposer``, ``scan_version``, ``batch_id``.
         """
+        action = (request.data.get('action') or 'propagation').strip()
         try:
+            if action == 'ping':
+                result = services.propose_pings(
+                    request.data.get('items') or [],
+                    proposer=request.data.get('proposer', ''),
+                    batch_id=request.data.get('batch_id', ''),
+                    created_by=request.user.username)
+                return Response(result, status=status.HTTP_200_OK)
+            if action == 'standard_config':
+                result = services.propose_standard_configs(
+                    request.data.get('items') or [],
+                    proposer=request.data.get('proposer', ''),
+                    batch_id=request.data.get('batch_id', ''),
+                    created_by=request.user.username)
+                return Response(result, status=status.HTTP_200_OK)
+            if action == 'registered_sample':
+                result = services.propose_registered_samples(
+                    request.data.get('items') or [],
+                    proposer=request.data.get('proposer', ''),
+                    batch_id=request.data.get('batch_id', ''),
+                    created_by=request.user.username)
+                return Response(result, status=status.HTTP_200_OK)
+            if action == 'ping_fulfil':
+                result = services.propose_ping_fulfil(
+                    request.data.get('ping_id', ''),
+                    request.data.get('comment', ''),
+                    proposer=request.data.get('proposer', ''),
+                    batch_id=request.data.get('batch_id', ''),
+                    created_by=request.user.username)
+                return Response(result, status=status.HTTP_200_OK)
             result = services.propose_propagation(
                 request.data.get('names') or [],
                 request.data.get('state'),
@@ -63,6 +94,9 @@ class ProposalDecideView(_AiApiView):
                 quality=request.data.get('quality', ''),
                 filter_state=request.data.get('filter', ''),
                 proposal_ids=request.data.get('ids') or [],
+                # Reviewer amendments for campaign-plan proposals:
+                # {proposal id: {target_events, priority}}.
+                amendments=request.data.get('amendments') or {},
             )
         except ServiceError as e:
             return Response({'detail': e.detail}, status=e.status)
@@ -174,6 +208,18 @@ class NarrativeCommentView(_AiApiView):
             message=f'comment on narrative {name}',
         )
         return Response({'ok': True}, status=status.HTTP_200_OK)
+
+
+class ProposalRemoveSupersededView(_AiApiView):
+    def post(self, request):
+        """Delete the withdrawn nightly copies of later proposals of the same
+        change and give each survivor the date it was first made
+        (services.proposal_remove_superseded)."""
+        try:
+            result = services.proposal_remove_superseded(deleted_by=request.user.username)
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response(result, status=status.HTTP_200_OK)
 
 
 class ProposalDeleteView(_AiApiView):

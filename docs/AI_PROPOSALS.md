@@ -115,6 +115,106 @@ propagation pilot is the worked example of each item.
 10. **Documentation.** The category added to this document: its
     precondition, comment template, and reversibility class.
 
+## Categories
+
+- **Campaign propagation** (`propagation`, ref `cp`) — the pilot:
+  proposes an edition's propagation disposition. Executor
+  `pcs.services.dataset_propagation_set`; precondition `prev_state` /
+  `prev_replaced_by`; undoable.
+- **Campaign plan** (`campaign_plan`, ref `pl`) — campaign assembly
+  (swf-epicprod CONTINUOUS_PRODUCTION.md): proposes one plan-membership
+  entry per physics configuration of a future campaign — disposition
+  (include_prior / include_requested / defer / retire), target events,
+  priority, with code-filled evidence. A creation subject keyed on
+  (campaign, PC), `counterpart_key` carrying the campaign; the
+  precondition anchor is the current plan entry's decision fields (None
+  for a true creation). Executor `pcs.services.campaign_plan_entries_set`
+  (one call and one `campaign_plan_set` event per campaign per decision
+  act); the plan lives in `Campaign.data['plan']`. **Edit-then-approve**:
+  the reviewer may amend target events and priority before deciding —
+  the amendments are recorded on the payload under `amended` and the
+  executor runs the amended values. Review surface: the campaign plan
+  page's assembly view (a future campaign with no editions) plus the
+  proposals page; undoable (the prior entry, or absence, is restored).
+  Proposer: `campaign-assembly` (`pcs/assembly.py`,
+  `scripts/propose-campaign-plan.py`), a rule-based proposer — comments
+  are wholly code-filled. No render projection: the subjects have no
+  Dataset row.
+- **Ping** (`ping`, ref `pg`) — proposes a dated obligation for the alarm
+  system ([PINGS.md](PINGS.md)): a creation subject keyed on the
+  obligation's title, the due date as `counterpart_key`, payload title,
+  due, lead days, owner, note, url. Precondition: the open ping with the
+  same title at proposal time (None for a true creation); a ping that has
+  since been entered makes the proposal stale. Executor
+  `monitor_app.alarms_data.ping_create_execute`, the identical call the
+  dashboard form makes. **Edit-then-approve**: the reviewer may change the
+  due date before accepting; the amendment is recorded on the payload
+  under `amended`. Review surface: the Pings section of the alarm
+  dashboard, proposed rows in the AI treatment with approve, an editable
+  date, and deny, plus the proposals page. Propose surface: the propose
+  endpoint with `action: ping` and the MCP tool `ai_propose_ping`.
+  Reversibility: mitigable, a ping created in error is marked fulfilled.
+  Rule-based proposers of this category: `credential-expiry` and
+  `certificate-expiry` (swf-epicprod `swf_epicprod/credential_proposer.py`
+  and `certificate_proposer.py`), each a nightly chain step, comments
+  wholly code-filled.
+- **Ping fulfilled** (`ping_fulfil`, ref `pf`) — proposes that an open
+  ping be marked fulfilled; subject the ping entry, precondition that it
+  is open, executor `ping_fulfil_execute`. Reviewed on the ping's own row
+  in the Pings section and on the proposals page. Irreversible by design:
+  a fulfilled ping is the record that the obligation was met.
+- **Standard configuration** (`standard_config`, ref `sc`) — the remedy
+  of a campaign-configuration ping (PINGS.md § Pings with a remedy):
+  proposes the creation of an edition's `<edition> Standard Production`
+  configuration. A creation subject keyed on the edition; payload the
+  edition, the configuration name, the template configuration, the
+  container image and tag, the Rucio RSE, and the title of the ping it
+  remedies. Precondition: no configuration of that name exists (the
+  proposal is stale once one does). Executor
+  `pcs.services.standard_prodconfig_create`, the identical call the
+  `create_standard_prodconfig.py` script makes: it creates the
+  configuration, marks the linked open ping fulfilled through
+  `ping_fulfil_execute` with the same origin, and logs one origin-stamped
+  `standard_prodconfig_create` event carrying what it fulfilled. The
+  decide path treats the remedy and its ping proposal as one item:
+  approval first executes a still-pending ping proposal with the linked
+  title, so the remedy fulfils the ping it just entered; denial denies
+  both; a remedy stale because the configuration exists makes the ping
+  proposal stale with it. Dry-runnable: the payload's values are the
+  preview. Review surface: one row in the Pings section with approve and
+  deny, and the proposals page. Proposer:
+  `campaign-config`, rule-based, comments wholly code-filled.
+  Reversibility: mitigable, a configuration created in error is deleted
+  while no task is bound to it.
+
+- **Registered sample** (`registered_sample`, ref `rs`) — a registered
+  EVGEN dataset nobody asked for (swf-epicprod EPICPROD_EVGEN_INPUTS.md
+  § From a registered sample to a task): proposes its intake into the
+  current production campaign as a physics configuration, request and
+  draft task. A creation subject keyed on the DID with the campaign as
+  `counterpart_key`; payload the identity the path derives (physics,
+  generator, background, sample, the physics tag and configuration when
+  they exist) and the three fields the approval completes. Precondition:
+  no PCS evgen dataset matches the DID, no request names the
+  configuration and no task runs it (`registered_sample_precondition`);
+  a sample taken in by another route is stale. Executor
+  `pcs.registered_samples.registered_sample_intake`, one transaction and
+  one `registered_sample_intake` event: the EVGEN-stage record with the
+  dataset's tail as source location, the production edition on the
+  campaign's release pair, the request and the draft task.
+  **Edit-then-approve**: requestor (required), target events, priority
+  and campaign, recorded under `amended`. Review surface: the EVGEN
+  inputs page's unmatched rows (the AI treatment with the fields and
+  approve/deny) and the proposals page; the bot relay lists the
+  proposal and points at the page, since approval needs the requestor.
+  Proposer `registered-sample` (swf-epicprod
+  `swf_epicprod/registered_sample_proposer.py`), rule-based, comments
+  wholly code-filled, run as the last step of the EVGEN assimilation
+  (nightly and on the Update button) with the scan heartbeat; switch
+  `ai_propose_registered_sample` in SysConfig. Reversibility: mitigable,
+  editions are permanent identities and a request or task made in error
+  is withdrawn.
+
 ## Review surfaces
 
 Proposals are **visible but inert** on the open face: anyone can see a
@@ -259,7 +359,7 @@ Designed-for extensions, reserved now, built when their consumer arrives:
 
 | action | when |
 |---|---|
-| `proposal_created` | one per propose call, with count and batch |
+| `proposal_created` | one per propose call, with count and batch; from a rule proposer (credential-expiry, certificate-expiry, campaign-config, campaign-assembly) it is low and not live, the decision being the live event |
 | `proposal_denied` | one per deny decision, with count and quality |
 | `proposal_expired` | one per heartbeat withdrawal, with count |
 | (execution) | the executed action's own event, origin-stamped |

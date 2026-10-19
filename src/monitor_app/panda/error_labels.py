@@ -36,7 +36,7 @@ TASKBUFFER_LABELS = {
     126: "Closed in bad job status",
     130: "Fast re-brokerage when overloaded",
     200: "Job cloning semaphore lock failed",
-    300: "Worker finished before the job",
+    300: "Worker's batch allocation ended under the job (Slurm state in the diagnostic)",
     403: "Forbidden request",
     404: "File not found",
 }

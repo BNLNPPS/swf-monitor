@@ -30,3 +30,15 @@ class WorkflowExecutionAdmin(admin.ModelAdmin):
     list_filter = ('status', 'executed_by')
     search_fields = ('execution_id', 'executed_by')
     readonly_fields = ('start_time', 'end_time')
+
+
+from .models import ErrorCorrectionRule
+
+
+@admin.register(ErrorCorrectionRule)
+class ErrorCorrectionRuleAdmin(admin.ModelAdmin):
+    list_display = ('component', 'code', 'diag_substring', 'queue_scope',
+                    'active', 'created_by', 'created_at')
+    list_filter = ('component', 'active')
+    search_fields = ('diag_substring', 'note')
+    readonly_fields = ('created_at', 'updated_at')

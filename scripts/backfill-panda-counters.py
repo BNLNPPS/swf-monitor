@@ -1,9 +1,12 @@
 """Backfill cumulative terminal-outcome counters into snap history.
 
 Reconstructs the panda component's version-5 cumulative terminal
-counters (jobs.cum, per-site cum and cum_failed_by_class) at a regular
-grid of historical instants, from the complete recorded job history in
-the PanDA database. One synthetic snap per grid instant is written
+counters (jobs.cum and jobs.cum_core_seconds, per-site cum,
+cum_core_seconds and cum_failed_by_class) at a regular grid of
+historical instants, from the complete recorded job history in the
+PanDA database. The core-seconds are the allocation those jobs held,
+cores times wall time from start to end — the productive baseline the
+wasted core-hours read against. One synthetic snap per grid instant is written
 with capture policy ``backfill-panda-v1`` — reconstructed evidence,
 explicitly distinguishable from observed snaps — carrying only the
 counter fields in the live publisher's envelope shape. The counters
@@ -55,8 +58,10 @@ CAPTURE_POLICY = 'backfill-panda-v1'
 
 def _hourly_outcome_buckets(until):
     """Terminal-outcome counts per (hour bucket, site, status, failure
-    class) over the full recorded history up to ``until``, deduplicated
-    across the active and archived tables."""
+    class) over the full recorded history up to ``until``, with the
+    core-seconds those jobs held, deduplicated across the active and
+    archived tables."""
+    from monitor_app.snapper_errors import HELD_SQL
     class_case = ' '.join(
         f'WHEN "{c["code"]}" > 0 THEN \'{c["name"]}\''
         for c in ERROR_COMPONENTS
@@ -71,14 +76,16 @@ def _hourly_outcome_buckets(until):
                CASE WHEN "jobstatus" = 'failed'
                     THEN CASE {class_case} ELSE 'other' END
                     ELSE '' END,
-               COUNT(*)
+               COUNT(*), COALESCE(SUM({HELD_SQL}), 0)
         FROM (
-            SELECT "pandaid", "endtime", "jobstatus",
-                   "computingsite", {err_fields}
+            SELECT "pandaid", "endtime", "endtime" AS "ended", "jobstatus",
+                   "computingsite", "starttime", "actualcorecount",
+                   "corecount", {err_fields}
             FROM "{PANDA_SCHEMA}"."jobsactive4" WHERE {bounds}
             UNION
-            SELECT "pandaid", "endtime", "jobstatus",
-                   "computingsite", {err_fields}
+            SELECT "pandaid", "endtime", "endtime" AS "ended", "jobstatus",
+                   "computingsite", "starttime", "actualcorecount",
+                   "corecount", {err_fields}
             FROM "{PANDA_SCHEMA}"."jobsarchived4" WHERE {bounds}
         ) completed
         GROUP BY 1, 2, 3, 4
@@ -99,20 +106,25 @@ def _counters_at_instants(instants, buckets):
     a bucket belongs to instant t when the whole hour ends at or
     before t."""
     scope_cum = {}
+    scope_held = {}
     site_cums = {}
     results = []
     index = 0
     for instant in instants:
         cutoff = instant.replace(tzinfo=None)
         while index < len(buckets):
-            bucket, site, status, fclass, count = buckets[index]
+            bucket, site, status, fclass, count, held = buckets[index]
             if bucket + dt.timedelta(hours=1) > cutoff:
                 break
             count = int(count or 0)
+            held = int(held or 0)
             _bump(scope_cum, status, count)
+            _bump(scope_held, status, held)
             entry = site_cums.setdefault(
-                str(site or 'unknown'), {'cum': {}, 'classes': {}})
+                str(site or 'unknown'),
+                {'cum': {}, 'classes': {}, 'held': {}})
             _bump(entry['cum'], status, count)
+            _bump(entry['held'], status, held)
             if status == 'failed' and fclass:
                 _bump(entry['classes'], fclass, count)
             index += 1
@@ -124,10 +136,12 @@ def _counters_at_instants(instants, buckets):
         for name in ranked:
             entry = site_cums[name]
             block = {'cum': dict(entry['cum'])}
+            if entry['held']:
+                block['cum_core_seconds'] = dict(entry['held'])
             if entry['classes']:
                 block['cum_failed_by_class'] = dict(entry['classes'])
             sites[name] = block
-        results.append((instant, dict(scope_cum), sites))
+        results.append((instant, dict(scope_cum), dict(scope_held), sites))
     return results
 
 
@@ -177,9 +191,11 @@ def main():
     print(f'end boundary: '
           f'{"earliest live counter snap " + end.isoformat() if live_first else "now"}')
     print(f'hour buckets: {len(buckets)}')
-    for instant, scope_cum, sites in results[-3:]:
+    for instant, scope_cum, scope_held, sites in results[-3:]:
         google = sites.get('BNL_ePIC_GOOGLE') or {}
+        hours = {k: round(v / 3600) for k, v in scope_held.items()}
         print(f'  {instant.isoformat()}: scope {scope_cum} | '
+              f'core-hours {hours} | '
               f'BNL_ePIC_GOOGLE {google.get("cum")} '
               f'{google.get("cum_failed_by_class")}')
 
@@ -190,7 +206,7 @@ def main():
     removed = SystemSnap.objects.filter(
         scope='epicprod', capture_policy=CAPTURE_POLICY).delete()
     written = 0
-    for instant, scope_cum, sites in results:
+    for instant, scope_cum, scope_held, sites in results:
         # One second past the grid instant: live captures land on
         # aligned 30-second boundaries, so the stamp never collides
         # with a real snap under the (scope, snap_time) uniqueness.
@@ -210,7 +226,9 @@ def main():
             state_hash='',
             state={'components': {'panda': {
                 'v': 1,
-                'data': {'jobs': {'cum': scope_cum, 'sites': sites}},
+                'data': {'jobs': {'cum': scope_cum,
+                                  'cum_core_seconds': scope_held,
+                                  'sites': sites}},
                 'registration': PANDA_REGISTRATION,
                 'revision': 0,
                 'registration_version': 5,

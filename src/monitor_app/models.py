@@ -809,6 +809,18 @@ class UserPreference(models.Model):
 
     @classmethod
     def set_pref(cls, username, key, value):
+        """Set one top-level preference key.
+
+        Reserved keys are refused loudly: ``authority`` decides who may act
+        on the system (authority.py) and is writable only through
+        ``authority.set_authority``, so no general preferences surface can
+        become a path to privilege.
+        """
+        from .authority import AUTHORITY_KEY
+        if key == AUTHORITY_KEY:
+            raise ValueError(
+                f"'{key}' is reserved; write it through "
+                'monitor_app.authority.set_authority')
         if not username or not key:
             return None
         from django.db import transaction
@@ -1147,6 +1159,7 @@ class PandaTaskOperation(models.Model):
         ('resume', 'Resume'),
         ('retry_failures', 'Retry failed jobs'),
         ('finish', 'Stop and finish task'),
+        ('reassign', 'Move remaining work'),
     ]
     STATUS_CHOICES = [
         ('queued', 'Queued'),
@@ -1284,6 +1297,147 @@ class CachedProduct(models.Model):
 
     def __str__(self):
         return self.key
+
+
+class HarvesterWorkerRecord(models.Model):
+    """Our copy of a harvester worker record (one batch allocation) from
+    PanDA's ``harvester_workers``, which drops each row three months after
+    its last update. Copied nightly for the queues whose allocations the
+    allocation page draws (docs: swf-epicprod EPICPROD_OPS.md, Harvester
+    worker records); the allocation timeline reads it once PanDA no longer
+    has the row. ``record`` is the whole PanDA row but the JDL."""
+    harvesterid = models.CharField(max_length=50)
+    workerid = models.BigIntegerField()
+    computingsite = models.CharField(max_length=128, db_index=True)
+    status = models.CharField(max_length=80, blank=True, default='')
+    batchid = models.CharField(max_length=80, blank=True, default='')
+    ncore = models.IntegerField(null=True, blank=True)
+    submittime = models.DateTimeField(null=True, blank=True)
+    starttime = models.DateTimeField(null=True, blank=True)
+    endtime = models.DateTimeField(null=True, blank=True)
+    lastupdate = models.DateTimeField(null=True, blank=True)
+    record = models.JSONField(default=dict)
+    captured_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'swf_harvester_worker_record'
+        unique_together = [('harvesterid', 'workerid')]
+
+    def __str__(self):
+        return f'{self.harvesterid}/{self.workerid}'
+
+
+class ErrorCorrectionRule(models.Model):
+    """Label-reliability rule of the error-correction root
+    (docs/ERROR_ATTRIBUTION.md): a job error label matching
+    component x code x diagnostic substring is untrustworthy. Every
+    error-presentation reader applies corrections on the way out —
+    the corrected reading (refined by the payload exit codes of the
+    matched jobs) leads, and the original label stays visible.
+    Recorded history is never rewritten."""
+    component = models.CharField(
+        max_length=20,
+        help_text='Error component: pilot, executor, ddm, brokerage, '
+                  'dispatcher, supervisor, or taskbuffer')
+    code = models.IntegerField(help_text='Error code within the component')
+    diag_substring = models.CharField(
+        max_length=200, blank=True, default='',
+        help_text='Substring of the diagnostic text; empty matches '
+                  'every diagnostic of the component and code')
+    queue_scope = models.CharField(
+        max_length=120, blank=True, default='',
+        help_text='Optional computingsite LIKE pattern; empty = every queue')
+    corrected_label = models.CharField(
+        max_length=200, blank=True, default='',
+        help_text='Fallback reading when no payload exit code refines '
+                  'the correction')
+    note = models.TextField(blank=True, default='')
+    evidence_url = models.CharField(max_length=500, blank=True, default='')
+    active = models.BooleanField(default=True)
+    created_by = models.CharField(max_length=100, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'swf_error_correction_rule'
+
+    def __str__(self):
+        return (f'{self.component}:{self.code} '
+                f'~"{self.diag_substring}"'
+                + (f' @{self.queue_scope}' if self.queue_scope else ''))
+
+
+class CrashSignature(models.Model):
+    """A payload crash signature of the segfault catalog (swf-epicprod
+    docs/SEGFAULT_DIAGNOSIS.md): the crashed jobs of the inventory
+    (EpicProdJob rows with phase payload_crash) grouped at record level
+    by exit code and PanDA task, promoted to trace level when a crashing
+    frame is read, carrying the class reading from the record, the
+    configuration, the sites, the loss, the trace, the reproductions
+    and the diagnosis, from first sighting to a verdict."""
+    LEVELS = (('record', 'record'), ('trace', 'trace'),
+              ('reproduction', 'reproduction'))
+    CLASSES = (('storm', 'storm'), ('configuration_dead', 'configuration dead'),
+               ('sparse', 'sparse'), ('abort', 'abort'), ('mixed', 'mixed'))
+    STATUSES = (('new', 'new'), ('digging', 'digging'), ('traced', 'traced'),
+                ('reproducing', 'reproducing'), ('reproduced', 'reproduced'),
+                ('not_reproduced', 'not reproduced'), ('diagnosed', 'diagnosed'),
+                ('handed_off', 'handed off'), ('fixed', 'fixed'),
+                ('accepted', 'accepted'))
+    key = models.CharField(
+        max_length=120, unique=True,
+        help_text="'exit139:task38661' at record level, "
+                  "'exit139:frame:<sha>' at trace level")
+    level = models.CharField(max_length=20, choices=LEVELS, default='record')
+    exit_code = models.IntegerField(db_index=True)
+    signal = models.IntegerField()
+    class_hint = models.CharField(max_length=30, choices=CLASSES,
+                                  default='mixed', db_index=True)
+    tasks = models.JSONField(
+        default=list, blank=True,
+        help_text='[{jeditaskid, taskname, crashes, finished, failed, '
+                  'first_seen, last_seen}]')
+    configuration = models.JSONField(
+        default=dict, blank=True,
+        help_text='campaign, edition, process family, ProdConfig, '
+                  'container image, detector version, payload version')
+    sites = models.JSONField(default=list, blank=True,
+                             help_text='[{site, crashes, hosts}]')
+    crashes = models.IntegerField(default=0)
+    rate = models.FloatField(null=True, blank=True,
+                             help_text='crashes over finished plus failed')
+    minutes_p10 = models.FloatField(null=True, blank=True)
+    minutes_p50 = models.FloatField(null=True, blank=True)
+    first_seen = models.DateTimeField(null=True, blank=True)
+    last_seen = models.DateTimeField(null=True, blank=True, db_index=True)
+    rows_lost = models.IntegerField(
+        null=True, blank=True,
+        help_text='crashed rows with no delivered output in any attempt')
+    events_lost = models.IntegerField(null=True, blank=True)
+    trace = models.JSONField(
+        default=dict, blank=True,
+        help_text='program, stage, top frames, source job, trace_status')
+    reproduction = models.JSONField(
+        default=list, blank=True,
+        help_text='[{pandaid, queue, jedi_task_id, outcome, minutes, '
+                  'verdict_time}]')
+    status = models.CharField(max_length=20, choices=STATUSES, default='new',
+                              db_index=True)
+    verdict = models.TextField(blank=True, default='')
+    assessment_ids = models.JSONField(default=list, blank=True)
+    package = models.JSONField(default=dict, blank=True,
+                               help_text='path or URL of the reproduction '
+                                         'package, built time')
+    data = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'swf_crash_signatures'
+        ordering = ['-crashes']
+
+    def __str__(self):
+        return f'{self.key} ({self.class_hint}, {self.crashes} crashes)'
 
 
 # Import workflow models to register them with Django

@@ -17,6 +17,13 @@ longer in the server cache (checked against the task's stored parameters and
 a HEAD of the cache URL): every generated job would fail its pre-process
 download, so the retry is reported refused with a resubmit recommendation
 instead of being sent. --force-retry bypasses the guard.
+
+Reassign moves a task's remaining work to another queue (--site, --mode
+soft by default): JEDI kills the task's jobs not yet running, holding or
+transferring (code 51, closed/toreassign), sets the task's site, and
+regenerates that work there; running jobs finish where they are. The
+operation is verified when the task names the target site and has left
+'reassigning'; the attempt each killed job cost is then repaid.
 """
 import argparse
 import json
@@ -35,7 +42,7 @@ DEFAULT_AUTH_VO = "EIC.production"
 # verification. Single-op retry_failures keeps its fire-and-report
 # behavior for the compose page; batch retry_failures verifies.
 STATE_CHANGE_OPERATIONS = ("pause", "resume", "finish")
-BATCH_OPERATIONS = ("pause", "resume", "retry_failures", "finish")
+BATCH_OPERATIONS = ("pause", "resume", "retry_failures", "finish", "reassign")
 # A retried task has left these states once JEDI acts on the command.
 RETRY_TERMINAL_STATUSES = (
     "finished", "failed", "done", "exhausted", "aborted", "broken")
@@ -154,6 +161,8 @@ def _run_inside_pclient(args):
         "send_interval": args.send_interval,
         "items": args.items,
         "force": bool(getattr(args, "force_retry", False)),
+        "site": args.site,
+        "mode": args.mode,
     }
     with tempfile.TemporaryDirectory(prefix="panda-task-operation.") as tmpdir:
         payload_path = os.path.join(tmpdir, "payload.json")
@@ -199,6 +208,10 @@ def _inside_pclient(payload_path):
             verify_timeout=float(payload.get("verify_timeout") or 90),
             poll_interval=float(payload.get("poll_interval") or 5),
             send_interval=float(payload.get("send_interval") or 1),
+            new_parameters=payload.get("new_parameters") or None,
+            site=str(payload.get("site") or ""),
+            mode=str(payload.get("mode") or "soft"),
+            client=client,
         )
         print(json.dumps(output, default=str))
         return 0
@@ -215,6 +228,9 @@ def _inside_pclient(payload_path):
             return 1
         if available is None:
             _log(f"NOTE: sandbox check inconclusive for {jedi_task_id}: {detail}")
+
+    if operation == "reassign":
+        return _reassign(Client, client, jedi_task_id, payload)
 
     if operation == "increase_attempts":
         result = client.increase_attempt_nr(jedi_task_id, int(payload.get("increase") or 1))
@@ -267,6 +283,90 @@ def _inside_pclient(payload_path):
     print(json.dumps(output, default=str))
     if not ok:
         _log(f"ERROR: PanDA returned failure for {operation} on {jedi_task_id}: {diagnostic}")
+        return 1
+    return 0
+
+
+def _task_site_and_status(Client, jedi_task_id):
+    """The task's JEDI site and status from the server's detailed task
+    info (the JEDI_Tasks row). ('', '', diagnostic) when unreadable."""
+    try:
+        status, output = Client.get_task_details_json(jedi_task_id)
+    except Exception as exc:
+        return "", "", f"task details unavailable: {exc}"
+    if status != 0 or not isinstance(output, (list, tuple)) or not output:
+        return "", "", f"task details unavailable: {output}"
+    if not output[0] or not isinstance(output[1], dict):
+        return "", "", f"task details refused: {output[1] if len(output) > 1 else ''}"
+    row = {str(k).lower(): v for k, v in output[1].items()}
+    return (str(row.get("site") or ""), str(row.get("status") or "").lower(), "")
+
+
+def _send_reassign(Client, jedi_task_id, site, mode):
+    """POST /v1/task/reassign through the client's transport (the client
+    has no call for it); returns the client's (status, output)."""
+    @Client.curl_request_decorator(endpoint="task/reassign", method="post",
+                                   json_out=True, output_mode="extended")
+    def reassign_task(task_id, site, mode, verbose=False):
+        return {"task_id": task_id, "site": site, "mode": mode}
+    return reassign_task(jedi_task_id, site, mode)
+
+
+def _reassign(Client, client, jedi_task_id, payload):
+    """Reassign the task to a site and verify it took (the module
+    docstring states the mechanics). The client has no call for the
+    endpoint, so it is made through the client's own transport.
+
+    Each job the reassign kills returns its file to ready with its
+    attemptNr bumped, so a file at its last attempt is left exhausted
+    and never regenerates at the new site (verified on trial task 40354,
+    2026-09-30, maxattempt 1). Once the reassign is verified, a
+    one-attempt increase repays that: PanDA raises maxAttempt on the
+    task's ready files, reviving the exhausted ones."""
+    site = str(payload.get("site") or "").strip()
+    mode = str(payload.get("mode") or "soft")
+    output = {"operation": "reassign", "jedi_task_id": jedi_task_id,
+              "site": site, "mode": mode, "accepted": False,
+              "verified": False, "observed_status": "", "observed_site": ""}
+    if not site or mode not in ("soft", "nokill", "kill"):
+        output.update(ok=False, diagnostic=f"bad site {site!r} or mode {mode!r}")
+        print(json.dumps(output, default=str))
+        return 2
+    before_site, before_status, _ = _task_site_and_status(Client, jedi_task_id)
+    output["previous_site"] = before_site
+    output["previous_status"] = before_status
+
+    result = _send_reassign(Client, jedi_task_id, site, mode)
+    ok, diagnostic = _panda_result_ok(result)
+    output.update(ok=ok, accepted=ok, diagnostic=diagnostic, result=result)
+    if ok:
+        deadline = time.monotonic() + float(payload.get("verify_timeout") or 90)
+        poll_interval = max(1.0, float(payload.get("poll_interval") or 5))
+        while True:
+            observed_site, observed_status, detail = _task_site_and_status(
+                Client, jedi_task_id)
+            if detail:
+                output["status_diagnostic"] = detail
+            output["observed_site"] = observed_site
+            output["observed_status"] = observed_status
+            if observed_site == site and observed_status and observed_status != "reassigning":
+                output["verified"] = True
+                break
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(poll_interval)
+    if output["verified"] and mode != "nokill":
+        repay = client.increase_attempt_nr(jedi_task_id, 1)
+        repaid, repay_diagnostic = _panda_result_ok(repay)
+        output["attempts_repaid"] = repaid
+        output["repay_diagnostic"] = repay_diagnostic
+        if not repaid:
+            _log(f"WARNING: reassign of {jedi_task_id} verified but the attempt "
+                 f"repayment failed: {repay_diagnostic}; files at their last "
+                 "attempt will not regenerate until attempts are increased")
+    print(json.dumps(output, default=str))
+    if not ok:
+        _log(f"ERROR: PanDA refused reassign of {jedi_task_id} to {site}: {diagnostic}")
         return 1
     return 0
 
@@ -374,6 +474,25 @@ def _panda_result_ok(result):
         if len(result) == 1:
             return True, "transport succeeded"
         payload = result[1]
+        if isinstance(payload, (list, tuple)) and payload and isinstance(payload[0], bool):
+            # The client's extended output mode: (success, data) on success,
+            # (False, message) on failure. For the task commands the data is
+            # the server's return code (0 registered, 1 server error, 2 not
+            # found, 3 permission, 4 irrelevant status); a bool read as a
+            # code made every accepted finish read "return code True: 0" and
+            # fail (39992, 2026-09-16).
+            success, data = payload[0], (payload[1] if len(payload) > 1 else None)
+            if not success:
+                return False, f"refused: {data}"
+            if isinstance(data, bool):
+                return data, f"accepted={data}"
+            if isinstance(data, int):
+                return data == 0, f"return code {data}"
+            if isinstance(data, (list, tuple)) and data:
+                code = data[0]
+                message = data[1] if len(data) > 1 else ""
+                return code == 0, f"return code {code}: {message}"
+            return True, f"accepted: {data}"
         if isinstance(payload, (list, tuple)) and payload:
             code = payload[0]
             message = payload[1] if len(payload) > 1 else ""
@@ -416,8 +535,15 @@ def _task_state_verified(operation, observed_status):
 
 
 def _run_batch_panda_operations(Client, operation, items, *, verify_timeout,
-                                poll_interval, send_interval):
-    """Submit scalar commands with pacing, then verify on one shared clock."""
+                                poll_interval, send_interval,
+                                new_parameters=None, site="", mode="soft",
+                                client=None):
+    """Submit scalar commands with pacing, then verify on one shared clock.
+
+    ``new_parameters`` (retry_failures only) are task parameters the retry
+    changes, e.g. ramCount and walltime: PanDA merges them into the
+    task's stored parameters and re-executes the task with them (its
+    reactivation path), for every task of the batch."""
     actions = {
         "pause": Client.pauseTask,
         "resume": Client.resumeTask,
@@ -442,16 +568,25 @@ def _run_batch_panda_operations(Client, operation, items, *, verify_timeout,
             if operation == "retry_failures":
                 # An aborted task takes the reactivation path (retry with
                 # new_parameters -> incexec); plain retry refuses aborted.
+                # Changed resource requirements take the same path on any
+                # retryable task, merged over the reactivation parameters
+                # when the task is aborted.
                 observed, _diag = _panda_task_status(
                     Client.getTaskStatus(jedi_task_id, False))
+                params = None
                 if observed == "aborted":
+                    params = dict(_reactivation_params(Client, jedi_task_id))
+                if new_parameters:
+                    params = dict(params or {}, **new_parameters)
+                if params:
                     panda_result = Client.retryTask(
-                        jedi_task_id, False,
-                        newParams=_reactivation_params(Client, jedi_task_id))
+                        jedi_task_id, False, newParams=params)
                 else:
                     panda_result = Client.retryTask(jedi_task_id, False)
             elif operation == "finish":
                 panda_result = Client.finishTask(jedi_task_id, False)
+            elif operation == "reassign":
+                panda_result = _send_reassign(Client, jedi_task_id, site, mode)
             else:
                 panda_result = actions[operation](jedi_task_id, False)
             accepted, diagnostic = _panda_result_ok(panda_result)
@@ -479,6 +614,17 @@ def _run_batch_panda_operations(Client, operation, items, *, verify_timeout,
     while pending:
         for index in list(pending):
             result = results[index]
+            if operation == "reassign":
+                observed_site, observed_status, detail = _task_site_and_status(
+                    Client, result["jedi_task_id"])
+                result["observed_site"] = observed_site
+                result["observed_status"] = observed_status
+                if detail:
+                    result["status_diagnostic"] = detail
+                if observed_site == site and observed_status and observed_status != "reassigning":
+                    result["verified"] = True
+                    pending.remove(index)
+                continue
             try:
                 status_result = Client.getTaskStatus(
                     result["jedi_task_id"], False)
@@ -497,6 +643,22 @@ def _run_batch_panda_operations(Client, operation, items, *, verify_timeout,
             break
         time.sleep(max(1.0, poll_interval))
 
+    # A verified move is followed by its attempt repayment (_reassign).
+    if operation == "reassign" and mode != "nokill" and client is not None:
+        for result in results:
+            if not result.get("verified"):
+                continue
+            try:
+                repaid, detail = _panda_result_ok(
+                    client.increase_attempt_nr(result["jedi_task_id"], 1))
+            except Exception as exc:
+                repaid, detail = False, str(exc)
+            result["attempts_repaid"] = repaid
+            result["repay_diagnostic"] = detail
+            if not repaid:
+                _log(f"WARNING: reassign of {result['jedi_task_id']} verified but "
+                     f"the attempt repayment failed: {detail}")
+
     return {
         "operation": operation,
         "batch": True,
@@ -509,8 +671,11 @@ def main():
     ap.add_argument(
         "--operation",
         choices=["increase_attempts", "retry_failures", "pause", "resume",
-                 "finish"],
+                 "finish", "reassign"],
     )
+    ap.add_argument("--site", default="", help="reassign: the target PanDA queue")
+    ap.add_argument("--mode", default="soft", choices=["soft", "nokill", "kill"],
+                    help="reassign: which jobs JEDI kills (soft: those not yet running)")
     ap.add_argument("--jedi-task-id", type=int)
     ap.add_argument("--increase", type=int, default=1)
     ap.add_argument("--new-parameters", default="", help="JSON object for retry_task new_parameters")
@@ -552,6 +717,9 @@ def main():
                  + ", ".join(BATCH_OPERATIONS))
             return 2
         args.jedi_task_id = int(args.items[0]["jedi_task_id"])
+    if args.operation == "reassign" and not args.site:
+        _log("ERROR: reassign requires --site")
+        return 2
     if args.increase < 1:
         _log("ERROR: --increase must be >= 1")
         return 2

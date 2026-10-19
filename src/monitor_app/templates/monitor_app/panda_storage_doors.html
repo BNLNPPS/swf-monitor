@@ -1,0 +1,84 @@
+{% extends 'base.html' %}
+{% load swf_fmt %}
+{% block title %}Storage doors{% endblock %}
+{% block content %}
+<style>
+  .doors-note { max-width: 74rem; font-size: 1.1rem; line-height: 1.55; }
+  .doors-said { font-family: var(--bs-font-monospace, monospace); font-size: 0.95em;
+                word-break: break-word; }
+  .doors-section { background-color: #e7f1fb; padding: 0.4rem 0.6rem;
+                   border-radius: 0.25rem; margin-top: 1.6rem; margin-bottom: 0.8rem; }
+</style>
+<div class="container-fluid">
+    <h1>Storage doors</h1>
+
+    {% if never_run %}
+    <p class="doors-note">No cycle has run yet. The storage door canary uses each
+       door on the production-operations agent and leaves its reading here;
+       it is enqueued every fifteen minutes and probes a door when its
+       interval has passed.</p>
+    {% else %}
+    <p class="doors-note">
+        The doors ePIC production writes through, used rather than inspected: a
+        small write, a stat, a delete, and the date on the certificate the door
+        serves. {{ probed|length }} of {{ doors|length }} carry a reading.
+        {% if down %}<strong class="failed_fill">Down: {{ down|join:", " }}.</strong>
+        {% else %}<strong class="finished_fill">None down.</strong>{% endif %}
+        {% if expiring %} Certificate expiring: {{ expiring|join:", " }}.{% endif %}
+        Last cycle <span data-relative-time="{{ cycle_at }}">{{ cycle_at }}</span>,
+        mode {{ mode }}{% if not enabled %}, switched off{% endif %}.
+    </p>
+
+    <p class="doors-note text-muted">
+        This says a door is alive, not that every site can reach it — site
+        reachability belongs to the canary probes that run as jobs. Nothing acts
+        on this record: production operations decide what a dead door calls for.
+        The node guard reads it only to excuse a node for a door's failures,
+        never to exclude one.
+    </p>
+
+    {% if errors %}
+    <p class="doors-note failed_fill">Last cycle reported: {{ errors|join:"; " }}</p>
+    {% endif %}
+
+    <table class="table table-striped table-bordered table-sm align-middle swf-sortable">
+        <thead><tr>
+            <th>RSE</th><th>Verdict</th><th>What it answered</th><th>Door</th>
+            <th>Certificate</th><th class="text-end">Write</th><th>Last probed</th>
+        </tr></thead>
+        <tbody>
+        {% for d in doors %}
+            <tr>
+                <td><strong>{{ d.rse }}</strong></td>
+                <td class="{{ d.verdict_class }}">{{ d.verdict }}</td>
+                <td>{{ d.reason_label }}
+                    {% if d.said %}<div class="doors-said text-muted">{{ d.said|truncatechars:160 }}</div>{% endif %}
+                </td>
+                <td class="doors-said">{{ d.door }}{% if d.path %}<div class="text-muted">{{ d.path }}</div>{% endif %}</td>
+                <td class="{% if d.expired %}failed_fill{% elif d.expiring %}holding_fill{% endif %}">
+                    {% if d.certificate %}{{ d.certificate }}
+                        {% if d.certificate_days is not None %}<span class="text-muted">({{ d.certificate_days }} d)</span>{% endif %}
+                    {% else %}<span class="text-muted">not read</span>{% endif %}
+                </td>
+                <td class="text-end">{% if d.write_seconds %}{{ d.write_seconds }} s{% else %}<span class="text-muted">-</span>{% endif %}</td>
+                <td>{% if d.probed_at %}<span data-relative-time="{{ d.probed_at }}">{{ d.probed_at }}</span>{% else %}<span class="text-muted">never</span>{% endif %}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <h2 class="doors-section">Settings</h2>
+    <p class="doors-note text-muted">Set on the System page; the cycle reads them
+       every time it runs. The record is served as JSON at
+       <a href="{{ request.META.SCRIPT_NAME }}/api/storage-doors/">/api/storage-doors/</a>.</p>
+    <table class="table table-striped table-bordered table-sm align-middle w-auto">
+        <thead><tr><th>Key</th><th>Value</th></tr></thead>
+        <tbody>
+        {% for s in settings %}
+            <tr><td>{{ s.key }}</td><td>{{ s.value }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+{% endblock %}

@@ -22,8 +22,10 @@ import ssl
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 
 # ChromaDB requires sqlite3 >= 3.35; RHEL8 ships 3.26.
 # pysqlite3-binary bundles a modern sqlite3 — swap BEFORE any chromadb import.
@@ -94,8 +96,8 @@ if _xrootd_server:
             '/data/wenauseic/github/xrootd-mcp-server/build/src/index.js',
         ],
         'env': {
-            'XROOTD_SERVER': os.environ.get('XROOTD_SERVER', 'root://dtn-eic.jlab.org'),
-            'XROOTD_BASE_DIR': os.environ.get('XROOTD_BASE_DIR', '/volatile/eic/EPIC'),
+            'XROOTD_SERVER': os.environ.get('XROOTD_SERVER', 'root://dtn2304.jlab.org:8443'),
+            'XROOTD_BASE_DIR': os.environ.get('XROOTD_BASE_DIR', '/jlab-osdf-ro/eic/EPIC/volatile'),
         },
         'repo_dir': '/data/wenauseic/github/xrootd-mcp-server',
         'update_commands': [
@@ -727,6 +729,41 @@ class ToolSelector:
         scores = scores + boosts
         top_indices = np.argsort(scores)[-top_k:][::-1]
         return [(self._tool_names[i], float(scores[i])) for i in top_indices]
+
+
+class _HtmlTextExtractor(HTMLParser):
+    """Visible text of an HTML document; script and style content dropped."""
+
+    def __init__(self):
+        super().__init__()
+        self._chunks = []
+        self._skip = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ('script', 'style'):
+            self._skip += 1
+
+    def handle_endtag(self, tag):
+        if tag in ('script', 'style') and self._skip:
+            self._skip -= 1
+
+    def handle_data(self, data):
+        if not self._skip and data.strip():
+            self._chunks.append(data.strip())
+
+    def text(self):
+        return '\n'.join(self._chunks)
+
+
+def _html_to_text(markup):
+    parser = _HtmlTextExtractor()
+    try:
+        parser.feed(markup)
+        parser.close()
+    except Exception as e:
+        logger.error(f"HTML text extraction failed: {e}")
+        return markup
+    return parser.text()
 
 
 class PandaBot:
@@ -1469,11 +1506,13 @@ class PandaBot:
                         bot._loop)
 
             def on_disconnected(self):
+                # The broker restarts in ten seconds under systemd (the
+                # OOM kill of 2026-09-21); one immediate attempt fails
+                # inside that and left the inlet dead until the unit was
+                # restarted. Retry with backoff off the listener thread.
                 logger.warning("Brains queue connection lost; reconnecting")
-                try:
-                    bot._brains_connect()
-                except Exception:
-                    logger.exception("Brains queue reconnect failed")
+                threading.Thread(target=bot._brains_reconnect,
+                                 name='brains-reconnect', daemon=True).start()
 
         self._brains_listener = _BrainsListener()
 
@@ -1500,6 +1539,25 @@ class PandaBot:
             logger.info("Brains web inlet listening on %s", self.BRAINS_QUEUE)
 
         self._brains_connect = _connect
+
+        def _reconnect():
+            # 2, 4, 8, ... 60 s between attempts, for up to an hour; the
+            # unit's restart is the recovery beyond that.
+            delay, waited = 2.0, 0.0
+            while waited < 3600.0:
+                time.sleep(delay)
+                waited += delay
+                try:
+                    _connect()
+                    logger.info("Brains queue reconnected after %.0f s", waited)
+                    return
+                except Exception as exc:
+                    logger.warning("Brains queue reconnect failed (%s); next in %.0f s",
+                                   exc, min(delay * 2, 60.0))
+                delay = min(delay * 2, 60.0)
+            logger.error("Brains queue reconnect gave up after an hour; restart the unit")
+
+        self._brains_reconnect = _reconnect
         try:
             _connect()
         except Exception:
@@ -1687,7 +1745,10 @@ class PandaBot:
             return
 
         message_text = post.get('message', '').strip()
-        if not message_text:
+        file_infos = list(((post.get('metadata') or {}).get('files')) or [])
+        if not file_infos and post.get('file_ids'):
+            file_infos = [{'id': fid} for fid in post['file_ids']]
+        if not message_text and not file_infos:
             return
 
         post_id = post.get('id')
@@ -1702,6 +1763,8 @@ class PandaBot:
             context_tag = f'#{channel_name}'
 
         tagged_message = f"[{mm_username} in {context_tag}] {message_text}"
+        if file_infos:
+            tagged_message += '\n' + await self._read_attachments(file_infos)
         source = 'DM' if is_dm else ('mention' if is_mention and not is_our_channel else 'channel')
         logger.info(f"Message from {mm_username} ({source}): {message_text[:100]}")
 
@@ -1720,6 +1783,56 @@ class PandaBot:
                 context_channel=context_channel,
             )
         )
+
+    ATTACHMENT_TEXT_EXTENSIONS = {
+        'txt', 'log', 'json', 'csv', 'tsv', 'md', 'html', 'htm', 'xml',
+        'yaml', 'yml', 'py', 'sh', 'cfg', 'ini', 'toml', 'out', 'err'}
+    ATTACHMENT_MAX_BYTES = 200_000
+    ATTACHMENT_MAX_CHARS = 12_000
+
+    async def _read_attachments(self, file_infos):
+        """Render a post's attached files for the model. Text-like files
+        within the size limit are downloaded and inlined (HTML reduced
+        to its visible text); every other attachment is described by
+        name, type, and size, so the model always knows the attachment
+        exists whether or not it can read it."""
+        blocks = []
+        for info in file_infos:
+            fid = info.get('id')
+            name = info.get('name') or fid or 'attachment'
+            size = int(info.get('size') or 0)
+            ext = (info.get('extension')
+                   or (name.rsplit('.', 1)[-1] if '.' in name else '')
+                   ).lower()
+            label = f"[Attached file: {name}, {size:,} bytes]"
+            if ext not in self.ATTACHMENT_TEXT_EXTENSIONS:
+                blocks.append(
+                    f"{label} binary or unsupported format; not readable "
+                    "inline. Readable formats: "
+                    + ', '.join(sorted(self.ATTACHMENT_TEXT_EXTENSIONS)))
+                continue
+            if size > self.ATTACHMENT_MAX_BYTES:
+                blocks.append(
+                    f"{label} too large to read inline; the limit is "
+                    f"{self.ATTACHMENT_MAX_BYTES:,} bytes.")
+                continue
+            try:
+                response = await asyncio.to_thread(
+                    self.driver.files.get_file, fid)
+                content = response.content.decode('utf-8', errors='replace')
+            except Exception as e:
+                logger.error(f"Attachment fetch failed for {name}: {e}")
+                blocks.append(f"{label} could not be fetched: {e}")
+                continue
+            if ext in ('html', 'htm'):
+                content = _html_to_text(content)
+            if len(content) > self.ATTACHMENT_MAX_CHARS:
+                content = (
+                    content[:self.ATTACHMENT_MAX_CHARS]
+                    + f"\n[attachment truncated at "
+                      f"{self.ATTACHMENT_MAX_CHARS:,} characters]")
+            blocks.append(f"{label}\n{content}")
+        return '\n\n'.join(blocks)
 
     async def _respond(
         self, tagged_message, reply_channel, post_id, root_id,

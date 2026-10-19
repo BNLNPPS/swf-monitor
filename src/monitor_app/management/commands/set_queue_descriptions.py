@@ -100,6 +100,15 @@ DESCRIPTIONS = {
         'Test twin of the Google Cloud queue, for validating cloud '
         'configuration without spending on production volume.'
     ),
+    'BNL_ePIC_GOOGLE_es': (
+        'Event Service queue on Google Cloud spot nodes: one pilot takes a '
+        'whole node and the core count comes from the pod, so a preempted '
+        'node keeps the work it shipped.'
+    ),
+    'NERSC_Perlmutter_epic_es': (
+        'Event Service production queue on Perlmutter: one job per whole '
+        'node, event ranges streamed to the node harness to the wall.'
+    ),
 
     # Echelon-1 and partner sites
     'E1_BNL': (
@@ -136,7 +145,9 @@ TIERS = {
     'UM_GREX_PanDA_1': 'T2',
     'BNL_ePIC_GOOGLE': 'Opp',
     'BNL_ePIC_GOOGLE_test': 'Opp',
+    'BNL_ePIC_GOOGLE_es': 'Opp',
     'NERSC_Perlmutter_epic': 'Opp',
+    'NERSC_Perlmutter_epic_es': 'Opp',
     'NERSC_Perlmutter_epic_dev': 'Opp',
     'NERSC_Perlmutter_epic_gpu_mps': 'Opp',
     'NERSC_Perlmutter_epic_gpu_test': 'Opp',

@@ -157,4 +157,13 @@ The error-state component and the dedicated errors view are designed in
 [SNAPPER_ERRORS.md](SNAPPER_ERRORS.md); the platform-health component,
 the Platform view, and the server-host reporter in
 [SNAPPER_PLATFORM.md](SNAPPER_PLATFORM.md) and
-[PANDA_SERVER_REPORTER.md](PANDA_SERVER_REPORTER.md).
+[PANDA_SERVER_REPORTER.md](PANDA_SERVER_REPORTER.md). The storage
+component in epicprod (internal name: storage) is published by the
+storage pass, the prod-ops agent's `storage_sweep` doer, after each
+run (swf-epicprod
+[STORAGE.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/STORAGE.md));
+its Storage view is designed in [SNAPPER_STORAGE.md](SNAPPER_STORAGE.md).
+The JLab Rucio catalog component in epicprod (internal name: catalog)
+is published by its maintainer on the same five-minute refresh as the
+platform component; its Catalog view is designed in
+[SNAPPER_CATALOG.md](SNAPPER_CATALOG.md).

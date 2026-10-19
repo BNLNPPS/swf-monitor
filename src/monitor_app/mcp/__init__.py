@@ -40,13 +40,37 @@ mcp = FastMCP(
 )
 
 
+EXTERNAL_INSTRUCTIONS = """swf-monitor MCP, external face (epic-devcloud.org).
+
+You are connected through swf-remote as a named collaborator; the tools
+run as that person. This face serves the read-only tools of the ePIC
+production monitor: PanDA tasks, jobs, queues, errors, and resource usage
+(panda_*), the production catalog and physics configurations (pcs_*
+reads), the production action stream (epicprod_*), Snapper state history
+(snapper_*), both Rucio catalogs (bnl_rucio_*, jlab_rucio_*), AI
+assessments and proposals (epic_get_ai_content, ai_list_proposals), and
+one write: ai_propose_ping, which proposes a dated obligation in natural
+language; it takes effect only when a person accepts it on the alarm
+dashboard.
+
+The tool catalog is tools/list; call it rather than looking for a listing
+tool. Decisions on proposals, task operations, and every other mutation
+happen on the web pages by signed-in people, not through this face.
+The human-facing outline is
+https://epic-wfms-docs.readthedocs.io/en/latest/apis/#mcp
+"""
+
+
 @mcp.tool()
 async def get_server_instructions() -> str:
-    """Get the swf-monitor MCP server instructions.
-
-    Compatibility tool for clients and permissions lists that previously
-    used django-mcp-server's server-instruction helper.
+    """Get the swf-monitor MCP server instructions: what this toolset
+    is and how to use it. Through the external face (epic-devcloud.org)
+    the instructions describe the tools served there and name tools/list
+    as the catalog.
     """
+    from .common import CALLER
+    if CALLER.get():
+        return EXTERNAL_INSTRUCTIONS
     return settings.MCP_SERVER_INSTRUCTIONS
 
 

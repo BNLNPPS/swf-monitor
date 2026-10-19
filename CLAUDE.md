@@ -63,17 +63,30 @@ the old paths here. This repo's docs cover the platform services:
 - `SSE_PUSH.md` — browser push of agent action completion (design).
 - `SSE_RELAY.md` — the ActiveMQ → remote SSE relay this builds on.
 - `EXTERNAL_ACCESS.md` — the swf-remote proxy contract, including write-action trigger rules.
+- `TEAMCOMMS.md` — embedded TeamComms, devcloud authentication, request binding, identity and stream revalidation.
+- `USER_VIEW.md` — the user view: the reduced epicprod face behind the universal `user_view` parameter, its nav and conventions, and how a page tailors itself.
 - `SYSTEM_STATUS.md` — cached system status record and page.
-- `SNAPPER.md`, `SNAPPER_ERRORS.md`, `SNAPPER_PLATFORM.md`, `PANDA_SERVER_REPORTER.md` — Snapper operations in SWF; the error-state component and errors view; the platform-health component, Platform view, and the pandaserver01 reporter.
+- `SNAPPER.md`, `SNAPPER_ERRORS.md`, `SNAPPER_PLATFORM.md`, `SNAPPER_STORAGE.md`, `SNAPPER_CATALOG.md`, `PANDA_SERVER_REPORTER.md` — Snapper operations in SWF; the error-state component and errors view; the platform-health component, Platform view, and the pandaserver01 reporter; the Storage view over the storage record; the JLab Rucio catalog component and Catalog view. All four are in production.
 - `ERROR_ATTRIBUTION.md` — correcting unreliable PanDA error labels at a single service root: rule lifetimes, evidence grades, representative-job digs, payload/pilot channels.
 - `CACHED_PRODUCTS.md` — uniform long-build caching: serve stored, rebuild behind, Update button; use this, never a new hand-rolled cache.
+- `INCLUSIVE_FILTER.md` — the two house facet filters: the inclusive filter (every value stays listed, selections widen, one URL key `f`) for views that assemble a set, and the narrowing filter (one parameter per facet, the intersection, every bar counted within the selection) for the operations views; pages switch to them one at a time.
 - `PRODUCTION_DEPLOYMENT.md` — deploying swf-monitor.
 - `API_REFERENCE.md` — REST API surface.
 - `MCP.md`, `MCP_TOOL_REFERENCE.md`, `MCP_CLIENTS.md`, `PANDA_BOT.md` — MCP server overview, tool catalog, client setup, and the DISpatcher Mattermost bot (MCP client).
-- `alarms.md`, `SETUP_GUIDE.md`, `TEST_SYSTEM.md`, `POSTGRES_MCP.md` — alarms, setup, tests, Postgres MCP.
+- `alarms.md`, `ALARM_QUEUE.md` — the alarm engine; the alarm queue design: lifecycle transitions, per-subscriber feeds with read state, automated response (design).
+- `PINGS.md` — pings: dated obligations at severity ping in the alarm system, entered by hand or by AI proposal, overdue becomes alarm, cleared on fulfilment (design).
+- `NOTICE_ROUTING.md` — notice routing: named incidents matched to self-registered subscribers and delivered per subscriber, so emitting code declares the incident and never names a recipient.
+- `WRANGLER_AGENT.md` — the wrangler agent: BaseAgent identity with a wrangle-ai work loop (durable bullpen, Postgres bell), the LLM-doer executor beside the production ops agent; first handler is the alarm responder (design).
+- `SETUP_GUIDE.md`, `TEST_SYSTEM.md`, `POSTGRES_MCP.md` — setup, tests, Postgres MCP.
 - `FASTMON_FILES.md`, `TFSLICE.md` — testbed fast-monitoring docs.
 
 ## Editing discipline (AI sessions)
+
+Material production findings and resolutions must be reported in
+`epicprod-live`, with affected scope, current status and supporting evidence.
+Private dialog, TJAI coordination and commits are not substitutes. Follow
+`docs/NOTICE_ROUTING.md` (Findings and resolutions); this is forward-only,
+not a requirement to backfill historical investigations.
 
 - The app is served under the `/swf-monitor/` script prefix, which exists
   only in request context. Never bake `reverse()` output into values built
@@ -119,7 +132,9 @@ page template:
 - **Relative time**: give any element
   `data-relative-time="<ISO timestamp>"` and its text renders and ticks
   every second as `just now` / `Ns ago` / `Nm ago` / `Nh ago` / `Nd ago`
-  (`window.swfFormatElapsed` is the formatter).
+  (`window.swfFormatElapsed` is the formatter). Optional
+  `data-relative-time-interval="<seconds>"` slows that element's redraw
+  to every N seconds.
 - **Poll gate**: `window.swfPollGate.attended()` reports whether the page
   is attended — visible, and either its window holds focus or it was
   interacted with within five minutes — and
@@ -136,6 +151,9 @@ page template:
   underlined tab row. Every tab is an ordinary server-routed link whose URL
   contains the selected view state; do not use hidden Bootstrap panels,
   client-only state, or a remembered preference for these tabs.
+- **Update-button feedback**: class `swf-update-btn` on a cached-product
+  Update link shows `Updating...` while its navigation is in flight,
+  restoring on pageshow and by a 20 s timeout so the label never sticks.
 - **Sortable tables**: DataTables is loaded globally in `base.html`
   and is the house table widget. Big list pages use the
   `_datatable_base` / `_datatable_dynamic_base` templates (ajax);

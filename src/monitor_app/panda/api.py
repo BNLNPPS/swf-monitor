@@ -247,11 +247,15 @@ def task_operations_request(request):
         return Response({'error': 'Every JEDI task ID must be an integer.'},
                         status=http_status.HTTP_400_BAD_REQUEST)
     try:
+        new_parameters = operations.retry_parameters(
+            request.data.get('new_parameters'))
         tasks = queries.get_task_operation_targets(task_ids)
         result = operations.queue_task_operations(
             tasks=tasks,
             operation=str(request.data.get('operation') or ''),
             requested_by=getattr(request.user, 'username', '') or 'operator',
+            new_parameters=new_parameters,
+            site=str(request.data.get('site') or ''),
         )
     except operations.PandaTaskOperationError as exc:
         return Response({'error': exc.detail}, status=exc.status)
@@ -304,6 +308,44 @@ def task_operation_update(request, operation_id):
     except operations.PandaTaskOperationError as exc:
         return Response({'error': exc.detail}, status=exc.status)
     return Response(operations.serialize_operation(record))
+
+
+@api_view(['GET'])
+@authentication_classes(_AUTH)
+@permission_classes([AllowAny])
+def seconds_per_event(request):
+    """GET /api/panda/seconds-per-event/ — the measured seconds per event
+    of a production configuration on a queue, from its finished jobs
+    (queries.seconds_per_event); what sizes the node harness's unit.
+
+    Query params:
+        task (str, required): the task name, matched as a prefix
+        queue (str, required)
+        days (int, default 14)
+    """
+    task = (request.query_params.get('task') or '').strip()
+    queue = (request.query_params.get('queue') or '').strip()
+    if not task or not queue:
+        return Response({'error': 'task and queue are required'}, status=http_status.HTTP_400_BAD_REQUEST)
+    days, err = _int_param(request, 'days', default=14, min_value=1)
+    if err:
+        return err
+    result = queries.seconds_per_event(task, queue, days)
+    if 'error' in result:
+        return Response(result, status=http_status.HTTP_500_INTERNAL_SERVER_ERROR)
+    return Response(result)
+
+
+@api_view(['GET'])
+@authentication_classes(_AUTH)
+@permission_classes([AllowAny])
+def harvester_instances(request):
+    """GET /api/panda/harvester-instances/ — each harvester instance and how
+    long ago it last reached the PanDA server."""
+    result = queries.harvester_instances()
+    if 'error' in result:
+        return Response(result, status=http_status.HTTP_500_INTERNAL_SERVER_ERROR)
+    return Response(result)
 
 
 @api_view(['GET'])

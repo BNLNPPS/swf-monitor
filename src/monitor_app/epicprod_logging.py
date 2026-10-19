@@ -71,6 +71,113 @@ SUBLEVEL_ORDER = {'high': 2, 'normal': 1, 'low': 0}
 # log entry page and the live-policy page, so a stream reader is never left
 # guessing what an event was.
 ACTION_DEFAULTS = {
+    # the pressure front (swf-epicprod docs/CONTINUOUS_PRODUCTION.md,
+    # The dispatcher)
+    'front_decision': {
+        'sublevel': 'low', 'live': False,
+        'description': "One queue's decision of the pressure front's cycle: "
+                       "feed or hold, with the reason, the depth in hours, "
+                       "the set points and the gates; recorded on every "
+                       "feed, on a change of state or reason, and hourly.",
+    },
+    'front_cycle': {
+        'sublevel': 'low', 'live': False,
+        'description': "One cycle of the pressure front over the regulated "
+                       "queues, with each queue's state.",
+    },
+    # the node guard (site-canary docs/NODE_GUARD.md)
+    'node_guard_decision': {
+        'sublevel': 'normal', 'live': True,
+        'description': "One node's verdict from the node guard's cycle: a "
+                       "black hole tripped (would_exclude in shadow mode, "
+                       "excluded live) or cleared after a trip, with the "
+                       "evidence; recorded on a trip, on the clear after "
+                       "one, and hourly while tripped.",
+    },
+    'node_guard_cycle': {
+        'sublevel': 'low', 'live': False,
+        'description': "One cycle of the node guard over the window's "
+                       "terminal production jobs: jobs, hosts, judged and "
+                       "tripped, and any queue read as a storm.",
+    },
+    # the preemption close-out (swf-epicprod swf_epicprod/es_closeout.py)
+    'es_closeout': {
+        'sublevel': 'normal', 'live': True,
+        'description': "One Event Service job at a preemptible queue closed "
+                       "after its node was lost: the ranges of every close "
+                       "that stood credited and the job finished, or why "
+                       "the server refused.",
+    },
+    'es_closeout_cycle': {
+        'sublevel': 'low', 'live': False,
+        'description': "One cycle of the preemption close-out over the "
+                       "running Event Service jobs of the listed queues: "
+                       "jobs, quiet, closed, failed.",
+    },
+    'worker_record_capture': {
+        'sublevel': 'low', 'live': False,
+        'description': "One pass copying the NERSC queues' harvester worker "
+                       "records into our store before PanDA's three-month "
+                       "window drops them: read, created, updated, unchanged.",
+    },
+    'harvester_stdout_capture': {
+        'sublevel': 'low', 'live': False,
+        'description': "One pass copying the harvester's stdout of the jobs "
+                       "worth keeping at the cache-stdout queues into our "
+                       "store before the PanDA cache purges it: candidates, "
+                       "captured, gone, failed, skipped.",
+    },
+    'node_guard_set': {
+        'sublevel': 'normal', 'live': True,
+        'description': "A person's decision on one node of the guard's "
+                       "record: clear, pin, unpin, or a black hole opened "
+                       "by hand.",
+    },
+    # alarm dashboard: pings (docs/PINGS.md)
+    'ping_create': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Enter a ping, a dated obligation the alarm system "
+                       "raises ahead of its due date, on the alarm "
+                       "dashboard.",
+    },
+    'ping_fulfil': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Record a ping's obligation as fulfilled; its alarm "
+                       "event clears on the engine's next tick.",
+    },
+    'standard_prodconfig_create': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Create a campaign edition's Standard Production "
+                       "configuration from the template, by the script or "
+                       "an approved standard_config proposal, the remedy of "
+                       "a campaign configuration ping.",
+    },
+    'registered_sample_intake': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Take a registered EVGEN sample nobody requested into "
+                       "the record: its EVGEN-stage record, the production "
+                       "edition on the campaign's release pair, the request "
+                       "with requestor, target and priority, and the draft "
+                       "task, by hand or by an approved registered_sample "
+                       "proposal.",
+    },
+    'prodtask_adopt': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Move a name-matched legacy task into PCS: its latest "
+                       "PanDA try recorded as the submission and the edition's "
+                       "Standard Production configuration bound, so the retry "
+                       "family applies. Nothing is submitted.",
+    },
+    'walltime_queue_cap': {
+        'sublevel': 'normal', 'live': True,
+        'description': "A residual rerun's declared walltime held under its "
+                       "queue's maxtime at submission (JEDI_INTEGRATION.md "
+                       "§ Residual rerun), carrying severity for notice "
+                       "routing: warning when the attempt's own jobs ran "
+                       "longer than the queue declares (the queue "
+                       "declaration is wrong), info when the estimate alone "
+                       "was capped.",
+    },
     # ops agent
     'task_submit': {
         'sublevel': 'high', 'live': True,
@@ -135,8 +242,11 @@ ACTION_DEFAULTS = {
         'description': "New files landed in JLab Rucio since the last "
                        "arrivals sweep, counted by campaign and location "
                        "across all versions — the signal behind the "
-                       "derived 'producing' campaign status. Emitted only "
-                       "when something arrived.",
+                       "derived 'producing' campaign status. Emitted on "
+                       "every sweep, so the assessment's arrival coverage "
+                       "reads a quiet interval as a measured zero; a sweep "
+                       "that found nothing is logged low and off the live "
+                       "view.",
     },
     'rucio_arrivals_sweep': {
         'sublevel': 'low', 'live': False,
@@ -187,11 +297,129 @@ ACTION_DEFAULTS = {
                        "inventory and parsed failure diagnosis for a PanDA "
                        "job.",
     },
+    'segfault_inventory': {
+        'sublevel': 'normal', 'live': True,
+        'description': "The crash-class inventory pass "
+                       "(scripts/segfault-inventory.py): payload crashes "
+                       "(exit 134/135/136/139) read from the PanDA record "
+                       "for a window and written as EpicProdJob rows with "
+                       "their manifest row, then the crash signatures of "
+                       "the tasks touched; one event per run carrying the "
+                       "window, jobs seen, rows added and updated, rows "
+                       "unresolved, tasks and signatures (swf-epicprod "
+                       "SEGFAULT_DIAGNOSIS.md).",
+    },
+    'segfault_dig': {
+        'sublevel': 'normal', 'live': True,
+        'description': "A crash signature's dig (scripts/segfault-dig.py): "
+                       "one representative crashed job's payload log "
+                       "fetched through the doer and its backtrace read "
+                       "onto the signature; on operator request from the "
+                       "signature page, or the nightly automatic dig of "
+                       "the largest signatures never dug (ten a night). "
+                       "Carries the trace status and crashing frame, or "
+                       "the reason the log was unavailable.",
+    },
+    'segfault_dig_request': {
+        'sublevel': 'low', 'live': False,
+        'description': "Operator request of a signature's dig from its "
+                       "page, queued to the production operations agent; "
+                       "the dig itself is the segfault_dig event.",
+    },
+    'segfault_reproduce': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Operator request to reproduce a crash signature: "
+                       "the crashed job's own manifest row run again as "
+                       "payload canaries on the production queue and the "
+                       "reference queue BNL_NPPS_GPU, queued to the canary "
+                       "agent; the outcome (reproduced, site_dependent, "
+                       "not_reproduced, inconclusive) settles on the "
+                       "signature from the runs' payload reports.",
+    },
+    'segfault_reproduction_reconcile': {
+        'sublevel': 'low', 'live': False,
+        'description': "Reproduction requests reconciled with their canary "
+                       "runs after a probe collection (the canary agent, "
+                       "scripts/segfault-reproductions-reconcile.py): each "
+                       "open request takes its run's identity and outcome, "
+                       "a reported production and reference pair settles the "
+                       "signature's reproduction outcome, and a settled "
+                       "reproduction with a trace queues its diagnosis once. "
+                       "Recorded when something changed.",
+    },
+    'segfault_diagnose_request': {
+        'sublevel': 'low', 'live': False,
+        'description': "Operator request of a crash signature's LLM study "
+                       "from its page, queued to the production operations "
+                       "agent; the submission is segfault_diagnosis_triggered "
+                       "and the result segfault_diagnosis.",
+    },
+    'live_watch_triggered': {
+        'sublevel': 'low', 'live': False,
+        'description': "A live watch run submitted to corun-ai "
+                       "(scripts/live-watch-trigger.py; swf-epicprod "
+                       "EPICPROD_ASSESSMENTS.md, The live watch): the channel's "
+                       "posts and the action record's failure groups as a hidden "
+                       "bundle page, the run created with the live_watch "
+                       "definition; outcome error when the submission failed.",
+    },
+    'live_watch': {
+        'sublevel': 'low', 'live': False,
+        'description': "A live watch run's result enforced "
+                       "(scripts/live-watch-enforce.py): the verdict, the noise "
+                       "in the channel and the recurring real problems; notify "
+                       "set when what it found changed from the last registered "
+                       "run, which is then registered as an assessment; live "
+                       "only for a changed alarm.",
+    },
+    'segfault_diagnosis_triggered': {
+        'sublevel': 'normal', 'live': True,
+        'description': "A crash signature's LLM study submitted to corun-ai "
+                       "(scripts/segfault-diagnosis-trigger.py): the evidence "
+                       "bundle stored as a hidden page and the run created "
+                       "with the segfault_diagnosis definition; outcome error "
+                       "when the submission failed.",
+    },
+    'segfault_diagnosis': {
+        'sublevel': 'normal', 'live': True,
+        'description': "A crash signature's diagnosis enforced and registered "
+                       "(scripts/segfault-diagnosis-enforce.py): the "
+                       "classification (software_defect, configuration, "
+                       "event_shaped, platform, unresolved), the operator "
+                       "action and the narration, carrying severity for notice "
+                       "routing (warning for a software defect or a "
+                       "configuration finding, info otherwise); outcome repair "
+                       "for the one bounded repair run, error for a "
+                       "quarantined or failed run.",
+    },
+    'segfault_finding_set': {
+        'sublevel': 'normal', 'live': True,
+        'description': "A segfault finding created or updated: the curated "
+                       "reading of one crashing frame in the entry store "
+                       "(kind finding, context segfault), versioned and "
+                       "stamped; through the MCP tool or REST.",
+    },
+    'segfault_package': {
+        'sublevel': 'normal', 'live': True,
+        'description': "A crashed job's reproduction package built for a "
+                       "software expert (scripts/segfault-repro-package.py): "
+                       "the run script, the payload, the row, the "
+                       "environment, the trace and the job records, as a "
+                       "tarball the signature page serves.",
+    },
     'system_status_refresh': {
         'sublevel': 'low', 'live': False,
         'description': "Periodic refresh of the cached System page status "
                        "rows for services, agents, and external monitor "
                        "endpoints.",
+    },
+    'snapper_publication_too_large': {
+        'sublevel': 'normal', 'live': False,
+        'description': "A Snapper component publication rejected at "
+                       "snapper-ai's 1 MiB data limit, the one size limit "
+                       "on component data; the component's record stops "
+                       "advancing until its projection fits. Capcom "
+                       "receives it as an alarm.",
     },
     'questionnaire_import': {
         'sublevel': 'normal', 'live': True,
@@ -238,6 +466,14 @@ ACTION_DEFAULTS = {
         'description': "Operator change to an action's live-stream override "
                        "on the live-policy page.",
     },
+    'host_reporter_install': {
+        'sublevel': 'high', 'live': True,
+        'description': "A host reporter installed on a service host it "
+                       "observes (docs/PANDA_SERVER_REPORTER.md, "
+                       "docs/OSG_SUBMIT_REPORTER.md): token, environment "
+                       "file, and schedule, recorded before the install "
+                       "is taken.",
+    },
     'workflow_execution_completed': {
         'sublevel': 'low', 'live': False,
         'description': "A testbed workflow execution reached a terminal "
@@ -248,6 +484,12 @@ ACTION_DEFAULTS = {
         'sublevel': 'normal', 'live': False,
         'description': "A notice-routing subscription was created, changed, "
                        "or removed through the subscriptions API.",
+    },
+    'campaign_plan_set': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Set or remove campaign-plan entries — the "
+                       "plan-membership records of a campaign's assembly "
+                       "(CONTINUOUS_PRODUCTION.md).",
     },
     'assessment_register': {
         'sublevel': 'normal', 'live': True,
@@ -289,9 +531,12 @@ ACTION_DEFAULTS = {
     },
     'proposal_created': {
         'sublevel': 'normal', 'live': True,
-        'description': "AI proposal of a dataset propagation change, pending "
-                       "human review; one event per propose call with the "
-                       "proposed count and batch.",
+        'description': "AI proposal pending human review; one event per "
+                       "propose call with the proposed count and batch. A "
+                       "session's proposal is normal and live; a rule "
+                       "proposer's (credential-expiry, certificate-expiry, "
+                       "campaign-config, campaign-assembly) records low and "
+                       "not live, the decision being the live event.",
     },
     'proposal_denied': {
         'sublevel': 'normal', 'live': True,
@@ -406,6 +651,54 @@ ACTION_DEFAULTS = {
         'sublevel': 'normal', 'live': True,
         'description': "Update Rucio storage endpoint records from the "
                        "GitHub source.",
+    },
+    # editions: the software tags and their repair (swf-epicprod PCS.md)
+    'edition_bind': {
+        'sublevel': 'normal', 'live': False,
+        'description': "Bind the release's simulation and reconstruction "
+                       "tags to an edition at submission; rides with the "
+                       "submission's own record.",
+    },
+    'physics_tag_rederive': {
+        'sublevel': 'low', 'live': False,
+        'description': "Physics tags brought up to the path parser's reading "
+                       "of their datasets' task names "
+                       "(swf-epicprod tools/pcs/rederive-physics-tags.py): "
+                       "the tags corrected, with the axes added, and the "
+                       "tags left because their corrected parameters equal "
+                       "another tag's; one record per applying run.",
+    },
+    'edition_fold': {
+        'sublevel': 'low', 'live': False,
+        'description': "One edition per identity restored where a physics "
+                       "tag was made twice (swf-epicprod "
+                       "scripts/fold_duplicate_tag_editions.py): placeholder "
+                       "editions folded into the editions of the same "
+                       "identity, the editions moved to the earlier tag, "
+                       "evgen tags corrected from the path; the record of a "
+                       "repair pass, one per run.",
+    },
+    'edition_rebind': {
+        'sublevel': 'low', 'live': False,
+        'description': "Rebind a campaign family's editions from the import "
+                       "and intake anchors to the tags the binding rule "
+                       "gives; the record of a repair pass, one per run.",
+    },
+    'edition_merge': {
+        'sublevel': 'low', 'live': False,
+        'description': "Fold a duplicate edition into the record that holds "
+                       "its identity; the record of a repair.",
+    },
+    'dataset_edit': {
+        'sublevel': 'normal', 'live': False,
+        'description': "Edit an edition's tags on the datasets compose page; "
+                       "the name recomposes and the former name still "
+                       "resolves.",
+    },
+    'trial_cost': {
+        'sublevel': 'low', 'live': False,
+        'description': "Record a trial's measured cost on the edition it "
+                       "proves; bookkeeping, read from the edition.",
     },
 }
 

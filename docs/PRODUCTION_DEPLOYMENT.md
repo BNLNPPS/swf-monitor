@@ -224,6 +224,17 @@ development checkout. Before deploying, inspect every local package checkout
 that the script freezes into the release virtual environment, including
 swf-epicprod, snapper-ai, site-canary, and swf-common-lib.
 
+### swf-epicprod deploys itself
+
+A merge or push to swf-epicprod `main` runs a deploy on this host
+through a self-hosted GitHub Actions runner: no deploy, the lightweight
+deploy, or the full deploy, chosen from the changed paths, and a stop on
+a PCS migration. A session does not deploy its own swf-epicprod push by
+hand; it follows the run in that repository's Actions tab. That
+lightweight deploy also syncs this repository's dev tree, so pushed
+swf-monitor work not yet deployed goes live with it. See
+swf-epicprod `docs/AUTODEPLOY.md`.
+
 ### Lightweight UI/MCP Deploy
 
 For rapid development on UI and MCP changes, use `deploy-lightweight-ui-mcp.sh`
@@ -238,7 +249,7 @@ or move the `current` symlink.
 Use it for:
 
 - Django UI/view/template/form/helper changes under `src/monitor_app/`,
-  `src/pcs/`, `src/templates/`, or URL routing
+  `src/templates/`, swf-epicprod's `pcs/`, or URL routing
 - MCP tool changes under `src/monitor_app/mcp/` and helper modules used by MCP
 - swf-epicprod's `swf_epicprod/` package: `mcp_tools/` with `--mcp`;
   `analytics/` and `assessment/` under either flag (they serve the web views
@@ -305,7 +316,7 @@ The deployment script automatically:
 12. **Syncs Apache vhost conf** — compares release's `apache-swf-monitor.conf` with live `/etc/httpd/conf.d/swf-monitor.conf`; if different, timestamped backup + install + `httpd -t` validates, rollback on failure
 13. **Reloads** Apache (`systemctl reload httpd`) so mod_wsgi processes pick up the new code and any validated configuration change
 14. **Restarts** the ASGI worker (`systemctl restart swf-monitor-mcp-asgi.service`) so uvicorn picks up new code
-15. **Restarts** the epicprod operations agent so its doers use the new release and environment
+15. **Restarts** the epicprod operations agent when it is idle; a working agent (or one whose state cannot be read) is signalled alone to step down, finishes its work in flight, and is restarted by systemd on the new release, the previous release staying on disk meanwhile
 16. **Health-checks** the deployment by hitting `/swf-monitor/api/`
 17. **Conditionally restarts** bots and the live publisher when their code changed relative to the previous release
 18. **Cleans up** old releases (keeps the last 5)
@@ -564,7 +575,48 @@ sudo systemctl status httpd swf-monitor-mcp-asgi swf-panda-bot swf-testbed-bot p
 
 ### SSL/TLS Configuration
 
-The SWF Monitor works with the existing Apache SSL setup. SSL configuration is handled by the system's ssl.conf file, not the swf-monitor specific configuration.
+TLS for the host is set in `/etc/httpd/conf.d/10-pandaserver02.conf`, which
+the swf-monitor repository does not manage. The host certificate is an
+InCommon ACME certificate issued by certbot
+(`/etc/letsencrypt/live/pandaserver02.sdcc.bnl.gov/`, server
+`acme-us.certinext.io`); `/etc/grid-security/hostcert.pem` and `hostkey.pem`
+link to it, and `SSLCertificateChainFile` names certbot's `chain.pem` in the
+same directory, so a renewed certificate and its intermediate change
+together. The chain was once pinned to a fixed InCommon CA 3 file: when the
+certificate was replaced by one issued from CA 4 (2026-10-01) and Apache
+next reloaded, every client that verifies the chain, the MCP endpoint's
+among them, failed with "unable to verify the first certificate" until the
+chain was repointed (2026-10-02, backup beside the file).
+
+certbot here has no renewal schedule. Its deploy hook,
+`/etc/letsencrypt/renewal-hooks/deploy/reload-apache.sh`, runs
+`apachectl configtest && apachectl graceful`, so a certificate renewed
+through certbot reaches Apache at once; one installed by hand still needs a
+reload. The `tls_served_chain` alarm verifies the chain served at this host
+and the other endpoints the agents use every five minutes, as the agents
+verify it, and fires when it does not verify. By hand:
+`openssl s_client -connect pandaserver02.sdcc.bnl.gov:443` (verify return
+code 0).
+
+The PanDA server on pandaserver01 (port 25443) carries the same kind of
+certificate and failed the same way. Its httpd runs as `atlpan`, which cannot
+read `/etc/letsencrypt/live`, so it reads copies in `/opt/panda/etc/certs`
+(`hostcert.pem`, `hostkey.pem`, `chain.pem`, owned by `atlpan`) through
+`/opt/panda/etc/panda/panda_server-httpd.conf`. On 2026-10-02 the server was
+restarted at 14:22 ET on the CA 4 certificate while that file still named the
+CA 3 intermediate, and pandaharvester01, whose own trust bundle
+(`/etc/pki/tls/certs/CA-bundles.pem`, its `ca_cert`) held only the CA 3 path,
+fetched no jobs and sent no updates for any queue it serves until 18:43. The
+server now serves certbot's chain from that copy, and the harvester's bundle
+also trusts the emSign root that the chain ends in (backups beside both files,
+dated 2026-10-02). The certbot deploy hook
+`/etc/letsencrypt/renewal-hooks/deploy/panda-httpd.sh` copies a renewed
+certificate, key and chain there (keeping the old ones in a dated backup
+directory), tests the configuration as `atlpan`, and reloads gracefully; a
+failed test restores the old files and does not reload. Never point that
+configuration at `/etc/letsencrypt/live`: `httpd -t` passes as root, and the
+graceful reload, which runs as `atlpan`, then cannot read the file and the
+server exits.
 
 ### File Permissions
 

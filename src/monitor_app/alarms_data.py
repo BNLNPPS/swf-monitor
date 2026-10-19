@@ -532,3 +532,220 @@ def _event_to_dict(e: Entry) -> dict:
         'timestamp_created': e.timestamp_created,
         'timestamp_modified': e.timestamp_modified,
     }
+
+
+# ── pings (docs/PINGS.md) ──────────────────────────────────────────────────
+
+PING_DEFAULT_LEAD_DAYS = 7
+
+
+def _today_eastern():
+    from zoneinfo import ZoneInfo
+    from datetime import datetime
+    return datetime.now(ZoneInfo('America/New_York')).date()
+
+
+def _ping_link(raw: str) -> str:
+    """A ping's link as the dashboard should render it: empty unless it
+    leads somewhere other than this page, so a ping with nothing to point
+    at is plain text. A site-root path is resolved against the mount
+    prefix, which differs between the internal and external faces; it is
+    read at render time, never stored."""
+    from django.urls import get_script_prefix, reverse
+    url = (raw or '').strip()
+    if not url:
+        return ''
+    if url.startswith('/') and not url.startswith('//'):
+        prefix = get_script_prefix()
+        if prefix != '/' and not url.startswith(prefix):
+            url = prefix.rstrip('/') + url
+    here = reverse('monitor_app:alarms_dashboard').rstrip('/')
+    if url.split('#', 1)[0].rstrip('/') == here:
+        return ''
+    return url
+
+
+def _ping_to_dict(e: Entry) -> dict:
+    """One ping for the dashboard: its fields, days left, and the state
+    word its cell takes — scheduled (not yet within lead), ping, alarm
+    (overdue), or fulfilled."""
+    from datetime import date
+    data = e.data or {}
+    status = data.get('status') or 'open'
+    due = None
+    try:
+        due = date.fromisoformat(str(data.get('due') or '')[:10])
+    except ValueError:
+        pass
+    lead = int(data.get('lead_days') or PING_DEFAULT_LEAD_DAYS)
+    days_left = (due - _today_eastern()).days if due else None
+    if status == 'fulfilled':
+        state = 'fulfilled'
+    elif due is None:
+        state = 'alarm'
+    elif days_left < 0:
+        state = 'alarm'
+    elif days_left <= lead:
+        state = 'ping'
+    else:
+        state = 'scheduled'
+    return {
+        'id': e.id,
+        'title': e.title,
+        'note': e.content,
+        'due': due.isoformat() if due else str(data.get('due') or ''),
+        'due_date': due,
+        'days_left': days_left,
+        'lead_days': lead,
+        'owner': data.get('owner') or '',
+        'url': _ping_link(data.get('url') or ''),
+        'status': status,
+        'state': state,
+        'origin': data.get('origin') or 'manual',
+        'created_by': data.get('created_by') or '',
+        'created': e.timestamp_created,
+        'fulfilled_by': data.get('fulfilled_by') or '',
+        'fulfilled_at': _ts_to_dt(data.get('fulfilled_at')),
+    }
+
+
+def list_pings() -> tuple[list[dict], list[dict]]:
+    """(open pings by due date, fulfilled pings newest first)."""
+    rows = [_ping_to_dict(e) for e in
+            Entry.objects.filter(context_id=CONTEXT_NAME, kind='ping',
+                                 archived=False, deleted_at__isnull=True)]
+    open_rows = sorted((r for r in rows if r['status'] == 'open'),
+                       key=lambda r: (r['due'] or '9999', r['title']))
+    done_rows = sorted((r for r in rows if r['status'] == 'fulfilled'),
+                       key=lambda r: (r['fulfilled_at'] is None,
+                                      r['fulfilled_at']), reverse=True)
+    return open_rows, done_rows
+
+
+class PingError(ValueError):
+    """A ping that cannot be created or changed as asked."""
+
+
+def create_ping(*, title: str, due: str, lead_days=None, owner: str = '',
+                note: str = '', url: str = '', created_by: str = '',
+                origin: str = 'manual') -> Entry:
+    """Create one open ping. Validates the fields the engine relies on;
+    raises PingError with the reason."""
+    from datetime import date
+    title = (title or '').strip()
+    if not title:
+        raise PingError('the obligation (title) is required')
+    try:
+        due_date = date.fromisoformat(str(due or '').strip()[:10])
+    except ValueError:
+        raise PingError(f'due must be a date (YYYY-MM-DD), got {due!r}')
+    try:
+        lead = int(lead_days) if lead_days not in (None, '') \
+            else PING_DEFAULT_LEAD_DAYS
+    except (TypeError, ValueError):
+        raise PingError(f'lead days must be a whole number, got {lead_days!r}')
+    if lead < 0:
+        raise PingError('lead days cannot be negative')
+    now = time.time()
+    return Entry.objects.create(
+        title=title[:255], content=(note or '').strip(), kind='ping',
+        context_id=CONTEXT_NAME, status='open',
+        data={
+            'due': due_date.isoformat(), 'lead_days': lead,
+            'owner': (owner or '').strip(), 'url': (url or '').strip(),
+            'status': 'open', 'origin': origin or 'manual',
+            'created_by': created_by or '',
+        },
+        timestamp_created=now, timestamp_modified=now)
+
+
+def fulfil_ping(ping_id: str, *, by: str = '') -> Entry:
+    """Mark one open ping fulfilled; the engine clears its event on the
+    next tick. Raises PingError if it is not an open ping."""
+    e = (Entry.objects
+         .filter(id=ping_id, context_id=CONTEXT_NAME, kind='ping',
+                 deleted_at__isnull=True).first())
+    if e is None:
+        raise PingError('no such ping')
+    data = dict(e.data or {})
+    if data.get('status') == 'fulfilled':
+        raise PingError('already fulfilled')
+    now = time.time()
+    data.update({'status': 'fulfilled', 'fulfilled_by': by or '',
+                 'fulfilled_at': now})
+    e.data = data
+    e.status = 'fulfilled'
+    e.timestamp_modified = now
+    e.save()
+    return e
+
+
+def _origin_attrs(origin):
+    """Action-stream attributes of an origin: manual, the AI proposal that
+    was approved (AI_PROPOSALS.md, origin-stamped events), or the rule
+    that verified its own condition (PINGS.md, Lifecycle)."""
+    origin = origin or {}
+    if origin.get('kind') == 'rule':
+        return {'origin': 'rule', 'proposer': origin.get('proposer', '')}
+    if origin.get('kind') != 'ai_proposal':
+        return {'origin': 'manual'}
+    return {k: v for k, v in {
+        'origin': 'ai_proposal', 'proposer': origin.get('proposer', ''),
+        'proposal_ref': origin.get('ref', ''),
+        'batch_id': origin.get('batch_id', ''),
+        'proposed_at': origin.get('proposed_at', ''),
+    }.items() if v}
+
+
+def ping_create_execute(payload, *, changed_by, origin=None):
+    """The executor behind entering a ping: the identical call the
+    dashboard form and an approved proposal make. Creates the entry and
+    logs one origin-stamped ``ping_create`` event. Returns (entry, log id)."""
+    from .epicprod_logging import log_epicprod_action
+    attrs = _origin_attrs(origin)
+    e = create_ping(
+        title=payload.get('title', ''), due=payload.get('due', ''),
+        lead_days=payload.get('lead_days'), owner=payload.get('owner', ''),
+        note=payload.get('note', ''), url=payload.get('url', ''),
+        created_by=changed_by,
+        origin=(attrs.get('proposal_ref') or 'manual'))
+    log_id = log_epicprod_action(
+        'web', 'ping_create', subject_type='ping', subject_key=e.id,
+        subject_label=e.title, username=changed_by,
+        sublevel='normal', live_default=True,
+        due=(e.data or {}).get('due', ''), url='/alarms/#pings', **attrs)
+    return e, log_id
+
+
+def ping_fulfil_execute(ping_id, *, changed_by, origin=None):
+    """The executor behind marking a ping fulfilled, for the dashboard
+    control and an approved proposal alike. Returns (entry, log id)."""
+    from .epicprod_logging import log_epicprod_action
+    attrs = _origin_attrs(origin)
+    e = fulfil_ping(ping_id, by=changed_by)
+    log_id = log_epicprod_action(
+        'web', 'ping_fulfil', subject_type='ping', subject_key=e.id,
+        subject_label=e.title, username=changed_by,
+        sublevel='normal', live_default=True,
+        due=(e.data or {}).get('due', ''), url='/alarms/#pings', **attrs)
+    return e, log_id
+
+
+def get_ping(ping_id: str) -> Entry | None:
+    return (Entry.objects
+            .filter(id=ping_id, context_id=CONTEXT_NAME, kind='ping',
+                    deleted_at__isnull=True).first())
+
+
+def open_ping_with_title(title: str) -> Entry | None:
+    """An open ping whose title matches, case-insensitively: the
+    idempotency check behind a ping proposal."""
+    title = (title or '').strip()
+    if not title:
+        return None
+    for e in Entry.objects.filter(context_id=CONTEXT_NAME, kind='ping',
+                                  archived=False, deleted_at__isnull=True,
+                                  title__iexact=title[:255]):
+        if (e.data or {}).get('status', 'open') == 'open':
+            return e
+    return None

@@ -5,6 +5,13 @@ Alarms are now owned by `swf-monitor` on `pandaserver02`. The old
 but the live alarm dashboard, editor, runtime state, and cron runner are in
 this repository.
 
+Lifecycle, per-subscriber feeds, and automated response are specified in
+[ALARM_QUEUE.md](ALARM_QUEUE.md); pings, dated obligations carried at
+their own severity, in [PINGS.md](PINGS.md).
+
+Delivery into all subscribed running Claude Code and Codex sessions is designed
+in [ALARM_AI_DELIVERY.md](ALARM_AI_DELIVERY.md).
+
 ## Runtime
 
 - Dashboard: `/swf-monitor/alarms/`
@@ -63,7 +70,12 @@ archive the alarm row.
 3. Yield `Detection(...)` objects from `swf_alarms.common`.
 4. Share helper code under `swf_alarms/common/`.
 5. Add a corresponding `Entry(kind='alarm', context='swf-alarms')` with
-   `data.entry_id='alarm_<name>'`.
+   `data.entry_id='alarm_<name>'` and `data.enabled=False`.
+
+**New alarms are email off.** An alarm is created with `data.enabled=False`
+and stays that way until Torre turns its email on; the engine treats a
+missing flag as off. Detection, events and the dashboard work the same
+either way.
 
 The engine dispatches by module name. There is no central registry.
 

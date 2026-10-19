@@ -39,6 +39,10 @@ relay. A `brains_event` message on the same queue appends an applied
 search to the conversation file with no engine run, keeping the
 dialog's chat-and-search narrative durable in one record; search
 entries enter later turns' thread context as "Search applied" lines.
+A lost broker connection is retried with backoff (2 s doubling to
+60 s, for an hour) off the listener thread: the broker restarts in
+ten seconds under systemd, and a single immediate attempt failed
+inside that and left the inlet dead (2026-09-21).
 An engine reply may end with a `SEARCH: <words>` line — the page's
 interface contract, defined in the Find Data preamble — which the page
 applies to its own dataset index. Web turns share the response lock

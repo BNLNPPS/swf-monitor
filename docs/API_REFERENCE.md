@@ -167,7 +167,15 @@ export REQUESTS_CA_BUNDLE=/opt/swf-monitor/current/full-chain.pem
   strands tasks in `aborted`. An aborted task is retried through PanDA's
   reactivation path (retry with new parameters, processed as incexec —
   the plain retry command refuses aborted); the executor selects the path
-  by the task's observed state. Prod-ops sends
+  by the task's observed state. A `retry_failures` request may carry
+  `"new_parameters": {"ram_count_mb": N, "walltime_hours": H,
+  "target_queue": "QUEUE"}` (any of the three): the retry then changes
+  the task's memory per core, wall time and target queue, in PanDA form
+  `ramCount` with `ramUnit` MBPerCore, `walltime` in seconds and `site`
+  (a name from the cached PanDA queue inventory; an unknown name is
+  refused with the known names), merged into the task's stored
+  parameters through the same reactivation path for every task of the
+  batch; the values are recorded on each operation record's evidence. Prod-ops sends
   the accepted scalar PanDA commands one second apart and records each task's
   verified outcome (retry verified when the task leaves its terminal state,
   kill when it reaches `aborting`/`aborted`).
@@ -268,8 +276,14 @@ Read-only JSON endpoints under `/swf-monitor/api/panda/` for external consumers 
 - `GET /api/panda/tasks/<jeditaskid>/` - Single task detail (same per-task schema as above)
 - `GET /api/panda/activity/` - Aggregate counts by task status and job status
   - Query params: `days` (default 1), `username`, `site`, `workinggroup`
+- `GET /api/panda/seconds-per-event/` - The measured cost of an event of one production configuration on one queue: the median of wall over the payload's own event count across the configuration's finished production jobs on the queue. Sizes the node harness's unit (swf-epicprod NODE_EVENT_DISPATCHER.md; the submitter's `--es-quantum-s`).
+  - Query params: `task` (the task name, matched as a prefix), `queue`, `days` (default 14)
+  - Response: `{task, queue, days, jobs, median_wall_s, median_events, s_per_event}`; `jobs` 0 and `s_per_event` null without a measurement
+- `GET /panda/queues/census/json/` - The per-queue job census (`monitor_app/panda/census.py`): the pressure input of the production dispatcher (swf-epicprod CONTINUOUS_PRODUCTION.md, The dispatcher) and the ready-queue page's source. No authentication; plain JSON.
+  - Query params: `refresh=1` rebuilds the hourly calibration.
+  - Response: `{observed_at, calibration_built_at, calibration_days, queues: {<queue>: {...}}}`. Per queue: `by_status` (jobs, cores and the production subset per `jobsactive4` status), `not_started` (defined, waiting, assigned, activated, sent, starting), `not_started_production`, `running`, `finishing` (holding, transferring, merging), `tasks_active` (production tasks pinned to the queue that have not ended), `calibration` (median and p90 finished walltime and p90 start latency in hours of production jobs, and their count, over 14 days; `peak_running`, the peak concurrent running jobs of any type over 14 days), `ceiling` (the peak or the current running count, whichever is higher), `hours_at_capacity` (not started × median walltime ÷ ceiling; null without a calibration), and `gate` over the last six hours (`finished`, `failed`, `fast_failed` for failures under a quarter of the median walltime, `useful_rate_per_h`).
 
-Authentication: `TunnelAuthentication` (X-Remote-User via swf-remote proxy) + `SessionAuthentication` + `TokenAuthentication`. Localhost-direct requests without X-Remote-User auto-authenticate as `swf-remote-proxy`; matches the existing pattern used by PCS and other `/swf-monitor/api/` routes.
+Authentication: `TunnelAuthentication` (X-Remote-User via swf-remote proxy) + `SessionAuthentication` + `TokenAuthentication`. A localhost request without X-Remote-User carries no tunnel identity and falls through to session or token authentication; swf-remote's own service calls name their identity explicitly. Writes by a person are subject to the authority gate ([AUTHORITY.md](AUTHORITY.md)).
 
 ## Server-Sent Events (SSE) Streaming
 

@@ -118,6 +118,13 @@ INSTALLED_APPS = [
     "pcs",  # Physics Configuration System
     "ai",  # AI proposals and human-in-the-loop automation
     "monitor_app",  # Changed from "swf_monitor_project.monitor_app"
+    "teamcomms.service.apps.ServiceConfig",
+    "teamcomms.entries.apps.EntriesConfig",
+    "teamcomms.comms.apps.CommsConfig",
+    "teamcomms.dialog.apps.DialogConfig",
+    "teamcomms.pouch.apps.PouchConfig",
+    "teamcomms.inflight.apps.InflightConfig",
+    "teamcomms.capcom.apps.CapcomConfig",
     "django_dbml",  # For schema diagram generation
     # Third-party apps
     "rest_framework",
@@ -129,6 +136,15 @@ INSTALLED_APPS = [
     "django_extensions",
 ]
 
+# Embedded TeamComms shares this database; devcloud remains its authentication
+# authority. The route is enabled only in installations with the proxy configured.
+SWF_TEAMCOMMS_ENABLED = config("SWF_TEAMCOMMS_ENABLED", default=False, cast=bool)
+SWF_TEAMCOMMS_PUBLIC_HOST = config("SWF_TEAMCOMMS_PUBLIC_HOST", default="epic-devcloud.org")
+SWF_TEAMCOMMS_INTROSPECTION_URL = config("SWF_TEAMCOMMS_INTROSPECTION_URL", default="")
+SWF_TEAMCOMMS_SERVICE_TOKEN_FILE = config("SWF_TEAMCOMMS_SERVICE_TOKEN_FILE", default="")
+if SWF_TEAMCOMMS_ENABLED and SWF_TEAMCOMMS_PUBLIC_HOST not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(SWF_TEAMCOMMS_PUBLIC_HOST)
+
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
@@ -138,6 +154,7 @@ MIDDLEWARE = [
     "monitor_app.middleware.MCPAuthMiddleware",  # Auth0 OAuth for MCP
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "monitor_app.middleware.TunnelAuthMiddleware",
+    "monitor_app.middleware.AuthorityGateMiddleware",  # a person who writes must hold authority (docs/AUTHORITY.md)
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -261,6 +278,12 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 # WhiteNoise configuration
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
+# Messages ride the session, never a cookie of their own: the external
+# proxy forwards only the renamed session and CSRF cookies, so
+# cookie-based message storage is silently dropped on the
+# epic-devcloud face and every action acknowledgment with it.
+MESSAGE_STORAGE = "django.contrib.messages.storage.session.SessionStorage"
+
 LOGIN_URL = 'login'
 
 
@@ -359,7 +382,12 @@ COMMON QUERIES:
 - EIC experiment tasks? → panda_list_tasks(workinggroup='EIC')
 - Production tasks? → panda_list_tasks(processingtype='epicproduction')
 - Top errors? → panda_error_summary(days=7)
+- Errors in an exact window? → panda_error_summary(ended_after='2026-09-05T03:10', ended_before='2026-09-05T03:40') — job end time, ET unless an offset is given
 - Errors for a user? → panda_error_summary(username='someone')
+- Payload crashes (segfaults) by signature? → panda_segfault_catalog(class_hint='storm')
+- One crash signature and its jobs? → panda_segfault_signature(key='exit139:task38661')
+- The readings of the crashes? → panda_segfault_findings(); write one → panda_segfault_finding_set(name=...)
+- Reproduce a crash named by the nightly notice? → panda_segfault_reproduce(key='exit139:task38971')
 - Deep dive on a failed job? → panda_study_job(pandaid=130497)
 - EIC queues? → panda_list_queues(vo='eic')
 - Queue config? → panda_get_queue(panda_queue='NERSC_Perlmutter_epic')
@@ -374,6 +402,7 @@ COMMON QUERIES:
 - What is PCS? → PCS = Physics Configuration System, manages configuration of production tasks based on physics inputs
 - List physics tags? → pcs_list_tags(tag_type='p')
 - What is tag p1001? → pcs_get_tag(tag_label='p1001')
+- Ghost DIDs by RSE, stuck rules, stalled datasets? → epicprod_storage(listing='ghosts', rse='ASGC-XRD') — the storage record's store; never scan Rucio for these
 - Reco tags? → pcs_list_tags(tag_type='r')
 - Photoproduction tags? → pcs_search_tags(query='photoproduction')
 - DIS tags? → pcs_list_tags(tag_type='p', category='DIS')

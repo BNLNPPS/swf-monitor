@@ -7,28 +7,39 @@ database shows from outside the host: request rates and outcomes at the
 web tier, daemon liveness, and host resources. The agent is a
 standalone script in the house pattern — Python standard library only,
 local state file, periodic run, HTTPS delivery to a swf-monitor REST
-ingest under a token — and it is read-only with respect to PanDA.
+ingest under a token — and it is read-only with respect to PanDA. The
+script is `scripts/panda-server-reporter.py`; it has run on the host
+under cron, on a five-minute cadence, since 2026-09-07.
 
 ## Functions
 
-Each run covers one 5-minute interval and posts one record.
+Each run posts one record covering the interval since the previous
+run. The access and error logs are read from the byte position the
+previous run left, so a record counts exactly the lines appended since
+it; a rotated log restarts from its beginning and the record says so;
+the first run sets the positions and counts nothing.
 
 | Function | Source on the host | Fields delivered |
 |---|---|---|
-| Web-tier request accounting | `/var/log/panda/panda_server_access_log` | requests per endpoint (updateJob, getJob, harvester, others); HTTP status split (2xx, 4xx, 5xx); request duration percentiles where logged |
-| Web-tier error markers | `/var/log/panda/panda_server_error_log` | counts of worker-saturation markers, SSL read failures, WSGI errors, per interval |
-| Daemon liveness and log freshness | `/var/log/panda/panda-*.log`, process table | for each PanDA daemon (Watcher, copyArchive, JobGenerator, JEDI daemons, MCP): process present, seconds since last log line, restart count since last run |
-| Watcher activity | `/var/log/panda/panda-Watcher.log` | lost-heartbeat kills per interval, oldest heartbeat age seen |
-| Service state | `systemctl status` (unprivileged view) | active/inactive per PanDA unit: panda_httpd, panda_daemon, panda_jedi, panda_mcp |
-| Host resources | `/proc`, `df` | load average, memory, root and /var volume use, httpd and python process counts |
-| Database reachability from the server host | TCP connect and a timed trivial query | connect latency, query latency, failure flag |
+| Web-tier request accounting | `/var/log/panda/panda_server_access_log` | requests in the interval by endpoint class (`update_job`, `acquire_jobs`, other pilot calls, harvester, the schedconfig cache, statistics, other) and by HTTP status class, the 5xx count, distinct clients and paths, the twenty most requested paths; the web tier's declared capacity (`MaxRequestWorkers`, `ServerLimit`, `ThreadsPerChild`, WSGI daemon processes) from the httpd configuration. The access log carries no request duration, so none is reported. |
+| Web-tier error markers | `/var/log/panda/panda_server_error_log` | lines in the interval by Apache level and by named marker (worker saturation, WSGI response timeout, truncated WSGI response, SSL read failure, child exit signal, memory allocation failure); the last five lines above info level |
+| Daemon log freshness | `/var/log/panda/*.log` | for every PanDA log: seconds since its last write and its size. A daemon is named by its log, and the age of the last write is what says whether it is working. |
+| Service state | `systemctl show` (unprivileged view) | per PanDA unit (panda_httpd, panda_daemon, panda_jedi, panda_mcp): active state, sub-state, restart count since boot, seconds active |
+| Processes | `/proc` | the httpd workers and the pandaserver python processes: count and resident memory |
+| Host resources | `/proc` | load average, memory and swap, root and /var volume use, uptime |
+| Database reachability from the server host | TCP connect | connect latency to the database host and port named in `/etc/panda/panda_server.cfg`; no credential is used, so this is reachability and the network's cost, not a query |
 | Web-tier occupancy | Apache `mod_status` on localhost | busy and idle workers, scoreboard — not enabled today (see below) |
 | System journal events | `journalctl` | daemon crashes, OOM kills, unit restarts — not readable today (see below) |
+
+Lost-heartbeat kills are not counted here: they are the error-state
+component's entries (SNAPPER_PLATFORM.md, one record per fact), and
+the Watcher's log is reported among the daemon logs like every other.
 
 Every failure to read a source is delivered as a field, never dropped;
 an unreachable swf-monitor buffers records locally and posts the
 backlog on the next run. The component's freshness watch reports a
-silent reporter.
+silent reporter. A record is about 9 KB and takes under 0.1 s to
+collect.
 
 ## Access inventory
 
@@ -96,12 +107,32 @@ action stream before it is taken.
 
 ## Delivery
 
-The reporter posts to a swf-monitor REST ingest endpoint authenticated
-by a per-host token, in the arrangement the GPU worker host uses. The
-ingest stores the record as the server-side fields of the platform
-component; the component publication on the 5-minute refresh merges
-them with the database-side fields. Token and endpoint live in the
-reporter's environment file, mode 600.
+The reporter posts to `api/host-reports/pandaserver01/` on swf-monitor,
+authenticated by the token of the Django user `pandaserver01-reporter`,
+held in the reporter's environment file at mode 600. The ingest stores
+the record whole in the cached-product store under a key naming the
+host ([OSG_SUBMIT_REPORTER.md](OSG_SUBMIT_REPORTER.md), Delivery); the
+platform component reads it at each 5-minute publication as its
+`server_host` group and publishes `reporter_status` as fresh, stale, or
+absent against the configured threshold.
+
+## Install
+
+1. The script at `~/.local/bin/panda-server-reporter.py` and its
+   environment file `~/.swf-panda-server-reporter.env` (mode 600,
+   `SWF_MONITOR_URL` and `SWF_REPORT_TOKEN`). The account's home
+   directory is shared across the SCDF hosts, so both are placed from
+   any of them; the reporter's state and buffer live beside them in
+   `~/.swf-panda-server-reporter/`, and its one-line run log in
+   `~/.swf-panda-server-reporter.log`.
+2. The per-host token issued in swf-monitor.
+3. A cron entry for the account on the host, every five minutes. The
+   crontab is the one per-host part of the install.
+
+The install is recorded in the action stream as
+`host_reporter_install` before the cron entry is written. No change to
+PanDA, its configuration, or its units is part of installing the
+reporter.
 
 ## Related
 

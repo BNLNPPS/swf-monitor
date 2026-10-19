@@ -15,7 +15,7 @@ from monitor_app.mcp import mcp
 
 from ..models import Run, StfFile, TFSlice, AppLog, SystemAgent
 from ..workflow_models import WorkflowDefinition, WorkflowExecution, WorkflowMessage
-from .common import _parse_time, _default_start_time, _monitor_url, _get_testbed_config_path, _get_username
+from .common import _parse_time, _default_start_time, _monitor_url, _get_testbed_config_path, _get_username, requires_authority
 
 logger = logging.getLogger(__name__)
 
@@ -684,6 +684,7 @@ async def swf_get_tf_slice(tf_filename: str, slice_id: int) -> dict:
 # -----------------------------------------------------------------------------
 
 @mcp.tool()
+@requires_authority
 async def swf_start_workflow(
     workflow_name: str = None,
     namespace: str = None,
@@ -826,6 +827,7 @@ async def swf_start_workflow(
 
 
 @mcp.tool()
+@requires_authority
 async def swf_stop_workflow(execution_id: str) -> dict:
     """
     Stop a running workflow by sending a stop command to the DAQ Simulator agent.
@@ -1105,6 +1107,7 @@ async def swf_list_workflow_monitors() -> list:
 
 
 @mcp.tool()
+@requires_authority
 async def swf_send_message(message: str, message_type: str = "announcement", metadata: dict = None) -> dict:
     """
     Send a message to the workflow monitoring stream.

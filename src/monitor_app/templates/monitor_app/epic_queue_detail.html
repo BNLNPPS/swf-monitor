@@ -4,11 +4,48 @@
 {% block title %}ePIC Queue: {{ queue_name }}{% endblock %}
 
 {% block content %}
+<style>
+  /* The house section bar, as on the queues list: a long page of cards
+     reads as sections rather than running together. Scoped here, never as
+     a bare element selector in the shared stylesheet. */
+  .queue-section-header {
+      background-color: #e7f1fb;
+  }
+</style>
 <div class="container-fluid">
     <h1>{{ queue_name }}</h1>
+    <p class="mb-2">On this page:
+        <a href="#description">Description</a>
+        <span class="text-muted mx-1">&middot;</span>
+        <a href="#declared">Declared state</a>
+        <span class="text-muted mx-1">&middot;</span>
+        <a href="#pool">Batch pool</a>
+        <span class="text-muted mx-1">&middot;</span>
+        <a href="#workers">Workers</a>
+        <span class="text-muted mx-1">&middot;</span>
+        {% if es %}<a href="#event-service">Event Service</a>
+        <span class="text-muted mx-1">&middot;</span>{% endif %}
+        {% if harvester %}<a href="#job-fetching">Harvester</a>
+        <span class="text-muted mx-1">&middot;</span>{% endif %}
+        <a href="#submission">Submission</a>
+        <span class="text-muted mx-1">&middot;</span>
+        <a href="#schedconfig">Declared configuration</a>
+        <span class="text-muted mx-1">&middot;</span>
+        <a href="#other-parameters">All other parameters</a>
+        <span class="text-muted mx-1">&middot;</span>
+        <a href="#observed">What this queue actually is</a>
+        <span class="text-muted mx-1">&middot;</span>
+        <a href="#full-json">Full JSON</a>
+    </p>
     <p><a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ queue_name }}" class="btn btn-primary btn-sm">View Jobs on this Queue</a></p>
-    <div class="card mb-3">
-        <div class="card-header d-flex align-items-center">
+    <p class="mb-3{% if declines %} text-danger fw-bold{% endif %}" title="Jobs whose payload could not reach the Rucio server or the input door from the worker and started no work (payload exit 80)">
+        Landing declines, last {{ declines_days }} days:
+        {% if declines %}{{ declines.count }}, last {{ declines.last|fmt_dt }}
+        (<a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ queue_name|urlencode }}&amp;status=failed" style="color: inherit;">failed jobs</a>)
+        {% else %}none{% endif %}
+    </p>
+    <div class="card mb-3" id="description">
+        <div class="card-header queue-section-header d-flex align-items-center">
             <strong>Description</strong>
             {% if user.is_authenticated %}
             <button type="button" class="btn btn-dark-green btn-sm" style="margin-left:1cm;"
@@ -43,39 +80,325 @@
         </div>
     </div>
 
-    {% ai_assessment_panel panda_queue_metadata %}
-
-    {% if snapper_embed %}
-    <div class="mb-3">
-        <div class="d-flex align-items-baseline">
-            <h5 class="mb-1">State history · {{ queue_name }} · last 2 weeks</h5>
-            <a class="ms-3" href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='site' %}?site={{ queue_name|urlencode }}">Open in Snapper</a>
+    <div class="card mb-3" id="declared">
+        <div class="card-header queue-section-header">
+            <strong>Declared state</strong>
+            <span class="ms-2 text-muted">what CRIC declares for this queue: status rules and downtime windows, read by the ops agent every ten minutes</span>
         </div>
-        <div class="row g-2 align-items-stretch">
-            <div class="{% if site_outcomes_pie.pie %}col-lg-8{% else %}col-12{% endif %}">
-                {% include 'snapper_ai/_snapper_embed.html' with embed=snapper_embed %}
-            </div>
-            {% if site_outcomes_pie.pie %}
-            <div class="col-lg-4 d-flex justify-content-center">
-                {% include 'monitor_app/_snapper_site_outcomes_pie.html' with site_outcomes=site_outcomes_pie %}
-            </div>
+        <div class="card-body p-0">
+            {% if declared_now.active or declared_now.future %}
+            <table class="table table-sm mb-0 align-middle">
+                <tbody>
+                {% for r in declared_now.active %}
+                <tr><td class="fw-bold {{ 'offline'|state_class }}" style="width:12%">In force</td>
+                    <td>{{ r.line }}</td></tr>
+                {% endfor %}
+                {% for r in declared_now.future %}
+                <tr><td class="fw-bold {{ 'pending'|state_class }}" style="width:12%">Coming</td>
+                    <td>{{ r.line }}{% if r.info_url %} <a href="{{ r.info_url }}">details</a>{% endif %}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="mb-0 p-2 text-muted">Nothing declared for this queue now.</p>
+            {% endif %}
+            {% if declared_history %}
+            <table class="table table-sm table-striped mb-0 align-middle swf-sortable">
+                <thead><tr><th>Declared</th><th>By</th><th>Rule or window</th><th>Standing</th></tr></thead>
+                <tbody>
+                {% for r in declared_history %}
+                <tr>
+                    <td class="text-nowrap">{{ r.when }}</td>
+                    <td>{{ r.declared_by }}</td>
+                    <td>{{ r.line }}</td>
+                    <td class="{{ r.standing_class }}">{{ r.standing }}{% if r.cleared_when %} {{ r.cleared_when }}{% endif %}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
             {% endif %}
         </div>
     </div>
-    {% elif site_no_activity %}
-    <p class="text-muted">No recorded job activity for this queue.</p>
+
+    {% if pool %}
+    <div class="card mb-3" id="pool">
+        <div class="card-header queue-section-header">
+            <strong>Batch pool</strong>
+            <span class="ms-2">{{ pool.label }}, read
+                <span data-relative-time="{{ pool.reported_at|date:'c' }}"></span></span>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-sm table-striped mb-0">
+                {% if pool.absent %}
+                <tr><td class="fw-bold" style="width:24%">Reading</td>
+                    <td>None yet: {{ pool.error }}</td></tr>
+                {% elif pool.error %}
+                <tr><td class="fw-bold" style="width:24%">Reading</td>
+                    <td>The pool did not answer: {{ pool.error }}</td></tr>
+                {% else %}
+                {% if pool.claimed_fraction is not None %}
+                <tr><td class="fw-bold" style="width:24%">Full</td>
+                    <td>{% widthratio pool.claimed_fraction 1 100 %}% of the pool claimed</td></tr>
+                {% endif %}
+                {% if pool.slots.total %}
+                <tr><td class="fw-bold">{{ pool.slots_unit|default:"Slots"|capfirst }}</td>
+                    <td>{{ pool.slots.total }} total{% if pool.slots.claimed is not None %},
+                        {{ pool.slots.claimed }} claimed, {{ pool.slots.unclaimed }} free{% endif %}{% if pool.slots.admitted is not None %},
+                        {{ pool.slots.admitted }} admitted by this queue's requirements{% endif %}</td></tr>
+                {% endif %}
+                {% if pool.cores.total %}
+                <tr><td class="fw-bold">Cores</td>
+                    <td>{{ pool.cores.claimed }} claimed of {{ pool.cores.total }}</td></tr>
+                {% endif %}
+                {% if pool.queue.idle is not None %}
+                <tr><td class="fw-bold">Queue ahead</td>
+                    <td>{{ pool.queue.idle }} waiting{% if pool.queue.idle_nodes is not None %} for {{ pool.queue.idle_nodes }} nodes{% endif %}{% if pool.queue.running is not None %},
+                        {{ pool.queue.running }} running{% if pool.queue.running_nodes is not None %} on {{ pool.queue.running_nodes }} nodes{% endif %}{% endif %}{% if pool.queue.held %},
+                        {{ pool.queue.held }} held{% endif %}
+                        <span class="text-muted ms-2">{{ pool.queue.scope }}{% if pool.queue.schedds %}, across {{ pool.queue.schedds }} schedds{% endif %}</span></td></tr>
+                {% endif %}
+                {% if pool.ours %}
+                <tr><td class="fw-bold">Our jobs there</td>
+                    <td>{{ pool.ours.idle|default_if_none:"?" }} waiting{% if pool.ours.oldest_pending_s %},
+                        the oldest for {{ pool.ours.oldest_pending_s|fmt_duration }}{% endif %},
+                        {{ pool.ours.running|default_if_none:"?" }} running
+                        <span class="text-muted ms-2">allocation {{ pool.ours.account }}, as the batch system counts them</span></td></tr>
+                {% endif %}
+                {% endif %}
+            </table>
+        </div>
+    </div>
     {% endif %}
+
+    {% if workers %}
+    <div class="card mb-3" id="workers">
+        <div class="card-header queue-section-header">
+            <strong>Workers</strong>
+            <span class="ms-2">this queue's harvester workers in the batch pool, read
+                <span data-relative-time="{{ workers.built_at|date:'c' }}"></span>
+                <a href="?refresh=1#workers" class="btn btn-secondary btn-sm swf-update-btn ms-2">Update</a></span>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-sm table-striped mb-0">
+                {% if workers.error %}
+                <tr><td class="fw-bold" style="width:24%">Reading</td>
+                    <td>The harvester record did not answer: {{ workers.error }}</td></tr>
+                {% else %}
+                <tr><td class="fw-bold" style="width:24%">Waiting now</td>
+                    <td>{{ workers.pending }} worker{{ workers.pending|pluralize }} submitted and not started{% if workers.pending %},
+                        the oldest for {{ workers.oldest_pending_s|fmt_duration }}{% endif %}{% if workers.cores_per_worker %}
+                        <span class="text-muted ms-2">{{ workers.cores_per_worker }} cores each</span>{% endif %}</td></tr>
+                <tr><td class="fw-bold">Running now</td>
+                    <td>{{ workers.running }}</td></tr>
+                <tr><td class="fw-bold">Started</td>
+                    <td>{{ workers.started }} in the last {{ workers.window_hours }} h,
+                        {{ workers.started_last_hour }} in the last hour{% if workers.last_start_at %},
+                        the latest <span data-relative-time="{{ workers.last_start_at }}"></span>{% endif %}</td></tr>
+                {% if workers.wait_p50_s is not None %}
+                <tr><td class="fw-bold">Wait to start</td>
+                    <td>{{ workers.wait_p50_s|fmt_duration }} median, {{ workers.wait_p90_s|fmt_duration }} at the 90th percentile,
+                        over the workers started in the last {{ workers.window_hours }} h</td></tr>
+                {% endif %}
+                {% if workers.ended %}
+                <tr><td class="fw-bold">Ended</td>
+                    <td>{% for status, count in workers.ended.items %}{{ count }} {{ status }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                        in the last {{ workers.window_hours }} h</td></tr>
+                {% endif %}
+                {% endif %}
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if es %}
+    <!-- What the node harness reported across this queue's Event Service
+         jobs, from the job reports (swf-epicprod NODE_EVENT_DISPATCHER.md,
+         The record); a cached product (es_reading.py). -->
+    <div class="card mb-3" id="event-service">
+        <div class="card-header queue-section-header">
+            <strong>Event Service</strong>
+            <span class="ms-2">the node harness on this queue's Event Service jobs of the last {{ es.window_days }} days, read
+                <span data-relative-time="{{ es.built_at|date:'c' }}"></span>
+                <a href="?refresh=1#event-service" class="btn btn-secondary btn-sm swf-update-btn ms-2">Update</a></span>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-sm table-striped mb-0">
+                {% if es.error %}
+                <tr><td class="fw-bold" style="width:24%">Reading</td><td>The record did not answer: {{ es.error }}</td></tr>
+                {% else %}
+                <tr><td class="fw-bold" style="width:24%">Jobs</td>
+                    <td>{{ es.es_jobs }} Event Service job{{ es.es_jobs|pluralize }}{% if es.capped %} (the newest {{ es.es_jobs }}){% endif %}: {% for status, n in es.by_status.items %}{{ n }} {{ status }}{% if not forloop.last %}, {% endif %}{% endfor %}{% if es.by_substatus %} ({% for sub, n in es.by_substatus.items %}{{ n }} {{ sub }}{% if not forloop.last %}, {% endif %}{% endfor %}){% endif %}; {{ es.reports }} with a harness report{% if es.slots_min %}, {% if es.slots_min == es.slots_max %}{{ es.slots_min }}{% else %}{{ es.slots_min }} to {{ es.slots_max }}{% endif %} slot{{ es.slots_max|pluralize }} a job{% endif %}
+                        {% if es.deadline_marks %}<span class="badge bg-warning text-dark ms-2">{{ es.deadline_marks }} stopped at the deadline</span>{% endif %}</td></tr>
+                <tr><td class="fw-bold">Units</td>
+                    <td>{{ es.units_done }} done{% if es.units_failed %}, <span class="text-danger">{{ es.units_failed }} failed</span>{% endif %}; {{ es.events_done }} events reconstructed{% if es.unit_events_median %}; {{ es.unit_events_median }} events a unit (median){% endif %}</td></tr>
+                {% if es.unit_wall_median_s is not None %}
+                <tr><td class="fw-bold">Unit wall</td>
+                    <td>{{ es.unit_wall_median_s|fmt_duration }} median, {{ es.unit_wall_p90_s|fmt_duration }} at the 90th percentile{% if es.s_per_event_median %}; {{ es.s_per_event_median }} s an event on this queue{% endif %}</td></tr>
+                {% endif %}
+                <tr><td class="fw-bold">Closes</td>
+                    <td>{% if es.closes %}{{ es.closes }} close{{ es.closes|pluralize }}, {{ es.close_events }} events registered{% if es.closes_failed %}, <span class="text-danger">{{ es.closes_failed }} failed</span>{% endif %}{% if es.close_wall_median_s is not None %}; {{ es.close_wall_median_s }} s a close (median){% endif %}{% else %}none: each unit registered its own file{% endif %}</td></tr>
+                {% if es.events_per_job_hour %}
+                <tr><td class="fw-bold">Rate</td>
+                    <td>{{ es.events_per_job_hour }} events an hour of job wall, over {{ es.job_wall_h }} job-hours</td></tr>
+                {% endif %}
+                {% endif %}
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if harvester %}
+    <div class="card mb-3" id="job-fetching">
+        <div class="card-header queue-section-header">
+            <strong>Harvester</strong>
+            <span class="ms-2">reported by {{ harvester.host }}
+                <span data-relative-time="{{ harvester.reported_at|date:'c' }}"></span>,
+                covering the {{ harvester.interval_seconds|default:"?" }} s before it</span>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-sm table-striped mb-0">
+                <tr><td class="fw-bold" style="width:24%">Last fetch</td>
+                    <td>{% if harvester.fetch.last %}
+                        {{ harvester.fetch.last.at }} (UTC): asked for {{ harvester.fetch.last.asked|default:"?" }},
+                        got {{ harvester.fetch.last.got }}
+                        <span class="{% if harvester.fetch.last.error_class %}text-danger fw-bold{% endif %}"
+                              style="word-break: break-word">({{ harvester.fetch.last.outcome }})</span>
+                        {% else %}none in the interval{% endif %}</td></tr>
+                <tr><td class="fw-bold">Fetches in the interval</td>
+                    <td>{{ harvester.fetch.attempts|default:"0" }} attempts,
+                        {{ harvester.fetch.jobs_got|default:"0" }} jobs got,
+                        <span class="{% if harvester.fetch.failed %}text-danger fw-bold{% endif %}">{{ harvester.fetch.failed|default:"0" }} failed</span>
+                        {% for cls, n in harvester.fetch.errors.items %}{% if forloop.first %}({% endif %}{{ cls }} {{ n }}{% if forloop.last %}){% else %}, {% endif %}{% endfor %}</td></tr>
+                <tr><td class="fw-bold">Workers</td>
+                    <td>{{ harvester.submit.workers_submitted|default:"0" }} submitted in the interval;
+                        {% if harvester.submit.workers_status %}
+                        last read {{ harvester.submit.workers_status.nRunning }} running,
+                        {{ harvester.submit.workers_status.nQueue }} queued,
+                        {{ harvester.submit.workers_status.nNewWorkers }} new allowed
+                        {% endif %}</td></tr>
+                {% if harvester.limits %}
+                <tr><td class="fw-bold">Launch limits</td>
+                    <td>at most {{ harvester.limits.max_workers }} workers, {{ harvester.limits.n_queue_limit_worker }} queued;
+                        {{ harvester.limits.n_new_workers }} new workers last decided
+                        <span class="text-muted ms-2">last submission {{ harvester.limits.submit_time|default:"none" }} (UTC)</span></td></tr>
+                {% endif %}
+                {% if harvester.workers_now %}
+                <tr><td class="fw-bold">Harvester's workers now</td>
+                    <td>{% for status, n in harvester.workers_now.items %}{{ n }} {{ status }}{% if not forloop.last %}, {% endif %}{% endfor %}</td></tr>
+                {% endif %}
+                {% if harvester.ended %}
+                <tr><td class="fw-bold">Workers ended in the interval</td>
+                    <td>{% for status, n in harvester.ended.by_status.items %}{{ n }} {{ status }}{% if not forloop.last %}, {% endif %}{% endfor %}{% if harvester.ended.median_finished_run_s is not None %};
+                        the finished ran {{ harvester.ended.median_finished_run_s|fmt_duration }} (median){% endif %}</td></tr>
+                {% endif %}
+                {% if harvester.limits or harvester.not_finished %}
+                <tr><td class="fw-bold{% if harvester.not_finished %} text-danger{% endif %}">Workers that did not finish, last {{ harvester.not_finished_hours|default:"24" }} h</td>
+                    <td style="word-break: break-word">{% if harvester.not_finished %}{{ harvester.not_finished.workers }}, by the batch system's reason:
+                        <ul class="mb-0 ps-3">
+                        {% for r in harvester.not_finished.reasons %}
+                        <li><strong>{{ r.count }}</strong> {{ r.status }}: {{ r.reason }}
+                            <span class="text-muted">({{ r.source }}; last {{ r.last_ended }} UTC{% for ex in r.examples %}{% if ex.batch_log %}; <a href="{{ ex.batch_log }}">worker {{ ex.workerid }} log</a>{% endif %}{% endfor %})</span></li>
+                        {% endfor %}
+                        </ul>{% if harvester.not_finished.reasons_dropped %}<span class="text-muted">and {{ harvester.not_finished.reasons_dropped }} rarer reasons</span>{% endif %}
+                        {% else %}none{% endif %}</td></tr>
+                {% endif %}
+                {% if harvester.db_error %}
+                <tr><td class="fw-bold text-danger">Harvester database</td>
+                    <td>not read: {{ harvester.db_error }}</td></tr>
+                {% endif %}
+                {% for daemon, calls in harvester.failed_calls.items %}
+                <tr><td class="fw-bold text-danger">Failed calls to PanDA ({{ daemon }})</td>
+                    <td style="word-break: break-word">{{ calls.failed }} in the interval, all queues:
+                        {% for key, n in calls.by_call_and_class.items %}{% if not forloop.first %}, {% endif %}{{ key }} {{ n }}{% endfor %}
+                        {% if calls.last %}<br><span class="text-muted">last: {{ calls.last.line }}</span>{% endif %}</td></tr>
+                {% endfor %}
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if submission %}
+    <div class="card mb-3" id="submission">
+        <div class="card-header queue-section-header">
+            <strong>Submission</strong>
+            <span class="ms-2">reported by the submit host
+                <span data-relative-time="{{ submission.reported_at|date:'c' }}"></span></span>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-sm table-striped mb-0">
+                <tr><td class="fw-bold" style="width:24%">Submit description</td>
+                    <td>{{ submission.submit_description }}
+                        <span class="text-muted ms-2">last changed {{ submission.modified }}</span></td></tr>
+                <tr><td class="fw-bold">Pilots may land on</td>
+                    <td>
+                        {% if submission.excluded_sites %}
+                        Excluded sites: {{ submission.excluded_sites|join:", " }}<br>
+                        {% endif %}
+                        {% if submission.excluded_site_nodes %}
+                        Excluded nodes:
+                        {% for n in submission.excluded_site_nodes %}{% if not forloop.first %}, {% endif %}{{ n.node }} at {{ n.site }}{% endfor %}
+                        {% endif %}
+                        {% if not submission.excluded_sites and not submission.excluded_site_nodes %}
+                        Nothing excluded.
+                        {% endif %}
+                    </td></tr>
+                {% if submission.pool.slots_total %}
+                <tr><td class="fw-bold">Pool</td>
+                    <td>{{ submission.pool.slots_total }} slots,
+                        {{ submission.pool.slots_admitted }} admitted by these requirements,
+                        {{ submission.pool.slots_excluded_now|default:"0" }} removed by the exclusions</td></tr>
+                {% endif %}
+                <tr><td class="fw-bold">Requirements</td>
+                    <td style="word-break: break-word">{{ submission.requirements|default:"—" }}</td></tr>
+                <tr><td class="fw-bold">Pilot wrapper</td>
+                    <td>{{ submission.executable|default:"—" }}</td></tr>
+                <tr><td class="fw-bold">Requests</td>
+                    <td>{{ submission.request_cpus|default:"—" }} cpu,
+                        {{ submission.request_memory|default:"—" }} memory,
+                        {{ submission.request_disk|default:"—" }} disk,
+                        duration category {{ submission.job_duration_category|default:"—" }}</td></tr>
+                <tr><td class="fw-bold">Worker limits</td>
+                    <td>ceiling {{ submission.max_workers|default:"—" }},
+                        {{ submission.max_new_workers_per_cycle|default:"—" }} new per cycle,
+                        {{ submission.workflow|default:"—" }} mode</td></tr>
+                {% if submission.schedd.workers %}
+                <tr><td class="fw-bold">Submit host workers</td>
+                    <td>{{ submission.schedd.workers.running }} running,
+                        {{ submission.schedd.workers.idle }} idle,
+                        {{ submission.schedd.workers.held }} held
+                        <span class="text-muted ms-2">all queues on that host, not this queue alone</span></td></tr>
+                {% endif %}
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    {% ai_assessment_panel panda_queue_metadata %}
+
+    <div class="mb-3">
+        <div class="d-flex align-items-baseline">
+            <h5 class="mb-1">Job outcomes · {{ queue_name }} · last 2 weeks</h5>
+            <a class="ms-3" href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='site' %}?site={{ queue_name|urlencode }}">State history in Snapper</a>
+        </div>
+        {% if site_outcomes_pie.pie %}
+        <div class="d-flex">
+            {% include 'monitor_app/_snapper_site_outcomes_pie.html' with site_outcomes=site_outcomes_pie %}
+        </div>
+        {% else %}
+        <p class="text-muted mb-0">No recorded job activity for this queue.</p>
+        {% endif %}
+    </div>
 
     {% if error %}
     <div class="alert alert-danger">{{ error }}</div>
     {% else %}
 
-    <div class="row">
+    <div class="row" id="schedconfig">
     {% for section_name, fields in sections %}
         {% if fields %}
         <div class="col-md-6 mb-3">
             <div class="card h-100">
-                <div class="card-header"><strong>{{ section_name }}</strong></div>
+                <div class="card-header queue-section-header"><strong>{{ section_name }}</strong></div>
                 <div class="card-body p-0">
                     <table class="table table-sm table-striped mb-0">
                     {% for key, value in fields.items %}
@@ -114,7 +437,7 @@
 
     {% if other %}
     <div class="card mb-3">
-        <div class="card-header">
+        <div class="card-header queue-section-header" id="other-parameters">
             <strong>All Other Parameters</strong>
             <span class="text-muted ms-2">({{ other|length }} fields)</span>
         </div>
@@ -131,8 +454,56 @@
     </div>
     {% endif %}
 
+    <!-- The observed counterpart to the declared schedconfig below: what the
+         queue delivered, per processor, over a month of its own jobs. Cached,
+         since the query scans that month (swf inflight
+         swf-node-map-benchmarks). -->
+    {% if observed.processors %}
+    <div class="card mb-3" id="observed">
+        <div class="card-header queue-section-header"><strong>What this queue actually is</strong>
+            <span class="text-muted ms-2">{{ observed.nodes }} node{{ observed.nodes|pluralize }},
+            {{ observed.jobs }} jobs over {{ observed.days }} days; the queue's own middle
+            efficiency is {{ observed.median_efficiency|default:"—" }} and its failure rate
+            {{ observed.failure_rate|default:"—" }}</span>
+        </div>
+        <div class="card-body">
+            <table class="table table-striped table-bordered table-sm align-middle w-auto mb-2 swf-sortable" data-swf-order="2,desc">
+                <thead><tr><th>Processor</th><th class="text-end">Nodes</th>
+                    <th class="text-end">Jobs</th><th class="text-end">Finished</th>
+                    <th class="text-end">Failure rate</th><th class="text-end">CPU efficiency</th>
+                    <th class="text-end">Memory, median</th><th class="text-end">Memory, 90th</th>
+                    {% if observed.measured %}<th class="text-end" title="CPU seconds per simulated event, the job-weighted mean over this queue's workloads, from the payload reports">Simulation, CPU s/event</th>
+                    <th class="text-end" title="CPU seconds per reconstructed event, the job-weighted mean over this queue's workloads, from the payload reports">Reconstruction, CPU s/event</th>{% endif %}
+                    <th>Reading</th></tr></thead>
+                <tbody>
+                {% for p in observed.processors %}
+                    <tr>
+                        <td>{{ p.processor }}</td>
+                        <td class="text-end">{{ p.nodes }}</td>
+                        <td class="text-end">{{ p.jobs }}</td>
+                        <td class="text-end">{{ p.finished }}</td>
+                        <td class="text-end">{{ p.failure_rate|default_if_none:"—" }}</td>
+                        <td class="text-end">{{ p.efficiency|default_if_none:"—" }}</td>
+                        <td class="text-end">{% if p.rss_median_mb %}{{ p.rss_median_mb }} MB{% else %}—{% endif %}</td>
+                        <td class="text-end">{% if p.rss_p90_mb %}{{ p.rss_p90_mb }} MB{% else %}—{% endif %}</td>
+                        {% if observed.measured %}<td class="text-end"{% if p.measured_jobs %} title="{{ p.measured_jobs }} measured jobs"{% endif %}>{{ p.sim_cpu_per_event|default_if_none:"—" }}</td>
+                        <td class="text-end"{% if p.measured_jobs %} title="{{ p.measured_jobs }} measured jobs"{% endif %}>{{ p.reco_cpu_per_event|default_if_none:"—" }}</td>{% endif %}
+                        <td>{% if p.failing %}<span class="text-danger">fails far more than this queue does</span>{% endif %}
+                            {% if p.slow and p.failing %}<br>{% endif %}
+                            {% if p.slow %}<span class="text-danger">delivers below this queue's rate</span>{% endif %}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            <p class="mb-0 text-muted">CPU efficiency and memory are taken over finished jobs
+               only: a job that died in its first minute consumed no CPU, so including
+               failures would measure the failure rate and call it a slow processor.</p>
+        </div>
+    </div>
+    {% endif %}
+
     <div class="card mb-3">
-        <div class="card-header">
+        <div class="card-header queue-section-header" id="full-json">
             <strong>Full JSON</strong>
             <button class="btn btn-sm btn-outline-secondary float-end" onclick="
                 var el = document.getElementById('json-block');

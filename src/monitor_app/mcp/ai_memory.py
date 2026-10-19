@@ -12,6 +12,7 @@ from django.utils import timezone
 from asgiref.sync import sync_to_async
 
 from monitor_app.mcp import mcp
+from monitor_app.mcp.common import requires_authority
 
 from ..models import AIMemory
 
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 @mcp.tool()
+@requires_authority
 async def swf_record_ai_memory(
     username: str,
     session_id: str,

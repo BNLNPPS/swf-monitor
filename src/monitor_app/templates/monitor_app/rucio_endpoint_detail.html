@@ -69,12 +69,36 @@
                                     <th>Updated:</th>
                                     <td>{{ endpoint.updated_at|fmt_dt }}</td>
                                 </tr>
+                                <tr>
+                                    <th title="What CRIC declares for this endpoint: the status rule in force or the next downtime window, read by the ops agent every ten minutes">Declared:</th>
+                                    <td>
+                                        {% for r in declared_now.active %}<div class="{{ 'offline'|state_class }} px-1">{{ r.line }}</div>{% endfor %}
+                                        {% for r in declared_now.future %}<div class="{{ 'pending'|state_class }} px-1">{{ r.line }}</div>{% endfor %}
+                                        {% if not declared_now.active and not declared_now.future %}<span class="text-muted">nothing declared now</span>{% endif %}
+                                    </td>
+                                </tr>
                             </table>
                         </div>
                     </div>
+                    {% if declared_history %}
+                    <h6 class="mt-2 mb-1">Declared history</h6>
+                    <table class="table table-sm table-striped mb-0 align-middle swf-sortable">
+                        <thead><tr><th>Declared</th><th>By</th><th>Rule or window</th><th>Standing</th></tr></thead>
+                        <tbody>
+                        {% for r in declared_history %}
+                        <tr>
+                            <td class="text-nowrap">{{ r.when }}</td>
+                            <td>{{ r.declared_by }}</td>
+                            <td>{{ r.line }}</td>
+                            <td class="{{ r.standing_class }}">{{ r.standing }}{% if r.cleared_when %} {{ r.cleared_when }}{% endif %}</td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                    {% endif %}
                 </div>
             </div>
-            
+
             {% if summary_fields %}
             <div class="card mb-4">
                 <div class="card-header">

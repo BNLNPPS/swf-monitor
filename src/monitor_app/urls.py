@@ -1,5 +1,6 @@
 from django.urls import path, include
 from . import alarm_views
+from .viewdir.user_admin import user_admin_page
 from .views import (
     home,
     authenticated_home,
@@ -92,10 +93,23 @@ from .viewdir.pandamon import (
     panda_task_detail,
     panda_errors_list,
     panda_errors_datatable_ajax,
+    panda_segfaults,
+    panda_segfault_detail,
+    panda_segfault_findings,
+    panda_segfault_reproductions,
+    panda_segfault_dig,
+    panda_segfault_reproduce,
+    panda_segfault_package,
+    panda_segfault_diagnose,
     panda_diagnostics_list,
     panda_diagnostics_datatable_ajax,
     panda_view_text,
     panda_payload_log,
+    panda_payload_report,
+    panda_node_declines,
+    panda_batch_record,
+    panda_harvester_stdout,
+    panda_allocation_detail,
     epic_queues_list,
     epic_queue_detail,
     epic_queue_description_update,
@@ -110,6 +124,11 @@ from .viewdir.system_status import (
 
 # Import iDDS database views from new dedicated module
 from .viewdir.analysis import analysis_view
+from .viewdir.panda_census import panda_queue_census_json
+from .viewdir.panda_node_guard import (panda_node_guard, panda_node_guard_json,
+                                       panda_node_guard_set)
+from .viewdir.panda_storage_doors import panda_storage_doors
+from pcs.views import front_page as panda_front
 from .viewdir.idds_database import (
     idds_database_tables_list,
     idds_database_tables_datatable_ajax,
@@ -149,6 +168,8 @@ urlpatterns = [
     path('<int:pk>/update/', system_agent_update, name='system_agent_update'),
     path('system_agents/<int:pk>/delete/', system_agent_delete, name='system_agent_delete'),
     path('account/', account_view, name='account'),
+    # Who may act on the system (docs/AUTHORITY.md).
+    path('users/admin/', user_admin_page, name='user_admin'),
     path('logs/summary/', log_summary, name='log_summary'),
     path('logs/summary/datatable/', log_summary_datatable_ajax, name='log_summary_datatable_ajax'),
     path('logs/', log_list, name='log_list'),
@@ -231,6 +252,10 @@ urlpatterns = [
     path('panda-queues/', panda_queues_list, name='panda_queues_list'),
     path('panda-queues/datatable/', panda_queues_datatable_ajax, name='panda_queues_datatable_ajax'),
     path('panda-queues/json/', panda_queues_all_json, name='panda_queues_all_json'),
+    # The per-queue job census: the dispatcher's pressure input
+    # (monitor_app/panda/census.py); under panda/ so the external face
+    # serves it.
+    path('panda/queues/census/json/', panda_queue_census_json, name='panda_queue_census_json'),
     path('panda-queues/update-from-github/', update_panda_queues_from_github, name='update_panda_queues_from_github'),
     path('panda-queues/<str:queue_name>/', panda_queue_detail, name='panda_queue_detail'),
     path('panda-queues/<str:queue_name>/json/', panda_queue_json, name='panda_queue_json'),
@@ -265,11 +290,26 @@ urlpatterns = [
 
     # PanDA Production Monitor
     path('panda/activity/', panda_activity, name='panda_activity'),
+    # The pressure front: what production does with the ready tasks PCS
+    # delivers (swf-epicprod docs/CONTINUOUS_PRODUCTION.md); the view is
+    # the production domain's, mounted here under the PanDA activity tree.
+    path('panda/front/', panda_front, name='panda_front'),
+    # The node guard: black hole nodes judged from the job record
+    # (site-canary docs/NODE_GUARD.md).
+    path('panda/node-guard/', panda_node_guard, name='panda_node_guard'),
+    # The storage doors production writes through, used hourly
+    path('panda/storage-doors/', panda_storage_doors, name='panda_storage_doors'),
+    path('panda/node-guard/json/', panda_node_guard_json, name='panda_node_guard_json'),
+    path('panda/node-guard/set/', panda_node_guard_set, name='panda_node_guard_set'),
     path('panda/jobs/', panda_jobs_list, name='panda_jobs_list'),
     path('panda/jobs/datatable/', panda_jobs_datatable_ajax, name='panda_jobs_datatable_ajax'),
     path('panda/jobs/filter-counts/', panda_jobs_filter_counts, name='panda_jobs_filter_counts'),
     path('panda/jobs/<int:pandaid>/', panda_job_detail, name='panda_job_detail'),
     path('panda/jobs/<int:pandaid>/payload-log/', panda_payload_log, name='panda_payload_log'),
+    path('panda/jobs/<int:pandaid>/payload-report/', panda_payload_report, name='panda_payload_report'),
+    path('panda/jobs/<int:pandaid>/batch-record/', panda_batch_record, name='panda_batch_record'),
+    path('panda/jobs/<int:pandaid>/harvester-stdout/', panda_harvester_stdout, name='panda_harvester_stdout'),
+    path('panda/allocations/<str:harvesterid>/<int:workerid>/', panda_allocation_detail, name='panda_allocation_detail'),
     path('epicprod/jobs/<int:pandaid>/', panda_job_detail, name='epicprod_job_detail'),
     path('epicprod/jobs/<int:pandaid>/refresh/', epicprod_job_refresh, name='epicprod_job_refresh'),
     path('panda/view-text/', panda_view_text, name='panda_view_text'),
@@ -279,8 +319,17 @@ urlpatterns = [
     path('panda/tasks/<int:jeditaskid>/', panda_task_detail, name='panda_task_detail'),
     path('panda/errors/', panda_errors_list, name='panda_errors_list'),
     path('panda/errors/datatable/', panda_errors_datatable_ajax, name='panda_errors_datatable_ajax'),
+    path('panda/segfaults/', panda_segfaults, name='panda_segfaults'),
+    path('panda/segfaults/findings/', panda_segfault_findings, name='panda_segfault_findings'),
+    path('panda/segfaults/reproductions/', panda_segfault_reproductions, name='panda_segfault_reproductions'),
+    path('panda/segfaults/<str:key>/', panda_segfault_detail, name='panda_segfault_detail'),
+    path('panda/segfaults/<str:key>/dig/', panda_segfault_dig, name='panda_segfault_dig'),
+    path('panda/segfaults/<str:key>/reproduce/', panda_segfault_reproduce, name='panda_segfault_reproduce'),
+    path('panda/segfaults/<str:key>/package/', panda_segfault_package, name='panda_segfault_package'),
+    path('panda/segfaults/<str:key>/diagnose/', panda_segfault_diagnose, name='panda_segfault_diagnose'),
     path('panda/diagnostics/', panda_diagnostics_list, name='panda_diagnostics_list'),
     path('panda/diagnostics/datatable/', panda_diagnostics_datatable_ajax, name='panda_diagnostics_datatable_ajax'),
+    path('panda/node-declines/', panda_node_declines, name='panda_node_declines'),
     path('panda/epic-queues/', epic_queues_list, name='epic_queues_list'),
     path('panda/epic-queues/<str:queue_name>/', epic_queue_detail, name='epic_queue_detail'),
     path('panda/epic-queues/<str:queue_name>/description/', epic_queue_description_update,
@@ -294,6 +343,9 @@ urlpatterns = [
          alarm_views.alarm_run_report, name='alarm_run_report'),
     path('alarms/<str:entry_id>/task/',
          alarm_views.alarm_task_history, name='alarm_task_history'),
+    path('alarms/pings/create/', alarm_views.ping_create, name='ping_create'),
+    path('alarms/pings/<str:ping_uuid>/fulfil/', alarm_views.ping_fulfil,
+         name='ping_fulfil'),
     path('alarms/teams/new/', alarm_views.team_new, name='team_new'),
     path('alarms/teams/create/', alarm_views.team_create, name='team_create'),
     path('alarms/teams/<str:at_name>/edit/', alarm_views.team_edit, name='team_edit'),

@@ -13,8 +13,8 @@ and the error-state component in [SNAPPER_ERRORS.md](SNAPPER_ERRORS.md),
 whose recorded events it reuses. The server-host reporter is documented
 in [PANDA_SERVER_REPORTER.md](PANDA_SERVER_REPORTER.md).
 
-This is a design document; the sections below are the agreed plan of
-record for implementation.
+The platform component, the Platform view and the platform-health alarm
+are in production; this document remains their design of record.
 
 ## Historical questions
 
@@ -41,8 +41,8 @@ A component, internal name `platform`, in the epicprod scope, published
 by a maintainer module (`monitor_app/snapper_platform.py`) beside the
 PanDA activity and error-state maintainers on the same 5-minute
 System-status refresh. Publisher identity `swf-monitor:panda-platform`,
-assessment policy `swf-panda-platform-v1`, schema version 1, canonical
-JSON bounded at 64 KiB. Every publication carries the owner's assessed
+assessment policy `swf-panda-platform-v1`, schema version 1. Every
+publication carries the owner's assessed
 values; the view derives nothing from raw records (DESIGN.md,
 invariants 1 and 4).
 
@@ -91,18 +91,49 @@ its latency is both a symptom and a cause. Question: was pandamon
 answering, at the cost its consumers pay.
 
 **Server host (delivered by the reporter).** Web-tier request counts
-per endpoint class and status class for the interval (updateJob,
-getJob, harvester, other; 2xx, 4xx, 5xx), error-log marker counts,
-per-daemon liveness and seconds since last log line, Watcher kills per
-interval; the WSGI tier as process count, total resident memory, and
-restarts in the interval; host load average, memory used and
-available, swap, and root and /var volume use; busy and idle web
-workers when mod_status is enabled. These fields are absent until the
-reporter runs and carry a `reported_at`; the maintainer publishes
+per endpoint class and status class for the interval (update_job,
+acquire_jobs, harvester, other; 2xx, 4xx, 5xx) with the web tier's
+declared capacity, error-log marker counts, seconds since the last
+write of every daemon log, the four PanDA units with their restart
+counts, the httpd and pandaserver processes as counts and resident
+memory, database reachability from the host; host load average,
+memory used and available, swap, and root and /var volume use; busy
+and idle web workers when mod_status is enabled. These fields are
+absent until the reporter runs; the maintainer publishes
 `reporter_status` as `fresh`, `stale`, or `absent` against a SysConfig
 threshold, and crossing that threshold is a semantic change that
-publishes (DESIGN.md, Maintained assessments). Question: what the
-server host itself saw.
+publishes (DESIGN.md, Maintained assessments). Verdicts cover the four
+PanDA units, silence of the judged daemons, the 5xx share over enough
+requests, and saturation, timeout, truncation, crash and memory
+markers in the web tier's error log. Question: what the server host
+itself saw.
+
+**Submit host (delivered by the reporter).** The submission side of OSG
+production, which no PanDA record carries: harvester daemon liveness as
+the age of each daemon's last log write, the submit schedd's workers
+idle, running and held with their hold reasons, the pool as the
+submitter sees it (total slots, slots the queue's requirements admit,
+slots the exclusions remove), the exclusion counts in force, and host
+load, memory and volumes. Verdicts cover held workers, daemon silence,
+and the harvester and schedd processes. The daemons are split: only
+those that tick regardless of demand are judged, because the submitters
+write only when there is work and their quiet on an idle host is
+correct. Question: was the submission side working, and where were
+pilots allowed to go. A site refusing every submission — GREX for
+thirteen hours on 2026-09-06, unnoticed — holds workers here and
+appears nowhere else.
+
+**Batch pools (delivered by the pool reporter).** For each pool a
+collector answers for us about — today the SCDF shared pool, where the
+E1 and BNL queues run: slots total, claimed and free, the claimed
+fraction, cores total and claimed, and the pool's own queue, jobs
+running, idle and held across every schedd in it
+([POOL_REPORTER.md](POOL_REPORTER.md)). Question: was the wait a
+worker suffered explained by the pool it waited in. A pool is not
+inferred from PanDA records, which carry nothing about it, and the OSG
+pool is not repeated here: its collector answers the submit host rather
+than us, and what it tells the submit host is in the submit-host group
+above.
 
 **swf-monitor host (measured locally by the maintainer).**
 swf-monitor's own tier on pandaserver02: Apache WSGI process count and
@@ -136,19 +167,31 @@ modification times are overwritten, so no past instant's staleness
 survives in the records. The view states the record's start rather
 than implying earlier coverage.
 
+The submit host's quantities are in the same position and cannot be
+backfilled at all. Every one of them is a reading of the present: the
+pool's composition on a past day is recorded nowhere, a daemon's log
+age is current by construction, and held workers at a past instant are
+not kept once the schedd releases them. Their panels are therefore
+empty before the reporter's first run on 2026-09-07 and accrue from
+there, which is the honest rendering rather than a gap to be filled.
+
 ## The server-host reporter
 
-The reporter agent on pandaserver01 (PANDA_SERVER_REPORTER.md) posts
-one record per 5-minute interval to a new authenticated ingest,
-`POST /api/snapper/platform/report/`, on the pattern of the episode
-write endpoints (token or session authentication, an authorized
-reporter identity in the body). The ingest validates the record against
-a declared shape and stores it as the current server-host report (one
-row, replaced per post, with `reported_at`); the maintainer reads it at
-publication and merges it into the component. A buffered backlog posts
-as a batch and the ingest keeps the newest; the record's own interval
-stamps stay with it. The reporter never publishes to Snapper directly:
-the maintainer remains the single owner of the component.
+Host reporters post to `POST /api/host-reports/<host>/`, authenticated
+by a per-host token. The ingest stores each record in the
+cached-product store under a key naming the host, so every reporter has
+its own record with the time it was delivered and none can overwrite
+another's; the maintainer reads them at publication and merges each
+into its own group. A record the monitor cannot take is buffered on the
+reporting host and posts on its next run. The reporter never publishes
+to Snapper directly: the maintainer remains the single owner of the
+component.
+
+The endpoint is keyed by host because there is more than one reporter:
+the OSG submit host's ([OSG_SUBMIT_REPORTER.md](OSG_SUBMIT_REPORTER.md))
+and the PanDA server host's
+([PANDA_SERVER_REPORTER.md](PANDA_SERVER_REPORTER.md)), both in
+production since 2026-09-07 on a five-minute cadence.
 
 ## The Platform view
 
@@ -159,9 +202,14 @@ over the `platform`, `panda`, and `errors` components' snaps, and its
 own detail rendering. Its families are absent from the compact scope
 report; the scope's front door does not grow.
 
-**Panels, in order — the platform's own quantities first, then the
-load and consequence panels beneath them for correlation by eye —
-each family's control row docked above its panel:**
+**Panels, in seven sections, each under a band naming the machine or
+subject it is about — the platform's own quantities first, then the
+production activity beneath them for correlation by eye — each
+family's control row docked above its panel. The sections: Pilot
+heartbeats (1–2), PanDA database (3), PanDA server host (4–6),
+swf-monitor host (6), Batch pool (5b), Submit hosts, Production
+activity (7–9). The submit host's panels are described under The
+platform component above.**
 
 1. *Heartbeats* — received per interval and starts per interval.
    Starts are in practice a subset of the heartbeats received (a
@@ -196,14 +244,28 @@ each family's control row docked above its panel:**
 4. *Server latency* — milliseconds; a timeout records at the timeout
    value. *pandamon latency* follows on its own panel: the front
    page and the worker-stats query, same treatment.
-5. *Web tier* — request rates by endpoint class and the 5xx count,
-   present when the reporter reports; daemon liveness renders as lanes
-   above the panels (per-daemon continuous lanes on the health-lane
-   mechanism: green alive, failure color silent), so a stalled
-   copyArchive is a red band, not a number.
-6. *Hosts* — per host, PanDA server and swf-monitor: load average; memory used;
-   volume use as percent, one line per volume; WSGI, ASGI, and agent
-   resident memory; service liveness as lanes beside the daemon lanes.
+5. *PanDA server requests* — requests per minute by endpoint class
+   (acquire_jobs, update_job, other pilot calls, harvester, the
+   schedconfig cache, statistics, other), stacked, as rates over the
+   reporter's own interval; *5xx responses* per interval on its own
+   panel, since on the request axis it is a hairline; *daemon silence*
+   as the oldest log age among the judged daemons, those that write
+   regardless of demand (the pilot API, copyArchive, the brokers and
+   the adder write only when there is work and are recorded, not
+   judged); *database reachability from the server host* as TCP
+   connect latency. All present when the reporter reports.
+5b. *Batch pool* — the claimed fraction on its own 0–1 scale; the
+   pool's queue, jobs idle and running, on a second panel; claimed and
+   free slots stacked on a third. Fullness and queue depth cannot share
+   an axis: a fraction against tens of thousands of jobs draws as a
+   flat line. The panels are empty before the pool reporter's first run
+   on 2026-09-08 and accrue from there, as the submit host's do.
+6. *Host resources* — for the PanDA server host, under its own band,
+   and for the swf-monitor host under its own: load average (1 and 15
+   minutes ticked, 5 unticked); memory used; volume use as percent,
+   one line per volume; resident memory of the httpd and pandaserver
+   processes on the server host and of WSGI, ASGI and the agent on the
+   monitor host. Unit and service state is on the card.
 7. *Jobs in flight* — the scope's in-flight jobs family (by state,
    stacked) with running cores as the overlay line, as the Site view
    draws them.
@@ -270,8 +332,10 @@ alarm engine's job ([alarms.md](alarms.md)): the
 `panda_platform_health` alarm reads the latest published component on
 each engine tick and raises one detection per metric in warning —
 heartbeat yield, heartbeat staleness, database connections, server
-latency, pandamon latency, swf-monitor volumes, swf-monitor services —
-plus one when the
+latency, pandamon latency, swf-monitor volumes, swf-monitor services,
+the submit host's held workers, daemon silence and processes, the
+server host's units, daemon silence, 5xx share and web-tier error
+markers — plus one when the
 component itself is absent, unreadable, or silent beyond
 `stale_after_minutes`. Heartbeat verdicts are suppressed below
 `min_running` running jobs, where the rates are noise. The thresholds
@@ -394,14 +458,15 @@ query.
 - swf-monitor: `monitor_app/snapper_platform.py` (maintainer;
   registration, projection, thresholds), invoked from
   `scripts/refresh-system-status.py` after the error maintainer; the
-  server-host report model and `viewdir/snapper_platform_api.py`
-  ingest; provider additions in `snapper_providers.py` (curve
-  extraction `plat_` ids, families, the Platform focus view declaration
-  listing its three components, the platform card, daemon lanes through
-  `lane_entries`); the card kind in `_snapper_cards.html`; a
-  `panda-platform` collector in `system_status.py`; the reporter script
-  `scripts/panda-server-reporter.py` (standard library only) and its
-  unit file under `tools/`; the alarm module
+  host-report ingest `monitor_app/host_reports.py` over the
+  cached-product store; provider additions in `snapper_providers.py`
+  (curve extraction under `pl` ids, families, the Platform focus view
+  declaration listing its three components, the platform card and its
+  summary); the card kind in `_snapper_cards.html`; a
+  `panda-platform` collector in `system_status.py`; the reporter
+  scripts `scripts/panda-server-reporter.py` and
+  `scripts/osgsub-reporter.py` (standard library only, cron on their
+  hosts); the alarm module
   `alarms/swf_alarms/alarms/panda_platform_health.py` with its
   `alarm_panda_platform_health` config row; this document and the
   SNAPPER.md maintainer list.

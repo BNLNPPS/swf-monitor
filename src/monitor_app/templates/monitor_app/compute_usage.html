@@ -26,6 +26,20 @@
   }
   .usage-sort[data-direction="asc"] .usage-sort-up,
   .usage-sort[data-direction="desc"] .usage-sort-down { color: #0d6efd; }
+  .usage-expand {
+    border: 0; background: none; padding: 0 .35rem 0 0; font-size: 1.05rem;
+    line-height: 1; color: #0d6efd; cursor: pointer; vertical-align: -1px;
+  }
+  .usage-expand[aria-expanded="true"] { transform: rotate(90deg); display: inline-block; padding: 0 0 0 .35rem; }
+  tr.usage-child td, tr.usage-child th { background: rgba(13, 110, 253, .06); }
+  tr.usage-child td.usage-child-name, tr.usage-child th.usage-child-name { padding-left: 2.2rem; }
+  tr.usage-child-head th { font-weight: 600; border-bottom: 2px solid #9ec5fe; }
+  tr.usage-child-info td { font-weight: 400; background: rgba(13, 110, 253, .12); padding: .5rem 1rem .5rem 2.2rem; white-space: nowrap; }
+  .usage-child-sort {
+    border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer;
+  }
+  .usage-child-sort[data-direction="asc"] .usage-sort-up,
+  .usage-child-sort[data-direction="desc"] .usage-sort-down { color: #0d6efd; }
   #usage-site-table th.usage-sort-active {
     box-shadow: inset 0 -2px #0d6efd;
   }
@@ -73,7 +87,7 @@
   <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
     <div>
       <h1 class="h3 mb-1">Site compute usage</h1>
-      <div class="text-muted">Finished PanDA jobs, grouped by computing site and completion time, with failed job counts alongside.</div>
+      <div class="text-muted">Finished PanDA jobs{% if work %} of {{ work_label }} alone{% else %}, all work{% endif %}, grouped by computing site and completion time, with failed job counts alongside.</div>
     </div>
   </div>
 
@@ -86,7 +100,7 @@
     {% endfor %}
   </div>
 
-  <form method="get" class="row g-2 align-items-end mb-3" id="usage-period-form">
+  <form method="get" class="row g-2 align-items-end mb-3" id="usage-period-form" data-default-start="{{ default_start }}" data-default-end="{{ default_end }}">
     <div class="col-sm-3 col-lg-2">
       <label class="form-label mb-1" for="usage-start">Start date</label>
       <input class="form-control form-control-sm" id="usage-start" name="start" type="date" value="{{ start }}" required>
@@ -103,10 +117,19 @@
       </select>
     </div>
     <div class="col-sm-3 col-lg-2">
+      <label class="form-label mb-1" for="usage-work" title="All work that ran at the queues, or one processing type's jobs alone">Work</label>
+      <select class="form-select form-select-sm" id="usage-work" name="processingtype">
+        <option value=""{% if not work %} selected{% endif %}>All work</option>
+        {% for value, label in work_options.items %}
+        <option value="{{ value }}"{% if work == value %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-sm-3 col-lg-2">
       <button class="btn btn-sm btn-primary" type="submit">Apply period</button>
     </div>
-    <div class="col-lg-4 text-lg-end small">
-      <a id="usage-json-link" href="{% url 'monitor_app:compute_usage_data' %}?start={{ start|urlencode }}&amp;end={{ end|urlencode }}&amp;bucket={{ bucket|urlencode }}">JSON data</a>
+    <div class="col-lg-2 text-lg-end small">
+      <a id="usage-json-link" href="{% url 'monitor_app:compute_usage_data' %}?start={{ start|urlencode }}&amp;end={{ end|urlencode }}&amp;bucket={{ bucket|urlencode }}{% if work %}&amp;processingtype={{ work|urlencode }}{% endif %}">JSON data</a>
     </div>
   </form>
 
@@ -114,11 +137,11 @@
   <div class="alert alert-danger">{{ error }}</div>
   {% else %}
   <div class="row g-2 mb-3">
-    <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted">Jobs</div><strong id="usage-jobs">—</strong></div></div>
+    <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted">Finished jobs</div><strong id="usage-jobs">—</strong></div></div>
     <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted">Failed jobs</div><strong id="usage-failed">—</strong></div></div>
     <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted">Allocated core-hours</div><strong id="usage-allocated">—</strong></div></div>
-    <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted">Used core-hours</div><strong id="usage-used">—</strong></div></div>
-    <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted">Allocation efficiency</div><strong id="usage-efficiency">—</strong></div></div>
+    <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted" title="CPU consumed by finished jobs">Productive core-hours</div><strong id="usage-used">—</strong></div></div>
+    <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted" title="Used CPU of finished jobs over the allocation held by every job that ran">Allocation efficiency</div><strong id="usage-efficiency">—</strong></div></div>
   </div>
 
   <div class="usage-layout">
@@ -130,7 +153,7 @@
             <label class="me-1 fw-bold" for="usage-metric">Metric</label>
             <select class="form-select form-select-sm d-inline-block w-auto" id="usage-metric">
               <option value="allocated_core_hours">Allocated core-hours</option>
-              <option value="used_core_hours">Used core-hours</option>
+              <option value="used_core_hours">Productive core-hours</option>
               <option value="failed_count">Failed jobs</option>
             </select>
           </div>
@@ -152,12 +175,17 @@
             <button type="button" class="btn btn-sm btn-link p-0" id="usage-sites-none">none</button>
           </span>
         </div>
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" id="usage-include-test"{% if include_test %} checked{% endif %}>
+          <label class="form-check-label small" for="usage-include-test" title="Test, CI, dev and pilot-test queues stay out of the plots and table unless ticked; production and unified queues are always in">Test queues</label>
+        </div>
         <div class="usage-site-list">
           {% for site in usage.by_site %}
-          <div class="form-check mb-1">
-            <input class="form-check-input usage-site" type="checkbox" checked
+          <div class="form-check mb-1"{% if site.is_test and not include_test %} hidden{% endif %}>
+            <input class="form-check-input usage-site" type="checkbox"{% if not site.is_test or include_test %} checked{% endif %}
+                   data-test="{% if site.is_test %}1{% else %}0{% endif %}"
                    value="{{ site.site }}" id="usage-site-{{ forloop.counter }}">
-            <label class="form-check-label small" for="usage-site-{{ forloop.counter }}">{{ site.site }}</label>
+            <label class="form-check-label small" for="usage-site-{{ forloop.counter }}">{% if site.label %}{{ site.label }} ({{ site.site }}){% else %}{{ site.site }}{% endif %}</label>
           </div>
           {% empty %}<span class="text-muted">No sites in this period.</span>{% endfor %}
         </div>
@@ -168,25 +196,52 @@
     <table class="table table-sm table-striped align-middle w-auto swf-latch-head" id="usage-site-table">
       <thead><tr>
         <th aria-sort="none"><button type="button" class="usage-sort" data-sort="site">Computing site<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
-        <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="jobs">Jobs<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+        <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="jobs">Finished jobs<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
         <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="failed">Failed jobs<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+        <th class="text-end" aria-sort="none" title="Failed jobs as a share of finished plus failed"><button type="button" class="usage-sort" data-sort="failpct">Failure %<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
         <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="allocated">Allocated core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
-        <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="used">Used core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+        <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="used">Productive core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
         <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="efficiency">Efficiency<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
         <th class="text-end" aria-sort="descending" title="Share of the selected metric across selected sites"><button type="button" class="usage-sort" data-sort="share" data-direction="desc">Compute usage %<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
       </tr></thead>
       <tbody>
         {% for site in usage.by_site %}
-        <tr data-site="{{ site.site }}">
-          <td><span class="usage-site-swatch d-inline-block me-1" data-site="{{ site.site }}"
-                    style="width:.75rem;height:.75rem" aria-hidden="true"></span>{{ site.site }}</td>
+        <tr data-site="{{ site.site }}"{% if site.execute_sites %} class="usage-parent"{% endif %}>
+          <td>{% if site.execute_sites %}<button type="button" class="usage-expand" data-site="{{ site.site }}" aria-expanded="false" title="Show the sites behind this pool">&#9656;</button>{% endif %}<span class="usage-site-swatch d-inline-block me-1" data-site="{{ site.site }}"
+                    style="width:.75rem;height:.75rem" aria-hidden="true"></span>{% if site.label %}{{ site.label }} ({{ site.site }}){% else %}{{ site.site }}{% endif %}{% if site.execute_sites %} <span class="usage-site-count text-muted"></span>{% endif %}</td>
           <td class="text-end usage-site-jobs">—</td>
           <td class="text-end usage-site-failed">—</td>
+          <td class="text-end usage-site-failpct">—</td>
           <td class="text-end usage-site-allocated">—</td>
           <td class="text-end usage-site-used">—</td>
           <td class="text-end usage-site-efficiency">—</td>
           <td class="text-end usage-site-share">—</td>
         </tr>
+        {% if site.execute_sites %}
+        <tr class="usage-child usage-child-info" data-parent="{{ site.site }}" hidden><td colspan="8" class="usage-child-info-cell"></td></tr>
+        <tr class="usage-child usage-child-head" data-parent="{{ site.site }}" hidden>
+          <th class="usage-child-name"><button type="button" class="usage-child-sort" data-sort="site">Execute site<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+          <th class="text-end"><button type="button" class="usage-child-sort" data-sort="jobs" data-direction="desc">Finished jobs<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+          <th class="text-end"><button type="button" class="usage-child-sort" data-sort="failed">Failed jobs<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+          <th class="text-end"><button type="button" class="usage-child-sort" data-sort="failpct">Failure %<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+          <th class="text-end"><button type="button" class="usage-child-sort" data-sort="allocated">Allocated core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+          <th class="text-end"><button type="button" class="usage-child-sort" data-sort="used">Productive core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+          <th class="text-end"><button type="button" class="usage-child-sort" data-sort="efficiency">Efficiency<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+          <th class="text-end" title="Finished jobs as a share of the pool's finished jobs in the period"><button type="button" class="usage-child-sort" data-sort="share">Share of pool jobs %<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+        </tr>
+        {% endif %}
+        {% for execute_site in site.execute_sites %}
+        <tr class="usage-child" data-parent="{{ site.site }}" data-execute="{{ execute_site }}" hidden>
+          <td class="usage-child-name">{{ execute_site }}</td>
+          <td class="text-end ux-jobs">—</td>
+          <td class="text-end ux-failed">—</td>
+          <td class="text-end ux-failpct">—</td>
+          <td class="text-end ux-allocated">—</td>
+          <td class="text-end ux-used">—</td>
+          <td class="text-end ux-efficiency">—</td>
+          <td class="text-end ux-share">—</td>
+        </tr>
+        {% endfor %}
         {% endfor %}
       </tbody>
     </table>
@@ -195,10 +250,16 @@
 
   <p class="small text-muted">
     Period boundaries are Eastern time. Jobs are attributed by end time.
-    Allocated core-hours are allocated cores multiplied by wall time; used
-    core-hours are recorded CPU consumption time. Failed jobs are counted
-    by end time and contribute nothing to the core-hour and efficiency
-    metrics.
+    The OSG pool is one PanDA queue spanning many sites: its row expands
+    into the sites its jobs ran at in the selected period, the glidein
+    site the pilot reports on each job record (or, for older records,
+    the worker-node host's site); a job that never left the submit host
+    is listed as not dispatched, and a site's share is its share of the
+    pool.
+    Allocated core-hours are allocated cores multiplied by wall time for
+    every job that ran, finished or failed; productive core-hours are the
+    CPU consumed by finished jobs; efficiency is productive over allocated,
+    so every failure counts against it. Failed jobs are counted by end time.
   </p>
 
   {{ usage|json_script:"compute-usage-data" }}
@@ -215,13 +276,25 @@
     const bucketInput = document.getElementById('usage-bucket');
     const jsonLink = document.getElementById('usage-json-link');
     const metric = document.getElementById('usage-metric');
+    const includeTest = document.getElementById('usage-include-test');
     const tableBody = document.querySelector('#usage-site-table tbody');
-    const tableRows = [...tableBody.querySelectorAll('tr')];
+    const tableRows = [...tableBody.querySelectorAll('tr:not(.usage-child)')];
+    const childRows = site => [...tableBody.querySelectorAll(`tr.usage-child:not(.usage-child-head):not(.usage-child-info)[data-parent="${site}"]`)];
+    const childHead = site => tableBody.querySelector(`tr.usage-child-head[data-parent="${site}"]`);
+    const childInfo = site => tableBody.querySelector(`tr.usage-child-info[data-parent="${site}"]`);
+    const expanded = new Set(
+      (new URLSearchParams(window.location.search).get('open') || '').split(',').filter(Boolean));
     const sortButtons = [...document.querySelectorAll('.usage-sort')];
     let sortKey = 'share';
     let sortDirection = 'desc';
     const selected = () => new Set(boxes.filter(box => box.checked).map(box => box.value));
-    const fmt = value => Number(value || 0).toLocaleString(undefined, {minimumFractionDigits: 1, maximumFractionDigits: 1});
+    // Core-hours to the hour; a decimal only below ten, where it carries meaning.
+    const fmt = value => {
+      const number = Number(value || 0);
+      return number < 10
+        ? number.toLocaleString(undefined, {minimumFractionDigits: 1, maximumFractionDigits: 1})
+        : Math.round(number).toLocaleString();
+    };
     const colors = ['#636efa', '#ef553b', '#00cc96', '#ab63fa', '#ffa15a', '#19d3f3', '#ff6692', '#b6e880', '#ff97ff', '#fecb52', '#2f4b7c', '#a05195'];
     const siteColors = new Map((usage.by_site || []).map((row, index) => [row.site, colors[index % colors.length]]));
 
@@ -248,7 +321,7 @@
     });
 
     function emptyUsage() {
-      return {job_count: 0, allocated_core_hours: 0, used_core_hours: 0, wall_hours: 0, failed_count: 0};
+      return {job_count: 0, allocated_core_hours: 0, used_core_hours: 0, wall_hours: 0, failed_count: 0, failed_core_hours: 0};
     }
 
     function addUsage(target, source) {
@@ -257,6 +330,7 @@
       target.used_core_hours += Number(source.used_core_hours || 0);
       target.wall_hours += Number(source.wall_hours || 0);
       target.failed_count += Number(source.failed_count || 0);
+      target.failed_core_hours += Number(source.failed_core_hours || 0);
     }
 
     function weekStart(dateText) {
@@ -286,7 +360,118 @@
         }
         addUsage(plotTotals.get(key), point);
       });
-      return {siteTotals, plotRows: [...plotTotals.values()]};
+      // Execute-site totals for the pool-fed queues (the OSG pool): the
+      // same period filter, keyed by queue and execute site.
+      const executeTotals = new Map();
+      (usage.execute_series || []).forEach(point => {
+        const dateText = point.bucket_start.slice(0, 10);
+        if (dateText < start || dateText > end) return;
+        const key = `${point.site}\u0000${point.execute_site}`;
+        if (!executeTotals.has(key)) executeTotals.set(key, emptyUsage());
+        addUsage(executeTotals.get(key), point);
+      });
+      return {siteTotals, plotRows: [...plotTotals.values()], executeTotals};
+    }
+
+    // The OSG pool row expands inline into its execute sites, under a
+    // header row of its own with an independent sort (most jobs first
+    // by default); share is the site's finished jobs within the pool's.
+    const childSort = new Map();
+    function childSortState(queue) {
+      if (!childSort.has(queue)) childSort.set(queue, {key: 'jobs', direction: 'desc'});
+      return childSort.get(queue);
+    }
+    function renderChildren(data, sites, key) {
+      tableRows.filter(row => row.classList.contains('usage-parent')).forEach(parent => {
+        const queue = parent.dataset.site;
+        const head = childHead(queue);
+        const rows = childRows(queue);
+        const lookup = row => data.executeTotals.get(`${queue}\u0000${row.dataset.execute}`);
+        // Share is by finished job count within the pool.
+        const queueTotal = rows.reduce((sum, row) => {
+          const values = lookup(row);
+          return sum + (values ? Number(values.job_count || 0) : 0);
+        }, 0);
+        const open = expanded.has(queue) && !parent.hidden;
+        let present = 0;
+        rows.forEach(row => {
+          const values = lookup(row);
+          const empty = !values || (values.job_count + values.failed_count) === 0;
+          row.hidden = empty || !open;
+          if (empty) { row.dataset.jobs = 0; return; }
+          present += 1;
+          const attempts = values.job_count + values.failed_count;
+          const failpct = attempts ? 100 * values.failed_count / attempts : 0;
+          const efficiency = values.allocated_core_hours
+            ? 100 * values.used_core_hours / values.allocated_core_hours : 0;
+          const share = queueTotal ? 100 * values.job_count / queueTotal : 0;
+          const set = (cls, text) => { row.querySelector(cls).textContent = text; };
+          set('.ux-jobs', values.job_count.toLocaleString());
+          set('.ux-failed', values.failed_count.toLocaleString());
+          set('.ux-failpct', attempts ? failpct.toFixed(1) + '%' : '\u2014');
+          set('.ux-allocated', fmt(values.allocated_core_hours));
+          set('.ux-used', fmt(values.used_core_hours));
+          set('.ux-efficiency', values.allocated_core_hours ? efficiency.toFixed(1) + '%' : '\u2014');
+          set('.ux-share', queueTotal ? share.toFixed(1) + '%' : '\u2014');
+          row.dataset.jobs = values.job_count;
+          row.dataset.failed = values.failed_count;
+          row.dataset.failpct = failpct;
+          row.dataset.allocated = values.allocated_core_hours;
+          row.dataset.wasted = values.failed_core_hours;
+          row.dataset.used = values.used_core_hours;
+          row.dataset.efficiency = efficiency;
+          row.dataset.share = share;
+        });
+        const state = childSortState(queue);
+        const multiplier = state.direction === 'asc' ? 1 : -1;
+        rows.sort((a, b) => {
+          let comparison;
+          if (state.key === 'site') {
+            comparison = a.dataset.execute.localeCompare(b.dataset.execute, undefined, {numeric: true, sensitivity: 'base'});
+          } else {
+            comparison = Number(a.dataset[state.key] || 0) - Number(b.dataset[state.key] || 0);
+          }
+          if (comparison === 0) comparison = a.dataset.execute.localeCompare(b.dataset.execute);
+          return comparison * multiplier;
+        });
+        let anchor = parent;
+        const info = childInfo(queue);
+        if (info) {
+          info.hidden = !open || present === 0;
+          const pool = data.siteTotals.get(queue) || emptyUsage();
+          const poolAttempts = pool.job_count + pool.failed_count;
+          const parts = [
+            `${pool.job_count.toLocaleString()} finished`,
+            `${pool.failed_count.toLocaleString()} failed`,
+            poolAttempts ? `${(100 * pool.failed_count / poolAttempts).toFixed(1)}% failure` : null,
+            `${fmt(pool.allocated_core_hours)} allocated core-hours`,
+            `${fmt(pool.used_core_hours)} productive`,
+            pool.allocated_core_hours ? `${(100 * pool.used_core_hours / pool.allocated_core_hours).toFixed(1)}% efficiency` : null,
+            `${present} sites`,
+          ].filter(Boolean);
+          info.querySelector('.usage-child-info-cell').textContent = parts.join('\u2003\u00b7\u2003');
+          anchor.after(info);
+          anchor = info;
+        }
+        if (head) {
+          head.hidden = !open || present === 0;
+          head.querySelectorAll('.usage-child-sort').forEach(button => {
+            const active = button.dataset.sort === state.key;
+            button.dataset.direction = active ? state.direction : '';
+            button.closest('th').classList.toggle('usage-sort-active', active);
+          });
+          anchor.after(head);
+          anchor = head;
+        }
+        rows.forEach(row => { anchor.after(row); anchor = row; });
+        const count = parent.querySelector('.usage-site-count');
+        if (count) count.textContent = present ? `(${present} sites)` : '';
+        const toggle = parent.querySelector('.usage-expand');
+        if (toggle) {
+          toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+          toggle.hidden = present === 0;
+        }
+      });
     }
 
     function updateSortIndicators() {
@@ -316,7 +501,14 @@
         }
         return comparison * multiplier;
       });
-      tableRows.forEach(row => tableBody.appendChild(row));
+      tableRows.forEach(row => {
+        tableBody.appendChild(row);
+        const info = childInfo(row.dataset.site);
+        if (info) tableBody.appendChild(info);
+        const head = childHead(row.dataset.site);
+        if (head) tableBody.appendChild(head);
+        childRows(row.dataset.site).forEach(child => tableBody.appendChild(child));
+      });
     }
 
     function render() {
@@ -389,7 +581,8 @@
           failed: sum.failed + Number(row.failed_count || 0),
           allocated: sum.allocated + Number(row.allocated_core_hours || 0),
           used: sum.used + Number(row.used_core_hours || 0),
-        }), {jobs: 0, failed: 0, allocated: 0, used: 0});
+          wasted: sum.wasted + Number(row.failed_core_hours || 0),
+        }), {jobs: 0, failed: 0, allocated: 0, used: 0, wasted: 0});
       document.getElementById('usage-jobs').textContent = totals.jobs.toLocaleString();
       document.getElementById('usage-failed').textContent = totals.failed.toLocaleString();
       document.getElementById('usage-allocated').textContent = fmt(totals.allocated);
@@ -404,6 +597,9 @@
         if (!values) return;
         row.querySelector('.usage-site-jobs').textContent = values.job_count.toLocaleString();
         row.querySelector('.usage-site-failed').textContent = values.failed_count.toLocaleString();
+        const attempts = values.job_count + values.failed_count;
+        const failpct = attempts ? 100 * values.failed_count / attempts : 0;
+        row.querySelector('.usage-site-failpct').textContent = attempts ? failpct.toFixed(1) + '%' : '—';
         row.querySelector('.usage-site-allocated').textContent = fmt(values.allocated_core_hours);
         row.querySelector('.usage-site-used').textContent = fmt(values.used_core_hours);
         const efficiency = values.allocated_core_hours
@@ -415,12 +611,21 @@
           ? share.toFixed(1) + '%' : '—';
         row.dataset.jobs = values.job_count;
         row.dataset.failed = values.failed_count;
+        row.dataset.failpct = failpct;
         row.dataset.allocated = values.allocated_core_hours;
+        row.dataset.wasted = values.failed_core_hours;
         row.dataset.used = values.used_core_hours;
         row.dataset.efficiency = efficiency;
         row.dataset.share = share;
       });
       sortRows();
+      lastRender = {data, sites, key};
+      renderChildren(data, sites, key);
+    }
+
+    let lastRender = null;
+    function rerenderChildren() {
+      if (lastRender) renderChildren(lastRender.data, lastRender.sites, lastRender.key);
     }
 
     function updatePeriodButtons() {
@@ -433,12 +638,21 @@
     }
 
     function updateLocation() {
+      // Only state that differs from the default goes in the URL.
       const params = new URLSearchParams(window.location.search);
-      params.set('start', startInput.value);
-      params.set('end', endInput.value);
-      params.set('bucket', bucketInput.value);
-      params.set('metric', metric.value);
-      window.history.replaceState(null, '', `${window.location.pathname}?${params}`);
+      const setOrDrop = (name, value, isDefault) => {
+        if (isDefault) params.delete(name); else params.set(name, value);
+      };
+      const defaultPeriod = startInput.value === periodForm.dataset.defaultStart
+        && endInput.value === periodForm.dataset.defaultEnd;
+      setOrDrop('start', startInput.value, defaultPeriod);
+      setOrDrop('end', endInput.value, defaultPeriod);
+      setOrDrop('bucket', bucketInput.value, bucketInput.value === 'day');
+      setOrDrop('metric', metric.value, metric.value === 'allocated_core_hours');
+      setOrDrop('test', '1', !(includeTest && includeTest.checked));
+      setOrDrop('open', [...expanded].join(','), expanded.size === 0);
+      const query = params.toString();
+      window.history.replaceState(null, '', window.location.pathname + (query ? `?${query}` : ''));
       const dataUrl = new URL(jsonLink.href, window.location.href);
       dataUrl.search = params.toString();
       jsonLink.href = dataUrl.toString();
@@ -451,7 +665,48 @@
     }
 
     boxes.forEach(box => box.addEventListener('change', render));
+    tableBody.addEventListener('click', event => {
+      const toggle = event.target.closest('.usage-expand');
+      if (toggle) {
+        const site = toggle.dataset.site;
+        if (expanded.has(site)) expanded.delete(site); else expanded.add(site);
+        updateLocation();
+        rerenderChildren();
+        return;
+      }
+      const sort = event.target.closest('.usage-child-sort');
+      if (!sort) return;
+      const queue = sort.closest('tr').dataset.parent;
+      const state = childSortState(queue);
+      const nextKey = sort.dataset.sort;
+      if (nextKey === state.key) {
+        state.direction = state.direction === 'asc' ? 'desc' : 'asc';
+      } else {
+        state.key = nextKey;
+        state.direction = nextKey === 'site' ? 'asc' : 'desc';
+      }
+      rerenderChildren();
+    });
+    function applyTestQueues() {
+      const on = includeTest && includeTest.checked;
+      boxes.filter(box => box.dataset.test === '1').forEach(box => {
+        box.checked = !!on;
+        box.closest('.form-check').hidden = !on;
+      });
+    }
+    if (includeTest) includeTest.addEventListener('change', () => { applyTestQueues(); updateLocation(); render(); });
+    applyTestQueues();
     metric.addEventListener('change', () => { updateLocation(); render(); });
+    // The work selection changes the data itself, so it reloads the page
+    // with every other piece of URL state kept.
+    const workInput = document.getElementById('usage-work');
+    if (workInput) workInput.addEventListener('change', () => {
+      const params = new URLSearchParams(window.location.search);
+      if (workInput.value) params.set('processingtype', workInput.value);
+      else params.delete('processingtype');
+      const query = params.toString();
+      window.location.assign(window.location.pathname + (query ? `?${query}` : ''));
+    });
     sortButtons.forEach(button => button.addEventListener('click', () => {
       const nextKey = button.dataset.sort;
       if (nextKey === sortKey) {
@@ -482,9 +737,25 @@
         periodForm.appendChild(metricField);
       }
       metricField.value = metric.value;
+      let testField = periodForm.querySelector('input[name="test"]');
+      if (!testField) {
+        testField = document.createElement('input');
+        testField.type = 'hidden';
+        testField.name = 'test';
+        periodForm.appendChild(testField);
+      }
+      testField.value = includeTest && includeTest.checked ? '1' : '';
+      let openField = periodForm.querySelector('input[name="open"]');
+      if (!openField) {
+        openField = document.createElement('input');
+        openField.type = 'hidden';
+        openField.name = 'open';
+        periodForm.appendChild(openField);
+      }
+      openField.value = [...expanded].join(',');
     });
     document.getElementById('usage-sites-all').addEventListener('click', () => {
-      boxes.forEach(box => { box.checked = true; }); render();
+      boxes.forEach(box => { box.checked = !box.closest('.form-check').hidden; }); render();
     });
     document.getElementById('usage-sites-none').addEventListener('click', () => {
       boxes.forEach(box => { box.checked = false; }); render();

@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load swf_fmt %}
 
 {% block title %}epicprod - ePIC Production System - SWF Monitor{% endblock %}
 
@@ -133,13 +134,22 @@
     </script>
     {% endif %}
 
+    <div class="prod-workflow-header">
+        <h1>epicprod - ePIC Production {% if active_tab == 'ops' %}Operations{% else %}System{% endif %}</h1>
+        <p>ePIC experiment production requests, configuration, management and monitoring<br>
+        <a href="{% url 'monitor_app:prod_hub' %}?user_view=1"><strong>A simplified interface for non-expert users is available.</strong></a></p>
+        {% if declared_lines %}
+        <p class="prod-summary-strip" title="Declared downtime from CRIC: status rules in force and downtime windows coming, for the production queues and storage endpoints">
+            Declared downtime:
+            {% for d in declared_lines %}<span class="{% if d.state == 'in force' %}{{ 'offline'|state_class }}{% else %}{{ 'pending'|state_class }}{% endif %} px-1">{% if d.kind == 'queue' %}<a href="{% url 'monitor_app:epic_queue_detail' d.target %}#declared" style="color: inherit;">{{ d.target }}</a>{% else %}{{ d.target }}{% endif %} {{ d.line }}</span>{% if not forloop.last %} {% endif %}{% endfor %}
+        </p>
+        {% endif %}
+        {% include 'monitor_app/_campaign_completion_panel.html' %}
+    </div>
+
     {% if active_tab == 'ops' %}
     {% include 'pcs/dashboard.html' %}
     {% else %}
-    <div class="prod-workflow-header">
-        <h1>epicprod - ePIC Production System</h1>
-        <p>ePIC experiment production requests, configuration, management and monitoring</p>
-    </div>
 
     <div class="workflow-grid">
         <section class="workflow-stage">
@@ -153,12 +163,15 @@
                     </div>
                     <div class="workflow-link-desc">Compose a production request against existing configurations</div>
                 </div>
+                {% comment %}The Google Form intake is retired (2026-09-10); the row stays in the code and is not shown.{% endcomment %}
+                {% if False %}
                 <div class="workflow-link-row" title="The Google request form, the current external intake">
                     <div class="workflow-link-line">
                         <strong><a href="https://docs.google.com/forms/d/e/1FAIpQLScDqiEaHayAcwBDGAWa4W6k-6yUFzS-XiWuhLolpy64mLk5FA/viewform" target="_blank" rel="noopener" class="text-decoration-none">Google request form</a></strong>
                     </div>
                     <div class="workflow-link-desc">The Google Form intake, mirrored into the request list</div>
                 </div>
+                {% endif %}
                 <div class="workflow-link-row" title="Production request questionnaire intake">
                     <div class="workflow-link-line">
                         <strong><a href="{% url 'pcs:questionnaires_list' %}" class="text-decoration-none">Production Requests</a></strong>
@@ -176,19 +189,19 @@
             <div class="workflow-stage-body">
                 <div class="workflow-group">
                     <div class="workflow-group-title">Tags</div>
-                    <div class="workflow-link-row" title="Tags describing physics processes and machine configurations">
-                        <div class="workflow-link-line">
-                            <strong><a href="{% url 'pcs:tag_compose' tag_type='p' %}" class="text-decoration-none">Physics</a></strong>
-                            <span class="badge bg-info">{{ physics_tags_count }}</span>
-                        </div>
-                        <div class="workflow-link-desc">Tags describing physics processes and machine configurations</div>
-                    </div>
                     <div class="workflow-link-row" title="Physics category numbering">
                         <div class="workflow-link-line">
                             <strong><a href="{% url 'pcs:physics_categories_list' %}" class="text-decoration-none">Physics Categories</a></strong>
                             <span class="badge bg-info">{{ categories_count }}</span>
                         </div>
                         <div class="workflow-link-desc">Physics category numbering</div>
+                    </div>
+                    <div class="workflow-link-row" title="Tags describing physics processes and machine configurations">
+                        <div class="workflow-link-line">
+                            <strong><a href="{% url 'pcs:tag_compose' tag_type='p' %}" class="text-decoration-none">Physics</a></strong>
+                            <span class="badge bg-info">{{ physics_tags_count }}</span>
+                        </div>
+                        <div class="workflow-link-desc">Tags describing physics processes and machine configurations</div>
                     </div>
                     <div class="workflow-link-row" title="Generator configurations, versions">
                         <div class="workflow-link-line">
@@ -228,16 +241,22 @@
                         </div>
                         <div class="workflow-link-desc">Datasets to be produced</div>
                     </div>
+                    <div class="workflow-link-row" title="Physics configurations from pasted legacy submission lines: identified, new, or near miss, accepted per row or in bulk">
+                        <div class="workflow-link-line">
+                            <strong><a href="{% url 'pcs:pc_ingest' %}" class="text-decoration-none">PC ingest</a></strong>
+                        </div>
+                        <div class="workflow-link-desc">Physics configurations from pasted legacy submission lines</div>
+                    </div>
                     <div class="workflow-link-row" title="Submission templates">
                         <div class="workflow-link-line">
-                            <strong><a href="{% url 'pcs:prod_configs_compose' %}" class="text-decoration-none">Configurations</a></strong>
+                            <strong><a href="{% url 'pcs:prod_configs_compose' %}" class="text-decoration-none">Prod Configs</a></strong>
                             <span class="badge bg-info">{{ prod_configs_count }}</span>
                         </div>
                         <div class="workflow-link-desc">Submission templates</div>
                     </div>
                     <div class="workflow-link-row" title="Submit-ready production tasks">
                         <div class="workflow-link-line">
-                            <strong><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks" class="text-decoration-none">Task Creation</a></strong>
+                            <strong><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks" class="text-decoration-none">Prod Tasks</a></strong>
                             <span class="badge bg-info">{{ prod_tasks_count }}</span>
                         </div>
                         <div class="workflow-link-desc">Submit-ready production tasks</div>
@@ -277,6 +296,12 @@
                     </div>
                     <div class="workflow-link-desc">Physics configurations with target event counts — the production plan</div>
                 </div>
+                <div class="workflow-link-row" title="Per production queue: the front's decision to feed or hold, its depth in hours against the set points, the gates, and the ready backlog in priority order">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'monitor_app:panda_front' %}" class="text-decoration-none">Pressure Front</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">Per queue: feed or hold, depth in hours against the set points, the gates, and the ready backlog</div>
+                </div>
                 <div class="workflow-link-row" title="Campaign narrative documents: purpose, content, and evolution of production campaigns">
                     <div class="workflow-link-line">
                         <strong><a href="{% url 'ai:ai_narratives' %}" class="text-decoration-none">Campaign Narratives</a></strong>
@@ -284,12 +309,11 @@
                     </div>
                     <div class="workflow-link-desc">Campaign narrative documents: purpose, content, evolution</div>
                 </div>
-                <div class="workflow-link-row" title="AI evaluations across epicprod">
+                <div class="workflow-link-row" title="AI assessments of campaigns and campaign tasks">
                     <div class="workflow-link-line">
-                        <strong><a href="{% url 'monitor_app:ai_content_list' %}" class="text-decoration-none ai-attr-text">AI assessments</a></strong>
-                        <span class="badge bg-info">{{ ai_content_count }}</span>
+                        <strong><a href="{% url 'monitor_app:ai_content_list' %}?subject_type=campaign_task,campaign" class="text-decoration-none ai-attr-text">Campaign Assessments</a></strong>
                     </div>
-                    <div class="workflow-link-desc">AI evaluations across epicprod</div>
+                    <div class="workflow-link-desc">AI assessments of campaigns and campaign tasks</div>
                 </div>
                 <div class="workflow-link-row" title="AI-proposed actions pending human review, and the decision history">
                     <div class="workflow-link-line">
@@ -312,12 +336,6 @@
                     </div>
                     <div class="workflow-link-desc">Production activity</div>
                 </div>
-                <div class="workflow-link-row" title="Allocated and used core-hours by computing site and time period">
-                    <div class="workflow-link-line">
-                        <strong><a href="{% url 'monitor_app:compute_usage' %}" class="text-decoration-none">Compute Usage</a></strong>
-                    </div>
-                    <div class="workflow-link-desc">Site core-hours over time</div>
-                </div>
                 <div class="workflow-link-row" title="PanDA/JEDI task browser">
                     <div class="workflow-link-line">
                         <strong><a href="{% url 'monitor_app:panda_tasks_list' %}" class="text-decoration-none">Tasks</a></strong>
@@ -336,6 +354,18 @@
                     </div>
                     <div class="workflow-link-desc">Top error patterns across failed jobs</div>
                 </div>
+                <div class="workflow-link-row" title="Payload crashes by signature, from first sighting to a verdict">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'monitor_app:panda_segfaults' %}" class="text-decoration-none">Segfault Catalog</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">Payload crashes by signature: storms, dead configurations, sparse event-dependent crashes</div>
+                </div>
+                <div class="workflow-link-row" title="The error record over time: what is failing, at what cost in core-hours">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='errors' %}" class="text-decoration-none">Snapper Errors View</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">The error record over time: what is failing, at what cost in core-hours</div>
+                </div>
                 <div class="workflow-link-row" title="Production alarm system">
                     <div class="workflow-link-line">
                         <strong><a href="{% url 'monitor_app:alarms_dashboard' %}" class="text-decoration-none">Alarms</a></strong>
@@ -344,15 +374,33 @@
                 </div>
                 <div class="workflow-link-row" title="Failed jobs with error details">
                     <div class="workflow-link-line">
-                        <strong><a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="text-decoration-none">Diagnostics</a></strong>
+                        <strong><a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="text-decoration-none">Job Diagnostics</a></strong>
                     </div>
                     <div class="workflow-link-desc">Failed jobs with error details</div>
                 </div>
                 <div class="workflow-link-row" title="ePIC compute queues">
                     <div class="workflow-link-line">
-                        <strong><a href="{% url 'monitor_app:epic_queues_list' %}" class="text-decoration-none">EIC PanDA Queues</a></strong>
+                        <strong><a href="{% url 'monitor_app:epic_queues_list' %}" class="text-decoration-none">PanDA Queues</a></strong>
                     </div>
                     <div class="workflow-link-desc">ePIC compute queues</div>
+                </div>
+                <div class="workflow-link-row" title="Allocated and used core-hours by computing site and time period">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'monitor_app:compute_usage' %}" class="text-decoration-none">Compute Usage</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">Site core-hours over time</div>
+                </div>
+                <div class="workflow-link-row" title="Production by site over time: what each site delivered and wasted">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='site' %}" class="text-decoration-none">Snapper Site View</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">Production by site over time: what each site delivered and wasted</div>
+                </div>
+                <div class="workflow-link-row" title="Site health as measured by probe jobs, per queue">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'canary:probes_page' %}" class="text-decoration-none">Canary Probes</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">Site health as measured by probe jobs, per queue</div>
                 </div>
             </div>
         </section>
@@ -373,6 +421,24 @@
                         <strong><a href="{% url 'pcs:evgen_inputs' %}" class="text-decoration-none">EVGEN Inputs</a></strong>
                     </div>
                     <div class="workflow-link-desc">The registered epic:/EVGEN inventory and registration coverage</div>
+                </div>
+                <div class="workflow-link-row" title="Placement of production data over time: arrivals, transfers, backlogs and capacity">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='storage' %}" class="text-decoration-none">Snapper Storage View</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">Placement of production data over time: arrivals, transfers, backlogs and capacity</div>
+                </div>
+                <div class="workflow-link-row" title="Ghosts and other placement exceptions in the science data">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'pcs:storage_listings' listing='ghosts' %}" class="text-decoration-none">Storage Exceptions</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">Ghosts and other placement exceptions in the science data</div>
+                </div>
+                <div class="workflow-link-row" title="Outputs waiting at BNL because the catalog of record would not take them, and what each owes">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'pcs:stash_page' %}" class="text-decoration-none">Failover Stash</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">Outputs waiting at BNL because the catalog of record would not take them, and what each owes</div>
                 </div>
                 <div class="workflow-link-row" title="Sample and campaign completion served to the validation team (v1)">
                     <div class="workflow-link-line">

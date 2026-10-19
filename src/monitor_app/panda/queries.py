@@ -14,10 +14,15 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.db import connections
 
+from ..error_corrections import apply_to_summary
+from ..error_corrections import exit_counts_of as _exit_counts_of
+
 from .constants import (
     PANDA_SCHEMA, LIST_FIELDS, ERROR_FIELDS, DIAGNOSE_EXTRA_FIELDS,
     ERROR_COMPONENTS, FAULTY_STATUSES, TASK_LIST_FIELDS,
     STUDY_FIELDS, FILE_FIELDS, JOB_STATUS_CATEGORIES,
+    ES_JOB_FLAVORS, ES_RANGE_STATUS, ES_RANGE_DONE, ES_TASKBUFFER_CODES,
+    FG_SUBSTATUS,
 )
 from .sql import (
     build_union_query, build_count_query,
@@ -37,16 +42,48 @@ PSEUDO_TASK_DATASETS = {'seq_number', 'pseudo_dataset'}
 # NERSC Perlmutter jobs publish their per-job pilot & slurm logs here.
 # Pattern: <base>/<queue>/<pandaid>/{pilotlog.txt, slurm-<id>-task<N>-panda<pid>.out}
 _NERSC_PORTAL_BASE = "https://portal.nersc.gov/cfs/m3763/panda/jobs"
+# A job in one of these states publishes no further logs, so its listing is
+# captured once and read from disk thereafter.
+_NERSC_PORTAL_FINAL_STATES = ('finished', 'failed', 'cancelled', 'closed')
 _PANDA_CLIENT_PROCESSING_RE = re.compile(r'^panda-client-[0-9][A-Za-z0-9._-]*-(jedi-.+)$')
-_PANDA_USER_EQUIVALENCES = {
-    # Canonical monitor display name -> equivalent login/name variants.
-    'Torre Wenaus': ('wenaus', 'wenauseic'),
+# One person, one name on every user facet and column. PanDA records a
+# task's owner as the OIDC display name ("Sakib Rahman"); PCS records the
+# login of the account that acted (srahman on pandaserver02, rahmans1 on
+# the external face), and the effective-owner substitution puts the login
+# on a PCS-submitted task. The equivalences live in SysConfig
+# (``panda_user_equivalences``: display name -> its logins), seeded with
+# what is known, edited on the System page as people arrive.
+PANDA_USER_EQUIVALENCES_KEY = 'panda_user_equivalences'
+_PANDA_USER_EQUIVALENCES_DEFAULT = {
+    'Torre Wenaus': ['wenaus', 'wenauseic'],
+    'Sakib Rahman': ['srahman', 'srahman1', 'rahmans1'],
 }
-_PANDA_USER_TO_CANONICAL = {
-    name: canonical
-    for canonical, names in _PANDA_USER_EQUIVALENCES.items()
-    for name in (canonical, *names)
-}
+_equivalences_cache = {'at': 0.0, 'forward': {}, 'reverse': {}}
+
+
+def _user_equivalences():
+    """{display name: [logins]} from SysConfig, read at most once a minute."""
+    import time
+    now = time.monotonic()
+    if now - _equivalences_cache['at'] < 60 and _equivalences_cache['forward']:
+        return _equivalences_cache['forward'], _equivalences_cache['reverse']
+    forward = dict(_PANDA_USER_EQUIVALENCES_DEFAULT)
+    try:
+        from monitor_app.models import SysConfig
+        value = SysConfig.get_setting(PANDA_USER_EQUIVALENCES_KEY,
+                                      _PANDA_USER_EQUIVALENCES_DEFAULT)
+        if isinstance(value, dict):
+            forward = {str(k): [str(v) for v in (vals or [])]
+                       for k, vals in value.items() if k}
+        else:
+            logger.error('%s is not a mapping of display name to logins: %r; '
+                         'using the defaults', PANDA_USER_EQUIVALENCES_KEY, value)
+    except Exception as e:                                    # noqa: BLE001
+        logger.warning('user equivalences unread: %s', e)
+    reverse = {name: canonical for canonical, names in forward.items()
+               for name in (canonical, *names)}
+    _equivalences_cache.update(at=now, forward=forward, reverse=reverse)
+    return forward, reverse
 
 
 def _display_processing_type(value):
@@ -79,13 +116,15 @@ def _aggregate_processing_type_counts(rows):
 
 
 def _canonical_user(value):
-    return _PANDA_USER_TO_CANONICAL.get(value, value)
+    _forward, reverse = _user_equivalences()
+    return reverse.get(value, value)
 
 
 def _user_filter_values(value):
+    forward, _reverse = _user_equivalences()
     canonical = _canonical_user(value)
     values = {canonical}
-    values.update(_PANDA_USER_EQUIVALENCES.get(canonical, ()))
+    values.update(forward.get(canonical, ()))
     return sorted(v for v in values if v)
 
 
@@ -220,6 +259,30 @@ def _aggregate_effective_user_counts(rows):
     return sorted(counts.items(), key=lambda item: item[1], reverse=True)
 
 
+def harvester_instances():
+    """Every harvester instance PanDA knows, with the time it last reached
+    the server (``harvester_instances.lastupdate``, written on each of its
+    calls) and that age in seconds. A harvester that cannot reach the server
+    stops advancing it, whatever the cause."""
+    sql = f"""
+        SELECT "harvester_id", "hostname", "sw_version", "lastupdate",
+               EXTRACT(EPOCH FROM (now() AT TIME ZONE 'UTC') - "lastupdate") AS age_s
+        FROM "{PANDA_SCHEMA}"."harvester_instances"
+        ORDER BY "harvester_id"
+    """
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(sql)
+            columns = [col[0] for col in cursor.description]
+            rows = [row_to_dict(row, columns) for row in cursor.fetchall()]
+    except Exception as e:
+        logger.error("harvester_instances failed: %s", e)
+        return {'error': str(e)}
+    for row in rows:
+        row['age_s'] = None if row.get('age_s') is None else int(row['age_s'])
+    return {'instances': rows}
+
+
 def _get_task_record(jeditaskid):
     sql = f"""
         SELECT *
@@ -338,13 +401,105 @@ def _get_task_parameters(jeditaskid):
     return params, items
 
 
-def _nersc_portal_log_urls(computingsite, pandaid):
-    """Build Perlmutter log URLs by scraping the NERSC portal dir listing.
+def _nersc_portal_cache_path(pandaid):
+    """Where the captured portal listing for a job lives."""
+    import os
+    from django.conf import settings
+    root = getattr(settings, 'SWF_TMP_DIR', '/data/swf-tmp')
+    return os.path.join(root, 'nersc-portal', f'{pandaid}.json')
+
+
+_JOB_FINAL_STATES = ('finished', 'failed', 'cancelled', 'closed', 'merging')
+_LOG_CHECK_TIMEOUT_S = 2
+
+
+def _log_url_present(url):
+    """Whether the file behind a log link is there: True, False (the host
+    answered 404), or None (no answer within the bound). One HEAD, two
+    seconds, so a slow or dead host costs the page that and no more."""
+    import requests
+    try:
+        r = requests.head(url, timeout=_LOG_CHECK_TIMEOUT_S, allow_redirects=True)
+    except requests.RequestException:
+        return None
+    if r.status_code == 404:
+        return False
+    if r.status_code < 400:
+        return True
+    return None
+
+
+def _prune_dead_log_urls(job, log_urls):
+    """Keep only the log links whose file is there. Two forms are known:
+
+    - the PanDA server cache (``https://pandaserver01…/cache/…_gz.out``),
+      where harvester uploads a worker's stdout alone and the server
+      times files out of the cache: the stderr and batch-log variants
+      never exist there, and the stdout link is asked for;
+    - a condor submit host's ``condor_logs`` tree, where ``.out``,
+      ``.err`` and ``.log`` are copied when the job ends, and are asked
+      for once the job has.
+
+    Returns (log_urls, note); the note says what was left out and why.
+    """
+    pruned = dict(log_urls)
+    notes = []
+    stdout = str(pruned.get('pilot_stdout') or '')
+    if '/cache/' in stdout and 'pandaserver' in stdout:
+        for key in ('pilot_stderr', 'batch_log'):
+            if '/cache/' in str(pruned.get(key) or ''):
+                pruned.pop(key, None)
+        present = _log_url_present(stdout)
+        if present is False:
+            pruned.pop('pilot_stdout', None)
+            notes.append("The harvester's stdout of this job has timed out of the PanDA "
+                         "server cache and is no longer on the server. Harvester uploads "
+                         "stdout only.")
+        elif present is None:
+            notes.append("The PanDA server did not answer whether the harvester's stdout is "
+                         "still in its cache; the link may have timed out. Harvester uploads "
+                         "stdout only.")
+        else:
+            notes.append("Harvester uploads the worker's stdout only; the server times it "
+                         "out of its cache after a retention period.")
+    elif 'condor_logs' in stdout:
+        if str(job.get('jobstatus') or '') not in _JOB_FINAL_STATES:
+            notes.append("The condor logs are copied to the submit host when the job ends; "
+                         "until then these links answer 404.")
+        else:
+            gone = [k for k in ('pilot_stdout', 'pilot_stderr', 'batch_log')
+                    if pruned.get(k) and _log_url_present(pruned[k]) is False]
+            for k in gone:
+                pruned.pop(k, None)
+            if gone:
+                notes.append("The condor logs of this job are no longer on the submit host "
+                             "(timed out of its log directory).")
+    return pruned, ' '.join(notes)
+
+
+def _nersc_portal_log_urls(computingsite, pandaid, *, fetch=True, capture=False):
+    """Perlmutter log URLs, from the captured listing or from the portal.
 
     The slurm task filename contains a per-allocation task index not stored in
-    our DB, so we have to scrape the Apache autoindex to find it. Returns
-    ``None`` if the dir is unreachable or empty.
+    our DB, so the names come from the portal's Apache autoindex. A page render
+    never reaches the portal: it passes ``fetch=False`` and reads the copy
+    captured off the request path by the epicprod inventory sync. The listing
+    is captured only for a job in a final state, where it no longer changes.
+    Returns ``None`` when nothing is on disk and no fetch is allowed, or when
+    the fetch fails.
     """
+    import os
+    cache_path = _nersc_portal_cache_path(pandaid)
+    try:
+        with open(cache_path) as fh:
+            return json.load(fh)
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError) as e:
+        logger.warning("NERSC portal listing cache unreadable for %s: %s",
+                       pandaid, e)
+    if not fetch:
+        return None
     import requests
     log_dir = f"{_NERSC_PORTAL_BASE}/{computingsite}/{pandaid}/"
     try:
@@ -374,6 +529,16 @@ def _nersc_portal_log_urls(computingsite, pandaid):
         elif name == f'PanDA_Pilot-{pandaid}/':
             result['payload_stdout'] = log_dir + name + 'payload.stdout'
             result['payload_stderr'] = log_dir + name + 'payload.stderr'
+    if capture and len(result) > 1:
+        try:
+            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+            tmp = f'{cache_path}.tmp.{os.getpid()}'
+            with open(tmp, 'w') as fh:
+                json.dump(result, fh)
+            os.replace(tmp, cache_path)
+        except OSError as e:
+            logger.warning("NERSC portal listing not captured for %s: %s",
+                           pandaid, e)
     return result
 
 
@@ -721,9 +886,15 @@ def _get_task_job_counts(jeditaskids):
 
     Extras beyond JOB_STATUS_CATEGORIES:
     - nrunning: count of job records with jobstatus='running' (subset of nactive).
-    - nretries: count of job records with attemptnr > 1. In the ePIC PanDA
-      schema every retry creates a new job record, so this is the total
-      retry count for the task.
+    - nretries: retries of failures: job records with attemptnr > 1, less
+      the closed records. Every retry creates a new job record, and so
+      does every reissue of a closed job (JEDI closes a job whose
+      activation expired unrun and issues it again with the attempt
+      bumped); each closed record has exactly one successor, so
+      subtracting the closed records leaves the attempts that followed a
+      failure. On Perlmutter in 2026-09 a task showed 56,000 "retries"
+      against 890 failures before this (Sakib, 9/20). A task aborted with
+      closed jobs never reissued undercounts, clamped at zero.
     - nfinalfailed: count of input files that exhausted their retry budget,
       from JEDI's file-level accounting (jedi_datasets.nfilesfailed on the
       master input datasets). These are final failures — no attempt remains.
@@ -786,6 +957,8 @@ def _get_task_job_counts(jeditaskids):
                 if jobstatus == 'running':
                     counts[tid]['nrunning'] += n
                 counts[tid]['nretries'] += nretries_part or 0
+                if jobstatus == 'closed':
+                    counts[tid]['nclosed'] = counts[tid].get('nclosed', 0) + n
                 if cat == 'finished':
                     counts[tid]['nretries_finished'] += retries_sum_part or 0
                 if maxattempt_part is not None:
@@ -797,6 +970,10 @@ def _get_task_job_counts(jeditaskids):
     except Exception as e:
         logger.error(f"_get_task_job_counts failed: {e}")
         # On failure, return zeros so caller still gets a consistent shape.
+    for tid in counts:
+        # Reissues of closed jobs are not retries (docstring, nretries).
+        counts[tid]['nretries'] = max(
+            0, counts[tid]['nretries'] - counts[tid].pop('nclosed', 0))
 
     # Final-failure accounting comes from JEDI's file-level bookkeeping on
     # the master input datasets, not from job records (see docstring).
@@ -1003,6 +1180,57 @@ def _error_distribution_views(site_task_counts):
     }
 
 
+def _declared_failures(conn, time_filter, time_params, dest_join, destse_params,
+                       extra_params, filters, status_filter, status_params,
+                       window_after, window_before):
+    """The faulty jobs of the summary's population that ended inside a
+    declared downtime of their queue, or the pilot's cache lag after it,
+    counted per declaration (monitor_app/declared.py windows_between).
+    Returns ``{'count': n, 'windows': [{queue, line, count}]}``; an
+    empty block when nothing was declared in the window, None when the
+    read failed (logged)."""
+    from ..declared import windows_between
+    try:
+        spans = windows_between(window_after, window_before, kind='queue')
+    except Exception as e:                                    # noqa: BLE001
+        logger.error(f"declared failures: windows read failed: {e}")
+        return None
+    if not spans:
+        return {'count': 0, 'windows': []}
+    windows, count = [], 0
+    for queue, start, stop, line in spans:
+        span_filter = 'j."computingsite" = %s AND j."endtime" >= %s'
+        span_params = [queue, start]
+        if stop is not None:
+            span_filter += ' AND j."endtime" < %s'
+            span_params.append(stop)
+        parts, params = [], []
+        for table in ['jobsactive4', 'jobsarchived4']:
+            parts.append(f"""
+                SELECT COUNT(*)
+                FROM "{PANDA_SCHEMA}"."{table}" j
+                {dest_join}
+                WHERE {time_filter}
+                  AND {status_filter}
+                  AND {span_filter}
+                  {filters}
+            """)
+            params.extend(destse_params + time_params + status_params + span_params + extra_params)
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(' UNION ALL '.join(parts), params)
+                n = sum(int(r[0] or 0) for r in cursor.fetchall())
+        except Exception as e:                                # noqa: BLE001
+            logger.error(f"declared failures count failed for {queue}: {e}")
+            return None
+        if n:
+            windows.append({'queue': queue, 'line': line, 'count': n,
+                            'start': start.isoformat(timespec='seconds'),
+                            'stop': stop.isoformat(timespec='seconds') if stop else None})
+            count += n
+    return {'count': count, 'windows': windows}
+
+
 def error_summary(days=10, username=None, site=None, destinationse=None,
                   taskid=None, error_source=None, limit=20,
                   ended_after=None, ended_before=None, status=None,
@@ -1119,6 +1347,7 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
                    j."computingsite",
                    j."starttime",
                    j."endtime",
+                   j."transexitcode",
                    {dest_select}
             FROM "{PANDA_SCHEMA}"."{table}" j
             {dest_join}
@@ -1174,6 +1403,19 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
                      e.error_diag, '[0-9]+', '#', 'g'), 256), '')
             GROUP BY p.diag_pattern, e.error_source, e.error_code,
                      e.computingsite, e.jeditaskid
+        ),
+        exit_modes AS (
+            SELECT p.diag_pattern, e.error_source, e.error_code,
+                   COALESCE(e.transexitcode, '') AS exitcode,
+                   COUNT(*) AS n,
+                   MAX(e.pandaid) AS rep
+            FROM errs e
+            JOIN pattern_totals p
+              ON p.error_source = e.error_source
+             AND p.error_code = e.error_code
+             AND p.diag_pattern = COALESCE(LEFT(regexp_replace(
+                     e.error_diag, '[0-9]+', '#', 'g'), 256), '')
+            GROUP BY 1, 2, 3, 4
         )
         SELECT p.error_source, p.error_code, p.error_diag,
                p.count, p.task_count, p.users, p.sites,
@@ -1194,7 +1436,17 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
                    WHERE d.error_source = p.error_source
                      AND d.error_code = p.error_code
                      AND d.diag_pattern = p.diag_pattern
-               ), '[]'::jsonb) as site_task_counts
+               ), '[]'::jsonb) as site_task_counts,
+               COALESCE((
+                   SELECT jsonb_object_agg(
+                       x.exitcode,
+                       jsonb_build_object('n', x.n, 'rep', x.rep))
+                   FROM exit_modes x
+                   WHERE x.error_source = p.error_source
+                     AND x.error_code = p.error_code
+                     AND x.diag_pattern = p.diag_pattern
+                     AND x.exitcode != ''
+               ), '{{}}'::jsonb) as exit_counts
         FROM pattern_totals p
         ORDER BY p.count DESC
     """
@@ -1239,6 +1491,17 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
         logger.error(f"error_summary status counts failed: {e}")
         return {"error": str(e)}
 
+    # The failures that fell under a declared downtime of their queue
+    # (or the pilot's cache lag after it), per declaration, under the
+    # same filters and status selection: the declaration is their
+    # reading (swf-epicprod CONTINUOUS_PRODUCTION.md, Declared
+    # downtime). A failed read logs and the block is absent, never a
+    # failed summary.
+    declared = _declared_failures(
+        conn, time_filter, time_params, dest_join, destse_params,
+        extra_params, filters, status_filter, status_params,
+        ended_after or (timezone.now() - timedelta(days=days)), ended_before)
+
     errors = []
     total = 0
     for row in rows:
@@ -1259,6 +1522,7 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
             'avg_seconds_to_error': (round(float(row[8]), 1)
                                      if row[8] is not None else None),
             'never_started_count': row[9] or 0,
+            'exit_counts': _exit_counts_of(row[11]),
             'attribution_guidance': (
                 'computingsite is the execution location, not causal '
                 'attribution; inspect a representative_pandaid with '
@@ -1269,6 +1533,11 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
         total += row[3]
         errors.append(entry)
 
+    # The correction root (docs/ERROR_ATTRIBUTION.md): entries whose
+    # label a rule marks unreliable gain the corrected reading; the
+    # original label stays in place beneath it.
+    apply_to_summary(errors)
+
     return {
         "total_errors": total,
         "errors": errors,
@@ -1277,6 +1546,8 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
         # restriction applied — the basis of the status filter chips,
         # and the visibility of whatever the filter excludes.
         "status_counts": status_counts,
+        # The failures under a declared downtime, per declaration.
+        "declared": declared,
         "filters": {
             "days": days,
             "username": username,
@@ -1289,7 +1560,15 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
 
 
 def get_activity(days=1, username=None, site=None, workinggroup=None):
-    """Pre-digested overview of PanDA activity — aggregate counts only."""
+    """Pre-digested overview of PanDA activity — aggregate counts only.
+
+    Closed jobs are in none of the job counts: a closed job never ran,
+    JEDI disposed of it for workflow reasons (a task reassigned, unstarted
+    jobs regenerated) and the work comes back as new jobs, so the count
+    tells a user nothing and, at 169k on one reassignment, drowns
+    everything else. Their number is reported apart as
+    ``jobs.closed_not_counted``; the jobs list shows them on request
+    (status=closed)."""
     cutoff = timezone.now() - timedelta(days=days)
     conn = connections['panda']
 
@@ -1346,6 +1625,7 @@ def get_activity(days=1, username=None, site=None, workinggroup=None):
             cursor.execute(status_sql, job_params + job_params)
             job_by_status = {row[0]: row[1] for row in cursor.fetchall()}
 
+        closed_not_counted = job_by_status.pop('closed', 0)
         job_total = sum(job_by_status.values())
 
         job_user_sql = f"""
@@ -1366,6 +1646,8 @@ def get_activity(days=1, username=None, site=None, workinggroup=None):
         job_owner_map = _pcs_owner_map([row[2] for row in job_user_rows])
         user_map = {}
         for status_val, user_val, jeditaskid, count in job_user_rows:
+            if status_val == 'closed':
+                continue
             user_val = job_owner_map.get(jeditaskid) or _canonical_user(user_val)
             if user_val not in user_map:
                 user_map[user_val] = {'user': user_val, 'total': 0}
@@ -1376,6 +1658,8 @@ def get_activity(days=1, username=None, site=None, workinggroup=None):
         site_rows = _job_agg('computingsite')
         site_map = {}
         for status_val, site_val, count in site_rows:
+            if status_val == 'closed':
+                continue
             if site_val not in site_map:
                 site_map[site_val] = {'site': site_val, 'total': 0}
             site_map[site_val][status_val] = count
@@ -1467,6 +1751,10 @@ def get_activity(days=1, username=None, site=None, workinggroup=None):
             "by_status": job_by_status,
             "by_user": by_user,
             "by_site": by_site,
+            # Never-run jobs JEDI disposed of, outside every count above;
+            # a large number here is a question for the task record (why
+            # were so many jobs made that ended closed), not activity.
+            "closed_not_counted": closed_not_counted,
         },
         "tasks": {
             "total": task_total,
@@ -1487,6 +1775,9 @@ QUEUE_SUMMARY_FIELDS = [
     'status', 'state', 'vo_name', 'resource_type', 'type', 'capability',
     'corepower', 'atlas_site', 'region', 'country', 'tier', 'cloud',
     'container_type', 'pilot_version', 'maxrss', 'maxtime', 'maxwdir',
+    # Event Service: std never receives a new consumer for unprocessed
+    # ranges; all or es does (panda-server job_complex_module.py).
+    'jobseed',
 ]
 
 
@@ -1571,6 +1862,153 @@ def queue_last_use():
             for row in rows if row[1] is not None}
 
 
+# The payload's landing-decline exit code (swf-epicprod
+# docs/EPICPROD_PAYLOAD.md, Exit codes): the worker could not reach the
+# Rucio server or the input door in the job's first seconds, so the
+# payload started nothing. PanDA keeps the code on every job as
+# transexitcode, which makes declines countable per queue with no log read.
+LANDING_DECLINE_EXIT = '80'
+
+
+def landing_declines(days=14):
+    """Landing declines per queue over the window: jobs whose payload
+    exited with the decline code, counted by computingsite with the
+    latest end time. Keyed by queue name; UTC-aware datetimes."""
+    conn = connections['panda']
+    since = timezone.now() - timedelta(days=days)
+    sql = f"""
+        SELECT "computingsite", COUNT(*), MAX("endtime")
+        FROM (
+            SELECT "pandaid", "computingsite", "endtime"
+            FROM "{PANDA_SCHEMA}"."jobsactive4"
+            WHERE "transexitcode" = %s AND "modificationtime" >= %s
+            UNION
+            SELECT "pandaid", "computingsite", "endtime"
+            FROM "{PANDA_SCHEMA}"."jobsarchived4"
+            WHERE "transexitcode" = %s AND "modificationtime" >= %s
+        ) declined
+        GROUP BY "computingsite"
+    """
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(sql, [LANDING_DECLINE_EXIT, since,
+                                 LANDING_DECLINE_EXIT, since])
+            rows = cursor.fetchall()
+    except Exception as e:                                   # noqa: BLE001
+        logger.error(f"landing_declines failed: {e}")
+        return {'error': str(e)}
+    return {
+        row[0]: {
+            'count': row[1],
+            'last': (row[2].replace(tzinfo=dt_timezone.utc).isoformat()
+                     if row[2] is not None else None),
+        }
+        for row in rows
+    }
+
+
+def node_declines(days=14):
+    """Landing declines per worker node, against what that node did produce.
+
+    A decline is the payload refusing a bad landing in its first seconds
+    (exit ``LANDING_DECLINE_EXIT``), so a node that declines is telling the
+    system what it cannot do. What survives in the job record is the exit
+    code, the queue and the node; what names the endpoint that refused and
+    why is the payload's own report, filed per job by the sweep
+    (swf-epicprod docs/JOB_REPORTING.md). This joins the two.
+
+    Every node is reported with the jobs it finished in the same window, so
+    a busy node is not read as a bad one, and with its decline reasons in
+    the node's own words. Sorted by declines, most first.
+    """
+    conn = connections['panda']
+    since = timezone.now() - timedelta(days=days)
+    host_expr = 'regexp_replace(COALESCE("modificationhost", \'\'), \'^.*@\', \'\')'
+    sql = f"""
+        SELECT {host_expr} AS node, "computingsite",
+               COUNT(*) FILTER (WHERE "transexitcode" = %s) AS declines,
+               COUNT(*) FILTER (WHERE "jobstatus" = 'finished') AS finished,
+               COUNT(*) AS jobs,
+               MAX("endtime") FILTER (WHERE "transexitcode" = %s) AS last_decline
+        FROM (
+            SELECT "pandaid", "computingsite", "modificationhost", "endtime",
+                   "transexitcode", "jobstatus"
+            FROM "{PANDA_SCHEMA}"."jobsactive4"
+            WHERE "modificationtime" >= %s
+            UNION
+            SELECT "pandaid", "computingsite", "modificationhost", "endtime",
+                   "transexitcode", "jobstatus"
+            FROM "{PANDA_SCHEMA}"."jobsarchived4"
+            WHERE "modificationtime" >= %s
+        ) j
+        GROUP BY node, "computingsite"
+        HAVING COUNT(*) FILTER (WHERE "transexitcode" = %s) > 0
+        ORDER BY declines DESC
+    """
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(sql, [LANDING_DECLINE_EXIT, LANDING_DECLINE_EXIT,
+                                 since, since, LANDING_DECLINE_EXIT])
+            rows = cursor.fetchall()
+    except Exception as e:                                   # noqa: BLE001
+        logger.error(f"node_declines failed: {e}")
+        return {'error': str(e), 'nodes': [], 'days': days}
+
+    nodes = []
+    for node, site, declines, finished, jobs, last in rows:
+        nodes.append({
+            'node': node or 'unknown',
+            'site': site or 'unknown',
+            'declines': declines,
+            'finished': finished,
+            'jobs': jobs,
+            'decline_rate': round(declines / jobs, 3) if jobs else None,
+            'last_decline': (last.replace(tzinfo=dt_timezone.utc).isoformat()
+                             if last is not None else None),
+            'reasons': [],
+        })
+    _attach_decline_reasons(nodes, since)
+    return {'nodes': nodes, 'days': days,
+            'declines_total': sum(n['declines'] for n in nodes)}
+
+
+def _attach_decline_reasons(nodes, since):
+    """The nodes' own account of why they declined, from the filed reports.
+
+    The report is the only place the refused endpoint and the reason exist;
+    the sweep files it with the node it ran on. A node with no filed report
+    yet keeps an empty reason list rather than a guess.
+    """
+    if not nodes:
+        return
+    by_node = {n['node']: n for n in nodes}
+    try:
+        from monitor_app.models import EpicProdJob
+        rows = (EpicProdJob.objects
+                .filter(updated_at__gte=since)
+                .only('pandaid', 'data')[:5000])
+        for job in rows:
+            filed = (job.data or {}).get('payload_report') or {}
+            report = filed.get('report')
+            if not isinstance(report, dict):
+                continue
+            if report.get('exit_code') != LANDING_DECLINE_EXIT:
+                continue
+            node = (filed.get('node') or '').split('@')[-1]
+            entry = by_node.get(node)
+            if entry is None:
+                continue
+            reason = (report.get('note')
+                      or (report.get('landing') or {}).get('reason')
+                      or '')
+            endpoint = (report.get('landing') or {}).get('endpoint') or ''
+            said = ' — '.join(part for part in (endpoint, reason) if part)
+            if said and said not in entry['reasons']:
+                entry['reasons'].append(said)
+    except Exception as e:                                   # noqa: BLE001
+        logger.error(f"decline reasons unavailable: {e}")
+
+
 def get_queue(panda_queue):
     """Get full configuration for a single PanDA queue."""
     conn = connections['panda']
@@ -1601,10 +2039,12 @@ def get_queue(panda_queue):
     return {"queue": config}
 
 
-def job_outcomes(days=7, site=None, start_time=None, end_time=None):
+def job_outcomes(days=7, site=None, start_time=None, end_time=None,
+                 include_closed=False):
     """Completed-job outcomes over time for the jobs page's graphical
-    view: finished/failed/cancelled/closed counts per Eastern-time
-    bucket, each with its cumulative integral over the window. Bins
+    view: finished/failed/cancelled counts per Eastern-time bucket, and
+    closed when asked for (never-run jobs; see get_activity), each with
+    its cumulative integral over the window. Bins
     are hourly up to three days, daily beyond. Rows are deduplicated
     across the active and archived tables by (pandaid, endtime,
     status)."""
@@ -1632,10 +2072,11 @@ def job_outcomes(days=7, site=None, start_time=None, end_time=None):
         clause, val = like_or_eq('computingsite', site)
         filters += f' AND {clause}'
         extra_params.append(val)
+    statuses = ('finished', 'failed', 'cancelled') + (
+        ('closed',) if include_closed else ())
     where = (
         '"endtime" > %s AND "endtime" <= %s'
-        ' AND "jobstatus" IN'
-        " ('finished', 'failed', 'cancelled', 'closed')"
+        ' AND "jobstatus" IN (' + ', '.join(f"'{s}'" for s in statuses) + ')'
         + filters)
     params = [window_start, window_end] + extra_params
     sql = f'''
@@ -1683,7 +2124,7 @@ def job_outcomes(days=7, site=None, start_time=None, end_time=None):
     for bin_time, status, count in rows:
         counts.setdefault(status, {})[bin_time] = int(count)
     series = []
-    for status in ('finished', 'failed', 'cancelled', 'closed'):
+    for status in statuses:
         per_bin = counts.get(status)
         if not per_bin:
             continue
@@ -1706,22 +2147,117 @@ def job_outcomes(days=7, site=None, start_time=None, end_time=None):
     }
 
 
+# The OSG pool is the special case among the queues: one PanDA queue
+# submits into the OSG pool and its jobs run at many sites. The pilot
+# (pilot user epic, since 2026-08-13) reads GLIDEIN_Site from the
+# glidein's machine ad and records it as the job's destinationsite; that
+# is the execute site. Older records carry only the worker-node host, and
+# for those the host's domain names the site through this table; a
+# domain absent here shows as itself, a bare hostname as unresolved, and
+# a job whose host is the submit host never reached a worker node.
+EXECUTE_SITE_NAMES = {
+    'uconn.edu': 'UConn',
+    'fsu.edu': 'FSU',
+    'illinois.edu': 'Illinois',
+    'iu.edu': 'Indiana',
+    'infn.it': 'INFN',
+    'mwt2.org': 'MWT2',
+    'osris.org': 'OSiRIS',
+    'unl.edu': 'Nebraska',
+    'uwm.edu': 'UW-Milwaukee',
+    'wisc.edu': 'Wisconsin',
+    'alliancecan.ca': 'Alliance Canada',
+    'umanitoba.ca': 'Manitoba',
+    'ucsd.edu': 'UCSD',
+    'mit.edu': 'MIT',
+    'syr.edu': 'Syracuse',
+    'gla.ac.uk': 'Glasgow',
+    'in2p3.fr': 'IN2P3',
+    'jlab.org': 'JLab',
+    'bnl.gov': 'BNL-SDCC',
+    'nersc.gov': 'NERSC',
+}
+PRIVATE_DOMAIN_TAILS = {'cluster', 'local', 'localdomain', 'internal', 'lan', 'novalocal'}
+SUBMIT_HOST_KEY = 'submit-host'
+NOT_DISPATCHED_LABEL = 'not dispatched (submit host)'
+UNRESOLVED_LABEL = 'unresolved (bare hostname)'
+
+
+SITE_KEY_PREFIX = 'site:'
+
+
+def execute_site_label(key):
+    """Site label for the execute-site key the breakdown query derives:
+    'site:<name>' for the pilot-reported glidein site (used verbatim),
+    a worker-node domain, '' for a bare hostname, or the submit-host
+    marker for a job that never reached a worker node."""
+    key = str(key or '')
+    if key.startswith(SITE_KEY_PREFIX):
+        return key[len(SITE_KEY_PREFIX):]
+    if key == SUBMIT_HOST_KEY:
+        return NOT_DISPATCHED_LABEL
+    # A private pseudo-domain (node31.cluster, host.local) names a node,
+    # not a site; it is as unresolved as a bare hostname.
+    if not key or key.rsplit('.', 1)[-1].lower() in PRIVATE_DOMAIN_TAILS:
+        return UNRESOLVED_LABEL
+    return EXECUTE_SITE_NAMES.get(key.lower(), key)
+
+
+def osg_pool_queues():
+    """The PanDA queues that submit into the OSG pool: those whose CRIC
+    catchall carries osgpool=true (schedconfig_json)."""
+    sql = f"""
+        SELECT "panda_queue" FROM "{PANDA_SCHEMA}"."schedconfig_json"
+        WHERE lower(replace("data"->>'catchall', ' ', '')) LIKE '%%osgpool=true%%'
+    """
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(sql)
+            return sorted(row[0] for row in cursor.fetchall())
+    except Exception as e:
+        logger.error(f"osg_pool_queues query failed: {e}")
+        return []
+
+
+def queue_types():
+    """{panda_queue: CRIC type} for every queue in schedconfig_json."""
+    sql = f"""SELECT "panda_queue", "data"->>'type' FROM "{PANDA_SCHEMA}"."schedconfig_json\""""
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(sql)
+            return {row[0]: (row[1] or '') for row in cursor.fetchall()}
+    except Exception as e:
+        logger.error(f"queue_types query failed: {e}")
+        return {}
+
+
 def resource_usage(days=30, site=None, username=None, taskid=None,
                    start_time=None, end_time=None, bucket=None,
-                   series_rollup=False):
-    """Aggregate resource usage for finished jobs.
+                   series_rollup=False, execute_sites=False,
+                   processingtype=None):
+    """Aggregate resource usage for finished jobs, optionally of one
+    processing type (``epicproduction`` for ePIC production alone).
 
-    Reports two core-hour metrics:
-    - allocated: actualcorecount × wall time (cores allocated to the job)
-    - used: cpuconsumptiontime (CPU time the job actually consumed)
+    With ``bucket`` and ``execute_sites``, the result also carries the
+    OSG pool's execute-site breakdown: ``execute_series``, the same
+    per-bucket metrics per (OSG pool queue, execute site), the execute
+    site being the pilot-reported glidein site (``destinationsite``) or,
+    where a record predates that report, the worker-node host's site; and
+    ``execute_sites``, each OSG pool queue with its execute sites, largest
+    first. The OSG pool queues are those whose CRIC catchall carries
+    osgpool=true; no other queue gets a breakdown.
 
-    Only counts jobs that actually ran: jobstatus='finished' with both
-    starttime and endtime set. Pre-running queue time is excluded.
+    Core-hour metrics:
+    - allocated: cores × wall time of every job that ran, finished or
+      failed (a failed job holds its allocation like any other);
+    - used: cpuconsumptiontime of finished jobs, the CPU that produced
+      results; efficiency is used over allocated;
+    - failed_core_hours: the allocation held by failed jobs (wasted).
 
-    Every aggregate additionally carries failed_count: jobs ending
-    'failed' in the window, counted by end time as the jobs page counts
-    them (no starttime requirement). Failed jobs contribute nothing to
-    job_count or any core-hour metric.
+    job_count counts finished jobs; failed_count counts jobs ending
+    'failed' in the window by end time (a failed job that never started
+    counts here and holds no allocation). Pre-running queue time is
+    excluded throughout.
     """
     def _time(value, label):
         if value in (None, ''):
@@ -1765,6 +2301,10 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
     if taskid:
         filters += ' AND "jeditaskid" = %s'
         extra_params.append(taskid)
+    if processingtype:
+        clause, val = like_or_eq('processingtype', processingtype)
+        filters += f' AND {clause}'
+        extra_params.append(val)
 
     base_where = (
         '"endtime" >= %s'
@@ -1783,18 +2323,26 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
         '"starttime", "endtime"'
     )
 
-    agg_cols = """
+    # Allocation is held by every job that ran, finished or failed; used CPU
+    # is what finished jobs consumed; the allocation held by failed jobs is
+    # reported on its own as failed_core_hours (wasted).
+    ran = '"starttime" IS NOT NULL AND "endtime" IS NOT NULL'
+    agg_cols = f"""
         COUNT(*) FILTER (WHERE "jobstatus" = 'finished') as job_count,
         COALESCE(SUM(
             EXTRACT(EPOCH FROM ("endtime" - "starttime"))
             * COALESCE("actualcorecount", "corecount", 1)
-        ) FILTER (WHERE "jobstatus" = 'finished'), 0) / 3600.0 as allocated_core_hours,
+        ) FILTER (WHERE {ran}), 0) / 3600.0 as allocated_core_hours,
         COALESCE(SUM("cpuconsumptiontime")
                  FILTER (WHERE "jobstatus" = 'finished'), 0) / 3600.0 as used_core_hours,
         COALESCE(SUM(
             EXTRACT(EPOCH FROM ("endtime" - "starttime"))
-        ) FILTER (WHERE "jobstatus" = 'finished'), 0) / 3600.0 as wall_hours,
-        COUNT(*) FILTER (WHERE "jobstatus" = 'failed') as failed_count
+        ) FILTER (WHERE {ran}), 0) / 3600.0 as wall_hours,
+        COUNT(*) FILTER (WHERE "jobstatus" = 'failed') as failed_count,
+        COALESCE(SUM(
+            EXTRACT(EPOCH FROM ("endtime" - "starttime"))
+            * COALESCE("actualcorecount", "corecount", 1)
+        ) FILTER (WHERE "jobstatus" = 'failed' AND {ran}), 0) / 3600.0 as failed_core_hours
     """
 
     def _run(group_col=None):
@@ -1821,6 +2369,7 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
             'used_core_hours': float(row[offset + 2]),
             'wall_hours': float(row[offset + 3]),
             'failed_count': int(row[offset + 4] or 0),
+            'failed_core_hours': float(row[offset + 5]),
         }
 
     def _rounded_metrics(values, precision=1):
@@ -1830,11 +2379,14 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
             'used_core_hours': round(values['used_core_hours'], precision),
             'wall_hours': round(values['wall_hours'], precision),
             'failed_count': values['failed_count'],
+            'failed_core_hours': round(values['failed_core_hours'], precision),
         }
 
     try:
         series = []
         series_raw = []
+        execute_series = []
+        execute_site_map = {}
         if bucket:
             bucket_timezone = timezone.get_current_timezone_name()
             sql = f"""
@@ -1864,10 +2416,71 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
                 series.append(entry)
                 series_raw.append((entry['site'], raw))
 
+        pool_queues = osg_pool_queues() if (bucket and execute_sites) else []
+        if pool_queues:
+            # Key: the pilot-reported glidein site when present; else the
+            # submit-host marker for a job that never left the harvester
+            # host; else the last two labels of the execute host
+            # ("<slot>@<host>" or "<host>"); else '' for a bare hostname.
+            host_expr = 'regexp_replace(COALESCE("modificationhost", \'\'), \'^.*@\', \'\')'
+            key_expr = (
+                "CASE WHEN COALESCE(dest_site, '') <> '' THEN 'site:' || dest_site "
+                "WHEN host ~ '^(osgsub|pandaharvester)' THEN 'submit-host' "
+                r"ELSE COALESCE(substring(host from '([^.]+\.[^.]+)$'), '') END"
+            )
+            pool_where = base_where + ' AND "computingsite" = ANY(%s)'
+            pool_params = base_params + [pool_queues]
+            sql = f"""
+                SELECT date_trunc(
+                           '{bucket}',
+                           ("endtime" AT TIME ZONE 'UTC') AT TIME ZONE %s
+                       ) AS bucket_start,
+                       "computingsite", {key_expr} AS execute_key, {agg_cols}
+                FROM (
+                    SELECT {inner_fields}, {host_expr} AS host, "destinationsite" AS dest_site
+                    FROM "{PANDA_SCHEMA}"."jobsactive4" WHERE {pool_where}
+                    UNION ALL
+                    SELECT {inner_fields}, {host_expr} AS host, "destinationsite" AS dest_site
+                    FROM "{PANDA_SCHEMA}"."jobsarchived4" WHERE {pool_where}
+                ) combined
+                GROUP BY bucket_start, "computingsite", execute_key
+                ORDER BY bucket_start, "computingsite", execute_key
+            """
+            with conn.cursor() as cursor:
+                cursor.execute(sql, [bucket_timezone] + pool_params + pool_params)
+                exec_rows = cursor.fetchall()
+            metric_names = (
+                'job_count', 'allocated_core_hours',
+                'used_core_hours', 'wall_hours', 'failed_count',
+                'failed_core_hours',
+            )
+            merged = {}            # (bucket, queue, label) -> raw metrics
+            per_queue = {}         # queue -> {label: weight}
+            for row in exec_rows:
+                queue = row[1] or 'unknown'
+                label = execute_site_label(row[2])
+                raw = _raw_metrics(row, offset=3)
+                key = (row[0].isoformat(), queue, label)
+                target = merged.setdefault(key, {name: 0 for name in metric_names})
+                for name in metric_names:
+                    target[name] += raw[name]
+                per_queue.setdefault(queue, {}).setdefault(label, 0)
+                per_queue[queue][label] += raw['allocated_core_hours'] + raw['failed_count']
+            for (bucket_start, queue, label), values in merged.items():
+                entry = _rounded_metrics(values, precision=4)
+                entry['bucket_start'] = bucket_start
+                entry['site'] = queue
+                entry['execute_site'] = label
+                execute_series.append(entry)
+            execute_site_map = {
+                q: [label for label, _ in sorted(labels.items(), key=lambda x: -x[1])]
+                for q, labels in per_queue.items()}
+
         if series_rollup:
             metric_names = (
                 'job_count', 'allocated_core_hours',
                 'used_core_hours', 'wall_hours', 'failed_count',
+                'failed_core_hours',
             )
             totals_raw = {name: 0 for name in metric_names}
             sites_raw = {}
@@ -1891,6 +2504,7 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
             totals = _rounded_metrics(_raw_metrics(rows[0])) if rows else {
                 'job_count': 0, 'allocated_core_hours': 0,
                 'used_core_hours': 0, 'wall_hours': 0, 'failed_count': 0,
+                'failed_core_hours': 0,
             }
 
             by_site = []
@@ -1914,6 +2528,8 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
         "by_site": by_site,
         "by_user": by_user,
         "series": series,
+        "execute_series": execute_series,
+        "execute_sites": execute_site_map,
         "window": {
             "start_time": window_start.isoformat(),
             "end_time": window_end.isoformat(),
@@ -1927,6 +2543,7 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
             "site": site,
             "username": username,
             "taskid": taskid,
+            "processingtype": processingtype,
             "start_time": window_start.isoformat(),
             "end_time": window_end.isoformat(),
             "bucket": bucket or None,
@@ -1934,8 +2551,411 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
     }
 
 
-def study_job(pandaid):
-    """Deep study of a single PanDA job — full record, files, harvester logs, errors."""
+# The order the epicprod payload runs its stages in (swf-epicprod
+# docs/EPICPROD_PAYLOAD.md). The report carries them as an object, and a
+# filed copy has lost the writing order to jsonb, so presentation restores it.
+PAYLOAD_STAGE_ORDER = [
+    'input', 'simulation', 'events', 'reconstruction', 'metadata',
+    'logs', 'validation', 'registration',
+]
+
+
+def _payload_report(conn, pandaid):
+    """The epicprod payload's own report of this job, from the PanDA
+    metatable, shaped for display.
+
+    The payload writes ``payload-report.json`` on every exit path; the
+    dispatcher carries it in ``jobReport.json`` under ``payload``, and the
+    pilot ships that whole object as job metadata (the server keeps
+    metadata for finished jobs, so a failed job has none). What the
+    payload reports is what the job did stage by stage, which the job
+    record cannot express: see swf-epicprod docs/EPICPROD_PAYLOAD.md.
+
+    Returns a dict with the events, the stages in run order paired with
+    their prmon measurements, the outputs and the registration outcome,
+    or None when the job carries no payload report. Never raises: an
+    unreadable or unexpected metadata blob leaves the page without the
+    card rather than failing it.
+    """
+    report, source = None, ''
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f'SELECT "metadata" FROM "{PANDA_SCHEMA}"."metatable" WHERE "pandaid" = %s',
+                [pandaid])
+            row = cursor.fetchone()
+    except Exception as e:
+        logger.error(f"payload report query failed for job {pandaid}: {e}")
+        row = None
+
+    if row and row[0]:
+        raw = row[0]
+        try:
+            metadata = json.loads(raw) if isinstance(raw, str) else raw
+        except (ValueError, TypeError) as e:
+            logger.error(
+                f"payload report metadata unparsable for job {pandaid}: {e}")
+            metadata = None
+        if isinstance(metadata, dict) and isinstance(metadata.get('payload'), dict):
+            report, source = metadata['payload'], 'metatable'
+
+    if report is None:
+        # The metatable holds metadata for finished jobs only, so a failed
+        # job's account is the one the sweep filed from the object store
+        # (swf-epicprod docs/JOB_REPORTING.md). That is the whole point of
+        # the channel: the jobs with no metadata are the ones worth reading.
+        report, source = _filed_payload_report(pandaid), 'swept'
+    if not isinstance(report, dict):
+        return None
+
+    stages = report.get('stages') or {}
+    prmon = report.get('prmon') or {}
+    rows = []
+    # Run order, not key order: a report filed by the sweep has been through
+    # a jsonb column, which does not preserve the order the payload wrote its
+    # keys in. The payload's own sequence names the order; a stage it does not
+    # name falls to the end, in the order its timestamps give.
+    def _run_order(item):
+        name, stage = item
+        stage = stage if isinstance(stage, dict) else {}
+        known = (PAYLOAD_STAGE_ORDER.index(name)
+                 if name in PAYLOAD_STAGE_ORDER else len(PAYLOAD_STAGE_ORDER))
+        return (known, str(stage.get('started_at') or stage.get('ended_at') or ''),
+                name)
+
+    for name, stage in sorted(stages.items(), key=_run_order):
+        if not isinstance(stage, dict):
+            continue
+        measured = prmon.get(name)
+        # The output stages are measured per output, so a stage carries
+        # whichever measurement names it.
+        if not isinstance(measured, dict):
+            measured = next(
+                (v for k, v in prmon.items()
+                 if isinstance(v, dict) and k.startswith(f'{name}_')), {})
+        trend = measured.get('trend') or {}
+        rows.append({
+            'name': name,
+            'status': stage.get('status'),
+            'wall_s': stage.get('wall_s'),
+            'detail': ', '.join(stage.get('detail') or []),
+            'cpu_s': (measured.get('cpu_user_s') or 0) + (measured.get('cpu_sys_s') or 0)
+                     if measured else None,
+            'cpu_efficiency': measured.get('cpu_efficiency'),
+            'rss_max_kb': measured.get('rss_max_kb'),
+            'read_bytes': measured.get('rchar_bytes'),
+            'write_bytes': measured.get('wchar_bytes'),
+            'memory_growth_kb_per_s': trend.get('memory_growth_kb_per_s'),
+            'samples': trend.get('samples'),
+        })
+
+    return {
+        'payload_version': report.get('payload_version') or '',
+        'exit_code': report.get('exit_code'),
+        'events': report.get('events') or {},
+        'stages': rows,
+        'outputs': [dict(v, kind=k) for k, v in (report.get('outputs') or {}).items()
+                    if isinstance(v, dict)],
+        'registration': report.get('registration') or {},
+        'note': report.get('note') or '',
+        'source': source,
+    }
+
+
+def _filed_payload_report(pandaid):
+    """The report the sweep filed beside the job record, or None.
+
+    Never raises: this is one card on a page.
+    """
+    try:
+        from monitor_app.models import EpicProdJob
+        job = EpicProdJob.objects.filter(pandaid=pandaid).only('data').first()
+    except Exception as e:                                    # noqa: BLE001
+        logger.error(f"filed payload report unreadable for job {pandaid}: {e}")
+        return None
+    if job is None:
+        return None
+    filed = (job.data or {}).get('payload_report') or {}
+    report = filed.get('report')
+    return report if isinstance(report, dict) else None
+
+
+def _quantile(values, fraction):
+    """The value at a fraction of the way through sorted values."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    index = min(int(fraction * (len(ordered) - 1) + 0.5), len(ordered) - 1)
+    return ordered[index]
+
+
+def task_payload_rollup(jeditaskid, limit=2000):
+    """What the payload reported across a task's jobs, as a distribution.
+
+    One job's report says what that job did; a task's worth of them says
+    what the work costs and how much it varies, which is what sizing, the
+    scout gate and the site comparison need. Per stage: how many jobs
+    reached it, the middle and the slow tail of its wall time and CPU, the
+    middle of its CPU efficiency and peak memory. Reports come from the
+    PanDA metatable, so only finished jobs contribute; the count that did
+    is reported with the numbers rather than implied.
+
+    Returns None when no job of the task carries a payload report. Never
+    raises: this is one card on a page.
+    """
+    conn = connections['panda']
+    try:
+        with conn.cursor() as cursor:
+            # The metatable is keyed by job alone, so the task's jobs come
+            # from the archive, which is also where a job with metadata
+            # always is: the server keeps metadata for finished jobs.
+            cursor.execute(
+                f'SELECT m."pandaid", m."metadata" FROM "{PANDA_SCHEMA}"."metatable" m '
+                f'JOIN "{PANDA_SCHEMA}"."jobsarchived4" j ON j."pandaid" = m."pandaid" '
+                f'WHERE j."jeditaskid" = %s LIMIT %s', [jeditaskid, limit])
+            rows = cursor.fetchall()
+    except Exception as e:
+        logger.error(f"payload rollup query failed for task {jeditaskid}: {e}")
+        rows = []
+
+    # Two sources, because the server keeps metadata for finished jobs only:
+    # the metatable for those, and the reports the sweep filed for the failed
+    # ones. Without the second, a task's distribution is the distribution of
+    # its successes, which is the wrong half to size a campaign on.
+    reports = []
+    have = set()
+    for pandaid, raw in rows:
+        if not raw:
+            continue
+        try:
+            metadata = json.loads(raw) if isinstance(raw, str) else raw
+        except (ValueError, TypeError):
+            continue
+        report = metadata.get('payload') if isinstance(metadata, dict) else None
+        if isinstance(report, dict):
+            have.add(int(pandaid))
+            reports.append((report, 'metatable'))
+    swept_jobs = 0
+    try:
+        # By the task's job ids rather than by EpicProdJob.jeditaskid: a row
+        # the sweep created for a job the inventory never synced knows its
+        # own pandaid and nothing else, and PanDA is the authority on which
+        # jobs belong to the task.
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f'SELECT "pandaid" FROM "{PANDA_SCHEMA}"."jobsarchived4" '
+                f'WHERE "jeditaskid" = %s '
+                f'UNION SELECT "pandaid" FROM "{PANDA_SCHEMA}"."jobsactive4" '
+                f'WHERE "jeditaskid" = %s LIMIT %s',
+                [jeditaskid, jeditaskid, limit])
+            task_pandaids = [int(r[0]) for r in cursor.fetchall()]
+    except Exception as e:                                    # noqa: BLE001
+        logger.error(f"task job ids unavailable for task {jeditaskid}: {e}")
+        task_pandaids = []
+    try:
+        from monitor_app.models import EpicProdJob
+        for job in (EpicProdJob.objects.filter(pandaid__in=task_pandaids)
+                    .only('pandaid', 'data')[:limit]):
+            if int(job.pandaid) in have:
+                continue
+            filed = ((job.data or {}).get('payload_report') or {}).get('report')
+            if isinstance(filed, dict):
+                swept_jobs += 1
+                reports.append((filed, 'swept'))
+    except Exception as e:                                    # noqa: BLE001
+        logger.error(f"swept reports unavailable for task {jeditaskid}: {e}")
+    if not reports:
+        return None
+
+    stages, events, versions, registrations = {}, [], {}, {}
+    contributing = 0
+    for report, _source in reports:
+        contributing += 1
+        version = report.get('payload_version') or 'unknown'
+        versions[version] = versions.get(version, 0) + 1
+        outcome = (report.get('registration') or {}).get('outcome') or 'none'
+        registrations[outcome] = registrations.get(outcome, 0) + 1
+        produced = (report.get('events') or {}).get('reconstructed')
+        if isinstance(produced, int):
+            events.append(produced)
+        prmon = report.get('prmon') or {}
+        for name, stage in (report.get('stages') or {}).items():
+            if not isinstance(stage, dict):
+                continue
+            bucket = stages.setdefault(
+                name, {'jobs': 0, 'failed': 0, 'wall': [], 'cpu': [],
+                       'efficiency': [], 'memory': []})
+            bucket['jobs'] += 1
+            if stage.get('status') == 'fail':
+                bucket['failed'] += 1
+            if isinstance(stage.get('wall_s'), (int, float)):
+                bucket['wall'].append(stage['wall_s'])
+            measured = prmon.get(name)
+            if not isinstance(measured, dict):
+                measured = next(
+                    (v for k, v in prmon.items()
+                     if isinstance(v, dict) and k.startswith(f'{name}_')), {})
+            if measured:
+                cpu = (measured.get('cpu_user_s') or 0) + (measured.get('cpu_sys_s') or 0)
+                if cpu:
+                    bucket['cpu'].append(cpu)
+                if measured.get('cpu_efficiency') is not None:
+                    bucket['efficiency'].append(measured['cpu_efficiency'])
+                if measured.get('rss_max_kb'):
+                    bucket['memory'].append(measured['rss_max_kb'])
+
+    if not contributing:
+        return None
+
+    rows_out = []
+    for name, bucket in stages.items():
+        rows_out.append({
+            'name': name,
+            'jobs': bucket['jobs'],
+            'failed': bucket['failed'],
+            'wall_median': _quantile(bucket['wall'], 0.5),
+            'wall_p90': _quantile(bucket['wall'], 0.9),
+            'cpu_median': _quantile(bucket['cpu'], 0.5),
+            'efficiency_median': _quantile(bucket['efficiency'], 0.5),
+            'memory_median_kb': _quantile(bucket['memory'], 0.5),
+        })
+    return {
+        'jobs': contributing,
+        'swept_jobs': swept_jobs,
+        'events_total': sum(events),
+        'events_median': _quantile(events, 0.5),
+        'stages': rows_out,
+        'versions': sorted(versions.items(), key=lambda kv: -kv[1]),
+        'registrations': sorted(registrations.items(), key=lambda kv: -kv[1]),
+        'limited': len(reports) >= limit,
+    }
+
+
+# Every failure reason that reaches PanDA from the batch layer arrives
+# as a fixed-width column value, so any reason longer than its column is
+# stored cut off with no marker that anything was removed. Measured on
+# job 2721305: superrordiag 250 characters, harvester diagmessage 256,
+# taskbuffererrordiag 300, each ending mid-word, and nothing in this
+# codebase does the cutting. The cut falls at a character count, not at
+# a clause, so what survives is the front of the message — which is
+# where batch systems put warnings and preamble — and what is removed is
+# the end, which is where they put the error. That job's stored text
+# ended "sbatch: error: Batch job submission failed:" after two surviving
+# sbatch WARNING and INFO lines about the default account and the
+# selected partitions, and was read as a queue misconfiguration; the
+# removed clause was "I/O error writing script/environment to file", a
+# site submit host that could not write to disk. The condor event log
+# the harvester keeps holds every reason whole and is served without
+# credentials from inside SCDF, so it is the authority whenever a
+# batch-layer reason is being assessed.
+BATCH_LOG_TIMEOUT_S = 8
+BATCH_LOG_MAX_BYTES = 512 * 1024
+
+# Condor's own trailer inside an event's detail. This is the only line
+# that is certainly not part of a reason; everything else indented under
+# an event is kept, because a filter built on a guess about the format
+# drops real text and says nothing about having done so.
+_CONDOR_TRAILER_RE = re.compile(r'^Code \d+ Subcode \d+$')
+# Event descriptions worth a plain word in the output. A code that is not
+# here is still reported, labelled by its number: the log is the
+# authority and nothing it says is dropped for not being recognised.
+# Names for the codes the corpus actually contains. The unnamed six
+# were found by the learning pass over captured logs rather than
+# guessed, which is the point of keeping every event: a code with no
+# name was already in the record and only read as a number.
+CONDOR_EVENT_NAMES = {
+    '000': 'submitted', '001': 'executing', '004': 'evicted',
+    '005': 'terminated', '006': 'image size updated',
+    '007': 'shadow exception', '009': 'aborted', '012': 'held',
+    '021': 'remote error', '022': 'disconnected',
+    '024': 'grid submit failed', '027': 'submitted to grid resource',
+    '029': 'remote status unknown', '040': 'transferring input files',
+}
+
+
+def parse_condor_log(body, source=''):
+    """The events a condor event log carries, from its text.
+
+    Pure: no network, no store. Presentation parses the captured copy
+    through this, so improving the parser improves every job already
+    captured with no refetch and no reprocessing.
+    """
+    # Format: an event header line "NNN (cluster.proc.sub) DATE TIME
+    # description", then indented detail lines, closed by a line of "...".
+    events = []
+    lines = body.splitlines()
+    for i, line in enumerate(lines):
+        code = line[:3]
+        if not (code.isdigit() and line[3:4] == ' ' and '(' in line):
+            continue
+        parts = line.split()
+        at = ' '.join(parts[2:4]) if len(parts) >= 4 else None
+        detail = []
+        for follow in lines[i + 1:]:
+            if follow.startswith('...'):
+                break
+            text = follow.strip()
+            if text and not _CONDOR_TRAILER_RE.match(text):
+                detail.append(text)
+        if detail:
+            events.append({
+                'code': code,
+                'event': CONDOR_EVENT_NAMES.get(code, f'event {code}'),
+                'at': at,
+                'header': line.strip(),
+                'text': ' '.join(detail),
+            })
+    if not events:
+        return {'source': source,
+                'error': 'no event with detail in the condor log'}
+    return {'source': source, 'events': events}
+
+
+def condor_log_events(batchlog_url, timeout_s=BATCH_LOG_TIMEOUT_S):
+    """The condor event log at a URL, fetched and parsed.
+
+    The fallback for a job whose log was never captured. The captured
+    copy is preferred wherever one exists, since the source keeps only
+    about eighteen days (monitor_app.batch_records).
+    """
+    if not batchlog_url:
+        return None
+    import ssl
+    import urllib.request
+
+    # The SCDF log hosts serve these over TLS with a chain this host's
+    # trust store does not carry. The content is an operational log
+    # inside the facility and no credential travels either way.
+    context = ssl._create_unverified_context()
+    try:
+        request = urllib.request.Request(
+            batchlog_url, headers={'User-Agent': 'swf-monitor/study_job'})
+        with urllib.request.urlopen(request, timeout=timeout_s,
+                                    context=context) as response:
+            body = response.read(BATCH_LOG_MAX_BYTES).decode(
+                'utf-8', errors='replace')
+    except Exception as e:                                   # noqa: BLE001
+        logger.error('condor log fetch failed for %s: %s', batchlog_url, e)
+        return {'source': batchlog_url,
+                'error': f'{e.__class__.__name__}: {e}'}
+    return parse_condor_log(body, source=batchlog_url)
+
+
+def study_job(pandaid, include_batch_reason=False, include_log_analysis=True,
+              fetch_remote=True):
+    """Deep study of a single PanDA job — full record, files, harvester logs, errors.
+
+    ``include_batch_reason`` fetches the harvester's condor event log for
+    a job that never started, so the batch system's hold reason is
+    reported whole rather than as PanDA's truncation of it. It makes one
+    bounded remote call, so callers in a request path leave it off.
+
+    ``fetch_remote`` governs the one remaining outbound call, the NERSC
+    portal listing that names a Perlmutter job's log files. A request path
+    passes ``False`` and is served the listing captured earlier off that
+    path; the sweeps that run outside a request leave it on, and a final
+    job's listing is captured as they go.
+    """
     conn = connections['panda']
 
     # 1. Full job record from both tables
@@ -2009,15 +3029,26 @@ def study_job(pandaid):
     # NERSC Perlmutter pilotid ends in literal 'None' so the synthesized URLs
     # 404. The NERSC portal exposes per-job log dirs instead.
     site = job.get('computingsite') or ''
+    log_urls_note = ''
     if site.startswith('NERSC_Perlmutter'):
-        portal_urls = _nersc_portal_log_urls(site, pandaid)
+        # The synthesized pilotid-derived entries 404 on Perlmutter whether or
+        # not the listing is to hand, so they go either way.
+        log_urls.pop('pilot_stdout', None)
+        log_urls.pop('pilot_stderr', None)
+        log_urls.pop('batch_log', None)
+        portal_urls = _nersc_portal_log_urls(
+            site, pandaid, fetch=fetch_remote,
+            capture=str(job.get('jobstatus') or '') in _NERSC_PORTAL_FINAL_STATES)
         if portal_urls:
-            # The synthesized pilotid-derived entries 404 on Perlmutter;
-            # the portal listing supplies the real files.
-            log_urls.pop('pilot_stdout', None)
-            log_urls.pop('pilot_stderr', None)
-            log_urls.pop('batch_log', None)
             log_urls.update(portal_urls)
+        elif not fetch_remote:
+            log_urls_note = (
+                'Perlmutter log listing not captured yet — the file names live '
+                'only in the NERSC portal listing, which is read off the '
+                'request path. Refresh this job to fetch it now.')
+        else:
+            log_urls_note = ('The NERSC portal did not answer, so its per-job '
+                             'log file names are not known for this job.')
 
     # 2. Files from filestable4
     file_field_list = ', '.join(f'"{f}"' for f in FILE_FIELDS)
@@ -2047,7 +3078,8 @@ def study_job(pandaid):
     harvester = None
     harvester_sql = f"""
         SELECT w."workerid", w."harvesterid", w."stdout", w."stderr", w."batchlog",
-               w."errorcode", w."diagmessage", w."status"
+               w."errorcode", w."diagmessage", w."status",
+               w."starttime", w."endtime"
         FROM "{PANDA_SCHEMA}"."harvester_workers" w
         JOIN "{PANDA_SCHEMA}"."harvester_rel_jobs_workers" r
             ON w."workerid" = r."workerid" AND w."harvesterid" = r."harvesterid"
@@ -2060,7 +3092,7 @@ def study_job(pandaid):
             hrow = cursor.fetchone()
             if hrow:
                 hcols = ['workerid', 'harvesterid', 'stdout', 'stderr', 'batchlog',
-                         'errorcode', 'diagmessage', 'status']
+                         'errorcode', 'diagmessage', 'status', 'starttime', 'endtime']
                 harvester = row_to_dict(hrow, hcols)
                 harvester = {k: v for k, v in harvester.items() if v is not None}
                 # Use harvester URLs if available (more authoritative than parsed pilotid)
@@ -2080,7 +3112,7 @@ def study_job(pandaid):
     if jeditaskid:
         task_sql = f"""
             SELECT "jeditaskid", "taskname", "status", "username", "errordialog",
-                   "failurerate", "workinggroup"
+                   "failurerate", "workinggroup", "eventservice", "splitrule"
             FROM "{PANDA_SCHEMA}"."jedi_tasks"
             WHERE "jeditaskid" = %s
         """
@@ -2090,12 +3122,39 @@ def study_job(pandaid):
                 trow = cursor.fetchone()
                 if trow:
                     tcols = ['jeditaskid', 'taskname', 'status', 'username',
-                             'errordialog', 'failurerate', 'workinggroup']
+                             'errordialog', 'failurerate', 'workinggroup',
+                             'eventservice', 'splitrule']
                     task_info = row_to_dict(trow, tcols)
                     task_info = {k: v for k, v in task_info.items() if v is not None}
                     _apply_effective_owners([task_info], 'username')
         except Exception as e:
             logger.error(f"study_job task query failed: {e}")
+
+    # A link is shown only where the file can be. Harvester uploads a
+    # worker's stdout alone to the PanDA server cache, which the server
+    # purges after seven days (copyArchive.py); the stderr and batch-log
+    # variants synthesized above never exist there. A condor log on the
+    # submit host is copied when the job ends.
+    # Our copy of the harvester's stdout, for a cache-stdout queue: read
+    # before the live link is judged, since the copy outlives the cache
+    # (monitor_app.harvester_stdout).
+    harvester_copy = None
+    if '/cache/' in str(log_urls.get('pilot_stdout') or ''):
+        try:
+            from monitor_app import harvester_stdout
+            copy = harvester_stdout.stored(pandaid, job.get('jeditaskid'))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('harvester stdout copy unreadable for %s: %s', pandaid, exc)
+            copy = None
+        if copy:
+            harvester_copy = {k: copy[k] for k in ('status', 'bytes', 'captured_at', 'source')}
+            if copy['status'] == 'failed':
+                harvester_copy['reason'] = copy['body'].strip().splitlines()[0] if copy['body'] else ''
+    kept, pruned_note = _prune_dead_log_urls(job, log_urls)
+    dead_log_urls = sorted(set(log_urls.values()) - set(kept.values()))
+    log_urls = kept
+    if pruned_note:
+        log_urls_note = f"{log_urls_note} {pruned_note}".strip()
 
     # Assemble result
     result = {
@@ -2104,7 +3163,14 @@ def study_job(pandaid):
         "job_record": full_job,
         "files": files,
         "log_urls": log_urls,
+        # Links the page must not draw anywhere else either (the pilot id,
+        # the harvester record): the file behind them is gone or never was.
+        "dead_log_urls": dead_log_urls,
     }
+    if log_urls_note:
+        result["log_urls_note"] = log_urls_note
+    if harvester_copy:
+        result["harvester_stdout"] = harvester_copy
 
     if log_file:
         result["log_file"] = log_file
@@ -2112,8 +3178,53 @@ def study_job(pandaid):
     if harvester:
         result["harvester"] = harvester
 
+    # Batch-layer reasons reach us cut to a length by the layers above
+    # (harvester to 256 of its own accord, then PanDA's 250- and
+    # 300-character columns), so a stored diag routinely ends mid-clause
+    # with the operative cause gone. When asked, read the condor event
+    # log the harvester keeps — the authority, and open inside SCDF —
+    # and report the reasons whole, naming each stored field that was cut.
+    if include_batch_reason:
+        # The captured copy first: it is what a parser improvement can be
+        # re-run against, and the source keeps only about eighteen days.
+        # A job captured before this ran falls back to the live fetch.
+        from monitor_app import batch_records
+        record = batch_records.stored(pandaid)
+        if record and record['status'] == 'captured':
+            events = parse_condor_log(record['body'], source=record['path'])
+            events['captured'] = {'path': record['path'],
+                                  'bytes': record['bytes'],
+                                  'day': record['day']}
+        elif record:
+            events = {'source': record['path'],
+                      'error': f"Capture failed: {record['body'].strip()}"}
+        elif include_batch_reason == 'fetch':
+            # Only ever on an explicit ask, never in a render: this reaches
+            # the harvester's log host over the network. A page shows what
+            # the capture holds and offers the fetch as an action.
+            events = condor_log_events(
+                (harvester or {}).get('batchlog') or log_urls.get('batch_log'))
+        else:
+            source = ((harvester or {}).get('batchlog')
+                      or log_urls.get('batch_log') or '')
+            events = {'source': source,
+                      'error': batch_records.why_absent(
+                          job, has_batchlog=bool(source))}
+        if events:
+            result['batch_record'] = events
+
     if task_info:
         result["task"] = task_info
+
+    # Event Service facts beside the record: one query on jedi_events,
+    # keyed by task and jobset, only for a job the flag marks as ES.
+    event_service = event_service_for_job(job, task_info)
+    if event_service:
+        result["event_service"] = event_service
+
+    payload_report = _payload_report(conn, pandaid)
+    if payload_report:
+        result["payload_report"] = payload_report
 
     # Official PanDA monitoring page URL.
     result["monitor_url"] = f"https://pandamon01.sdcc.bnl.gov/job?pandaid={pandaid}"
@@ -2121,8 +3232,12 @@ def study_job(pandaid):
     # 5. Log analysis for failure-adjacent statuses. 'closed' covers
     # lost-heartbeat (pilot killed at slot boundary before reporting back);
     # its pilot log on NERSC CFS is the only window into what happened.
+    # Two live fetches with thirty-second timeouts, so never in a page
+    # render: a page that waits on another host is a page that hangs when
+    # that host is slow, and no template reads this. The MCP study tool and
+    # the inventory sync, which are not renders, keep it.
     jobstatus = job.get('jobstatus', '')
-    if jobstatus in ('failed', 'holding', 'cancelled', 'closed'):
+    if include_log_analysis and jobstatus in ('failed', 'holding', 'cancelled', 'closed'):
         try:
             from askpanda_atlas.log_analysis_impl import (
                 _select_log_filename, _fetch_log_text,
@@ -2183,6 +3298,787 @@ def study_job(pandaid):
     return result
 
 
+# ── Event Service ────────────────────────────────────────────────────────────
+
+ES_RANGE_ROW_CAP = 60
+
+
+def es_events_per_range(splitrule):
+    """The task's events per range, from the ES= term of its split rule.
+
+    JEDI writes ``nEventsPerWorker`` into ``jedi_tasks.splitrule`` as
+    ``ES=<n>`` (``NE=100,ES=10,...``), which spares the taskparams JSON.
+    """
+    m = re.search(r'(?:^|,)ES=(\d+)', splitrule or '')
+    return int(m.group(1)) if m else None
+
+
+def _es_range_query(conn, where_sql, params, cap, consumer_ids=None):
+    """Ranges from jedi_events under one WHERE, read with the table's two
+    kinds of row told apart.
+
+    A range is one (file, process id) span of events. The server keeps a
+    row for it keyed by the JOBSET id: the bookkeeping row, whose status
+    is the range's disposition and whose attemptnr counts down. Each
+    consumer that takes the range adds a row keyed by its own PanDA id:
+    the attempt row, whose status and error code are that attempt's
+    outcome (task 39577, 2026-09-09: ten ranges, ten jobset rows
+    cancelled with 9 attempts left, ten consumer rows failed with pilot
+    error 1220). ``consumer_ids`` names the PanDA ids that are consumers;
+    every other id is a jobset. Without it every row reads as an attempt.
+
+    Returns totals, the distinct ranges, events requested and done (a
+    range is done when any row of it is), the bookkeeping counts by
+    status, the attempt counts by status and error code, and the first
+    ``cap`` rows. The pilot names a range
+    ``<task>-<pandaid>-<file>-<process>-<attempt>`` (task_event_module.py
+    decomposes it in that order); the same string is composed here for
+    reading pilot logs against the record.
+    """
+    sql = f"""
+        SELECT "jeditaskid", "pandaid", "fileid", "job_processid", "status",
+               "def_min_eventid", "def_max_eventid", "processed_upto_eventid",
+               "attemptnr", "error_code", "error_diag"
+        FROM "{PANDA_SCHEMA}"."jedi_events"
+        WHERE {where_sql}
+        ORDER BY "pandaid", "job_processid"
+    """
+    consumer_ids = set(int(i) for i in consumer_ids) if consumer_ids is not None else None
+    range_counts = {}
+    attempt_counts = {}
+    rows = []
+    total = 0
+    consumers = set()
+    jobsets = set()
+    distinct = {}
+    # A successor consumer gets its own jobset with its own copy of the
+    # bookkeeping rows, so a range's current state is the row under its
+    # latest jobset; the range counts are taken over those, one per range.
+    latest_bookkeeping = {}
+
+    def _count(table, key, status, attempt, ecode):
+        c = table.setdefault(key, {
+            'status': status, 'label': ES_RANGE_STATUS.get(status, str(status)),
+            'error_code': ecode, 'n': 0, 'attempts_min': None, 'attempts_max': None})
+        c['n'] += 1
+        if attempt is not None:
+            c['attempts_min'] = attempt if c['attempts_min'] is None else min(c['attempts_min'], attempt)
+            c['attempts_max'] = attempt if c['attempts_max'] is None else max(c['attempts_max'], attempt)
+
+    with conn.cursor() as cursor:
+        cursor.execute(sql, params)
+        for r in cursor.fetchall():
+            (taskid, pid, fileid, procid, status, emin, emax, upto,
+             attempt, ecode, ediag) = r
+            total += 1
+            is_consumer = consumer_ids is None or pid in consumer_ids
+            (consumers if is_consumer else jobsets).add(pid)
+            span = (emax - emin + 1) if emin is not None and emax is not None else 0
+            key = (fileid, procid)
+            done = status in ES_RANGE_DONE
+            prev = distinct.get(key)
+            distinct[key] = (span, done or (prev[1] if prev else False))
+            if is_consumer:
+                _count(attempt_counts, (status, ecode), status, attempt, ecode)
+            else:
+                held = latest_bookkeeping.get(key)
+                if held is None or pid > held[0]:
+                    latest_bookkeeping[key] = (pid, status, attempt)
+            if len(rows) < cap:
+                rows.append({
+                    'range_id': f'{taskid}-{pid}-{fileid}-{procid}-{attempt}',
+                    'keyed': 'consumer' if is_consumer else 'jobset',
+                    'pandaid': pid,
+                    'process': procid,
+                    'status': status,
+                    'label': ES_RANGE_STATUS.get(status, str(status)),
+                    'first_event': emin,
+                    'last_event': emax,
+                    'events': span,
+                    'processed_upto': upto,
+                    'attempts_left': attempt,
+                    'error_code': ecode,
+                    'error_diag': ediag,
+                })
+    for _pid, status, attempt in latest_bookkeeping.values():
+        _count(range_counts, (status,), status, attempt, None)
+    return {
+        'total': total,
+        'ranges': len(distinct),
+        'consumers': len(consumers),
+        'jobsets': sorted(jobsets),
+        'events_requested': sum(span for span, _ in distinct.values()),
+        'events_done': sum(span for span, done in distinct.values() if done),
+        'range_counts': sorted(range_counts.values(), key=lambda c: c['status']),
+        'attempt_counts': sorted(attempt_counts.values(),
+                                 key=lambda c: (c['status'], c['error_code'] or 0)),
+        'rows': rows,
+        'truncated': bool(cap) and total > len(rows),
+        'cap': cap,
+    }
+
+
+def event_service_ranges(jeditaskid, pandaid, jobsetid=None, cap=ES_RANGE_ROW_CAP):
+    """One job's ranges. ``jedi_events.pandaid`` holds the consumer's
+    jobset id, not its own PanDA id (the 2026-09-09 probes: 2722536 for
+    job 2722535), so the rows are keyed by task and by either id."""
+    conn = connections['panda']
+    ids = [int(pandaid)]
+    if jobsetid and int(jobsetid) != int(pandaid):
+        ids.append(int(jobsetid))
+    marks = ', '.join(['%s'] * len(ids))
+    try:
+        return _es_range_query(
+            conn, f'"jeditaskid" = %s AND "pandaid" IN ({marks})',
+            [int(jeditaskid), *ids], cap, consumer_ids=[int(pandaid)])
+    except Exception as e:
+        logger.error(f"event_service_ranges failed for job {pandaid}: {e}")
+        return {'error': str(e)}
+
+
+def event_service_task_summary(jeditaskid, consumer_ids=None, cap=0):
+    """The task's ranges across all its consumers: counts by status and
+    events done against requested. ``consumer_ids`` are the task's job
+    ids, which tell the attempt rows from the jobset bookkeeping rows.
+    No rows by default."""
+    conn = connections['panda']
+    try:
+        return _es_range_query(conn, '"jeditaskid" = %s', [int(jeditaskid)], cap,
+                               consumer_ids=consumer_ids)
+    except Exception as e:
+        logger.error(f"event_service_task_summary failed for task {jeditaskid}: {e}")
+        return {'error': str(e)}
+
+
+def es_verdict(job):
+    """The server's Event Service disposition of a job, when it made one:
+    the es_* substatus and the taskbuffer code in the ES band with its
+    meaning (panda-server ErrorCode.py)."""
+    sub = str(job.get('jobsubstatus') or '')
+    code = job.get('taskbuffererrorcode')
+    try:
+        code = int(code) if code is not None else None
+    except (TypeError, ValueError):
+        code = None
+    meaning = ES_TASKBUFFER_CODES.get(code)
+    if sub in FG_SUBSTATUS:
+        # A fine-grained job's disposition is its substatus alone.
+        return {'substatus': sub, 'code': None, 'meaning': FG_SUBSTATUS[sub],
+                'diag': None, 'ok': sub == 'fg_done'}
+    if not sub.startswith('es_') and meaning is None:
+        return None
+    return {
+        'substatus': sub or None,
+        'code': code if meaning else None,
+        'meaning': meaning,
+        'diag': job.get('taskbuffererrordiag') if meaning else None,
+        'ok': False,
+    }
+
+
+def seconds_per_event(taskname, queue, days=14):
+    """The measured cost of an event of one production configuration on
+    one queue: over the finished production jobs of the task name (a
+    prefix: the configuration's tasks and their residuals) on the queue
+    in the window, the median of each job's wall over its own event
+    count (the payload's count in the job record). The node harness's
+    unit size follows from it (swf-epicprod NODE_EVENT_DISPATCHER.md):
+    the loss quantum over the seconds per event. No measurement, no
+    number: ``jobs`` is 0 and ``s_per_event`` None."""
+    sql = f"""
+        SELECT COUNT(*),
+               percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (j."endtime" - j."starttime"))),
+               percentile_cont(0.5) WITHIN GROUP (ORDER BY j."nevents"),
+               percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (j."endtime" - j."starttime")) / j."nevents")
+        FROM "{PANDA_SCHEMA}"."jobsarchived4" j
+        JOIN "{PANDA_SCHEMA}"."jedi_tasks" t ON t."jeditaskid" = j."jeditaskid"
+        WHERE t."taskname" LIKE %s AND j."computingsite" = %s
+          AND j."jobstatus" = 'finished' AND j."nevents" > 0
+          AND j."processingtype" = 'epicproduction'
+          AND j."modificationtime" > NOW() - INTERVAL %s
+    """
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(sql, [f'{taskname}%', queue, f'{int(days)} days'])
+            n, med_s, med_events, med_spe = cursor.fetchone()
+    except Exception as e:
+        logger.error(f"seconds_per_event failed for {taskname} on {queue}: {e}")
+        return {'error': str(e)}
+    return {'task': taskname, 'queue': queue, 'days': int(days), 'jobs': int(n or 0),
+            'median_wall_s': round(float(med_s), 1) if med_s is not None else None,
+            'median_events': round(float(med_events), 1) if med_events is not None else None,
+            's_per_event': round(float(med_spe), 3) if med_spe is not None else None}
+
+
+def _median(values):
+    vals = sorted(v for v in values if v is not None)
+    if not vals:
+        return None
+    mid = len(vals) // 2
+    return round(vals[mid] if len(vals) % 2 else (vals[mid - 1] + vals[mid]) / 2, 1)
+
+
+def task_harness_rollup(jeditaskid, limit=2000):
+    """What the node harness reported across a task's Event Service
+    jobs: the jobs with a report, their slots, the units done and failed
+    with their events, the unit wall's middle and tail and the seconds
+    an event costs (unit wall over its events), the closes with their
+    events and wall, and every job's untaken-at-deadline mark. From the
+    job reports in the metatable (finished jobs), capped at ``limit``
+    jobs; None when no job of the task carries a harness report. Never
+    raises: one card on a page."""
+    conn = connections['panda']
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f'SELECT m."pandaid", m."metadata", j."starttime", j."endtime" '
+                f'FROM "{PANDA_SCHEMA}"."metatable" m '
+                f'JOIN "{PANDA_SCHEMA}"."jobsarchived4" j ON j."pandaid" = m."pandaid" '
+                f'WHERE j."jeditaskid" = %s ORDER BY m."pandaid" DESC LIMIT %s',
+                [int(jeditaskid), int(limit)])
+            rows = cursor.fetchall()
+    except Exception as e:
+        logger.error(f"harness rollup query failed for task {jeditaskid}: {e}")
+        return None
+    from ..es_plot import slot_plot_svg
+    jobs = 0
+    slots = []
+    unit_walls, unit_events, spe = [], [], []
+    done = failed = events_done = 0
+    closes, close_walls, close_events, close_failed = 0, [], 0, 0
+    deadline_marks = 0
+    busy_s = allocated_s = 0.0
+    heads, tails = [], []
+    plots = []
+    for pandaid, raw, jstart, jend in rows:
+        try:
+            metadata = json.loads(raw) if isinstance(raw, str) else raw
+        except (ValueError, TypeError):
+            continue
+        es = metadata.get('es') if isinstance(metadata, dict) else None
+        if not isinstance(es, dict):
+            continue
+        jobs += 1
+        # The slots' occupancy of this job, for the task's total and the
+        # newest jobs' plots.
+        tl = es_slot_timeline({'starttime': jstart, 'endtime': jend}, es)
+        if tl:
+            busy_s += tl['busy_s']
+            allocated_s += tl['allocated_s']
+            if tl.get('head_idle_s') is not None:
+                heads.append(tl['head_idle_s'])
+                tails.append(tl['tail_idle_s'])
+            if len(plots) < 8:
+                plots.append({'pandaid': int(pandaid), 'timeline': tl, 'svg': slot_plot_svg(tl)})
+        if es.get('slots'):
+            slots.append(int(es['slots']))
+        if es.get('untaken_at_deadline'):
+            deadline_marks += 1
+        for u in es.get('ranges_done') or []:
+            if not isinstance(u, dict):
+                continue
+            done += 1
+            ev = int(u.get('events_reconstructed') or u.get('events') or 0)
+            events_done += ev
+            w = u.get('wall_s')
+            if w is not None:
+                unit_walls.append(float(w))
+                unit_events.append(ev)
+                if ev:
+                    spe.append(float(w) / ev)
+        failed += len(es.get('ranges_failed') or [])
+        for c in es.get('closes') or []:
+            if not isinstance(c, dict):
+                continue
+            closes += 1
+            if c.get('ok'):
+                close_events += int(c.get('events') or 0)
+            else:
+                close_failed += 1
+            if c.get('wall_s') is not None:
+                close_walls.append(float(c['wall_s']))
+    if not jobs:
+        return None
+    walls = sorted(unit_walls)
+    return {
+        'jobs': jobs, 'slots_min': min(slots) if slots else None, 'slots_max': max(slots) if slots else None,
+        'units_done': done, 'units_failed': failed, 'events_done': events_done,
+        'unit_events_median': _median(unit_events),
+        'unit_wall_median_s': _median(unit_walls),
+        'unit_wall_p90_s': round(walls[min(len(walls) - 1, int(0.9 * len(walls)))], 1) if walls else None,
+        's_per_event_median': round(_median(spe), 2) if spe else None,
+        'closes': closes, 'closes_failed': close_failed, 'close_events': close_events,
+        'close_wall_median_s': _median(close_walls),
+        'deadline_marks': deadline_marks,
+        'capped': len(rows) >= limit,
+        # The slots' occupancy over the task: slot-time busy of allocated,
+        # and the typical idle head and tail of a job.
+        'busy_s': round(busy_s, 1), 'allocated_s': round(allocated_s, 1),
+        'busy_fraction': round(busy_s / allocated_s, 3) if allocated_s else None,
+        'head_idle_median_s': _median(heads), 'tail_idle_median_s': _median(tails),
+        'plots': plots,
+    }
+
+
+def es_slot_timeline(job, es):
+    """The slot occupancy of one Event Service job for the plot: each
+    slot's units as intervals on the job's own clock (seconds from the
+    pilot's start of the job), the closes, the harness's span, and the
+    accounting: slot-seconds allocated (slots times the job's wall),
+    slot-seconds busy (the units' wall), the head before the first unit
+    and the tail after the last, per slot. A unit's slot comes from the
+    record (payload 0.21.4); an older record is laid out greedily onto
+    lanes, which is what the slots did since each runs one unit at a
+    time. None when the job has no start and end."""
+    start, end = job.get('starttime'), job.get('endtime')
+    if not start or not end:
+        return None
+    from datetime import datetime, timezone as _tz
+
+    def epoch(t):
+        if isinstance(t, str):
+            t = parse_datetime(t)
+        if t is None:
+            return None
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=_tz.utc)
+        return t.timestamp()
+
+    t0, t1 = epoch(start), epoch(end)
+    if t0 is None or t1 is None or t1 <= t0:
+        return None
+    # A job whose node was taken away ends at the cut, not when PanDA
+    # later gave up on its heartbeat.
+    cut = (es.get('preempted') or {}).get('at')
+    if cut and (es.get('preempted') or {}).get('real'):
+        t1 = min(t1, float(cut))
+    nslots = int(es.get('slots') or 0) or 1
+    units = []
+    for status, key in (('done', 'ranges_done'), ('failed', 'ranges_failed'),
+                        ('interrupted', 'ranges_interrupted'), ('unshipped', 'ranges_unshipped')):
+        for u in es.get(key) or []:
+            if not isinstance(u, dict) or u.get('started_at') is None:
+                continue
+            us = float(u['started_at'])
+            ue = float(u.get('ended_at') or (us + float(u.get('wall_s') or 0)))
+            units.append({'unit_id': u.get('unit_id'), 'status': status,
+                          'start_s': us - t0, 'end_s': ue - t0,
+                          'events': int(u.get('events_reconstructed') or u.get('events') or 0),
+                          'slot': u.get('slot'), 'close': u.get('close')})
+    units.sort(key=lambda u: u['start_s'])
+    lanes = {}
+    if all(u['slot'] is not None for u in units) and units:
+        for u in units:
+            lanes.setdefault(int(u['slot']), []).append(u)
+    else:
+        # Greedy lanes: a unit takes the first lane free at its start.
+        free_at = []
+        for u in units:
+            lane = next((i for i, t in enumerate(free_at) if t <= u['start_s'] + 0.5), None)
+            if lane is None:
+                lane = len(free_at)
+                free_at.append(0.0)
+            free_at[lane] = u['end_s']
+            lanes.setdefault(lane, []).append(u)
+    for i in range(nslots):
+        lanes.setdefault(i, [])
+    closes = []
+    for c in es.get('closes') or []:
+        if isinstance(c, dict) and c.get('started_at') is not None:
+            cs = float(c['started_at'])
+            closes.append({'index': c.get('index'), 'ok': bool(c.get('ok')),
+                           'start_s': cs - t0,
+                           'end_s': float(c.get('ended_at') or (cs + float(c.get('wall_s') or 0))) - t0})
+    wall = t1 - t0
+    busy = sum(u['end_s'] - u['start_s'] for u in units)
+    allocated = wall * max(nslots, len(lanes))
+    slot_rows = []
+    for i in sorted(lanes):
+        us = lanes[i]
+        slot_rows.append({
+            'index': i, 'units': us,
+            'busy_s': round(sum(u['end_s'] - u['start_s'] for u in us), 1),
+            'head_idle_s': round(us[0]['start_s'], 1) if us else round(wall, 1),
+            'tail_idle_s': round(wall - us[-1]['end_s'], 1) if us else 0.0,
+        })
+    harness = None
+    if es.get('started_at'):
+        harness = {'start_s': float(es['started_at']) - t0,
+                   'end_s': (float(es['ended_at']) - t0) if es.get('ended_at') else None}
+    return {
+        'wall_s': round(wall, 1), 'slots': max(nslots, len(lanes)),
+        # The cores the batch job holds, which may exceed the cores it works
+        # (npps0: 6 of 8, a memory limit).
+        'cores_allocated': int(job.get('actualcorecount') or job.get('corecount') or 0) or None,
+        'rows': slot_rows, 'closes': closes, 'harness': harness,
+        'busy_s': round(busy, 1), 'allocated_s': round(allocated, 1),
+        'busy_fraction': round(busy / allocated, 3) if allocated else None,
+        'head_idle_s': round(min(r['head_idle_s'] for r in slot_rows), 1) if slot_rows else None,
+        'tail_idle_s': round(min(r['tail_idle_s'] for r in slot_rows), 1) if slot_rows else None,
+        'lanes_from_record': all(u['slot'] is not None for u in units) and bool(units),
+        'cut_s': round(float(cut) - t0, 1) if cut else None,
+        'cut_real': bool((es.get('preempted') or {}).get('real')),
+    }
+
+
+_PILOT_TASK_RE = re.compile(r'(?:pilotlog-task|-task)(\d+)')
+
+
+def allocation_timeline(harvesterid, workerid):
+    """The occupancy of one batch allocation (a harvester worker): every
+    PanDA job its pilots ran, as bars on the allocation's own clock, in the
+    shape es_slot_timeline gives an Event Service job, so the one renderer
+    (es_plot.slot_plot_svg) draws both. A lane is a pilot, the jobs it ran
+    one after another; a job is green finished, red failed, light yellow
+    when the batch job ended under it (taskbuffer 300, its work lost). The
+    clock is the worker's batch start to its end; when the harvester's
+    worker record has aged out of PanDA (a three-month window) the jobs'
+    own first start and last end stand in, and the timeline says so.
+
+    A lane's pilot comes from the Perlmutter log listing captured off the
+    request path (the srun task index in the file names) when every job
+    has one; otherwise jobs are laid out greedily, which leaves the
+    occupancy unchanged. Returns {'error': ...} on a failed read and None
+    when the worker ran no job."""
+    conn = connections['panda']
+    wcols = ['harvesterid', 'workerid', 'computingsite', 'status', 'batchid',
+             'submittime', 'starttime', 'endtime', 'ncore', 'njobs',
+             'resourcetype', 'diagmessage', 'stdout']
+    jcols = ['pandaid', 'jeditaskid', 'jobstatus', 'computingsite', 'starttime',
+             'endtime', 'corecount', 'nevents', 'piloterrorcode', 'exeerrorcode',
+             'transexitcode', 'taskbuffererrorcode', 'superrorcode']
+    jsel = ', '.join(f'j."{c}"' for c in jcols)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f'SELECT {", ".join(chr(34) + c + chr(34) for c in wcols)} '
+                f'FROM "{PANDA_SCHEMA}"."harvester_workers" '
+                f'WHERE "harvesterid" = %s AND "workerid" = %s',
+                [harvesterid, int(workerid)])
+            wrow = cursor.fetchone()
+            cursor.execute(
+                f'SELECT {jsel} FROM "{PANDA_SCHEMA}"."harvester_rel_jobs_workers" r '
+                f'JOIN "{PANDA_SCHEMA}"."jobsarchived4" j ON j."pandaid" = r."pandaid" '
+                f'WHERE r."harvesterid" = %s AND r."workerid" = %s '
+                f'UNION ALL '
+                f'SELECT {jsel} FROM "{PANDA_SCHEMA}"."harvester_rel_jobs_workers" r '
+                f'JOIN "{PANDA_SCHEMA}"."jobsactive4" j ON j."pandaid" = r."pandaid" '
+                f'WHERE r."harvesterid" = %s AND r."workerid" = %s',
+                [harvesterid, int(workerid), harvesterid, int(workerid)])
+            jrows = cursor.fetchall()
+    except Exception as e:
+        logger.error(f"allocation timeline query failed for {harvesterid}/{workerid}: {e}")
+        return {'error': f'PanDA database read failed: {e}'}
+    worker = dict(zip(wcols, wrow)) if wrow else None
+    if worker is None:
+        # PanDA drops the row after three months; our nightly copy keeps it
+        # (monitor_app.worker_records).
+        from ..worker_records import worker_row
+        try:
+            copy = worker_row(harvesterid, workerid)
+        except Exception as e:
+            logger.error(f"worker record copy unreadable for {harvesterid}/{workerid}: {e}")
+            copy = None
+        if copy:
+            worker = {k: copy.get(k) for k in wcols}
+            worker['from_copy'] = True
+    jobs = [dict(zip(jcols, r)) for r in jrows]
+    if not jobs:
+        return None
+
+    def epoch(t):
+        if t is None:
+            return None
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=dt_timezone.utc)
+        return t.timestamp()
+
+    now = timezone.now().timestamp()
+    started = [j for j in jobs if j['starttime'] is not None]
+    never_started = len(jobs) - len(started)
+    bounds_from_jobs = not (worker and worker.get('starttime'))
+    if not bounds_from_jobs:
+        t0 = epoch(worker['starttime'])
+        t1 = epoch(worker['endtime']) if worker.get('endtime') else now
+    elif started:
+        t0 = min(epoch(j['starttime']) for j in started)
+        t1 = max(epoch(j['endtime']) if j['endtime'] else now for j in started)
+    else:
+        t0 = t1 = None
+    wall = (t1 - t0) if (t0 is not None and t1 is not None) else 0.0
+
+    units = []
+    counts = {'done': 0, 'failed': 0, 'interrupted': 0, 'running': 0}
+    core_s = {'done': 0.0, 'failed': 0.0, 'interrupted': 0.0, 'running': 0.0}
+    tasks = {}
+    for j in started:
+        js = epoch(j['starttime'])
+        je = epoch(j['endtime']) if j['endtime'] else now
+        if j['jobstatus'] == 'finished':
+            status = 'done'
+        elif j['jobstatus'] in ('failed', 'cancelled', 'closed'):
+            status = 'interrupted' if j.get('taskbuffererrorcode') == 300 else 'failed'
+        else:
+            status = 'running'
+        s, e = max(0.0, js - t0), min(wall, je - t0)
+        if e < s:
+            e = s
+        cores = int(j.get('corecount') or 1)
+        counts[status] += 1
+        core_s[status] += (e - s) * cores
+        errs = [f'{name} {j[key]}' for name, key in (
+                    ('pilot', 'piloterrorcode'), ('taskbuffer', 'taskbuffererrorcode'),
+                    ('supervisor', 'superrorcode'), ('exe', 'exeerrorcode'))
+                if j.get(key) not in (None, 0, '0')]
+        if j.get('transexitcode') not in (None, '', '0', 0):
+            errs.append(f'exit {j["transexitcode"]}')
+        label = {'done': 'finished', 'failed': 'failed', 'interrupted': 'ended under it by the batch job',
+                 'running': j['jobstatus']}[status]
+        title = (f"job {j['pandaid']} (task {j['jeditaskid']}): {label}"
+                 + (f" ({', '.join(errs)})" if errs and status != 'done' else '')
+                 + f", {(e - s) / 60:.1f} min from {s / 60:.1f} min"
+                 + (f", {cores} cores" if cores > 1 else ''))
+        units.append({'unit_id': j['pandaid'], 'status': status, 'start_s': s, 'end_s': e,
+                      'events': int(j.get('nevents') or 0), 'title': title, 'slot': None,
+                      'cores': cores, 'jeditaskid': j['jeditaskid'], 'jobstatus': j['jobstatus'],
+                      'errors': ', '.join(errs) if status != 'done' else '',
+                      'site': j['computingsite'], 'start_min': round(s / 60, 1),
+                      'wall_s': round(e - s, 1)})
+        listing = _nersc_portal_log_urls(j['computingsite'], j['pandaid'], fetch=False) \
+            if str(j['computingsite'] or '').startswith('NERSC') else None
+        m = _PILOT_TASK_RE.search(' '.join(str(v) for v in (listing or {}).values()))
+        if m:
+            tasks[j['pandaid']] = int(m.group(1))
+    units.sort(key=lambda u: u['start_s'])
+    lanes = {}
+    lanes_from_record = bool(units) and all(u['unit_id'] in tasks for u in units)
+    if lanes_from_record:
+        for u in units:
+            lanes.setdefault(tasks[u['unit_id']], []).append(u)
+    else:
+        free_at = []
+        for u in units:
+            lane = next((i for i, t in enumerate(free_at) if t <= u['start_s'] + 0.5), None)
+            if lane is None:
+                lane = len(free_at)
+                free_at.append(0.0)
+            free_at[lane] = u['end_s']
+            lanes.setdefault(lane, []).append(u)
+    ncore = int((worker or {}).get('ncore') or 0)
+    max_cores = max((u['cores'] for u in units), default=1)
+    # The pilots the allocation could have held: its cores over the jobs'
+    # core count. Lanes nobody used stay on the plot, bare.
+    if ncore:
+        for i in range(ncore // max_cores):
+            lanes.setdefault(i, [])
+    rows = []
+    for i in sorted(lanes):
+        us = lanes[i]
+        rows.append({'index': i, 'units': us,
+                     # A job count beside the lane, except on a narrowed plot
+                     # where it would label one lane in eight.
+                     'right_text': (f'{len(us)} job{"s" if len(us) != 1 else ""}'
+                                    if us and len(lanes) <= 40 else ''),
+                     'busy_s': round(sum(u['end_s'] - u['start_s'] for u in us), 1)})
+    cores_allocated = ncore or len(rows) * max_cores
+    allocated = wall * cores_allocated
+    busy = sum(core_s.values())
+    # The idle after a pilot's last job: the cores waiting out the slowest
+    # job of the wave, or the allocation's end.
+    last_ends = [max(u['end_s'] for u in r['units']) for r in rows if r['units']]
+    first_start = min((u['start_s'] for u in units), default=None)
+    return {
+        'worker': worker, 'wall_s': round(wall, 1), 'slots': len(rows),
+        'cores_allocated': cores_allocated or None,
+        'rows': rows, 'closes': [], 'harness': None, 'cut_s': None, 'cut_real': False,
+        # For the shared renderer: pilots, not cores, one job count per lane.
+        'lane_label': 'pilot', 'closes_lane': False, 'compact_lanes': len(rows) > 40,
+        'lanes_from_record': lanes_from_record,
+        'bounds_from_jobs': bounds_from_jobs,
+        'live': bool(worker and not worker.get('endtime')) or counts['running'] > 0,
+        'jobs': len(jobs), 'never_started': never_started, 'counts': counts,
+        'core_s': {k: round(v, 1) for k, v in core_s.items()},
+        # The same in core-hours, the unit an allocation is charged in.
+        'core_h': {k: round(v / 3600, 1) for k, v in core_s.items()},
+        'busy_core_h': round(busy / 3600, 1), 'allocated_core_h': round(allocated / 3600, 1),
+        'idle_core_h': round(max(0.0, allocated - busy) / 3600, 1),
+        'busy_s': round(busy, 1), 'allocated_s': round(allocated, 1),
+        'idle_s': round(max(0.0, allocated - busy), 1),
+        'busy_fraction': round(busy / allocated, 3) if allocated else None,
+        'head_idle_s': round(first_start, 1) if first_start is not None else None,
+        'last_job_end_s': round(max(last_ends), 1) if last_ends else None,
+        'first_pilot_done_s': round(min(last_ends), 1) if last_ends else None,
+        'units': units,
+    }
+
+
+def allocation_of_job(pandaid):
+    """The (harvesterid, workerid) of the allocation a job ran in, from the
+    job-worker links, which PanDA keeps after the worker record itself has
+    aged out; None when the job has no link or the read fails."""
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(
+                f'SELECT "harvesterid", "workerid" FROM "{PANDA_SCHEMA}"."harvester_rel_jobs_workers" '
+                f'WHERE "pandaid" = %s ORDER BY "lastupdate" DESC LIMIT 1', [int(pandaid)])
+            row = cursor.fetchone()
+    except Exception as e:
+        logger.error(f"allocation lookup failed for job {pandaid}: {e}")
+        return None
+    return (row[0], int(row[1])) if row else None
+
+
+def es_from_shipped_record(pandaid):
+    """The ``es`` block of a job that ended without its final report, from
+    the record the harness shipped off the node as it went (swf-epicprod
+    payload/es/es_record.py), as the sweep filed it under
+    ``EpicProdJob.data['es_record']``. The record's last write is the cut:
+    the units then in flight were cut off, the units finished and not yet
+    in a close that stood never left the node, and a close running at the
+    cut is lost with them. None when no record was filed."""
+    from ..models import EpicProdJob
+    job = EpicProdJob.objects.filter(pandaid=int(pandaid)).only('data').first()
+    rec = ((job.data or {}).get('es_record') or {}).get('record') if job else None
+    if not isinstance(rec, dict) or not rec.get('written_at'):
+        return None
+    cut = float(rec['written_at'])
+    interrupted = [dict(u, status='interrupted', ended_at=cut,
+                        wall_s=round(cut - float(u.get('started_at') or cut), 1))
+                   for u in rec.get('in_flight') or []]
+    unshipped = [dict(u, status='unshipped') for u in rec.get('awaiting_close') or []]
+    # The record's closes carry no units (es_harness_report takes a close's
+    # units as a list); each done unit names its close.
+    per_close = {}
+    for u in rec.get('done') or []:
+        if u.get('close') is not None:
+            per_close.setdefault(int(u['close']), []).append(u.get('unit_id'))
+    closes = [dict(c, units=per_close.get(int(c.get('index') or 0), []))
+              for c in rec.get('closes') or []] + [
+        {'index': c.get('index'), 'ok': False, 'outcome': 'cut off', 'units': list(c.get('units') or []),
+         'started_at': c.get('started_at'), 'ended_at': cut} for c in rec.get('closing') or []]
+    return {
+        'kind': 'event_service', 'stamp': rec.get('stamp'), 'slots': rec.get('slots'),
+        'payload_version': rec.get('payload_version', ''),
+        'ranges_done': rec.get('done') or [], 'ranges_failed': rec.get('failed') or [],
+        'ranges_interrupted': interrupted, 'ranges_unshipped': unshipped, 'closes': closes,
+        'preempted': {
+            'real': True, 'at': cut,
+            'after_s': round(cut - float(rec.get('started_at') or cut), 1),
+            'interrupted_units': len(interrupted),
+            'interrupted_events': sum(int(u.get('events') or 0) for u in interrupted),
+            'unshipped_units': len(unshipped),
+            'unshipped_events': sum(int(u.get('events') or 0) for u in unshipped)},
+    }
+
+
+def es_harness_report(conn, pandaid):
+    """The node harness's account of an Event Service job, from the job
+    report the pilot shipped as metadata (evgen_job_dispatcher.py es
+    mode: the summary under ``es``, every unit's record with its events,
+    wall, outputs and, for a failed unit, the payload's failed stage and
+    error lines; swf-epicprod NODE_EVENT_DISPATCHER.md, The record).
+    A job with no such report, a preempted job above all, whose node
+    took the final report with it, is drawn from the record the harness
+    shipped off the node as it went, as the sweep filed it
+    (``es_from_shipped_record``). None when there is neither; never
+    raises."""
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f'SELECT "metadata" FROM "{PANDA_SCHEMA}"."metatable" WHERE "pandaid" = %s',
+                [int(pandaid)])
+            row = cursor.fetchone()
+    except Exception as e:
+        logger.error(f"harness report query failed for job {pandaid}: {e}")
+        return None
+    metadata = {}
+    if row and row[0]:
+        try:
+            metadata = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+        except (ValueError, TypeError) as e:
+            logger.error(f"job metadata unparsable for job {pandaid}: {e}")
+            return None
+    es = metadata.get('es') if isinstance(metadata, dict) else None
+    if not isinstance(es, dict):
+        es = es_from_shipped_record(pandaid)
+        if es is None:
+            return None
+        metadata = {'payload_version': es.get('payload_version', '')}
+    units = []
+    for status, key in (('done', 'ranges_done'), ('failed', 'ranges_failed'),
+                        ('interrupted', 'ranges_interrupted'), ('unshipped', 'ranges_unshipped')):
+        for u in es.get(key) or []:
+            if not isinstance(u, dict):
+                continue
+            rng = u.get('range') or {}
+            units.append({
+                'unit_id': u.get('unit_id'),
+                'status': status,
+                'first_event': rng.get('startEvent'),
+                'last_event': rng.get('lastEvent'),
+                'events': u.get('events'),
+                'wall_s': u.get('wall_s'),
+                'reconstructed': u.get('events_reconstructed'),
+                'dids': [d.split('/')[-1] for d in (u.get('dids') or [])],
+                'message': u.get('message') or '',
+                'rc': u.get('rc'),
+            })
+    units.sort(key=lambda u: (u['first_event'] is None, u['first_event'] or 0))
+    raw_es = es
+    closes = []
+    for c in es.get('closes') or []:
+        if isinstance(c, dict):
+            closes.append({'index': c.get('index'), 'outcome': c.get('outcome'),
+                           'events': c.get('events'), 'units': len(c.get('units') or []),
+                           'wall_s': c.get('wall_s'), 'did': (c.get('did') or '').split('/')[-1],
+                           'message': c.get('message') or '', 'ok': bool(c.get('ok'))})
+    return {
+        'payload_version': metadata.get('payload_version') or '',
+        'stamp': es.get('stamp'),
+        'dataset': es.get('dataset'),
+        'image': es.get('image'),
+        'slots': es.get('slots'),
+        'wall_s': es.get('wall_s'),
+        'harness_rc': es.get('harness_rc'),
+        'untaken_at_deadline': bool(es.get('untaken_at_deadline')),
+        'preempted': es.get('preempted'),
+        'units': units,
+        'closes': closes,
+        'raw': raw_es,
+        'n_done': sum(1 for u in units if u['status'] == 'done'),
+        'n_failed': sum(1 for u in units if u['status'] == 'failed'),
+        'events_reconstructed': sum(int(u['reconstructed'] or 0) for u in units),
+    }
+
+
+def event_service_for_job(job, task_info):
+    """The Event Service facts of one job for the job page and the study
+    tool: flavor, events per range, the job's ranges, the verdict. None
+    for a job that is not an Event Service job."""
+    flavor = job.get('eventservice')
+    try:
+        flavor = int(flavor) if flavor is not None else 0
+    except (TypeError, ValueError):
+        flavor = 0
+    if not flavor and 'eventservice' not in str(job.get('specialhandling') or ''):
+        return None
+    ranges = event_service_ranges(job.get('jeditaskid'), job.get('pandaid'),
+                                  job.get('jobsetid'))
+    out = {
+        'flavor': flavor,
+        'flavor_name': ES_JOB_FLAVORS.get(flavor, f'flag {flavor}'),
+        'events_per_range': es_events_per_range((task_info or {}).get('splitrule')),
+        'ranges': ranges,
+        'verdict': es_verdict(job),
+        'report': es_harness_report(connections['panda'], job.get('pandaid')),
+    }
+    if out['report']:
+        out['report']['timeline'] = es_slot_timeline(job, out['report']['raw'])
+        from ..es_plot import slot_plot_svg
+        out['report']['svg'] = slot_plot_svg(out['report']['timeline'])
+    return out
+
+
 # ── DataTables query functions ───────────────────────────────────────────────
 
 # Orderable columns for jobs and tasks (maps column name to SQL expression)
@@ -2205,17 +4101,23 @@ def _job_window_filter(days, ended_after=None, ended_before=None):
     return ['"modificationtime" >= %s'], [cutoff]
 
 
-def list_jobs_dt(days=7, status=None, username=None, site=None,
-                 taskid=None, reqid=None,
-                 order_by='"pandaid" DESC', limit=100, offset=0, search=None,
-                 ended_after=None, ended_before=None):
-    """List PanDA jobs for DataTables (returns rows, total, filtered counts)."""
+def _job_list_where(days, status=None, username=None, site=None,
+                    taskid=None, reqid=None,
+                    ended_after=None, ended_before=None):
+    """The WHERE clauses and parameters a jobs-list request selects.
+
+    Closed jobs (never run, disposed of by JEDI; see get_activity) are
+    left out unless the request asks for them by status: they are a
+    question about the task record, not a listing anyone reads
+    through."""
     where, params = _job_window_filter(
         days, ended_after=ended_after, ended_before=ended_before)
 
     if status:
         where.append('"jobstatus" = %s')
         params.append(status)
+    else:
+        where.append('"jobstatus" <> \'closed\'')
     if username:
         clause, vals = _effective_username_filter('produsername', username)
         where.append(clause)
@@ -2230,6 +4132,38 @@ def list_jobs_dt(days=7, status=None, username=None, site=None,
     if reqid:
         where.append('"reqid" = %s')
         params.append(int(reqid))
+    return where, params
+
+
+def job_request_size(days=7, status=None, username=None, site=None,
+                     taskid=None, reqid=None,
+                     ended_after=None, ended_before=None):
+    """How many jobs a jobs-list request covers, before anything is built
+    for it: the number the page judges the request by. None when the
+    count fails (logged), so the caller can proceed as asked."""
+    where, params = _job_list_where(
+        days, status=status, username=username, site=site,
+        taskid=taskid, reqid=reqid,
+        ended_after=ended_after, ended_before=ended_before)
+    count_sql, count_params = build_union_count(where, params)
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(count_sql, count_params)
+            return int(cursor.fetchone()[0])
+    except Exception as e:                                   # noqa: BLE001
+        logger.error(f"job_request_size count failed: {e}")
+        return None
+
+
+def list_jobs_dt(days=7, status=None, username=None, site=None,
+                 taskid=None, reqid=None,
+                 order_by='"pandaid" DESC', limit=100, offset=0, search=None,
+                 ended_after=None, ended_before=None):
+    """List PanDA jobs for DataTables (returns rows, total, filtered counts)."""
+    where, params = _job_list_where(
+        days, status=status, username=username, site=site,
+        taskid=taskid, reqid=reqid,
+        ended_after=ended_after, ended_before=ended_before)
 
     conn = connections['panda']
 
@@ -2371,6 +4305,11 @@ def job_filter_counts(days=7, status=None, username=None, site=None,
         # Apply all other filters except this one
         where = list(base_where)
         params = list(base_params)
+        # The status facet keeps closed listed with its count, the way
+        # an expert asks for closed jobs; the other facets count what the
+        # listing shows, which leaves closed out unless it was asked for.
+        if filter_name != 'status' and status != 'closed':
+            where.append('"jobstatus" <> \'closed\'')
         for other_db_field, other_name, other_value in filter_config:
             if other_name != filter_name and other_value:
                 if other_name == 'username':
@@ -2413,7 +4352,7 @@ def job_filter_counts(days=7, status=None, username=None, site=None,
 
 
 def task_filter_counts(days=7, status=None, username=None,
-                       processingtype=None, workinggroup=None):
+                       processingtype=None, workinggroup=None, queue=None):
     """Get filter option counts for task list."""
     cutoff = timezone.now() - timedelta(days=days)
     base_where = ['COALESCE("modificationtime", "creationdate") >= %s']
@@ -2431,6 +4370,8 @@ def task_filter_counts(days=7, status=None, username=None,
         ('username', 'username', username),
         ('processingtype', 'processingtype', processingtype),
         ('workinggroup', 'workinggroup', workinggroup),
+        # The queue filter reads the task's pinned queue (the site field).
+        ('site', 'queue', queue),
     ]
 
     for db_field, filter_name, current_value in filter_config:
@@ -2442,8 +4383,10 @@ def task_filter_counts(days=7, status=None, username=None,
                     clause, vals = _effective_username_filter(other_db_field, other_value)
                     where.append(clause)
                     params.extend(vals)
-                elif other_db_field == 'processingtype' and other_value == '__blank__':
-                    where.append('("processingtype" IS NULL OR "processingtype" = %s)')
+                elif other_db_field in ('processingtype', 'site') \
+                        and other_value == '__blank__':
+                    where.append(f'("{other_db_field}" IS NULL '
+                                 f'OR "{other_db_field}" = %s)')
                     params.append('')
                 else:
                     where.append(f'"{other_db_field}" = %s')
@@ -2525,7 +4468,7 @@ def get_task_operation_targets(jedi_task_ids):
         return []
     placeholders = ', '.join(['%s'] * len(ids))
     sql = f"""
-        SELECT "jeditaskid", "taskname", "status"
+        SELECT "jeditaskid", "taskname", "status", "site"
         FROM "{PANDA_SCHEMA}"."jedi_tasks"
         WHERE "jeditaskid" IN ({placeholders})
     """
@@ -2538,7 +4481,160 @@ def get_task_operation_targets(jedi_task_ids):
             'jeditaskid': int(row[0]),
             'taskname': row[1] or '',
             'status': row[2] or '',
+            'site': row[3] or '',
         }
         for row in rows
     }
     return [by_id[task_id] for task_id in ids if task_id in by_id]
+
+
+def canary_probe_activity(days=30, limit_jobs=100):
+    """Canary probe tasks and jobs — everything carrying processing
+    type 'canary' in the window, for the canary probes page. Tasks
+    gain per-status job counts; jobs come newest first, bounded."""
+    cutoff = timezone.now() - timedelta(days=days)
+    conn = connections['panda']
+    tasks = []
+    jobs = []
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f'SELECT "jeditaskid", "taskname", "status", "site", '
+                f'"creationdate", "modificationtime" '
+                f'FROM "{PANDA_SCHEMA}"."jedi_tasks" '
+                f"WHERE \"processingtype\" = 'canary' "
+                f'AND COALESCE("modificationtime", "creationdate") >= %s '
+                f'ORDER BY "jeditaskid" DESC', [cutoff])
+            for row in cursor.fetchall():
+                tasks.append(dict(zip(
+                    ('jeditaskid', 'taskname', 'status', 'queue',
+                     'creationdate', 'modificationtime'), row)))
+            for table in ('jobsactive4', 'jobsarchived4'):
+                cursor.execute(
+                    f'SELECT "pandaid", "jeditaskid", "jobstatus", '
+                    f'"computingsite", "starttime", "endtime", '
+                    f'"transexitcode", "piloterrordiag" '
+                    f'FROM "{PANDA_SCHEMA}"."{table}" '
+                    f"WHERE \"processingtype\" = 'canary' "
+                    f'AND "modificationtime" >= %s', [cutoff])
+                for row in cursor.fetchall():
+                    jobs.append(dict(zip(
+                        ('pandaid', 'jeditaskid', 'jobstatus',
+                         'computingsite', 'starttime', 'endtime',
+                         'transexitcode', 'piloterrordiag'), row)))
+    except Exception as e:
+        logger.error(f"canary_probe_activity query failed: {e}")
+        return {'error': str(e)}
+    counts = {}
+    for job in jobs:
+        entry = counts.setdefault(job['jeditaskid'], {})
+        entry[job['jobstatus']] = entry.get(job['jobstatus'], 0) + 1
+    for task in tasks:
+        task['job_counts'] = counts.get(task['jeditaskid'], {})
+    jobs.sort(key=lambda j: -(j['pandaid'] or 0))
+    return {'tasks': tasks, 'jobs': jobs[:limit_jobs]}
+
+
+def queue_observed(panda_queue, days=30):
+    """What a queue actually is, from the jobs that ran on it.
+
+    The declared schedconfig says what a queue offers; this says what it
+    delivered. Per processor: how many distinct nodes carried it, how many
+    jobs ran and how they ended, the middle of their CPU efficiency, and
+    the memory they actually took. A queue is judged against its own
+    history this way rather than against another site's declaration
+    (the node map and benchmark record, swf inflight
+    swf-node-map-benchmarks).
+
+    Cost is a month of jobs, so callers cache it.
+    """
+    conn = connections['panda']
+    since = timezone.now() - timedelta(days=days)
+    host_expr = 'regexp_replace(COALESCE("modificationhost", \'\'), \'^.*@\', \'\')'
+    sql = f"""
+        SELECT COALESCE("cpuconsumptionunit", 'unknown') AS processor,
+               COUNT(DISTINCT {host_expr}) AS nodes,
+               COUNT(*) AS jobs,
+               COUNT(*) FILTER (WHERE "jobstatus" = 'finished') AS finished,
+               COUNT(*) FILTER (WHERE "jobstatus" = 'failed') AS failed,
+               -- Over finished jobs only. A job that died in its first
+               -- minute consumed no CPU, so including failures measures the
+               -- failure rate and calls it a slow processor: at
+               -- BNL_OSG_EPIC_PROD_1 that read an EPYC 7452 as 0.003.
+               PERCENTILE_DISC(0.5) WITHIN GROUP (
+                   ORDER BY CASE WHEN "wall_time" > 0 AND "jobstatus" = 'finished'
+                            THEN "cpu_seconds" / "wall_time" END) AS efficiency,
+               PERCENTILE_DISC(0.5) WITHIN GROUP (
+                   ORDER BY CASE WHEN "jobstatus" = 'finished'
+                            THEN "maxrss" END) AS rss_median,
+               PERCENTILE_DISC(0.9) WITHIN GROUP (
+                   ORDER BY CASE WHEN "jobstatus" = 'finished'
+                            THEN "maxrss" END) AS rss_p90,
+               MAX("corecount") AS cores
+        FROM (
+            SELECT "computingsite", "modificationhost", "jobstatus",
+                   "cpuconsumptionunit", "maxrss", "corecount",
+                   "cpuconsumptiontime" AS cpu_seconds,
+                   EXTRACT(EPOCH FROM ("endtime" - "starttime"))
+                       * GREATEST(COALESCE("actualcorecount", "corecount", 1), 1)
+                       AS wall_time
+            FROM "{PANDA_SCHEMA}"."jobsarchived4"
+            WHERE "computingsite" = %s AND "modificationtime" >= %s
+              AND "starttime" IS NOT NULL AND "endtime" IS NOT NULL
+        ) j
+        GROUP BY processor
+        ORDER BY jobs DESC
+    """
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(sql, [panda_queue, since])
+            rows = cursor.fetchall()
+    except Exception as e:                                   # noqa: BLE001
+        logger.error('queue_observed failed for %s: %s', panda_queue, e)
+        return {'error': str(e), 'processors': [], 'days': days}
+
+    processors = []
+    for (processor, nodes, jobs, finished, failed, efficiency,
+         rss_median, rss_p90, cores) in rows:
+        processors.append({
+            'processor': processor,
+            'nodes': nodes,
+            'jobs': jobs,
+            'finished': finished,
+            'failed': failed,
+            'failure_rate': round(failed / jobs, 3) if jobs else None,
+            'efficiency': round(float(efficiency), 3) if efficiency else None,
+            # In megabytes: the record keeps kilobytes and a seven-digit
+            # number of them reads as noise.
+            'rss_median_mb': round(int(rss_median) / 1024) if rss_median else None,
+            'rss_p90_mb': round(int(rss_p90) / 1024) if rss_p90 else None,
+            'cores': cores,
+        })
+    # An outlier is a processor the queue itself contradicts: it carried
+    # real work and delivered at a different rate from the queue's own
+    # middle. Named, never excluded here — exclusion is a human decision.
+    efficiencies = [p['efficiency'] for p in processors if p['efficiency']]
+    middle = _quantile(efficiencies, 0.5)
+    total_jobs = sum(p['jobs'] for p in processors)
+    total_failed = sum(p['failed'] for p in processors)
+    queue_failure = (total_failed / total_jobs) if total_jobs else 0
+    for entry in processors:
+        # Two different kinds of outlier, and conflating them hides the
+        # worse one: a processor can deliver at the queue's rate and still
+        # deliver almost nothing. At BNL_OSG_EPIC_PROD_1 a Xeon 6230R runs
+        # at 0.988 efficiency with 95% of its jobs failing.
+        entry['slow'] = bool(
+            middle and entry['efficiency'] and entry['jobs'] >= 20
+            and entry['efficiency'] < middle * 0.8)
+        # Above the queue's own rate by a margin, not by a multiple: on a
+        # queue already failing 73% of its jobs, 1.5 times that is over 1.0
+        # and nothing can ever clear it, which left the column empty on the
+        # very queue that needed it.
+        entry['failing'] = bool(
+            entry['jobs'] >= 20 and entry['failure_rate']
+            and entry['failure_rate'] >= max(queue_failure + 0.15, 0.3))
+        entry['outlier'] = entry['slow'] or entry['failing']
+    return {'processors': processors, 'days': days, 'median_efficiency': middle,
+            'failure_rate': round(queue_failure, 3),
+            'nodes': sum(p['nodes'] for p in processors),
+            'jobs': sum(p['jobs'] for p in processors)}

@@ -7,7 +7,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from monitor_app.activemq_connection import ActiveMQConnectionManager
-from monitor_app.models import PandaTaskOperation
+from monitor_app.models import PandaQueue, PandaTaskOperation
 
 PAUSE_REJECTED_TASK_STATUSES = frozenset(
     ('finished', 'failed', 'done', 'aborted', 'broken', 'paused'))
@@ -26,13 +26,22 @@ RETRYABLE_TASK_STATUSES = frozenset(
 FINISHABLE_TASK_STATUSES = frozenset(
     ('running', 'paused', 'throttled', 'staging', 'exhausted',
      'ready', 'pending', 'scouting', 'assigning', 'defined', 'registered'))
+# Move remaining work (PanDA task reassign, mode soft): offered while the
+# task has work to generate or run. PanDA accepts a site reassign in any
+# state; a finished, failed or exhausted task moves by a retry with a
+# target queue or a rerun with a site instead.
+MOVABLE_TASK_STATUSES = frozenset(
+    ('defined', 'ready', 'running', 'scouting', 'scouted', 'pending',
+     'assigning', 'throttled', 'paused'))
 BULK_OPERATION_STATUSES = {
     'pause': frozenset(('running',)),
     'resume': frozenset(('paused',)),
     'retry_failures': RETRYABLE_TASK_STATUSES,
     'finish': FINISHABLE_TASK_STATUSES,
+    'reassign': MOVABLE_TASK_STATUSES,
 }
-OPERATION_VERBS = frozenset(('pause', 'resume', 'retry_failures', 'finish'))
+OPERATION_VERBS = frozenset(('pause', 'resume', 'retry_failures', 'finish',
+                             'reassign'))
 MAX_BULK_TASKS = 5000
 
 
@@ -108,8 +117,12 @@ def operation_controls(task, *, authenticated, internal_monitor, pending=None):
 
 
 def queue_task_operation(*, task, operation, requested_by, source='manual',
-                         evidence=None):
-    """Persist and queue one pause/resume request for the prod-ops agent."""
+                         evidence=None, site=''):
+    """Persist and queue one task operation for the prod-ops agent.
+    ``site`` is the target queue of a reassign."""
+    if operation == 'reassign':
+        site = validate_move_site(site)
+        evidence = dict(evidence or {}, site=site, mode='soft')
     record, created = _persist_task_operation(
         task=task,
         operation=operation,
@@ -130,8 +143,23 @@ def queue_task_operation(*, task, operation, requested_by, source='manual',
         'source': source,
         'created_by': requested_by,
     }
+    if operation == 'reassign':
+        msg.update(site=site, mode='soft')
     _send_operation_message(msg, [record])
     return record, True
+
+
+def validate_move_site(site):
+    """The target of a Move: one of the production queues (SysConfig
+    ``front.queues``, the set the pressure front regulates)."""
+    from swf_epicprod.front import regulated_queues
+    site = str(site or '').strip()
+    queues = regulated_queues()
+    if site not in queues:
+        raise PandaTaskOperationError(
+            f'{site or "(none)"} is not a production queue; the production '
+            'queues are ' + ', '.join(queues) + '.')
+    return site
 
 
 def _persist_task_operation(*, task, operation, requested_by, source,
@@ -175,6 +203,12 @@ def _persist_task_operation(*, task, operation, requested_by, source,
             raise PandaTaskOperationError(
                 f'Task failures cannot be retried from status {task_status}.',
                 409)
+    elif operation == 'reassign':
+        if task_status not in MOVABLE_TASK_STATUSES:
+            raise PandaTaskOperationError(
+                f'Work cannot be moved from a task in status {task_status}; '
+                'a finished, failed or exhausted task moves by a retry with '
+                'a target queue or a rerun with a site.', 409)
     elif task_status not in FINISHABLE_TASK_STATUSES:
         raise PandaTaskOperationError(
             f'Task cannot be finished from status {task_status}.', 409)
@@ -221,12 +255,74 @@ def _send_operation_message(message, records):
         raise PandaTaskOperationError(diagnostic, 503)
 
 
-def queue_task_operations(*, tasks, operation, requested_by):
-    """Persist eligible task records and queue one paced prod-ops batch."""
+def retry_parameters(raw):
+    """The PanDA task parameters a failure retry may change, from the
+    request form: memory per core in MB, wall time in hours, and the
+    target queue. PanDA merges them into the task's stored parameters
+    and re-executes the task with them (the retry API's new_parameters);
+    the server accepts that only for a task in a terminal state, which
+    the retry eligibility already requires. Returns None when nothing
+    is set."""
+    if raw in (None, '', {}):
+        return None
+    if not isinstance(raw, dict):
+        raise PandaTaskOperationError('new_parameters must be an object.')
+    params = {}
+    ram = raw.get('ram_count_mb')
+    if ram not in (None, ''):
+        try:
+            ram = int(ram)
+        except (TypeError, ValueError):
+            raise PandaTaskOperationError('RAM per core must be an integer number of MB.')
+        if ram < 100 or ram > 1000000:
+            raise PandaTaskOperationError('RAM per core must be between 100 and 1000000 MB.')
+        params['ramCount'] = ram
+        # Fixed, as the submission sets it (scripts/evgen_panda_submit.py):
+        # a memory the operator sets is not for JEDI's scout-data pass to
+        # reset from the finished jobs' PSS.
+        params['ramUnit'] = 'MBPerCoreFixed'
+    hours = raw.get('walltime_hours')
+    if hours not in (None, ''):
+        try:
+            hours = float(hours)
+        except (TypeError, ValueError):
+            raise PandaTaskOperationError('Wall time must be a number of hours.')
+        if hours <= 0 or hours > 1000:
+            raise PandaTaskOperationError('Wall time must be between 0 and 1000 hours.')
+        # Seconds, as the PCS submission sets it; JEDI's refiner reads
+        # the bare value and leaves the unit unset.
+        params['walltime'] = int(round(hours * 3600))
+    queue = raw.get('target_queue')
+    if queue not in (None, ''):
+        queue = str(queue).strip()
+        known = set(PandaQueue.objects.values_list('queue_name', flat=True))
+        if queue not in known:
+            raise PandaTaskOperationError(
+                f'Unknown PanDA queue {queue!r}; known queues: '
+                + ', '.join(sorted(known)))
+        # The task's target queue, under the taskParamMap key the PCS
+        # submission sets (pcs/commands.py, 'site').
+        params['site'] = queue
+    return params or None
+
+
+def queue_task_operations(*, tasks, operation, requested_by,
+                          new_parameters=None, site=''):
+    """Persist eligible task records and queue one paced prod-ops batch.
+
+    ``new_parameters`` (retry_failures only) are the task parameters the
+    retry changes, already in PanDA form from ``retry_parameters``; they
+    ride the batch message to the executor and are recorded on every
+    task's operation record."""
     if operation not in BULK_OPERATION_STATUSES:
         raise PandaTaskOperationError(
             'operation must be one of: '
             + ', '.join(sorted(BULK_OPERATION_STATUSES)))
+    if new_parameters and operation != 'retry_failures':
+        raise PandaTaskOperationError(
+            'New resource requirements apply to retry_failures only.')
+    if operation == 'reassign':
+        site = validate_move_site(site)
     if not tasks:
         raise PandaTaskOperationError('Select at least one task.')
     if len(tasks) > MAX_BULK_TASKS:
@@ -241,13 +337,19 @@ def queue_task_operations(*, tasks, operation, requested_by):
     for task in tasks:
         jedi_task_id = task.get('jeditaskid')
         task_status = str(task.get('status') or '').lower()
+        evidence = {'task_status': task_status, 'batch_id': batch_id}
+        if operation == 'reassign':
+            evidence.update(site=site, mode='soft',
+                            previous_site=str(task.get('site') or ''))
+        if new_parameters:
+            evidence['new_parameters'] = dict(new_parameters)
         try:
             record, created = _persist_task_operation(
                 task=task,
                 operation=operation,
                 requested_by=requested_by,
                 source='manual-bulk',
-                evidence={'task_status': task_status, 'batch_id': batch_id},
+                evidence=evidence,
                 allowed_statuses=allowed_statuses,
             )
         except PandaTaskOperationError as exc:
@@ -274,7 +376,7 @@ def queue_task_operations(*, tasks, operation, requested_by):
             }
             for record in new_records
         ]
-        _send_operation_message({
+        message = {
             'msg_type': 'panda_task_operations',
             'namespace': 'prodops',
             'batch_id': batch_id,
@@ -282,7 +384,12 @@ def queue_task_operations(*, tasks, operation, requested_by):
             'items': items,
             'source': 'manual-bulk',
             'created_by': requested_by,
-        }, new_records)
+        }
+        if new_parameters:
+            message['new_parameters'] = dict(new_parameters)
+        if operation == 'reassign':
+            message.update(site=site, mode='soft')
+        _send_operation_message(message, new_records)
     return {
         'batch_id': batch_id,
         'records': [serialize_operation(record) for record in records],
