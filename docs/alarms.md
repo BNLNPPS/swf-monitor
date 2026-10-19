@@ -9,6 +9,9 @@ Lifecycle, per-subscriber feeds, and automated response are specified in
 [ALARM_QUEUE.md](ALARM_QUEUE.md); pings, dated obligations carried at
 their own severity, in [PINGS.md](PINGS.md).
 
+Delivery into all subscribed running Claude Code and Codex sessions is designed
+in [ALARM_AI_DELIVERY.md](ALARM_AI_DELIVERY.md).
+
 ## Runtime
 
 - Dashboard: `/swf-monitor/alarms/`
