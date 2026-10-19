@@ -34,8 +34,8 @@ Subscription controls select topics and allow pause or disconnect. They do not s
 ```mermaid
 flowchart LR
     W[Watcher] --> A[Alarm event and subscription feed]
-    A -->|Outbound HTTPS connection| R1[Receiver on machine A]
-    A -->|Outbound HTTPS connection| R2[Receiver on machine B]
+    R1[Receiver on machine A] -->|receiver-initiated HTTPS stream| A
+    R2[Receiver on machine B] -->|receiver-initiated HTTPS stream| A
     R1 --> C1[Claude Code session]
     R1 --> C2[Codex session]
     R2 --> C3[Claude Code session]
@@ -56,7 +56,7 @@ The broader alarm-response lifecycle in [ALARM_QUEUE.md](ALARM_QUEUE.md) is stil
 
 Two existing details need adaptation:
 
-- The current notice feed is selected by subscriber name and uses a timestamp cursor. Add authenticated subscription ownership and a stable sequence cursor for personal client connections; preserve the existing public-feed contract.
+- The current notice feed (`/api/capcom/notices/`) is an open read selected by an arbitrary subscriber name, with a timestamp cursor. Personal feeds are a separate authenticated path scoped to the subscription's owner, with a stable sequence cursor; personal subscriptions and their messages never flow through the open endpoint, which keeps its existing contract for the shared feeds.
 - Existing push plugins are at-most-once. AI delivery should read a durable buffer and reconnect with replay, rather than depend on a successful one-time callback.
 
 Implementation references: [alarm engine](alarms.md) and [notice routing](NOTICE_ROUTING.md).
