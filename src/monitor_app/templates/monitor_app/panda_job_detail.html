@@ -334,7 +334,17 @@
     {% endif %}
 
     <!-- Crash: the payload died on a signal; the signature it belongs to in the segfault catalog -->
-    {% if crash_signature %}
+    {% if crash_signature.class == 'memory' %}
+    <div class="card mb-3">
+        <div class="card-header"><strong>Memory kill</strong></div>
+        <div class="card-body">
+            The job was {{ crash_signature.signal_name }}; it is a representative of the memory signature
+            <a href="{% url 'monitor_app:panda_segfault_detail' key=crash_signature.key %}">{{ crash_signature.key }}</a>:
+            {{ crash_signature.crashes }} jobs killed for memory{% if crash_signature.rate_pct %}, {{ crash_signature.rate_pct }} of the task's jobs{% endif %};
+            status {{ crash_signature.status_label }}.
+        </div>
+    </div>
+    {% elif crash_signature %}
     <div class="card mb-3">
         <div class="card-header"><strong>Crash</strong></div>
         <div class="card-body">

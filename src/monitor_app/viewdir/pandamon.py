@@ -1234,9 +1234,10 @@ def panda_job_detail(request, pandaid):
     data.update(inventory_for_job_context(data))
     data['epicprod_diagnosis'] = diagnosis_for_study_data(
         data, epicprod_job=data.get('epicprod_job'))
-    # A crashed job's card names its segfault-catalog signature; swfdb only.
+    # A crashed job's card names its segfault-catalog signature, a memory
+    # signature's representative its memory signature; swfdb only.
     epicprod_job = data.get('epicprod_job')
-    if epicprod_job is not None and epicprod_job.phase == 'payload_crash':
+    if epicprod_job is not None and epicprod_job.phase in ('payload_crash', 'payload_memory'):
         from ..segfaults import signature_for_job
         data['crash_signature'] = signature_for_job(pandaid)
     return render(request, 'monitor_app/panda_job_detail.html', data)

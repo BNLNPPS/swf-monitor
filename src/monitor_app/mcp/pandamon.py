@@ -780,7 +780,11 @@ async def panda_segfault_reproduce(
     reference queue BNL_NPPS_GPU, one slot with known conditions, is named
     in ``queues`` only when the reading needs the host (a memory ceiling, a
     core dump, a stall watched live); it then carries the production
-    queue's memory limit. The request is recorded on the signature as it
+    queue's memory limit. A memory signature (class memory, key
+    'memory:task<N>[:stage]') is reproduced by default on the production
+    queue at the task's own request and on the reference queue with no
+    limit, where the row runs to its end and its peak memory and growth
+    are measured. The request is recorded on the signature as it
     is sent and appears on the runs page (/panda/segfaults/reproductions/)
     within a minute, which is how a session that takes an item from the
     nightly notice claims it: check the signature's attempts
@@ -792,7 +796,8 @@ async def panda_segfault_reproduce(
         pandaid: The crashed job to rerun (default: the representative
             with a resolved row).
         queues: The queues to run on (default: the production queue and
-            the second queue; add 'BNL_NPPS_GPU' for the reference run).
+            the second queue, or the reference queue for a memory
+            signature; add 'BNL_NPPS_GPU' for the reference run).
         requested_by: Who requests (recorded on the signature and the
             action stream).
 
@@ -812,10 +817,11 @@ async def panda_segfault_reproduce(
             plan = reproduction_plan(sig, pandaid)
         except ValueError as e:
             return {'error': str(e)}
-        chosen = [q for q in (queues or []) if q] or [
-            q for q in (plan['production_queue'], plan['elsewhere_queue']) if q]
+        chosen = [q for q in (queues or []) if q] or plan['default_queues']
         chosen = list(dict.fromkeys(chosen))
-        mem_limits = {q: (plan['maxrss_mb'] if q == REFERENCE_QUEUE else None) for q in chosen}
+        # A memory reproduction measures the row, so no run is limited.
+        mem_limits = {q: (plan['maxrss_mb'] if q == REFERENCE_QUEUE and not plan['memory'] else None)
+                      for q in chosen}
         try:
             entries = reproduce(sig, plan['pandaid'], chosen, mem_limits, requested_by)
         except (ValueError, RuntimeError) as e:

@@ -17,6 +17,12 @@ Class reading, thresholds in SysConfig (``segfault_class_*``):
   range of time to death under ``storm_iqr`` of the median;
 - ``sparse``: rate under ``sparse_rate``;
 - ``mixed`` otherwise, a class to look at rather than a verdict.
+
+Jobs killed for their memory are the ``memory`` class (SEGFAULT_DIAGNOSIS.md,
+Memory kills): one signature per task and stage, built by
+``build_memory_signatures`` from aggregate queries on the PanDA record
+with no row per job, and a few representative jobs written by the
+inventory as EpicProdJob rows of phase ``payload_memory``.
 """
 import logging
 from collections import defaultdict
@@ -31,12 +37,31 @@ from .models import CrashSignature, EpicProdJob, SysConfig
 logger = logging.getLogger(__name__)
 
 PHASE = 'payload_crash'
+MEMORY_PHASE = 'payload_memory'
+MEMORY_CLASS = 'memory'
 SIGNAL_NAMES = {6: 'SIGABRT', 7: 'SIGBUS', 8: 'SIGFPE', 11: 'SIGSEGV'}
 CLASS_LABELS = {
     'storm': 'Storm', 'configuration_dead': 'Config dead',
     'sparse': 'Sparse', 'abort': 'Abort', 'mixed': 'Mixed',
+    MEMORY_CLASS: 'Memory',
 }
 STAGE_LABELS = {'simulation': 'simu', 'reconstruction': 'reco'}
+# How a memory kill removed the job, read from the pilot error, with the
+# conventional status of the signal it received (128 plus the signal).
+MEMORY_MECHANISMS = {
+    'cgroup': {'label': 'memory cgroup kill', 'exit_code': 137, 'signal': 9},
+    'eviction': {'label': 'batch eviction (SIGTERM)', 'exit_code': 143, 'signal': 15},
+    'sigkill': {'label': 'SIGKILL above the request', 'exit_code': 137, 'signal': 9},
+}
+
+
+def is_memory(sig):
+    return getattr(sig, 'class_hint', '') == MEMORY_CLASS
+
+
+def sig_phase(sig):
+    """The EpicProdJob phase of a signature's jobs."""
+    return MEMORY_PHASE if is_memory(sig) else PHASE
 
 
 def stage_label(stage):
@@ -53,6 +78,13 @@ def record_key(exit_code, jeditaskid, stage=''):
     return f'{key}:{stage}' if stage else key
 
 
+def memory_key(jeditaskid, stage=''):
+    """A memory signature's key: the task, and the stage when the task's
+    kills split by stage."""
+    key = f'memory:task{int(jeditaskid)}'
+    return f'{key}:{stage}' if stage else key
+
+
 def job_filter(sig):
     """The Q that selects a signature's own crashed jobs: its tasks, its
     exit code, and its stage where the entry is a stage entry; for a
@@ -65,7 +97,12 @@ def job_filter(sig):
             q |= job_filter(m)
         return q
     task_ids = [t.get('jeditaskid') for t in (sig.tasks or []) if t.get('jeditaskid')]
-    q = Q(phase=PHASE, jeditaskid__in=task_ids, data__crash__exit_code=sig.exit_code)
+    if is_memory(sig):
+        # A memory signature's jobs are its representatives, whatever
+        # status their removal left.
+        q = Q(phase=MEMORY_PHASE, jeditaskid__in=task_ids)
+    else:
+        q = Q(phase=PHASE, jeditaskid__in=task_ids, data__crash__exit_code=sig.exit_code)
     stage = (sig.data or {}).get('stage')
     if (sig.data or {}).get('split'):
         if stage:
@@ -73,7 +110,7 @@ def job_filter(sig):
         else:
             q &= (Q(data__crash__stage='') | Q(data__crash__stage__isnull=True))
     return q
-CLASS_ORDER = ['storm', 'configuration_dead', 'mixed', 'sparse', 'abort']
+CLASS_ORDER = ['storm', 'configuration_dead', 'mixed', 'sparse', 'abort', MEMORY_CLASS]
 STATUS_LABELS = dict(CrashSignature.STATUSES)
 
 # Fields the record pass owns; everything else on a signature (status,
@@ -89,6 +126,9 @@ THRESHOLD_DEFAULTS = {
     'segfault_class_storm_rate': 0.20,
     'segfault_class_storm_iqr': 0.20,
     'segfault_class_sparse_rate': 0.05,
+    # A SIGTERM eviction or a SIGKILL is a memory kill when the job's peak
+    # resident memory reached this fraction of its request.
+    'segfault_memory_rss_fraction': 0.9,
 }
 
 
@@ -444,6 +484,230 @@ def _retire_plain(plain, stage_keys):
             remerge_frame(frame)
 
 
+# ------------------------------------------------------------ memory kills
+
+# The payload stage a job's digest names, and its minutes from start to end.
+MEMORY_STAGE_SQL = """substring(j."jobmetrics" from 'payloadStage=([A-Za-z_]+)')"""
+MEMORY_MINUTES_SQL = """extract(epoch FROM (j."endtime" - j."starttime")) / 60.0"""
+MEMORY_MECHANISM_SQL = """CASE WHEN j."piloterrorcode" = 1212 THEN 'cgroup'
+                              WHEN j."piloterrorcode" = 1201 THEN 'eviction'
+                              ELSE 'sigkill' END"""
+
+
+def memory_kill_sql():
+    """The condition selecting a memory kill among failed jobs (alias
+    ``j``) and its parameters (SEGFAULT_DIAGNOSIS.md, Memory kills): a
+    cgroup kill; a SIGTERM eviction, or a SIGKILL under another pilot
+    label, whose peak resident memory reached the SysConfig fraction of
+    the request. ``maxrss`` is kB in the record, ``minramcount`` MB."""
+    frac = thresholds()['segfault_memory_rss_fraction']
+    sql = """((j."piloterrorcode" = 1212 AND j."piloterrordiag" ILIKE '%%out of memory%%')
+              OR (j."piloterrorcode" = 1201 AND j."piloterrordiag" ILIKE '%%SIGTERM%%'
+                  AND j."maxrss" >= %s * j."minramcount" * 1024)
+              OR (j."transexitcode" = '137' AND j."piloterrorcode" <> 1212
+                  AND j."maxrss" >= %s * j."minramcount" * 1024))"""
+    return sql, [frac, frac]
+
+
+def _panda_rows(sql, params):
+    with connections['panda'].cursor() as cur:
+        cur.execute(sql, params)
+        cols = [c[0] for c in cur.description]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
+def memory_tasks(since):
+    """The production tasks with a memory kill recorded after ``since``;
+    the builder's call, never a page's."""
+    from .panda.constants import PANDA_SCHEMA
+    cond, params = memory_kill_sql()
+    rows = _panda_rows(
+        f"""SELECT DISTINCT j."jeditaskid" FROM "{PANDA_SCHEMA}"."jobsarchived4" j
+            JOIN "{PANDA_SCHEMA}"."jedi_tasks" t ON t."jeditaskid" = j."jeditaskid"
+            WHERE j."jobstatus" = 'failed' AND j."modificationtime" > %s
+              AND t."processingtype" = 'epicproduction' AND {cond}""",
+        [since] + params)
+    return sorted(int(r['jeditaskid']) for r in rows)
+
+
+def _memory_aggregate(tids, by_stage, by_site=False):
+    """The memory kills of the tasks over their whole life, grouped by
+    task, by stage when asked, and by queue and removal when asked."""
+    from .panda.constants import PANDA_SCHEMA
+    if not tids:
+        return []
+    cond, params = memory_kill_sql()
+    stage = MEMORY_STAGE_SQL if by_stage else "''"
+    site_cols = (f', j."computingsite" AS site, {MEMORY_MECHANISM_SQL} AS mechanism'
+                 if by_site else '')
+    group = '1, 2' + (', 3, 4' if by_site else '')
+    return _panda_rows(
+        f"""SELECT j."jeditaskid", coalesce({stage}, '') AS stage{site_cols},
+                   count(*) AS kills, count(DISTINCT j."modificationhost") AS hosts,
+                   percentile_cont(0.10) WITHIN GROUP (ORDER BY {MEMORY_MINUTES_SQL}) AS p10,
+                   percentile_cont(0.25) WITHIN GROUP (ORDER BY {MEMORY_MINUTES_SQL}) AS p25,
+                   percentile_cont(0.50) WITHIN GROUP (ORDER BY {MEMORY_MINUTES_SQL}) AS p50,
+                   percentile_cont(0.75) WITHIN GROUP (ORDER BY {MEMORY_MINUTES_SQL}) AS p75,
+                   percentile_cont(0.50) WITHIN GROUP (ORDER BY j."maxrss") AS rss_p50,
+                   max(j."maxrss") AS rss_max,
+                   percentile_cont(0.50) WITHIN GROUP (ORDER BY j."maxpss") AS pss_p50,
+                   min(j."minramcount") AS req_min, max(j."minramcount") AS req_max,
+                   min(j."endtime") AS first, max(j."endtime") AS last,
+                   max(t."taskname") AS taskname
+            FROM "{PANDA_SCHEMA}"."jobsarchived4" j
+            JOIN "{PANDA_SCHEMA}"."jedi_tasks" t ON t."jeditaskid" = j."jeditaskid"
+            WHERE j."jeditaskid" = ANY(%s) AND j."jobstatus" = 'failed' AND {cond}
+            GROUP BY {group}""",
+        [list(tids)] + params)
+
+
+def _mb(kb):
+    return round(float(kb) / 1024.0) if kb is not None else None
+
+
+def _min(value):
+    return round(float(value), 1) if value is not None else None
+
+
+def _utc(dt):
+    if dt is None:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=dt_timezone.utc)
+
+
+def build_memory_signatures(jeditaskids):
+    """The memory signatures of the tasks, recomputed over each task's
+    life from the PanDA record and upserted: one per task, or one per
+    stage when the task's kills carry two or more known stages (the kills
+    of no recorded stage under the plain key), as the record-level crash
+    entries split. Representatives are the inventory's (it writes them
+    and records them on the signature); everything a reproduction wrote
+    survives. Returns a summary with the keys built."""
+    import re
+    from pcs.manifests import _taskparams
+    from pcs.models import PandaTasks
+    tids = sorted({int(t) for t in jeditaskids if t})
+    summary = {'signatures': 0, 'created': 0, 'retired': 0, 'keys': []}
+    if not tids:
+        return summary
+    staged = _memory_aggregate(tids, by_stage=True)
+    stages_by_task = defaultdict(set)
+    for r in staged:
+        if r['stage']:
+            stages_by_task[int(r['jeditaskid'])].add(stage_label(r['stage']))
+    split = {tid for tid, s in stages_by_task.items() if len(s) >= 2}
+    whole = [t for t in tids if t not in split]
+    groups = {}
+    for r in staged:
+        if int(r['jeditaskid']) in split:
+            groups[(int(r['jeditaskid']), stage_label(r['stage']))] = r
+    for r in _memory_aggregate(whole, by_stage=False):
+        groups[(int(r['jeditaskid']), '')] = r
+    stage_counts = defaultdict(dict)
+    for r in staged:
+        if r['stage']:
+            stage_counts[int(r['jeditaskid'])][r['stage']] = int(r['kills'])
+    sites = defaultdict(list)
+    for r in _memory_aggregate(sorted(split), by_stage=True, by_site=True):
+        sites[(int(r['jeditaskid']), stage_label(r['stage']))].append(r)
+    for r in _memory_aggregate(whole, by_stage=False, by_site=True):
+        sites[(int(r['jeditaskid']), '')].append(r)
+
+    totals = task_totals(tids)
+    prod_tasks, payload_versions = {}, {}
+    for pt in PandaTasks.objects.filter(jedi_task_id__in=tids).select_related(
+            'prod_task', 'prod_task__dataset', 'prod_task__prod_config',
+            'prod_task__dataset__physics_tag', 'prod_task__campaign',
+            'prod_task__dataset__campaign'):
+        prod_tasks[pt.jedi_task_id] = pt.prod_task
+        payload_versions[pt.jedi_task_id] = (pt.metadata or {}).get('payload_version', '')
+    split_keys = defaultdict(list)
+    for (tid, stage) in groups:
+        if tid in split:
+            split_keys[tid].append(memory_key(tid, stage))
+    now = timezone.now()
+    for (tid, stage), g in sorted(groups.items(), key=lambda kv: -int(kv[1]['kills'])):
+        key = memory_key(tid, stage)
+        sig = CrashSignature.objects.filter(key=key).first()
+        created = sig is None
+        if created:
+            sig = CrashSignature(key=key, status='new')
+        site_rows = sorted(sites.get((tid, stage), []), key=lambda s: -int(s['kills']))
+        mechanisms = defaultdict(int)
+        for s in site_rows:
+            mechanisms[s['mechanism']] += int(s['kills'])
+        dominant = max(mechanisms.items(), key=lambda kv: kv[1])[0] if mechanisms else 'cgroup'
+        kills = int(g['kills'])
+        tot = totals.get(tid, {'finished': 0, 'failed': 0})
+        denom = tot['finished'] + tot['failed']
+        sig.level = 'record'
+        sig.class_hint = MEMORY_CLASS
+        sig.exit_code = MEMORY_MECHANISMS[dominant]['exit_code']
+        sig.signal = MEMORY_MECHANISMS[dominant]['signal']
+        first, last = _utc(g['first']), _utc(g['last'])
+        sig.tasks = [{'jeditaskid': tid, 'taskname': g['taskname'] or '', 'crashes': kills,
+                      'finished': tot['finished'], 'failed': tot['failed'],
+                      'first_seen': _iso(first), 'last_seen': _iso(last)}]
+        sig.configuration = _configuration(prod_tasks.get(tid), payload_versions.get(tid, ''))
+        m = re.search(r'"container_name":\s*"([^"]+)"', _taskparams(tid) or '')
+        sig.configuration['container_image_ran'] = m.group(1) if m else ''
+        sig.sites = [{'site': s['site'], 'crashes': int(s['kills']), 'hosts': int(s['hosts']),
+                      'mechanism': s['mechanism'],
+                      'request_mb': int(s['req_max']) if s['req_max'] is not None else None,
+                      'rss_p50_mb': _mb(s['rss_p50']), 'rss_max_mb': _mb(s['rss_max'])}
+                     for s in site_rows]
+        sig.crashes = kills
+        sig.rate = round(kills / denom, 4) if denom else None
+        sig.minutes_p10, sig.minutes_p50 = _min(g['p10']), _min(g['p50'])
+        sig.first_seen, sig.last_seen = first, last
+        sig.rows_lost, sig.events_lost = None, None
+        data = dict(sig.data or {})
+        data.update({
+            'kind': MEMORY_CLASS,
+            'hosts': int(g['hosts']),
+            'minutes_p25': _min(g['p25']), 'minutes_p75': _min(g['p75']),
+            # A stage entry holds its stage; a split task's plain entry the
+            # kills of no recorded stage; a whole task its one stage, if any.
+            'stages': ({g['stage']: kills} if stage else {} if tid in split
+                       else dict(stage_counts.get(tid, {}))),
+            'memory': {
+                'request_mb': [int(g['req_min']) if g['req_min'] is not None else None,
+                               int(g['req_max']) if g['req_max'] is not None else None],
+                'rss_p50_mb': _mb(g['rss_p50']), 'rss_max_mb': _mb(g['rss_max']),
+                'pss_p50_mb': _mb(g['pss_p50']),
+                'mechanisms': dict(mechanisms), 'dominant': dominant,
+            },
+            'rows_lost_note': 'not computed for memory kills: the killed rows are not kept per job',
+            'record_built_at': _iso(now),
+            'stage': stage,
+            'split': tid in split,
+            'split_keys': sorted(split_keys.get(tid, [])),
+        })
+        data.setdefault('representatives', [])
+        data.setdefault('rows_resolved', 0)
+        sig.data = data
+        sig.updated_at = now
+        sig.save()
+        summary['signatures'] += 1
+        summary['created'] += int(created)
+        summary['keys'].append(key)
+    # A split task whose kills all carry a stage leaves no plain entry; one
+    # left from before the split goes unless a reproduction is recorded on it.
+    for tid in split:
+        if (tid, '') in groups:
+            continue
+        plain = CrashSignature.objects.filter(key=memory_key(tid)).first()
+        if plain is None:
+            continue
+        if plain.reproduction:
+            logger.info('memory signature %s kept: its task now splits by stage, '
+                        'but a reproduction is recorded on it', plain.key)
+            continue
+        plain.delete()
+        summary['retired'] += 1
+    return summary
+
+
 # ---------------------------------------------------------- the reading
 
 # The campaign images all live at one cvmfs path; the version is the
@@ -459,12 +723,20 @@ def _image_label(image):
 
 def signature_summary(sig):
     """The list-row form of a signature, as the page and the tools show it."""
+    memory = (sig.data or {}).get('memory') or {} if is_memory(sig) else {}
+    if memory:
+        mechanism = MEMORY_MECHANISMS.get(memory.get('dominant') or '', {})
+        signal_name = f"killed for memory ({mechanism.get('label', 'removed')})"
+    else:
+        signal_name = SIGNAL_NAMES.get(sig.signal, f'signal {sig.signal}')
     return {
         'key': sig.key,
         'level': sig.level,
         'exit_code': sig.exit_code,
         'signal': sig.signal,
-        'signal_name': SIGNAL_NAMES.get(sig.signal, f'signal {sig.signal}'),
+        'signal_name': signal_name,
+        'memory': memory,
+        'memory_measured': (sig.data or {}).get('memory_measured') or {},
         'class': sig.class_hint,
         'class_label': CLASS_LABELS.get(sig.class_hint, sig.class_hint),
         'tasks': len(sig.tasks or []),
@@ -579,6 +851,7 @@ def signature_detail(key, jobs_limit=200):
                 'host': crash.get('modificationhost', ''),
                 'minutes': crash.get('minutes'),
                 'maxrss_mb': crash.get('maxrss_mb'),
+                'request_mb': crash.get('request_mb'),
                 'stage': STAGE_LABELS.get(crash.get('stage', ''), crash.get('stage', '')),
                 # PanDA's times are naive UTC; stated with the zone so the
                 # house formatter shows them in Eastern.
@@ -590,12 +863,18 @@ def signature_detail(key, jobs_limit=200):
 
 def signature_for_job(pandaid):
     """The signature a crashed job belongs to, for the job page's card,
-    or None."""
-    job = EpicProdJob.objects.filter(pandaid=pandaid, phase=PHASE).only(
-        'jeditaskid', 'data').first()
+    or None. A memory signature's representative names its memory
+    signature."""
+    job = EpicProdJob.objects.filter(pandaid=pandaid, phase__in=(PHASE, MEMORY_PHASE)).only(
+        'jeditaskid', 'phase', 'data').first()
     if job is None or not job.jeditaskid:
         return None
     crash = (job.data or {}).get('crash') or {}
+    if job.phase == MEMORY_PHASE:
+        sig = (CrashSignature.objects.filter(
+                   key=memory_key(job.jeditaskid, stage_label(crash.get('stage')))).first()
+               or CrashSignature.objects.filter(key=memory_key(job.jeditaskid)).first())
+        return signature_summary(sig) if sig else None
     exit_code = crash.get('exit_code')
     if not exit_code:
         return None
@@ -910,6 +1189,7 @@ def dig_candidates(limit):
     """Record-level signatures never dug, largest first, for the automatic
     dig: at most ``limit`` a night so a storm is not a thousand fetches."""
     qs = (CrashSignature.objects.filter(level='record')
+          .exclude(class_hint=MEMORY_CLASS)
           .exclude(trace__has_key='trace_status').order_by('-crashes'))
     return list(qs[:limit])
 
@@ -955,10 +1235,12 @@ def crashed_run(sig, pandaid=None):
         if rep is None:
             raise ValueError('no crashed job on record')
         pandaid = rep[0]
-    job = EpicProdJob.objects.filter(pandaid=int(pandaid), phase=PHASE).select_related(
+    job = EpicProdJob.objects.filter(pandaid=int(pandaid), phase=sig_phase(sig)).select_related(
         'prod_task').first()
     if job is None:
-        raise ValueError(f'job {pandaid} is not in the crash inventory')
+        raise ValueError(f'job {pandaid} is not '
+                         + ("one of the signature's representatives" if is_memory(sig)
+                            else 'in the crash inventory'))
     crash = (job.data or {}).get('crash') or {}
     if job.prod_task is None:
         raise ValueError(f'job {pandaid} has no PCS task; move its task to PCS first '
@@ -1023,11 +1305,17 @@ def local_repro(sig, pandaid=None):
     ichunk = int(row['ichunk'])
     nevents = int(row['nevents'])
     input_url = f"{INPUT_DOOR}/EVGEN/{row['file']}.{row['ext']}"
-    signal_name = SIGNAL_NAMES.get(crash.get('signal'), crash.get('signal'))
+    if is_memory(sig):
+        mechanism = MEMORY_MECHANISMS.get(crash.get('mechanism') or '', {})
+        what = (f"killed for memory ({mechanism.get('label', 'removed')}) in "
+                f"{crash.get('stage') or 'the payload'} at {crash.get('maxrss_mb')} MB peak RSS "
+                f"against a {crash.get('request_mb')} MB request")
+    else:
+        signal_name = SIGNAL_NAMES.get(crash.get('signal'), crash.get('signal'))
+        what = f"the payload died on {signal_name} (exit {crash.get('exit_code')})"
     lines = [
         f"# PanDA job {job.pandaid} (task {job.jeditaskid}, {job.prod_task.name}): "
-        f"the payload died on {signal_name} (exit {crash.get('exit_code')}) "
-        f"after {crash.get('minutes')} min at {crash.get('computingsite')}",
+        f"{what} after {crash.get('minutes')} min at {crash.get('computingsite')}",
         f"# Image: {container or '(not on record)'}",
         "# Inside the image (eic-shell, or: apptainer exec <image> bash), in an empty directory:",
         f"git clone {PAYLOAD_REPO}",
@@ -1053,6 +1341,9 @@ def local_repro(sig, pandaid=None):
         f"# Manifest row {ichunk + 1}: {nevents} events after skipping {ichunk} x {nevents}, "
         f"seed {ichunk + 1}; outputs stay in the working directory, nothing is registered.",
     ]
+    if is_memory(sig):
+        lines.append("# Each stage runs under prmon: payload-report.json gives every stage's peak "
+                     "memory and its growth, the prmon series beside the stage logs the curve.")
     return {'pandaid': job.pandaid, 'jeditaskid': job.jeditaskid,
             'task': job.prod_task.name, 'container': container, 'row_text': row_text,
             'payload_version': payload_version, 'input_url': input_url,
@@ -1078,11 +1369,19 @@ def reproduction_plan(sig, pandaid=None):
             maxrss_mb = int(raw) if raw else None
         except (TypeError, ValueError):
             maxrss_mb = None
-    return {'pandaid': int(pandaid), 'task': job.prod_task.name, 'row_text': row_text,
+    plan = {'pandaid': int(pandaid), 'task': job.prod_task.name, 'row_text': row_text,
             'container': crash.get('container') or '',
             'production_queue': site, 'elsewhere_queue': elsewhere_queue(site),
             'reference_queue': REFERENCE_QUEUE,
-            'maxrss_mb': maxrss_mb, 'job_maxrss_mb': crash.get('maxrss_mb')}
+            'maxrss_mb': maxrss_mb, 'job_maxrss_mb': crash.get('maxrss_mb'),
+            'memory': is_memory(sig), 'request_mb': crash.get('request_mb')}
+    # A crash is settled by the production queue and a second production-
+    # class queue; a memory kill by the production queue at the task's own
+    # request and the reference queue with no limit, where the row runs to
+    # its end and is measured (SEGFAULT_DIAGNOSIS.md, Memory kills).
+    plan['default_queues'] = [q for q in (site, REFERENCE_QUEUE if plan['memory']
+                                          else plan['elsewhere_queue']) if q]
+    return plan
 
 
 def _append_reproduction(key, entry):

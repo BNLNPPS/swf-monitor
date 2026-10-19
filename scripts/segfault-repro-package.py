@@ -42,7 +42,8 @@ import django  # noqa: E402
 django.setup()
 
 from monitor_app.models import CrashSignature, EpicProdJob  # noqa: E402
-from monitor_app.segfaults import SIGNAL_NAMES, repro_environment, signature_for_job  # noqa: E402
+from monitor_app.segfaults import (MEMORY_MECHANISMS, SIGNAL_NAMES,  # noqa: E402
+                                   repro_environment, signature_for_job)
 
 SWF_TMP_DIR = os.environ.get('SWF_TMP_DIR', '/data/swf-tmp')
 PACKAGE_ROOT = os.path.join(SWF_TMP_DIR, 'segfault-packages')
@@ -61,11 +62,21 @@ def _container(prod_task):
 
 
 def build(pandaid):
-    job = EpicProdJob.objects.filter(pandaid=pandaid, phase='payload_crash').select_related(
+    job = EpicProdJob.objects.filter(
+        pandaid=pandaid, phase__in=('payload_crash', 'payload_memory')).select_related(
         'prod_task', 'prod_task__prod_config', 'prod_task__dataset').first()
     if job is None:
-        raise ValueError(f'job {pandaid} is not in the crash inventory')
+        raise ValueError(f'job {pandaid} is not in the crash inventory '
+                         f'nor a memory signature representative')
     crash = (job.data or {}).get('crash') or {}
+    # What happened to the job, in the README's and the script's words.
+    if job.phase == 'payload_memory':
+        mechanism = MEMORY_MECHANISMS.get(crash.get('mechanism') or '', {})
+        what = (f"the job was killed for memory ({mechanism.get('label', 'removed')}) at "
+                f"{crash.get('maxrss_mb')} MB peak RSS against a {crash.get('request_mb')} MB request")
+    else:
+        what = (f"the payload died on {SIGNAL_NAMES.get(crash.get('signal'), crash.get('signal'))} "
+                f"(exit {crash.get('exit_code')})")
     row = crash.get('row')
     if not row:
         raise ValueError(f"job {pandaid}'s manifest row is unresolved")
@@ -112,11 +123,10 @@ def build(pandaid):
         json.dump(repro, fh, indent=1, default=str)
 
     seed = int(row['ichunk']) + 1
-    signal = crash.get('signal')
     with open(os.path.join(outdir, 'run-repro.sh'), 'w') as fh:
         fh.write(f'''#!/bin/bash
 # Reproduce PanDA job {pandaid} (task {job.jeditaskid}, {job.prod_task.name}):
-# the payload died on {SIGNAL_NAMES.get(signal, signal)} (exit {crash.get('exit_code')})
+# {what}
 # after {crash.get('minutes')} min at {crash.get('computingsite')}.
 #
 # Runs the campaign image with the payload this package carries, on the
@@ -154,7 +164,7 @@ exit ${{rc:-0}}
         fh.write(f'''# Reproduction package: job {pandaid}
 
 Signature {key}{' (' + sig_summary['class_label'] + ')' if sig_summary else ''}:
-the payload died on {SIGNAL_NAMES.get(signal, signal)} (exit {crash.get('exit_code')})
+{what}
 after {crash.get('minutes')} minutes at {crash.get('computingsite')} on
 {crash.get('modificationhost')}, peak resident memory {crash.get('maxrss_mb')} MB.
 {'Stage ' + crash['stage'] + '. ' if crash.get('stage') else ''}The signature holds

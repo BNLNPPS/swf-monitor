@@ -71,6 +71,7 @@ RESULTS = [
     ('awaiting_report', 'Awaiting report'),
     ('crashed', 'Crash reproduced'),
     ('crash_observed', 'Crash observed'),
+    ('memory_killed', 'Killed for memory'),
     ('completed', 'Completed without crash'),
     ('inconclusive', 'Inconclusive'),
     ('cancelled', 'Cancelled'),
@@ -81,14 +82,14 @@ RESULT_ORDER = [r for r, _ in RESULTS]
 # back), and the subset that takes part in the pair settling the
 # signature's outcome: a cancelled run is a withdrawn request, not a
 # result, and counts for nothing.
-ENDED_OUTCOMES = ('crashed', 'completed', 'inconclusive', 'cancelled')
-PAIR_OUTCOMES = ('crashed', 'completed', 'inconclusive')
+ENDED_OUTCOMES = ('crashed', 'memory_killed', 'completed', 'inconclusive', 'cancelled')
+PAIR_OUTCOMES = ('crashed', 'memory_killed', 'completed', 'inconclusive')
 
 # The house state colours (static/css/state-colors.css) a phase or
 # result cell takes, where its own word has no fill class.
 PHASE_STATE = {'queued_submission': 'waiting', 'submission_failed': 'failed'}
 RESULT_STATE = {'awaiting_report': 'pending', 'crashed': 'failed',
-                'crash_observed': 'failed',
+                'crash_observed': 'failed', 'memory_killed': 'failed',
                 'inconclusive': 'degraded'}
 
 # PanDA job states before the job runs; the raw state is kept beside
@@ -99,6 +100,16 @@ FINISHING_JOB_STATES = ('holding', 'transferring', 'merging')
 # The tolerance the legacy join allows between a request and the run
 # it produced (the agent stamps the run when it dispatches).
 LEGACY_JOIN_TOLERANCE = timedelta(seconds=5)
+
+
+def _is_memory(sig):
+    from .segfaults import is_memory
+    return is_memory(sig)
+
+
+def _memory_fraction():
+    from .segfaults import thresholds
+    return thresholds()['segfault_memory_rss_fraction']
 
 
 def new_request_id():
@@ -245,9 +256,30 @@ def phase_of(run):
     return 'unknown', js
 
 
-def result_of(run, phase):
+def memory_kill(d, fraction):
+    """Why a run reads as killed for memory, or '': the selection's rule
+    for a memory kill (SEGFAULT_DIAGNOSIS.md, Memory kills) applied to the
+    run's job, from the pilot error and the job's peak resident memory and
+    request the collection keeps."""
+    pilot = (d.get('errors') or {}).get('pilot') or {}
+    code, diag = pilot.get('code'), str(pilot.get('diag') or '')
+    rss, req = d.get('maxrss_mb'), d.get('request_mb')
+    above = bool(rss and req and rss >= fraction * req)
+    at = f' at {rss} MB peak RSS against a {req} MB request' if rss and req else ''
+    if code == 1212 and 'out of memory' in diag.lower():
+        return 'memory cgroup kill' + at
+    if code == 1201 and 'SIGTERM' in diag and above:
+        return 'evicted with SIGTERM' + at
+    if d.get('payload_exit_code') == 137 and above:
+        return 'SIGKILL' + at
+    return ''
+
+
+def result_of(run, phase, memory_fraction=None):
     """The reproduction result of a run given its phase: what the payload
-    did, never what the pilot did."""
+    did, never what the pilot did. ``memory_fraction`` is set for a
+    memory signature's run, which reads as killed for memory under the
+    selection's rule."""
     if run is None:
         return 'pending', '', None
     d = run.data or {}
@@ -273,6 +305,10 @@ def result_of(run, phase):
         return 'cancelled', 'request withdrawn', None
     if phase in ACTIVE_PHASES:
         return 'pending', '', None
+    if memory_fraction is not None:
+        killed = memory_kill(d, memory_fraction)
+        if killed:
+            return 'memory_killed', killed, d.get('payload_exit_code')
     if run.status == 'collected':
         rc = d.get('payload_exit_code')
         if rc in CRASH_EXITS:
@@ -306,11 +342,12 @@ def withdrawn_phase(entry):
     return 'cancelled', 'cancelled', entry.get('reason') or 'request withdrawn'
 
 
-def _attempt(sig, entry, run, now):
-    """One attempt row from a request entry, its run, or both."""
+def _attempt(sig, entry, run, now, memory_fraction=None):
+    """One attempt row from a request entry, its run, or both;
+    ``memory_fraction`` for a memory signature's attempt."""
     d = (run.data or {}) if run is not None else {}
     phase, job_status = phase_of(run)
-    result, reason, rc = result_of(run, phase)
+    result, reason, rc = result_of(run, phase, memory_fraction)
     withdrawn = withdrawn_phase(entry) if run is None else None
     if withdrawn:
         phase, result, reason = withdrawn
@@ -382,6 +419,9 @@ def _attempt(sig, entry, run, now):
         'run_s': run_s,
         'running_for_s': running_for_s,
         'mem_limit_mb': (entry or {}).get('mem_limit_mb') or d.get('mem_limit_mb'),
+        'maxrss_mb': d.get('maxrss_mb'),
+        'request_mb': d.get('request_mb'),
+        'memory': d.get('memory') or {},
         'container': (entry or {}).get('container') or d.get('container') or '',
         'landed_site': d.get('landed_site') or '',
         'host': d.get('host') or '',
@@ -409,16 +449,22 @@ def attempts(keys=None, signatures=None):
         signatures = list(qs)
     runs_by_key = _signature_runs(keys=[s.key for s in signatures] if keys is not None else None)
     rows = []
+    fraction = None
     for sig in signatures:
         entries = list(sig.reproduction or [])
         runs = runs_by_key.get(sig.key, [])
         if not entries and not runs:
             continue
+        frac = None
+        if _is_memory(sig):
+            if fraction is None:
+                fraction = _memory_fraction()
+            frac = fraction
         pairs, unmatched = join_requests(entries, runs)
         for entry, run in pairs:
-            rows.append(_attempt(sig, entry, run, now))
+            rows.append(_attempt(sig, entry, run, now, frac))
         for run in unmatched:
-            rows.append(_attempt(sig, None, run, now))
+            rows.append(_attempt(sig, None, run, now, frac))
     # Active first, in request order; then the ended, newest first.
     active = [r for r in rows if r['active']]
     ended = sorted([r for r in rows if not r['active']],
@@ -565,6 +611,97 @@ def _entry_outcome(row):
     return 'submitted'
 
 
+def _memory_measurement(sig, row):
+    """What a run's payload report measured of the signature's stage (the
+    stage of the largest peak when the signature names none), in MB, with
+    the stage's memory trend; None when the run carries no measurement."""
+    from .segfaults import STAGE_LABELS
+    mem = row.get('memory') or {}
+    if not mem:
+        return None
+    label = (sig.data or {}).get('stage') or ''
+    names = [k for k, v in STAGE_LABELS.items() if v == label] + ([label] if label else [])
+    stage = next((s for s in names if s in mem), None)
+    if stage is None:
+        stage = max(mem, key=lambda s: (mem.get(s) or {}).get('rss_max_kb') or 0)
+    rec = mem.get(stage) or {}
+    if rec.get('rss_max_kb') is None:
+        return None
+    trend = rec.get('trend') or {}
+
+    def mb(kb):
+        return round(kb / 1024.0) if isinstance(kb, (int, float)) else None
+    return {'canary_pandaid': row.get('canary_pandaid'), 'queue': row.get('queue'),
+            'role': row.get('role'), 'stage': stage,
+            'rss_max_mb': mb(rec.get('rss_max_kb')), 'pss_max_mb': mb(rec.get('pss_max_kb')),
+            'vmem_max_mb': mb(rec.get('vmem_max_kb')), 'wall_s': rec.get('wall_s'),
+            'memory_start_mb': mb(trend.get('memory_start_kb')),
+            'growth_kb_per_s': trend.get('memory_growth_kb_per_s'),
+            'fit_quality': trend.get('fit_quality'), 'span_s': trend.get('span_s'),
+            'events': row.get('events_processed')}
+
+
+def _memory_request(sig, entries):
+    """The request a memory reproduction is read against: the
+    representative's own (MB), else the largest request among the
+    signature's kills."""
+    from .models import EpicProdJob
+    from .segfaults import MEMORY_PHASE
+    pandaids = [e.get('pandaid') for e in entries if e.get('pandaid')]
+    for job in EpicProdJob.objects.filter(pandaid__in=pandaids, phase=MEMORY_PHASE).only('data'):
+        req = ((job.data or {}).get('crash') or {}).get('request_mb')
+        if req:
+            return int(req)
+    req = ((sig.data or {}).get('memory') or {}).get('request_mb') or [None, None]
+    return int(req[-1]) if req and req[-1] else None
+
+
+def _memory_outcome(sig, rows, request_mb):
+    """The settled outcome of a memory signature's runs and the
+    measurement it rests on (SEGFAULT_DIAGNOSIS.md, Memory kills): the
+    reference run's peak against the request decides, the production
+    run's kill telling reproduced from site dependent; a production kill
+    with no measurement yet stands as reproduced. ``rows`` are the
+    settled attempt rows with their roles, oldest first."""
+    prod = [r for r in rows if r['role'] == 'production']
+    other = [r for r in rows if r['role'] != 'production']
+    measured = None
+    for r in other[::-1]:
+        if r['result'] == 'completed':
+            measured = _memory_measurement(sig, r)
+            if measured:
+                break
+    shown = measured
+    if shown is None:
+        # A production run that completed is measured too; it is shown,
+        # and it settles nothing about the row elsewhere.
+        for r in prod[::-1]:
+            if r['result'] == 'completed':
+                shown = _memory_measurement(sig, r)
+                if shown:
+                    break
+    if shown is not None:
+        shown = dict(shown, request_mb=request_mb)
+    p = prod[-1]['result'] if prod else None
+    o = other[-1]['result'] if other else None
+    if o == 'memory_killed':
+        return 'reproduced', shown
+    if measured is not None and request_mb:
+        over = measured['rss_max_mb'] >= request_mb
+        if over:
+            return 'reproduced', shown
+        if p == 'memory_killed':
+            return 'site_dependent', shown
+        if p == 'completed':
+            return 'not_reproduced', shown
+        return ('inconclusive' if p else None), shown
+    if p == 'memory_killed':
+        return 'reproduced', shown
+    if p and o:
+        return 'inconclusive', shown
+    return None, shown
+
+
 def reconcile(sig_key, queue_diagnosis=None):
     """Write the join back onto one signature: each request entry gets
     its run's identity and outcome, and the pair settles the signature's
@@ -590,10 +727,14 @@ def reconcile(sig_key, queue_diagnosis=None):
         runs = _signature_runs(keys=[sig.key]).get(sig.key, [])
         pairs, _unmatched = join_requests(entries, runs)
         now = timezone.now()
+        memory = _is_memory(sig)
+        frac = _memory_fraction() if memory else None
+        rows_at = {}
         for i, (entry, run) in enumerate(pairs):
             if run is None:
                 continue
-            row = _attempt(sig, entry, run, now)
+            row = _attempt(sig, entry, run, now, frac)
+            rows_at[i] = row
             before = dict(entry)
             entry['run_id'] = str(run.id)
             entry['jedi_task_id'] = run.jeditaskid
@@ -618,7 +759,12 @@ def reconcile(sig_key, queue_diagnosis=None):
         prod = [e for e in settled if entry_role(e) == 'production']
         ref = [e for e in settled if entry_role(e) != 'production']
         outcome = None
-        if prod and ref:
+        measured = None
+        if memory:
+            settled_rows = [dict(rows_at[i], role=entry_role(e)) for i, e in enumerate(entries)
+                            if e.get('outcome') in PAIR_OUTCOMES and i in rows_at]
+            outcome, measured = _memory_outcome(sig, settled_rows, _memory_request(sig, entries))
+        elif prod and ref:
             p, r = prod[-1]['outcome'], ref[-1]['outcome']
             if p == 'crashed' and r == 'crashed':
                 outcome = 'reproduced'
@@ -632,7 +778,7 @@ def reconcile(sig_key, queue_diagnosis=None):
                 outcome = 'inconclusive'
         elif ref and ref[-1]['outcome'] == 'crashed':
             outcome = 'reproduced'
-        if (outcome in ('reproduced', 'site_dependent')
+        if (not memory and outcome in ('reproduced', 'site_dependent')
                 and (sig.trace or {}).get('trace_status') != 'found'):
             # The crashed run's report carries the stage's log tail
             # (payload 0.12 and later); record_trace saves the trace and
@@ -651,6 +797,11 @@ def reconcile(sig_key, queue_diagnosis=None):
         if changed['entries']:
             sig.reproduction = entries
             fields.append('reproduction')
+        if measured and data.get('memory_measured') != measured:
+            data['memory_measured'] = measured
+            sig.data = data
+            fields.append('data')
+            changed['measured'] = measured.get('canary_pandaid')
         if outcome and data.get('reproduction_outcome') != outcome:
             data['reproduction_outcome'] = outcome
             data['reproduction_settled_at'] = _iso(now)
