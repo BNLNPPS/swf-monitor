@@ -91,13 +91,17 @@ async def swf_get_system_state(username: str = None) -> dict:
         agent_manager = {"status": "missing", "last_heartbeat": None}
         try:
             am = SystemAgent.objects.get(instance_name=agent_manager_name)
+            # Heartbeating without ActiveMQ means no commands are received: unhealthy
+            am_mq_connected = (am.metadata or {}).get('mq_connected')
             if am.operational_state == 'EXITED':
                 agent_manager["status"] = "exited"
-            elif am.last_heartbeat and am.last_heartbeat >= recent_threshold:
+            elif (am.last_heartbeat and am.last_heartbeat >= recent_threshold
+                  and am_mq_connected is not False):
                 agent_manager["status"] = "healthy"
             else:
                 agent_manager["status"] = "unhealthy"
             agent_manager["last_heartbeat"] = am.last_heartbeat.isoformat() if am.last_heartbeat else None
+            agent_manager["mq_connected"] = am_mq_connected
         except SystemAgent.DoesNotExist:
             pass
 
@@ -725,11 +729,15 @@ async def swf_check_agent_manager(username: str = None) -> dict:
 
     Returns:
         - alive: True if agent manager has recent heartbeat (within 5 minutes)
+          and is not reporting itself disconnected from ActiveMQ
+        - mq_connected: The manager's own report of its ActiveMQ connection
+          (None from managers that predate the report)
         - instance_name: The agent manager's instance name
         - namespace: Current testbed namespace (from config)
         - last_heartbeat: When it last checked in
         - control_queue: The queue to send commands to
         - agents_running: Whether testbed agents are running
+        - error: Why a heartbeating manager is not alive
         - how_to_start: Instructions if not alive
     """
     username = _get_username(username)
@@ -744,7 +752,7 @@ async def swf_check_agent_manager(username: str = None) -> dict:
             now = timezone.now()
             recent_threshold = now - timedelta(minutes=5)
 
-            alive = (
+            heartbeating = (
                 agent.last_heartbeat is not None and
                 agent.last_heartbeat >= recent_threshold and
                 agent.operational_state != 'EXITED'
@@ -752,8 +760,14 @@ async def swf_check_agent_manager(username: str = None) -> dict:
 
             metadata = agent.metadata or {}
 
-            return {
+            # A manager that lost ActiveMQ still heartbeats over REST, but
+            # commands sent to its control queue go unread: alive means listening.
+            mq_connected = metadata.get('mq_connected')
+            alive = heartbeating and mq_connected is not False
+
+            result = {
                 "alive": alive,
+                "mq_connected": mq_connected,
                 "username": username,
                 "instance_name": instance_name,
                 "namespace": agent.namespace,
@@ -765,6 +779,15 @@ async def swf_check_agent_manager(username: str = None) -> dict:
                 "agents_running": metadata.get('agents_running', False),
                 "supervisord_healthy": metadata.get('supervisord_healthy'),
             }
+            if heartbeating and not alive:
+                result["error"] = (
+                    f"Agent manager for '{username}' is running but disconnected from "
+                    f"ActiveMQ, so it receives no commands. It retries the connection "
+                    f"every heartbeat; if this persists, read logs/agent-manager.log in "
+                    f"{username}'s swf-testbed directory and restart it with "
+                    f"'testbed agent-manager'."
+                )
+            return result
         except SystemAgent.DoesNotExist:
             return {
                 "alive": False,
@@ -812,7 +835,7 @@ async def swf_start_user_testbed(username: str = None, config_name: str = None) 
     if not manager_status.get('alive'):
         return {
             "success": False,
-            "error": f"Agent manager for '{username}' is not running",
+            "error": manager_status.get('error') or f"Agent manager for '{username}' is not running",
             "how_to_start": f"Run 'testbed agent-manager' in {username}'s swf-testbed directory",
             "username": username,
         }
@@ -893,7 +916,7 @@ async def swf_stop_user_testbed(username: str = None) -> dict:
     if not manager_status.get('alive'):
         return {
             "success": False,
-            "error": f"Agent manager for '{username}' is not running",
+            "error": manager_status.get('error') or f"Agent manager for '{username}' is not running",
             "username": username,
             "note": "If agents are still running, you can kill them directly with kill_agent()",
         }
@@ -1021,6 +1044,7 @@ async def swf_get_testbed_status(username: str = None) -> dict:
             'operational_state': manager_status.get('operational_state'),
             'status': manager_status.get('status'),
             'last_heartbeat': manager_status.get('last_heartbeat'),
+            'mq_connected': manager_status.get('mq_connected'),
             'supervisord_healthy': sv_healthy,
         },
         'agents': agents_data['agents'],
@@ -1033,7 +1057,7 @@ async def swf_get_testbed_status(username: str = None) -> dict:
     }
 
     if not alive:
-        result['error'] = 'Agent manager is not running. Run /check-testbed to bootstrap infrastructure.'
+        result['error'] = manager_status.get('error') or 'Agent manager is not running. Run /check-testbed to bootstrap infrastructure.'
     elif manager_error:
         result['error'] = f"Agent manager reports ERROR: {manager_status.get('description', 'unknown')}"
     elif running_workflows > 0:

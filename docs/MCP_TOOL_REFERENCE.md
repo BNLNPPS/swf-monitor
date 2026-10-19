@@ -31,7 +31,7 @@ and `monitor_urls` when web UI links are available.
 **Returns:**
 - `timestamp`: Current server time
 - `user_context`: namespace, workflow defaults from user's testbed.toml
-- `agent_manager`: Status of user's agent manager daemon (healthy/unhealthy/missing/exited)
+- `agent_manager`: Status of user's agent manager daemon (healthy/unhealthy/missing/exited) and its `mq_connected` report; a manager heartbeating while disconnected from ActiveMQ is unhealthy
 - `workflow_runner`: Status of healthy DAQ_Simulator that can accept swf_start_workflow
 - `ready_to_run`: Boolean - True if workflow_runner is healthy and can accept commands
 - `last_execution`: Most recent workflow execution for user's namespace
@@ -344,7 +344,9 @@ The User Agent Manager is a per-user daemon that enables MCP-driven testbed cont
 | `swf_stop_user_testbed` | `username` | Stop a user's testbed via their agent manager. |
 
 **`swf_check_agent_manager` returns:**
-- `alive`: True if agent manager has recent heartbeat (within 5 minutes)
+- `alive`: True if agent manager has recent heartbeat (within 5 minutes) and does not report itself disconnected from ActiveMQ. A manager that has lost the broker keeps heartbeating over REST but receives no commands, so it is not alive.
+- `mq_connected`: The manager's own report of its ActiveMQ connection; `null` from managers that predate the report
+- `error`: Why a heartbeating manager is not alive; `swf_start_user_testbed` and `swf_stop_user_testbed` return it and send nothing
 - `username`: The user being checked
 - `instance_name`: The agent manager's instance name (e.g., 'agent-manager-wenauseic')
 - `last_heartbeat`: When it last checked in
@@ -354,7 +356,7 @@ The User Agent Manager is a per-user daemon that enables MCP-driven testbed cont
 - `how_to_start`: Instructions if not alive
 
 **`swf_get_testbed_status` returns:**
-- `agent_manager`: alive, namespace, operational_state, status, last_heartbeat
+- `agent_manager`: alive, namespace, operational_state, status, last_heartbeat, mq_connected
 - `agents`: List of workflow agents with running/stopped status
 - `summary`: Running and stopped agent counts
 - `running_workflows`: Count of currently executing workflows

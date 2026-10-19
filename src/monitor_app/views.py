@@ -312,6 +312,16 @@ class SystemAgentViewSet(viewsets.ModelViewSet):
             defaults=defaults
         )
 
+        # The agent's own report of its ActiveMQ connection, kept in metadata:
+        # an agent that lost the broker still heartbeats here but receives nothing.
+        if 'mq_connected' in request.data:
+            mq_connected = bool(request.data['mq_connected'])
+            metadata = dict(agent.metadata or {})
+            if metadata.get('mq_connected') != mq_connected:
+                metadata['mq_connected'] = mq_connected
+                agent.metadata = metadata
+                agent.save(update_fields=['metadata'])
+
         # Piggyback: mark any stale agents as EXITED
         SystemAgent.mark_stale_agents()
 
