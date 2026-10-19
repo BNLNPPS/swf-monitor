@@ -1915,7 +1915,8 @@ def panda_segfaults(request):
     from ..narrowing_filter import Facet, NarrowingFilter
     from ..reproductions import (REPRODUCTION_STATE_LABELS, REPRODUCTION_STATE_ORDER, attempts,
                                  counts_by_signature, global_counts, reproduction_states)
-    from ..segfaults import CLASS_LABELS, CLASS_ORDER, STATUS_LABELS, catalog
+    from ..segfaults import (CLASS_LABELS, CLASS_ORDER, KIND_LABELS, KIND_ORDER, STATUS_LABELS,
+                             catalog)
     rows_all, _class_counts = catalog()
     # The reproduction attempts per row, active and ended, each attempt
     # counted once; a trace-level row carries its members' attempts; and
@@ -1931,6 +1932,10 @@ def panda_segfaults(request):
         r['repro_state'] = states.get(r['key'], '')
         r['repro_state_label'] = REPRODUCTION_STATE_LABELS.get(r['repro_state'], r['repro_state'])
     facets = [
+        # A payload crash or a job killed for memory (SEGFAULT_DIAGNOSIS.md,
+        # Memory kills): the first split a reader makes.
+        Facet('kind', 'Kind', lambda r: r['kind'],
+              display=lambda v: KIND_LABELS.get(v, v), order=KIND_ORDER),
         Facet('class', 'Class', lambda r: r['class'],
               display=lambda v: CLASS_LABELS.get(v, v), order=CLASS_ORDER),
         Facet('exit', 'Exit code', lambda r: str(r['exit_code'])),
@@ -1949,7 +1954,9 @@ def panda_segfaults(request):
         'rows': rows_all,
         'shown': shown,
         'total': len(rows_all),
-        'crashes_total': sum(r['crashes'] for r in rows_all if r['level'] == 'record'),
+        'crashes_total': sum(r['crashes'] for r in rows_all
+                             if r['level'] == 'record' and r['kind'] == 'crash'),
+        'memory_kills_total': sum(r['crashes'] for r in rows_all if r['kind'] == 'memory'),
         'repro_counts': global_counts(att),
         'run_needed': sum(1 for r in rows_all if r['repro_state'] == 'run_needed' and r['level'] == 'record'),
         'narrowing_filter': flt.context(rows_all, facets, request),
@@ -1967,6 +1974,7 @@ def panda_segfault_reproductions(request):
     from ..reproductions import (PHASE_LABELS, PHASE_ORDER, RESULT_LABELS, RESULT_ORDER,
                                  attempts, counts_by_signature, freshness, global_counts,
                                  reproduction_states)
+    from ..segfaults import KIND_LABELS, KIND_ORDER
     rows_all = attempts()
     # The signatures that still need a run, for the link to the catalog's
     # run-needed selection (monitor_app/reproductions.py).
@@ -1976,6 +1984,8 @@ def panda_segfault_reproductions(request):
     states = reproduction_states(sig_rows, counts_by_signature(rows_all, members))
     run_needed = sum(1 for r in sig_rows if states.get(r['key']) == 'run_needed' and r['level'] == 'record')
     facets = [
+        Facet('kind', 'Kind', lambda r: r['kind'],
+              display=lambda v: KIND_LABELS.get(v, v), order=KIND_ORDER),
         Facet('phase', 'Execution', lambda r: r['phase'],
               display=lambda v: PHASE_LABELS.get(v, v), order=PHASE_ORDER),
         Facet('result', 'Result', lambda r: r['result'],

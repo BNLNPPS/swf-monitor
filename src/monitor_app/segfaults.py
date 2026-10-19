@@ -46,6 +46,10 @@ CLASS_LABELS = {
     MEMORY_CLASS: 'Memory',
 }
 STAGE_LABELS = {'simulation': 'simu', 'reconstruction': 'reco'}
+# What a signature records: a payload crash, or a job killed for memory;
+# the Kind facet of the catalog and the runs page.
+KIND_LABELS = {'crash': 'Crash', MEMORY_CLASS: 'Memory'}
+KIND_ORDER = ['crash', MEMORY_CLASS]
 # How a memory kill removed the job, read from the pilot error, with the
 # conventional status of the signal it received (128 plus the signal).
 MEMORY_MECHANISMS = {
@@ -731,6 +735,7 @@ def signature_summary(sig):
         signal_name = SIGNAL_NAMES.get(sig.signal, f'signal {sig.signal}')
     return {
         'key': sig.key,
+        'kind': MEMORY_CLASS if is_memory(sig) else 'crash',
         'level': sig.level,
         'exit_code': sig.exit_code,
         'signal': sig.signal,

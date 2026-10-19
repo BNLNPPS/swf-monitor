@@ -11,7 +11,8 @@
         Payload crashes in ePIC production jobs, one row per crash signature: a job whose payload died on a signal
         (exit code 128 plus the signal: 139 SIGSEGV, 134 SIGABRT, 135 SIGBUS, 136 SIGFPE), found from the PanDA record
         and grouped by exit code and PanDA task at record level; signatures sharing a crashing frame merge into one
-        trace-level entry once dug. Rebuilt nightly by the catalog sync; the crashed jobs behind each row carry their
+        trace-level entry once dug. Jobs the site killed for their memory are signatures of their own, one per task
+        and stage (Kind Memory). Rebuilt nightly by the catalog sync; the crashed jobs behind each row carry their
         manifest row where the attempt's manifest is on record.
     </p>
     <details class="mb-3">
@@ -58,7 +59,7 @@
     </details>
     <p class="mb-2">
         <strong class="swf-nf-shown">{{ shown }}</strong> of <strong>{{ total }}</strong> signatures,
-        <strong>{{ crashes_total }}</strong> crashed jobs in the inventory{% if repro_counts.total %};
+        <strong>{{ crashes_total }}</strong> crashed jobs in the inventory{% if memory_kills_total %} and <strong>{{ memory_kills_total }}</strong> jobs killed for memory{% endif %}{% if repro_counts.total %};
         <strong>{{ repro_counts.active }}</strong> reproduction runs active, <strong>{{ repro_counts.ended }}</strong> ended{% endif %};
         <strong>{{ run_needed }}</strong> signature{{ run_needed|pluralize }} still need{{ run_needed|pluralize:"s," }} a run
         (the Reproduction bar's <a href="{% url 'monitor_app:panda_segfaults' %}?reproduction=run_needed">run needed</a> selection).

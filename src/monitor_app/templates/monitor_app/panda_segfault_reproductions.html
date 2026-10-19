@@ -18,6 +18,7 @@
     <details class="mb-3">
         <summary>Definitions</summary>
         <ul class="mb-2 mt-1">
+            <li><strong>Kind</strong>: <strong>Crash</strong>, a crashed row run again to see whether it crashes; <strong>Memory</strong>, a row of a job killed for its memory run again to measure it: at the task's own request on the production queue, and with no limit on the reference queue, where the payload's prmon gives the peak and its growth.</li>
             <li><strong>Execution</strong>, where the attempt is:
                 <ul>
                     <li><strong>Queued for submission</strong>: the request is recorded, no canary run answers it yet; the agent has it, or its dispatch failed before a run was recorded.</li>
@@ -34,6 +35,7 @@
                     <li><strong>Awaiting report</strong>: the job ended; the next collection reads its report.</li>
                     <li><strong>Crash reproduced</strong>: the payload died on a signal (exit 134, 135, 136 or 139).</li>
                     <li><strong>Crash observed</strong>: the stage log recorded a fatal signal, including when its handler stalled until a timeout. The signal and stage remain visible; this alone does not confirm the requested crashing frame.</li>
+                    <li><strong>Killed for memory</strong> (Kind Memory): the site removed the run for its memory, a memory cgroup kill, or a SIGTERM eviction or SIGKILL with a peak at or above the configured share of the request.</li>
                     <li><strong>Completed without crash</strong>: the payload ran to exit 0.</li>
                     <li><strong>Inconclusive</strong>: the run says nothing about the crash; the reason is on the row (another payload exit, a missing report, a job failure before the payload, a failed submission).</li>
                 </ul>
