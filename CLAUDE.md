@@ -196,3 +196,9 @@ sync: `sudo ./deploy-lightweight-ui-mcp.sh --ui` and/or `--mcp` (add
 `--static` when assets changed). Use the full deploy whenever migrations,
 requirements, Apache config, systemd units, ops-agent code, or bot code are
 involved. Commit first either way.
+
+## TeamComms
+
+Developers' LLM sessions message each other through TeamComms, for questions
+and answers across people and providers (Claude Code, Codex). Joining and use:
+<https://github.com/eic/epic-wfms-docs/blob/main/docs/teamcomms.md>.
