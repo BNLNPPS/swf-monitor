@@ -172,6 +172,19 @@ SUBMIT_EVGEN_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "subm
 SUBMIT_EVGEN_TIMEOUT = int(os.environ.get("EPICPROD_SUBMIT_EVGEN_TIMEOUT", "300"))
 PANDA_TASK_OPERATION_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "panda-task-operation.py"
 PANDA_TASK_OPERATION_TIMEOUT = int(os.environ.get("EPICPROD_PANDA_TASK_OPERATION_TIMEOUT", "120"))
+# A Move PanDA accepted but the doer could not verify in its first wait is
+# settled in the background: JEDI holds a large task in toreassign for an
+# hour or more while it kills the waiting jobs (40856, 40857 on 2026-10-20),
+# and the attempts those kills cost are repaid only once it has moved the
+# task. The settles in progress are kept on disk and resumed after a restart.
+REASSIGN_SETTLE_TIMEOUT = int(os.environ.get("EPICPROD_REASSIGN_SETTLE_TIMEOUT", str(8 * 3600)))
+REASSIGN_SETTLE_POLL = 120
+REASSIGN_SETTLES = Path(os.environ.get("EPICPROD_REASSIGN_SETTLES",
+                                       "/opt/swf-monitor/shared/run/reassign-settles.json"))
+_REASSIGN_SETTLES_LOCK = threading.Lock()
+REASSIGN_SETTLING_REASON = (
+    'PanDA accepted the Move and JEDI is still moving the task; the attempts '
+    'its kills cost are repaid when it is done')
 
 SANDBOX_KEEPALIVE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "panda-sandbox-keepalive.py"
 SANDBOX_KEEPALIVE_TIMEOUT = int(os.environ.get("EPICPROD_SANDBOX_KEEPALIVE_TIMEOUT", "600"))
@@ -811,6 +824,8 @@ class EpicProdOpsAgent(BaseAgent):
             if is_state_change and not result.get('verified'):
                 reason = ('PanDA accepted the request but the task state was '
                           'not verified before the deadline')
+                if operation == 'reassign':
+                    reason = REASSIGN_SETTLING_REASON
                 observed_status = str(result.get('observed_status') or '')
                 self.logger.warning(
                     f"PRODOPS panda_task_operation UNVERIFIED: {operation} "
@@ -835,6 +850,14 @@ class EpicProdOpsAgent(BaseAgent):
                     operation=operation, task_name=task_name,
                     observed_status=observed_status,
                     url=f'/panda/tasks/{jedi_task_id}/')
+                if operation == 'reassign':
+                    self._settle_reassign_later({
+                        'operation_id': operation_id,
+                        'jedi_task_id': jedi_task_id, 'task_name': task_name,
+                        'site': str(m.get('site') or ''),
+                        'mode': str(m.get('mode') or 'soft'),
+                        'created_by': str(m.get('created_by') or ''),
+                        'since': time.time()})
                 return
             observed_status = str(result.get('observed_status') or '')
             self.logger.info(
@@ -1011,6 +1034,8 @@ class EpicProdOpsAgent(BaseAgent):
                 status = 'unverified'
                 diagnostic = ('PanDA accepted the request but the task state '
                               'was not verified before the deadline')
+                if operation == 'reassign':
+                    diagnostic = REASSIGN_SETTLING_REASON
             counts[status] = counts.get(status, 0) + 1
             self._settle_panda_bulk_item(
                 m, item, status,
@@ -1023,6 +1048,14 @@ class EpicProdOpsAgent(BaseAgent):
                         (result or {}).get('status_diagnostic') or ''),
                 },
             )
+            if operation == 'reassign' and status == 'unverified':
+                self._settle_reassign_later({
+                    'operation_id': str(item['operation_id']),
+                    'jedi_task_id': str(item['jedi_task_id']),
+                    'task_name': str(item.get('task_name') or ''),
+                    'site': str(m.get('site') or ''),
+                    'mode': str(m.get('mode') or 'soft'),
+                    'created_by': username, 'since': time.time()})
         problems = counts.get('failed', 0) + counts.get('unverified', 0)
         outcome = 'ok' if not problems else 'error'
         # The human count line the batch notice shows (notice routing).
@@ -1039,6 +1072,141 @@ class EpicProdOpsAgent(BaseAgent):
             operation=operation, tasks=len(items),
             summary=' · '.join(parts), url='/panda/tasks/',
             **notice_subject, **counts)
+
+    def register_subscriber(self):
+        """Register on the bus, then resume the Move settles a restart cut."""
+        super().register_subscriber()
+        self._resume_reassign_settles()
+
+    def _reassign_settles(self):
+        try:
+            with open(REASSIGN_SETTLES) as f:
+                settles = json.load(f)
+            return settles if isinstance(settles, dict) else {}
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError) as e:
+            self.logger.error(f"PRODOPS could not read {REASSIGN_SETTLES}: {e}")
+            return {}
+
+    def _store_reassign_settle(self, operation_id, settle):
+        """Add (settle) or remove (None) one pending settle on disk."""
+        with _REASSIGN_SETTLES_LOCK:
+            settles = self._reassign_settles()
+            if settle is None:
+                settles.pop(operation_id, None)
+            else:
+                settles[operation_id] = settle
+            try:
+                REASSIGN_SETTLES.parent.mkdir(parents=True, exist_ok=True)
+                tmp = REASSIGN_SETTLES.with_suffix('.tmp')
+                with open(tmp, 'w') as f:
+                    json.dump(settles, f)
+                os.replace(tmp, REASSIGN_SETTLES)
+            except OSError as e:
+                self.logger.error(f"PRODOPS could not write {REASSIGN_SETTLES}: {e}")
+
+    def _settle_reassign_later(self, settle):
+        """Watch a Move the doer could not verify in its first wait, and
+        repay the attempts its kills cost once JEDI has moved the task."""
+        self._store_reassign_settle(settle['operation_id'], settle)
+        self._start_reassign_settle(settle)
+
+    def _start_reassign_settle(self, settle):
+        self.run_in_background(
+            self._do_settle_reassign, settle,
+            dedup_key=f"panda-settle:{settle['jedi_task_id']}",
+            label=f"reassign settle {settle['jedi_task_id']}",
+            queue='reassign_settle')
+
+    def _resume_reassign_settles(self):
+        with _REASSIGN_SETTLES_LOCK:
+            settles = self._reassign_settles()
+        for settle in settles.values():
+            self.logger.info(
+                f"PRODOPS resuming the Move settle of {settle.get('jedi_task_id')} "
+                f"to {settle.get('site')}")
+            self._start_reassign_settle(settle)
+
+    def _do_settle_reassign(self, settle):
+        operation_id = str(settle['operation_id'])
+        jedi_task_id = str(settle['jedi_task_id'])
+        task_name = str(settle.get('task_name') or '')
+        site = str(settle.get('site') or '')
+        left = int(REASSIGN_SETTLE_TIMEOUT - (time.time() - float(settle.get('since') or 0)))
+        t0 = time.monotonic()
+        result = {}
+        if left > 0:
+            cmd = [
+                sys.executable, str(PANDA_TASK_OPERATION_SCRIPT),
+                '--operation', 'reassign_settle',
+                '--jedi-task-id', jedi_task_id,
+                '--site', site, '--mode', str(settle.get('mode') or 'soft'),
+                '--verify-timeout', str(left),
+                '--poll-interval', str(REASSIGN_SETTLE_POLL),
+                '--timeout', str(left + PANDA_TASK_OPERATION_TIMEOUT),
+            ]
+            try:
+                p = subprocess.run(cmd, capture_output=True, text=True,
+                                   timeout=left + PANDA_TASK_OPERATION_TIMEOUT + 60)
+                for line in (p.stderr or '').splitlines():
+                    self.logger.info(f'  reassign settle: {line}')
+                result = json.loads((p.stdout or '').strip().splitlines()[-1])
+            except subprocess.TimeoutExpired:
+                result = {}
+            except (IndexError, json.JSONDecodeError):
+                # No result: the doer was ended (an agent stop) or failed
+                # before its watch finished. The settle stays on disk and
+                # resumes at the next start while it has time left.
+                self.logger.warning(
+                    f"PRODOPS Move settle of {jedi_task_id} returned no result; kept")
+                return
+        self._store_reassign_settle(operation_id, None)
+        hours = round(REASSIGN_SETTLE_TIMEOUT / 3600, 1)
+        if result.get('verified'):
+            repaid = bool(result.get('attempts_repaid'))
+            diagnostic = '' if repaid else (
+                'the task moved but the attempt repayment failed: '
+                f"{result.get('repay_diagnostic') or 'no detail'}")
+            self._record_panda_operation_state(
+                operation_id, 'verified',
+                observed_status=str(result.get('observed_status') or ''),
+                diagnostic=diagnostic,
+                evidence={'observed_site': str(result.get('observed_site') or ''),
+                          'attempts_repaid': repaid,
+                          'repay_diagnostic': str(result.get('repay_diagnostic') or '')})
+            summary = (f'remaining work moved to {site}; '
+                       + ('attempts repaid' if repaid else 'attempts NOT repaid'))
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'panda_task_operation_done',
+                'operation_id': operation_id,
+                'task_name': task_name, 'jedi_task_id': jedi_task_id,
+                'operation': 'reassign', 'status': 'verified',
+                'observed_status': str(result.get('observed_status') or ''),
+                'ok': repaid, 'summary': summary})
+            self._log_action(
+                'panda_task_operation', t0, outcome='ok' if repaid else 'error',
+                reason=diagnostic, subject_type='panda_task',
+                subject_key=jedi_task_id,
+                username=str(settle.get('created_by') or ''),
+                sublevel='high', live_default=True,
+                level=logging.INFO if repaid else logging.ERROR,
+                operation='reassign', task_name=task_name, summary=summary,
+                url=f'/panda/tasks/{jedi_task_id}/')
+            return
+        reason = (f'JEDI had not moved the task to {site} within {hours} h of the '
+                  'Move; the attempts its kills cost were not repaid')
+        self._record_panda_operation_state(
+            operation_id, 'unverified', diagnostic=reason,
+            observed_status=str(result.get('observed_status') or ''),
+            evidence={'observed_site': str(result.get('observed_site') or '')})
+        self._log_action(
+            'panda_task_operation', t0, outcome='unverified', reason=reason,
+            subject_type='panda_task', subject_key=jedi_task_id,
+            username=str(settle.get('created_by') or ''),
+            sublevel='high', live_default=True, level=logging.ERROR,
+            operation='reassign', task_name=task_name,
+            url=f'/panda/tasks/{jedi_task_id}/')
 
     def _settle_panda_bulk_item(self, message, item, status, *,
                                 diagnostic='', observed_status='',

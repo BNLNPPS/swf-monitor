@@ -23,7 +23,10 @@ soft by default): JEDI kills the task's jobs not yet running, holding or
 transferring (code 51, closed/toreassign), sets the task's site, and
 regenerates that work there; running jobs finish where they are. The
 operation is verified when the task names the target site and has left
-'reassigning'; the attempt each killed job cost is then repaid.
+'toreassign' and 'reassigning'; the attempt each killed job cost is then
+repaid. A large task stays in those states longer than the first wait;
+reassign_settle then watches it, without sending anything, and repays when
+JEDI is done.
 """
 import argparse
 import json
@@ -231,6 +234,8 @@ def _inside_pclient(payload_path):
 
     if operation == "reassign":
         return _reassign(Client, client, jedi_task_id, payload)
+    if operation == "reassign_settle":
+        return _reassign_settle(Client, client, jedi_task_id, payload)
 
     if operation == "increase_attempts":
         result = client.increase_attempt_nr(jedi_task_id, int(payload.get("increase") or 1))
@@ -340,21 +345,40 @@ def _reassign(Client, client, jedi_task_id, payload):
     ok, diagnostic = _panda_result_ok(result)
     output.update(ok=ok, accepted=ok, diagnostic=diagnostic, result=result)
     if ok:
-        deadline = time.monotonic() + float(payload.get("verify_timeout") or 90)
-        poll_interval = max(1.0, float(payload.get("poll_interval") or 5))
-        while True:
-            observed_site, observed_status, detail = _task_site_and_status(
-                Client, jedi_task_id)
-            if detail:
-                output["status_diagnostic"] = detail
-            output["observed_site"] = observed_site
-            output["observed_status"] = observed_status
-            if observed_site == site and observed_status and observed_status != "reassigning":
-                output["verified"] = True
-                break
-            if time.monotonic() >= deadline:
-                break
-            time.sleep(poll_interval)
+        _settle_reassign(Client, client, jedi_task_id, site, mode, payload, output)
+    print(json.dumps(output, default=str))
+    if not ok:
+        _log(f"ERROR: PanDA refused reassign of {jedi_task_id} to {site}: {diagnostic}")
+        return 1
+    return 0
+
+
+# JEDI holds a reassigned task in these states while it kills the task's
+# waiting jobs; a large task stays in them for an hour or more (40856 and
+# 40857, about 47,000 waiting jobs each, 2026-10-20).
+REASSIGN_IN_PROGRESS = ("reassigning", "toreassign")
+
+
+def _settle_reassign(Client, client, jedi_task_id, site, mode, payload, output):
+    """Wait, up to the payload's verify_timeout, for the task to name the
+    target site and leave REASSIGN_IN_PROGRESS, then repay the attempt each
+    killed job cost. Updates output in place."""
+    deadline = time.monotonic() + float(payload.get("verify_timeout") or 90)
+    poll_interval = max(1.0, float(payload.get("poll_interval") or 5))
+    while True:
+        observed_site, observed_status, detail = _task_site_and_status(
+            Client, jedi_task_id)
+        if detail:
+            output["status_diagnostic"] = detail
+        output["observed_site"] = observed_site
+        output["observed_status"] = observed_status
+        if (observed_site == site and observed_status
+                and observed_status not in REASSIGN_IN_PROGRESS):
+            output["verified"] = True
+            break
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(poll_interval)
     if output["verified"] and mode != "nokill":
         repay = client.increase_attempt_nr(jedi_task_id, 1)
         repaid, repay_diagnostic = _panda_result_ok(repay)
@@ -364,10 +388,24 @@ def _reassign(Client, client, jedi_task_id, payload):
             _log(f"WARNING: reassign of {jedi_task_id} verified but the attempt "
                  f"repayment failed: {repay_diagnostic}; files at their last "
                  "attempt will not regenerate until attempts are increased")
+
+
+def _reassign_settle(Client, client, jedi_task_id, payload):
+    """Finish a reassign PanDA accepted but that was not verified within
+    the first wait: no request is sent; the task is watched until JEDI has
+    moved it, and the attempts are then repaid (_settle_reassign)."""
+    site = str(payload.get("site") or "").strip()
+    mode = str(payload.get("mode") or "soft")
+    output = {"operation": "reassign_settle", "jedi_task_id": jedi_task_id,
+              "site": site, "mode": mode, "accepted": True,
+              "verified": False, "observed_status": "", "observed_site": ""}
+    if not site or mode not in ("soft", "nokill", "kill"):
+        output.update(ok=False, diagnostic=f"bad site {site!r} or mode {mode!r}")
+        print(json.dumps(output, default=str))
+        return 2
+    output["ok"] = True
+    _settle_reassign(Client, client, jedi_task_id, site, mode, payload, output)
     print(json.dumps(output, default=str))
-    if not ok:
-        _log(f"ERROR: PanDA refused reassign of {jedi_task_id} to {site}: {diagnostic}")
-        return 1
     return 0
 
 
@@ -621,7 +659,8 @@ def _run_batch_panda_operations(Client, operation, items, *, verify_timeout,
                 result["observed_status"] = observed_status
                 if detail:
                     result["status_diagnostic"] = detail
-                if observed_site == site and observed_status and observed_status != "reassigning":
+                if (observed_site == site and observed_status
+                        and observed_status not in REASSIGN_IN_PROGRESS):
                     result["verified"] = True
                     pending.remove(index)
                 continue
@@ -671,7 +710,7 @@ def main():
     ap.add_argument(
         "--operation",
         choices=["increase_attempts", "retry_failures", "pause", "resume",
-                 "finish", "reassign"],
+                 "finish", "reassign", "reassign_settle"],
     )
     ap.add_argument("--site", default="", help="reassign: the target PanDA queue")
     ap.add_argument("--mode", default="soft", choices=["soft", "nokill", "kill"],
