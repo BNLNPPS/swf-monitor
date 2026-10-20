@@ -1784,6 +1784,28 @@ def findings(*, name=None, version=None, include_history=False):
     return entries, ''
 
 
+def finding_task_ids():
+    """{jeditaskid: finding id} for every PanDA task whose failures a
+    finding explains: the tasks of each catalog signature a finding names
+    (a record-level key names its task, memory:task40856:simu included).
+    The pressure front's failure window leaves these tasks out, since a
+    task's own crashes or memory say nothing about the queue it ran on
+    (swf-epicprod CONTINUOUS_PRODUCTION.md, The tripwire)."""
+    out = {}
+    for e in finding_entries():
+        fid = finding_id((e.data or {}).get('serial')) or e.name
+        keys = [str(k) for k in ((e.data or {}).get('signatures') or [e.name])]
+        for sig in CrashSignature.objects.filter(key__in=keys).only('key', 'tasks'):
+            for t in sig.tasks or []:
+                if t.get('jeditaskid'):
+                    out.setdefault(int(t['jeditaskid']), fid)
+        for key in keys:
+            m = re.search(r':task(\d+)(?::|$)', key)
+            if m:
+                out.setdefault(int(m.group(1)), fid)
+    return out
+
+
 def finding_anchors():
     """{signature key: findings-page anchor} for every signature a finding
     names."""

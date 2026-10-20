@@ -190,26 +190,50 @@ def calibration(refresh=False):
     return built
 
 
+def _explained_tasks():
+    """{jeditaskid: finding id} of the tasks whose failures a finding
+    explains (monitor_app.segfaults.finding_task_ids); empty, and logged,
+    when the findings cannot be read, so the window then counts every
+    failure as before."""
+    try:
+        from monitor_app.segfaults import finding_task_ids
+        return finding_task_ids()
+    except Exception:  # noqa: BLE001
+        logger.exception('census: findings unreadable; the gate window counts every failure')
+        return {}
+
+
 def _gate_window(calib_queues):
     """Per queue over the last GATE_HOURS hours: finished and failed
-    production jobs, and the failures that died fast."""
+    production jobs, and the failures that died fast. A failure of a task
+    a finding explains (a crash or memory kill the catalog attributes to
+    the task) says nothing about the queue: it is counted apart as
+    explained, with the findings that explain it, and not as failed."""
     rows = []
     with connections['panda'].cursor() as cursor:
         cursor.execute(f"""
             SELECT "computingsite", "jobstatus",
-                   EXTRACT(EPOCH FROM ("endtime" - "starttime"))
+                   EXTRACT(EPOCH FROM ("endtime" - "starttime")), "jeditaskid"
             FROM "{PANDA_SCHEMA}"."jobsarchived4"
             WHERE "processingtype" = 'epicproduction'
               AND "endtime" > NOW() - INTERVAL %s
               AND "jobstatus" IN ('finished', 'failed')
         """, [f"{GATE_HOURS} hours"])
         rows = cursor.fetchall()
+    explained = _explained_tasks()
     out = {}
-    for site, status, seconds in rows:
+    for site, status, seconds, task in rows:
         site = str(site)
-        g = out.setdefault(site, {'finished': 0, 'failed': 0, 'fast_failed': 0})
+        g = out.setdefault(site, {'finished': 0, 'failed': 0, 'fast_failed': 0,
+                                  'explained': 0, 'explained_by': []})
         if status == 'finished':
             g['finished'] += 1
+            continue
+        fid = explained.get(int(task)) if task is not None else None
+        if fid:
+            g['explained'] += 1
+            if fid not in g['explained_by']:
+                g['explained_by'].append(fid)
             continue
         g['failed'] += 1
         med_h = (calib_queues.get(site) or {}).get('median_walltime_h')
@@ -238,7 +262,8 @@ def queue_census(refresh=False):
         running = sum(v['jobs'] for s, v in by_status.items() if s in RUNNING)
         finishing = sum(v['jobs'] for s, v in by_status.items() if s in FINISHING)
         c = calib_queues.get(name) or {}
-        g = gate.get(name) or {'finished': 0, 'failed': 0, 'fast_failed': 0}
+        g = gate.get(name) or {'finished': 0, 'failed': 0, 'fast_failed': 0,
+                               'explained': 0, 'explained_by': []}
         peak = int(c.get('peak_running') or 0)
         ceiling = max(peak, running)
         med_h = c.get('median_walltime_h')
@@ -266,6 +291,8 @@ def queue_census(refresh=False):
                 'finished': g['finished'],
                 'failed': g['failed'],
                 'fast_failed': g['fast_failed'],
+                'explained': g['explained'],
+                'explained_by': g['explained_by'],
                 'useful_rate_per_h': round(g['finished'] / GATE_HOURS, 2),
             },
         }
