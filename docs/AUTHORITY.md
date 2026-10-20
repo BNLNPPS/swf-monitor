@@ -249,11 +249,11 @@ carry no person. The `02:47 catalog_sync` chain publishes in process and
 never crosses the web tier at all.
 
 **The MCP surface.** MCP is a separate service calling the service layer in
-process, so a Django middleware never sees it. Each of the fourteen tools
-that change the system carries `@requires_authority` under its
+process, so a Django middleware never sees it. Each tool
+that changes the system carries `@requires_authority` under its
 `@mcp.tool()` (`monitor_app/mcp/common.py`): a tunnel caller is a person
 and must `may_act`; a bearer-token caller carries no person and passes, as
-on the REST face. `AUTHORITY_GUARDED_TOOLS` declares the fourteen, and
+on the REST face. `AUTHORITY_GUARDED_TOOLS` declares them, and
 `tests/test_authority.py` asserts that the guarded set and the declared set
 are identical, so a write tool cannot be added without being declared and a
 declared name cannot go stale.

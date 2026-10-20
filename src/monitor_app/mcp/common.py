@@ -50,7 +50,8 @@ CALLER: contextvars.ContextVar = contextvars.ContextVar('mcp_caller', default=''
 AUTHORITY_GUARDED_TOOLS = frozenset({
     'ai_decide_proposal', 'ai_propose_ping', 'epic_register_ai_assessment',
     'pcs_dataset_intake', 'pcs_prodtask_intake', 'pcs_prodtask_link_input',
-    'panda_segfault_finding_set', 'panda_segfault_reproduce', 'pcs_prodtask_set_status', 'swf_kill_agent',
+    'panda_segfault_finding_set', 'panda_segfault_reproduce', 'pcs_prodtask_set_status',
+    'swf_end_execution', 'swf_kill_agent',
     'swf_record_ai_memory',
     'swf_send_message', 'swf_start_user_testbed', 'swf_start_workflow',
     'swf_stop_user_testbed', 'swf_stop_workflow',
