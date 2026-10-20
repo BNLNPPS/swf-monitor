@@ -244,7 +244,9 @@ async def snapper_series(scope: str, focus: str, window: str = '24h',
         gaps: recorded observation gaps — the record has no state
             across them.
         cache: the product's cache state; 'refreshing' True means a
-            newer build is landing behind this one.
+            newer build is landing behind this one. A stored product
+            older than the window is never returned: the tool waits for
+            its rebuild or builds the series itself ('built_inline').
     """
     from snapper_ai.products import series_product
 
