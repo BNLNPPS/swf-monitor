@@ -25,6 +25,7 @@ with no row per job, and a few representative jobs written by the
 inventory as EpicProdJob rows of phase ``payload_memory``.
 """
 import logging
+import re
 from collections import defaultdict
 from datetime import datetime, timezone as dt_timezone
 
@@ -1536,7 +1537,71 @@ def queue_diagnosis(key, requested_by):
 FINDING_KIND = 'finding'
 FINDING_CONTEXT = 'segfault'
 FINDING_FIELDS = ('date', 'frame', 'stage', 'title', 'class', 'action', 'standing',
-                  'fix', 'notes', 'sources', 'signatures', 'model_reading')
+                  'fix', 'notes', 'sources', 'signatures', 'model_reading',
+                  'detector_components', 'detector_point', 'detector_geometry')
+
+# Where in the detector a finding lies, for the ePIC detector model: DD4hep
+# top-level detector names from the epic compact files (BeamPipeB0),
+# optionally with a volume path below (BeamPipeB0/v_pipe_7); a point in
+# DD4hep global coordinates, millimetres, any axis unknown left null; the
+# geometry they refer to (e.g. 'epic 26.07.3 epic_craterlake').
+_DETECTOR_NAME = re.compile(r'^[A-Za-z][A-Za-z0-9_]*(/[A-Za-z0-9_]+)*$')
+
+
+def _clean_detector_fields(fields):
+    """Check and normalize the detector fields of a finding write in place;
+    ValueError names the first bad value."""
+    if 'detector_components' in fields:
+        names = fields['detector_components'] or []
+        if isinstance(names, str):
+            names = [names]
+        names = [str(n).strip() for n in names if str(n).strip()]
+        bad = [n for n in names if not _DETECTOR_NAME.match(n)]
+        if bad:
+            raise ValueError(f'detector_components: {bad[0]!r} is not a DD4hep detector '
+                             'name, optionally with a volume path (BeamPipeB0/v_pipe_7)')
+        fields['detector_components'] = names
+    if 'detector_point' in fields:
+        point = fields['detector_point']
+        if point in (None, {}):
+            fields['detector_point'] = None
+        else:
+            if not isinstance(point, dict) or set(point) - {'x', 'y', 'z'}:
+                raise ValueError('detector_point: {x, y, z} in millimetres, DD4hep global '
+                                 'coordinates, an unknown axis null')
+            clean = {}
+            for axis in ('x', 'y', 'z'):
+                value = point.get(axis)
+                if value is not None:
+                    try:
+                        value = float(value)
+                    except (TypeError, ValueError):
+                        raise ValueError(f'detector_point: {axis} is not a number of millimetres')
+                clean[axis] = value
+            if all(v is None for v in clean.values()):
+                raise ValueError('detector_point: no axis given')
+            fields['detector_point'] = clean
+    if 'detector_geometry' in fields:
+        fields['detector_geometry'] = str(fields['detector_geometry'] or '').strip()
+
+
+def detector_where(f):
+    """The detector fields as one line for the findings page."""
+    parts = []
+    names = f.get('detector_components') or []
+    if names:
+        parts.append(', '.join(names))
+    point = f.get('detector_point') or {}
+    if point:
+        known = [f'{axis} {point[axis]:g} mm' for axis in ('x', 'y', 'z')
+                 if point.get(axis) is not None]
+        unknown = [axis for axis in ('x', 'y', 'z') if point.get(axis) is None]
+        parts.append('point ' + ', '.join(known)
+                     + (f" ({', '.join(unknown)} not recorded)" if unknown else ''))
+    line = '; '.join(parts)
+    if line and f.get('detector_geometry'):
+        line += f" (geometry {f['detector_geometry']})"
+    return line
 
 
 def _finding_context():
@@ -1587,6 +1652,8 @@ def set_finding(name, fields, changed_by):
     from django.db import transaction
     from .models import Entry
     from .signals import set_changed_by
+    fields = dict(fields)
+    _clean_detector_fields(fields)
     set_changed_by(changed_by or 'unknown')
     with transaction.atomic():
         ctx = _finding_context()
@@ -1695,6 +1762,10 @@ def findings(*, name=None, version=None, include_history=False):
             'standing': f.get('standing', '') if snapshot is not None else e.status or f.get('standing', ''),
             'fix': f.get('fix', ''), 'notes': (f.get('notes') or '').strip(),
             'model_reading': bool(f.get('model_reading')),
+            'detector_components': f.get('detector_components') or [],
+            'detector_point': f.get('detector_point') or None,
+            'detector_geometry': f.get('detector_geometry') or '',
+            'detector_where': detector_where(f),
             'updated_by': f.get('updated_by', ''), 'updated_at': _iso(
                 datetime.fromtimestamp(snapshot.timestamp if snapshot is not None else e.timestamp_modified,
                                        tz=dt_timezone.utc)),

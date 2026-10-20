@@ -682,9 +682,12 @@ async def panda_segfault_findings() -> dict:
             (label, url), class, action (what production does), standing
             (open, fix named, fixed, accepted), fix, notes, model_reading
             (true when the entry is an LLM study's reading not yet checked
-            against its source), updated_by, updated_at, signatures (the
-            catalog entries with their counts), crashes, tasks, rows_lost,
-            events_lost.
+            against its source), detector_components, detector_point and
+            detector_geometry (where in the detector the finding lies: DD4hep
+            detector names, a point in DD4hep global coordinates in mm, the
+            geometry), detector_where (the same as one line), updated_by,
+            updated_at, signatures (the catalog entries with their counts),
+            crashes, tasks, rows_lost, events_lost.
         monitor_url: The findings page.
     """
     from monitor_app.segfaults import findings
@@ -713,6 +716,9 @@ async def panda_segfault_finding_set(
     sources: list = None,
     signatures: list = None,
     model_reading: bool = None,
+    detector_components: list = None,
+    detector_point: dict = None,
+    detector_geometry: str = None,
     changed_by: str = 'mcp',
 ) -> dict:
     """
@@ -739,6 +745,14 @@ async def panda_segfault_finding_set(
         signatures: The catalog keys the finding explains (default: name).
         model_reading: True when the entry is an LLM study's reading not
             yet checked against its source; cleared by whoever checks it.
+        detector_components: Where in the detector the finding lies, for
+            the ePIC detector model: DD4hep top-level detector names from
+            the epic compact files (e.g. ['BeamPipeB0']), each optionally
+            with a volume path below it ('BeamPipeB0/v_pipe_7').
+        detector_point: A point in DD4hep global coordinates, millimetres:
+            {'x': ..., 'y': ..., 'z': ...}, an unknown axis null.
+        detector_geometry: The geometry the names and point refer to
+            (e.g. 'epic 26.07.3 epic_craterlake').
         changed_by: Who writes (the version stamp).
 
     Returns:
@@ -752,12 +766,18 @@ async def panda_segfault_finding_set(
                            ('stage', stage), ('class', class_hint), ('action', action),
                            ('standing', standing), ('fix', fix), ('notes', notes),
                            ('sources', sources), ('signatures', signatures),
-                           ('model_reading', model_reading)):
+                           ('model_reading', model_reading),
+                           ('detector_components', detector_components),
+                           ('detector_point', detector_point),
+                           ('detector_geometry', detector_geometry)):
             if value is not None:
                 fields[key] = value
         if not fields:
             return {'error': 'nothing to set'}
-        entry, created = set_finding(name, fields, changed_by)
+        try:
+            entry, created = set_finding(name, fields, changed_by)
+        except ValueError as exc:
+            return {'error': str(exc)}
         return {'name': name, 'created': created, 'versions': entry.versions.count(),
                 'title': entry.title, 'standing': entry.status, 'data': entry.data}
     return await sync_to_async(_work)()

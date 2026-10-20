@@ -85,6 +85,8 @@
                     {% endif %}
                     <div class="finding-label">What it is</div>
                     <p>{{ e.what|urlize }}</p>
+                    {% if e.detector_where %}<div class="finding-label">Where in the detector</div>
+                    <p>{{ e.detector_where }}</p>{% endif %}
                     {% if e.sources %}<div class="finding-label">Sources</div>
                     <p>{% for s in e.sources %}<a href="{{ s.url }}">{{ s.label }}</a>{% if not forloop.last %}<br>{% endif %}{% endfor %}</p>{% endif %}
                     {% if e.action %}<div class="finding-label">What production does</div>
