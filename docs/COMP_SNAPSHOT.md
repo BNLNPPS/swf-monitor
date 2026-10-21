@@ -198,7 +198,11 @@ shadow mode.
 
 ## Links
 
-Every queue links to its PanDA queue page, its errors view filtered to
-the queue, and the canary page. Every storage element links
-to the Storage view. All links are on the public face
-(`https://epic-devcloud.org/prod/...`).
+Every queue links to its ePIC queue page (`panda/epic-queues/<queue>/`),
+its errors view filtered to the queue (`panda/errors/?site=<queue>`) and
+the canary probes page (`canary/probes/`: the canary root answers with a
+redirect, which the proxy cannot relay). The pressure front links to the
+front page (`panda/front/`) and every storage element to the storage
+doors page (`panda/storage-doors/`). All links are on the public face
+(`https://epic-devcloud.org/prod/...`), and each was checked to answer
+200 there on 2026-10-21.

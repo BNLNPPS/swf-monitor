@@ -281,10 +281,10 @@ class _Build:
         return [
             {'id': 'jlab-rucio', 'name': 'JLab Rucio', 'holds': 'science data',
              'health': _health({'registration': reg_part, 'latest_arrival': arrival}),
-             'links': {'storage': f'{PUBLIC}/pcs/storage/'}},
+             'links': {'storage': f'{PUBLIC}/panda/storage-doors/'}},
             {'id': 'bnl-rucio', 'name': 'BNL Rucio', 'holds': 'logs',
              'health': _health({'log_stageout': log_part}),
-             'links': {'storage': f'{PUBLIC}/pcs/storage/'}},
+             'links': {'storage': f'{PUBLIC}/panda/storage-doors/'}},
         ]
 
 
@@ -383,9 +383,10 @@ def build():
                           'feed': dc.get('feed_switch')},
                 'health': health,
                 'links': {
-                    'panda_queue': f'{PUBLIC}/panda/queues/{q}/',
+                    'panda_queue': f'{PUBLIC}/panda/epic-queues/{q}/',
                     'snapper': f'{PUBLIC}/panda/errors/?site={q}',
-                    'canary': f'{PUBLIC}/canary/',
+                    # the canary root redirects, which the proxy cannot relay
+                    'canary': f'{PUBLIC}/canary/probes/',
                 },
             })
         if s.get('execute_sites') and pool and pool.get('admitted') is not None:
@@ -421,7 +422,7 @@ def build():
         'ready_tasks': ready, 'released_1h': released,
         'enabled': cfg.get('front.enabled'), 'mode': cfg.get('front.mode'),
         'jedi_throttled': cfg.get('front.jedi_throttled'),
-        'link': f'{PUBLIC}/pcs/front/',
+        'link': f'{PUBLIC}/panda/front/',
     }
 
     record = {
