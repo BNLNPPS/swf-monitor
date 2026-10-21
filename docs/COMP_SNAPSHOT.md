@@ -53,8 +53,8 @@ sites[]           {id, name, status, capacity, capacity_source, in_use,
                    health, links, queues[], execute_sites[]}
   queues[]        {id, name, status, status_reason,
                    running, starting, queued, ungenerated,
-                   harvester_slots_opened_1h, finished_1h, failed_1h,
-                   capacity, capacity_source, in_use,
+                   harvester_slots_opened_1h, harvester_pilots_submitted_1h,
+                   finished_1h, failed_1h, capacity, capacity_source, in_use,
                    finished_core_h_1h, failed_core_h_1h,
                    front: {state, reason, feed},
                    health, links}
@@ -101,8 +101,12 @@ Per queue, from the PanDA database:
 - `queued`: activated, assigned, defined, waiting and sent jobs, the
   census's not-started set.
 - `ungenerated`: input rows JEDI has not yet made into jobs.
-- `harvester_slots_opened_1h`: harvester workers submitted in the last
-  hour.
+- `harvester_slots_opened_1h`: harvester workers that started in the
+  last hour, each a slot opened at the site.
+- `harvester_pilots_submitted_1h`: harvester workers submitted in the
+  last hour, into the site's batch system or the OSG pool, where they
+  wait for a slot. (Until 2026-10-21 16:30 ET `harvester_slots_opened_1h`
+  carried this count.)
 - `finished_1h`, `failed_1h`: production jobs that ended in the last
   hour.
 - `front`: the front's latest decision for the queue.

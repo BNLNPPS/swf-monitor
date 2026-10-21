@@ -147,9 +147,16 @@ class _Build:
         return out
 
     def opened(self):
-        sql = f'''SELECT computingsite, COUNT(*) FROM "{self.S}"."harvester_workers"
-                  WHERE submittime >= %s GROUP BY 1'''
-        return {site: int(n) for site, n in _rows(sql, (self.hour_ago,))}
+        """Harvester workers per queue in the last hour: started (a slot
+        opened: the pilot got a slot at the site) and submitted (sent to
+        the site's batch system or pool, not yet a slot)."""
+        sql = f'''SELECT computingsite,
+                         SUM(CASE WHEN starttime >= %s THEN 1 ELSE 0 END),
+                         SUM(CASE WHEN submittime >= %s THEN 1 ELSE 0 END)
+                  FROM "{self.S}"."harvester_workers"
+                  WHERE starttime >= %s OR submittime >= %s GROUP BY 1'''
+        h = self.hour_ago
+        return {site: (int(s or 0), int(n or 0)) for site, s, n in _rows(sql, (h, h, h, h))}
 
     def queue_status(self, names):
         sql = f'''SELECT panda_queue, data->>'status' FROM "{self.S}"."schedconfig_json"
@@ -355,7 +362,8 @@ def build():
                 'running': running, 'starting': starting,
                 'queued': int(c.get('not_started') or 0),
                 'ungenerated': int(c.get('ungenerated') or 0),
-                'harvester_slots_opened_1h': opened.get(q, 0),
+                'harvester_slots_opened_1h': opened.get(q, (0, 0))[0],
+                'harvester_pilots_submitted_1h': opened.get(q, (0, 0))[1],
                 'finished_1h': e['finished'], 'failed_1h': e['failed'],
                 'capacity': capacity, 'capacity_source': source,
                 'in_use': running_cores,
