@@ -118,8 +118,9 @@ load, memory and volumes. Verdicts cover held workers, daemon silence,
 and the harvester and schedd processes. The daemons are split: only
 those that tick regardless of demand are judged, because the submitters
 write only when there is work and their quiet on an idle host is
-correct. Question: was the submission side working, and where were
-pilots allowed to go. A site refusing every submission — GREX for
+correct. The database is judged by its connection pool's log, since
+db_proxy's own is held at INFO and is nearly silent. Question: was the
+submission side working, and where were pilots allowed to go. A site refusing every submission — GREX for
 thirteen hours on 2026-09-06, unnoticed — holds workers here and
 appears nowhere else.
 
@@ -251,7 +252,8 @@ platform component above.**
    panel, since on the request axis it is a hairline; *daemon silence*
    as the oldest log age among the judged daemons, those that write
    regardless of demand (the pilot API, copyArchive, the brokers and
-   the adder write only when there is work and are recorded, not
+   the adder write only when there is work, and some daemons write
+   nothing at the server's log level INFO; those are recorded, not
    judged); *database reachability from the server host* as TCP
    connect latency. All present when the reporter reports.
 5b. *Batch pool* — the claimed fraction on its own 0–1 scale; the
