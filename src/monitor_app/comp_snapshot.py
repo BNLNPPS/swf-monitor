@@ -340,7 +340,7 @@ def build():
                 # one pool behind every OSG queue: the site carries it once
                 capacity, source = int(pool['admitted']), 'pool, shared'
             elif q in targets:
-                capacity, source = targets[q], 'harvester'
+                capacity, source = targets[q], 'target (ours)'
             elif (c.get('calibration') or {}).get('peak_running'):
                 capacity, source = int(c['calibration']['peak_running']), 'observed peak'
 

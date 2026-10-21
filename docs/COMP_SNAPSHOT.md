@@ -118,8 +118,11 @@ and cores agree. A multicore job later counts its cores.
     from the submit host's report (SNAPPER_PLATFORM.md). The pool is
     one behind both OSG queues, so the OSG site carries it as its
     capacity and each OSG queue repeats it as `pool, shared`;
-  - `harvester`: the queue's harvester worker limit times pilots per
-    worker (GREX: 125 workers of 8);
+  - `target (ours)`: the running target we set for the queue's pilots
+    (SysConfig `pilot.queue.<queue>.target_running`; GREX 1,000). It is
+    our figure, not a limit agreed with the site: GREX's scheduler runs
+    about 120 to 128 of our 8-pilot slots at a time (2026-10-21), and
+    that limit is GREX's and not visible to us;
   - `allocation`: a batch allocation's cores (Perlmutter);
   - `configured`: the SysConfig key `comp.capacity.<queue>`, an
     operator's figure, which overrides the others;
