@@ -76,17 +76,21 @@ def _live_counts():
 
 def _tasks_active():
     """Per queue, the production tasks pinned to it that have not
-    ended (canary and other test tasks excluded). By processing type,
-    not VO: production tasks carry ``wlcg`` (the VO the server was
-    commissioned under, set by the Standard Production configuration),
-    the test and canary paths carry ``epic``; a VO filter here had read
-    a queue with three live production tasks as none."""
+    ended and are not paused (canary and other test tasks excluded).
+    By processing type, not VO: production tasks carry ``wlcg`` (the
+    VO the server was commissioned under, set by the Standard
+    Production configuration), the test and canary paths carry
+    ``epic``; a VO filter here had read a queue with three live
+    production tasks as none. A paused task generates no jobs until an
+    operator resumes it, so it does not count toward the front's task
+    cap: three tasks paused on 2026-08-17 had held BNL_OSG_EPIC_PROD_1
+    at its cap with nothing running."""
     placeholders = ', '.join(['%s'] * len(TASK_TERMINAL_STATUSES))
     sql = f"""
         SELECT COALESCE("site", 'unknown'), COUNT(*)
         FROM "{PANDA_SCHEMA}"."jedi_tasks"
         WHERE "processingtype" = 'epicproduction'
-          AND ("status" IS NULL OR "status" NOT IN ({placeholders}))
+          AND ("status" IS NULL OR "status" NOT IN ({placeholders}, 'paused'))
         GROUP BY 1
     """
     with connections['panda'].cursor() as cursor:
