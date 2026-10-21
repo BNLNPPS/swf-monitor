@@ -24,6 +24,7 @@ and `monitor_urls` when web UI links are available.
 | Tool | Parameters | Description |
 |------|------------|-------------|
 | `swf_get_system_state` | `username` | Comprehensive system state for a user: context from testbed.toml, agent manager status, workflow runner readiness, agent counts, execution stats. |
+| `swf_comp_snapshot` | `refresh` | The computing centre room's live record: pressure front, sites with their queues, OSG execute sites, storage health, report (docs/COMP_SNAPSHOT.md). |
 
 **Parameters:**
 - `username`: Optional. Username to get context for (reads their testbed.toml). If not provided, infers from SWF_HOME environment variable.

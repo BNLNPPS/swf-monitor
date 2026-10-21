@@ -63,6 +63,7 @@ the old paths here. This repo's docs cover the platform services:
 - `TEAMCOMMS.md` — embedded TeamComms, devcloud authentication, request binding, identity and stream revalidation.
 - `USER_VIEW.md` — the user view: the reduced epicprod face behind the universal `user_view` parameter, its nav and conventions, and how a page tailors itself.
 - `SYSTEM_STATUS.md` — cached system status record and page.
+- `COMP_SNAPSHOT.md` — the comp snapshot: the computing centre room's live record (`swf_comp_snapshot`, `panda/comp/snapshot.json`).
 - `SNAPPER.md`, `SNAPPER_ERRORS.md`, `SNAPPER_PLATFORM.md`, `SNAPPER_STORAGE.md`, `SNAPPER_CATALOG.md`, `PANDA_SERVER_REPORTER.md` — Snapper operations in SWF; the error-state component and errors view; the platform-health component, Platform view, and the pandaserver01 reporter; the Storage view over the storage record; the JLab Rucio catalog component and Catalog view. All four are in production.
 - `ERROR_ATTRIBUTION.md` — correcting unreliable PanDA error labels at a single service root: rule lifetimes, evidence grades, representative-job digs, payload/pilot channels.
 - `CACHED_PRODUCTS.md` — uniform long-build caching: serve stored, rebuild behind, Update button; use this, never a new hand-rolled cache.

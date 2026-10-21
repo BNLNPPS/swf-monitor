@@ -1068,3 +1068,27 @@ async def swf_get_testbed_status(username: str = None) -> dict:
         result['note'] = 'No agents running. Start testbed first.'
 
     return result
+
+
+@mcp.tool()
+async def swf_comp_snapshot(refresh: bool = False) -> dict:
+    """
+    The computing centre's live record: the whole room in one call
+    (docs/COMP_SNAPSHOT.md, schema comp-snapshot/1).
+
+    Returns the pressure front (ready tasks, released in the last hour,
+    the front's switches); every site with its production queues (status,
+    running and starting, queued, ungenerated rows, harvester slots
+    opened, jobs finished and failed in the last hour, capacity in cores
+    with its source, cores in use, finished and failed core-hours, the
+    front's decision, health with its parts, links); OSG's execute sites;
+    the JLab and BNL Rucio storage health; a summary report; and the
+    parts that could not be read. Served from a cached product refreshed
+    behind the request once a minute; refresh=True rebuilds first (about
+    15-25 s).
+    """
+    from monitor_app.comp_snapshot import get_snapshot
+    try:
+        return await sync_to_async(get_snapshot)(refresh=refresh)
+    except Exception as e:
+        return {"error": f"comp snapshot failed: {e}"}
