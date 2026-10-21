@@ -48,6 +48,12 @@ DEFAULT_SITES = [
 # GREX runs eight pilots per Slurm worker (2026-10-20).
 PILOTS_PER_WORKER = {'UM_GREX_PanDA_1': 8}
 OSG_SUBMIT_HOST = 'osgsub01'
+# The harvester reporters (docs/HARVESTER_REPORTER.md); each record names
+# the queues its harvester serves. osgsub01's own key is the OSG submit
+# reporter's, which carries the schedd's idle pilots per queue.
+HARVESTER_REPORTS = ('osgsub01-harvester', 'pandaharvester01', 'pandaharvester02')
+# The reporters run every five minutes; three missed runs make a record stale.
+REPORT_STALE_SECONDS = 900
 LEVELS = ('grey', 'green', 'amber', 'red')
 
 
@@ -79,6 +85,31 @@ def _activity_part(finished, failed):
         level = 'green'
     return _part(level, round(failed / ended, 3),
                  f'{finished} finished, {failed} failed in the last hour')
+
+
+def _pilot_supply_part(p, queued, started_1h, submitted_1h):
+    """Whether pilots keep reaching the queue (docs/COMP_SNAPSHOT.md, Pilot
+    supply). Harvester holds new pilots back against its own count of
+    those waiting, so a count the schedd no longer bears out stops supply
+    while the queue reads full."""
+    if not p:
+        return _part('grey', None, 'no harvester report names the queue')
+    age = p.get('report_age_seconds')
+    if age is None or age > REPORT_STALE_SECONDS:
+        return _part('grey', None, f"harvester report {int((age or 0) // 60)} min old")
+    waiting, limit = p['waiting'], p.get('limit')
+    seen = f"harvester counts {waiting} waiting (limit {limit})"
+    idle = p.get('waiting_schedd')
+    if idle is not None and (p.get('schedd_age_seconds') or 0) <= REPORT_STALE_SECONDS:
+        seen += f", the schedd holds {idle}"
+        if limit and waiting >= 2 * limit and idle < limit:
+            return _part('red' if queued else 'amber', waiting - idle,
+                         f"{seen}: harvester counts pilots the schedd no longer has "
+                         f"and submits none")
+    if queued and not waiting and not started_1h and not submitted_1h:
+        return _part('red', 0, f"{queued} jobs queued, no pilot waiting, submitted "
+                               f"or started in the last hour")
+    return _part('green', waiting, seen)
 
 
 def _rows(sql, params=()):
@@ -184,6 +215,49 @@ class _Build:
         pool = (found.get('record') or {}).get('pool') or {}
         return {'admitted': pool.get('slots_admitted'), 'total': pool.get('slots_total'),
                 'age_seconds': found.get('age_seconds')}
+
+    def pilots(self):
+        """Per queue, the pilot slots waiting at the site and running by
+        harvester's own count, its waiting limit, and for the OSG queues
+        the idle pilots the submit schedd holds, from the host reporters'
+        records (no remote call)."""
+        from monitor_app.host_reports import latest
+        out = {}
+        for key in HARVESTER_REPORTS:
+            found = latest(key)
+            if not found:
+                continue
+            hdb = (found.get('record') or {}).get('harvester_db') or {}
+            now = hdb.get('workers_now') or {}
+            limits = {}
+            for row in hdb.get('launch_limits') or []:
+                if isinstance(row, dict) and row.get('queue'):
+                    try:
+                        n = int(row.get('n_queue_limit_worker'))
+                    except (TypeError, ValueError):
+                        continue
+                    limits[row['queue']] = limits.get(row['queue'], 0) + n
+            for q in set(now) | set(limits):
+                w = now.get(q) or {}
+                out[q] = {
+                    # harvester's idle is a pilot evicted back to waiting
+                    'waiting': int(w.get('submitted') or 0) + int(w.get('idle') or 0),
+                    'waiting_schedd': None,
+                    'limit': limits.get(q),
+                    'running': int(w.get('running') or 0),
+                    'per_slot': PILOTS_PER_WORKER.get(q, 1),
+                    'report': key,
+                    'report_age_seconds': found.get('age_seconds'),
+                }
+        found = latest(OSG_SUBMIT_HOST)
+        idle = ((found or {}).get('record') or {}).get('idle_analysis')
+        if isinstance(idle, dict) and 'error' not in idle:
+            # the reporter lists every queue that has an idle pilot
+            for q, p in out.items():
+                if p['report'] == f'{OSG_SUBMIT_HOST}-harvester':
+                    p['waiting_schedd'] = int((idle.get(q) or {}).get('idle') or 0)
+                    p['schedd_age_seconds'] = found.get('age_seconds')
+        return out
 
     def execute_sites(self, queues):
         sql = f'''SELECT COALESCE(NULLIF(destinationsite, ''), ''), COUNT(*),
@@ -304,6 +378,7 @@ def build():
     pandastatus = b.part('queue_status', lambda: b.queue_status(names), {})
     decisions = b.part('front', lambda: b.front_decisions(names), {})
     pool = b.part('osg_pool', b.osg_pool, None)
+    pilots = b.part('pilots', b.pilots, {})
 
     sites = []
     for s in sites_cfg:
@@ -351,8 +426,10 @@ def build():
                 else:
                     snap = _part('green', e['failed'],
                                  f'top: {top[0][1]} x {top[0][0]}' if top else 'no failures')
+                supply = _pilot_supply_part(pilots.get(q), int(c.get('not_started') or 0),
+                                            *opened.get(q, (0, 0)))
                 health = _health({'prod_activity': activity, 'canary': canary_part,
-                                  'snapper_errors': snap})
+                                  'snapper_errors': snap, 'pilot_supply': supply})
             else:
                 health = _health({'status': _part('grey', status, reason or status)})
 
@@ -364,6 +441,7 @@ def build():
                 'ungenerated': int(c.get('ungenerated') or 0),
                 'harvester_slots_opened_1h': opened.get(q, (0, 0))[0],
                 'harvester_pilots_submitted_1h': opened.get(q, (0, 0))[1],
+                'pilots': pilots.get(q),
                 'finished_1h': e['finished'], 'failed_1h': e['failed'],
                 'capacity': capacity, 'capacity_source': source,
                 'in_use': running_cores,

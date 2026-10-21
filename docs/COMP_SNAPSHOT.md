@@ -54,6 +54,8 @@ sites[]           {id, name, status, capacity, capacity_source, in_use,
   queues[]        {id, name, status, status_reason,
                    running, starting, queued, ungenerated,
                    harvester_slots_opened_1h, harvester_pilots_submitted_1h,
+                   pilots: {waiting, waiting_schedd, limit, running, per_slot,
+                            report, report_age_seconds},
                    finished_1h, failed_1h, capacity, capacity_source, in_use,
                    finished_core_h_1h, failed_core_h_1h,
                    front: {state, reason, feed},
@@ -107,6 +109,23 @@ Per queue, from the PanDA database:
   last hour, into the site's batch system or the OSG pool, where they
   wait for a slot. (Until 2026-10-21 16:30 ET `harvester_slots_opened_1h`
   carried this count.)
+- `pilots`: the queue's pilot slots by harvester's own count, from the
+  harvester reporter's latest record (HARVESTER_REPORTER.md); `null` for
+  a queue no harvester reports. `waiting` is the slots submitted and not
+  yet started (an evicted pilot back in the batch queue included),
+  `running` the slots running, `limit` harvester's configured maximum of
+  waiting slots, `per_slot` the pilots in one slot (8 at GREX, 1
+  elsewhere). Harvester submits new slots only while `waiting` is below
+  its limit, so `waiting` is what the site has not yet started: at GREX
+  on 2026-10-21, 592 slots waited while GREX ran 118 and started 3 in an
+  hour. For the OSG queues `waiting_schedd` is the idle pilots the
+  submit schedd actually holds, from the OSG submit reporter
+  (OSG_SUBMIT_REPORTER.md). The two disagree when pilots leave the
+  schedd without harvester's knowledge: on 2026-10-21 harvester counted
+  4,311 waiting at BNL_OSG_PanDA_1 against 131 in the schedd, after
+  waiting pilots were removed there directly, and submitted none.
+  `report_age_seconds` is the harvester record's age; the reporters run
+  every five minutes.
 - `finished_1h`, `failed_1h`: production jobs that ended in the last
   hour.
 - `front`: the front's latest decision for the queue.
@@ -164,6 +183,16 @@ A queue's parts:
   The part is `red` when one category accounts for more than half the
   ended jobs, the signature of an outage, and `amber` when the failures
   are more than a quarter of them.
+- `pilot_supply`, whether pilots keep reaching the queue, from the
+  queue's `pilots` reading. `red` when harvester counts at least twice
+  its waiting limit while the schedd holds fewer than the limit and jobs
+  are queued (`amber` with none queued): harvester then submits nothing,
+  because its own count says the queue is full. In normal running
+  harvester's count stays within one cycle of its limit, so twice the
+  limit is never a lag. `red` also when jobs are queued and in the last
+  hour no pilot waited, was submitted or started. `grey` when no
+  harvester report names the queue or the report is more than fifteen
+  minutes old; otherwise `green`, with the counts in the note.
 
 A site's health is the worst of its queues'. An execute site's health
 has the `prod_activity` part only.
