@@ -118,16 +118,17 @@ and cores agree. A multicore job later counts its cores.
     from the submit host's report (SNAPPER_PLATFORM.md). The pool is
     one behind both OSG queues, so the OSG site carries it as its
     capacity and each OSG queue repeats it as `pool, shared`;
-  - `target (ours)`: the running target we set for the queue's pilots
-    (SysConfig `pilot.queue.<queue>.target_running`; GREX 1,000). It is
-    our figure, not a limit agreed with the site: GREX's scheduler runs
-    about 120 to 128 of our 8-pilot slots at a time (2026-10-21), and
-    that limit is GREX's and not visible to us;
   - `allocation`: a batch allocation's cores (Perlmutter);
   - `configured`: the SysConfig key `comp.capacity.<queue>`, an
     operator's figure, which overrides the others;
   - `observed peak`: the most jobs seen running in the census's
-    calibration window, when nothing better exists.
+    calibration window. This is the site's discovered limit where our
+    supply is open-ended, as at GREX: harvester keeps 125 to 625 of our
+    8-pilot slots waiting there and GREX's scheduler starts about 120 to
+    128 at a time (2026-10-21), so the peak is GREX's limit, not ours.
+    The pilot controller's running target (SysConfig
+    `pilot.queue.<queue>.target_running`, GREX 1,000) is our figure, not
+    a capacity, and is not used.
 - `in_use`: running cores now.
 - `finished_core_h_1h`, `failed_core_h_1h`: the core-hours spent in the
   last hour by jobs that finished and by jobs that failed. A running

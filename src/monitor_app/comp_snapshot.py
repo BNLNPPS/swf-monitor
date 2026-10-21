@@ -169,21 +169,6 @@ class _Build:
                 out[q] = rec
         return out
 
-    def pilot_targets(self):
-        """The front's latest pilot decisions per queue (target running)."""
-        from monitor_app.models import AppLog
-        out = {}
-        since = self.now - timedelta(hours=1)
-        for rec in (AppLog.objects.filter(app_name='epicprod', timestamp__gte=since,
-                                          extra_data__action='pilot_decision')
-                    .order_by('-timestamp').values_list('extra_data', flat=True)[:50]):
-            q = rec.get('subject_key')
-            if q and q not in out:
-                counts = rec.get('counts') or rec
-                if counts.get('target_running'):
-                    out[q] = int(counts['target_running'])
-        return out
-
     def osg_pool(self):
         from monitor_app.host_reports import latest
         found = latest(OSG_SUBMIT_HOST)
@@ -311,7 +296,6 @@ def build():
     opened = b.part('harvester', b.opened, {})
     pandastatus = b.part('queue_status', lambda: b.queue_status(names), {})
     decisions = b.part('front', lambda: b.front_decisions(names), {})
-    targets = b.part('pilot_targets', b.pilot_targets, {})
     pool = b.part('osg_pool', b.osg_pool, None)
 
     sites = []
@@ -339,8 +323,6 @@ def build():
             elif s.get('execute_sites') and pool and pool.get('admitted') is not None:
                 # one pool behind every OSG queue: the site carries it once
                 capacity, source = int(pool['admitted']), 'pool, shared'
-            elif q in targets:
-                capacity, source = targets[q], 'target (ours)'
             elif (c.get('calibration') or {}).get('peak_running'):
                 capacity, source = int(c['calibration']['peak_running']), 'observed peak'
 
