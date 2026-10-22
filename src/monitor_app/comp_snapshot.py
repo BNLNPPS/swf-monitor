@@ -648,6 +648,10 @@ FRONT_REASONS = {
 PART_NAMES = {'prod_activity': 'jobs', 'canary': 'canary',
               'snapper_errors': 'failures', 'pilot_supply': 'pilot supply'}
 LEVEL_ORDER = {'red': 0, 'amber': 1, 'grey': 2, 'green': 3}
+# The alarm engine's titles: 'task 40962 (failed) final-failure rate 100.0% —
+# <task name>' and a ping's 'due in 7 days (2026-10-28): <what>'.
+TASK_ALARM_RE = re.compile(r'^task (\d+) \(([^)]*)\) final-failure rate ([\d.]+%) — (.*)$')
+DUE_RE = re.compile(r'^due in (\d+) days? \((\d{4}-\d\d-\d\d)\): (.*)$')
 
 
 def _active_alarms():
@@ -707,11 +711,28 @@ def _report_items(front, sites, storage, alarms, assessment):
                 items.append({'level': p['level'],
                               'text': f"{q['id']} {PART_NAMES.get(name, name)}: {p['note']}",
                               'link': link})
-    for a in alarms or []:
+    seen = set()
+    for a in alarms or []:  # newest first
+        title = a['title']
+        # one line per task: the failure-rate alarms fire per task, and
+        # several alarms (and older events) can name the same one
+        task = TASK_ALARM_RE.match(title)
+        key = ('task', task.group(1)) if task else ('title', title)
+        if key in seen:
+            continue
+        seen.add(key)
         # a ping is a dated obligation, an alarm only once overdue (PINGS.md)
         ping = a.get('severity') == 'ping'
-        items.append({'level': 'amber' if ping else 'red',
-                      'text': f"{'Due' if ping else 'Alarm'}: {a['title'].replace(' — ', ': ')}",
+        due = DUE_RE.match(title) if ping else None
+        if task:
+            number, state, rate, name = task.groups()
+            text = f'Final failures {rate}, task {number} ({state}): {name}'
+        elif due:
+            days, date, what = due.groups()
+            text = f'Due {date} ({days} days): {what}'
+        else:
+            text = f"{'Due' if ping else 'Alarm'}: {title.replace(' — ', ': ')}"
+        items.append({'level': 'amber' if ping else 'red', 'text': text,
                       'link': f"{PUBLIC}/alarms/events/{a['id']}/"})
     for st in storage:
         for name, p in st['health']['parts'].items():
