@@ -2996,12 +2996,23 @@ def epic_queue_detail(request, queue_name):
     other = {k: v for k, v in config.items() if k not in shown}
 
     # The same outcomes pie the jobs page shows when filtered to this
-    # queue, over the standing 2-week window (the embedded site history
-    # that stood beside it is gone: _jobs_site_pie_product).
+    # queue, over the standing 2-week window, or the hours= window the
+    # computing-centre floor's links carry (hours=12, Torre Wenaus,
+    # 2026-10-22). The embedded site history that stood beside it is
+    # gone: _jobs_site_pie_product.
+    outcomes_days = 14
+    try:
+        hours = float(request.GET.get('hours') or 0)
+    except ValueError:
+        hours = 0
+    if hours > 0:
+        outcomes_days = hours / 24
+        if outcomes_days == int(outcomes_days):
+            outcomes_days = int(outcomes_days)
     site_outcomes_pie = None
     try:
         site_outcomes_pie = _jobs_site_pie_product(
-            14, queue_name, request.GET.get('refresh') == '1')['value']
+            outcomes_days, queue_name, request.GET.get('refresh') == '1')['value']
     except Exception as e:                                   # noqa: BLE001
         logger.error('site outcomes pie failed for queue detail: %s', e)
 
@@ -3019,6 +3030,8 @@ def epic_queue_detail(request, queue_name):
         'other': other,
         'config_json': json_mod.dumps(config, indent=2, default=str),
         'site_outcomes_pie': site_outcomes_pie,
+        'outcomes_window_label': ('last 2 weeks' if outcomes_days == 14
+                                  else _window_label(outcomes_days)),
         'declines': _landing_declines_product().get(queue_name),
         'observed': _with_measurements(_queue_observed_product(queue_name), queue_name),
         'declines_days': SPARK_SPAN_DAYS,

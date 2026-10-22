@@ -33,7 +33,7 @@ PUBLIC = 'https://epic-devcloud.org/prod'
 # queue is off or not yet built.
 DEFAULT_SITES = [
     {'id': 'osg', 'name': 'OSG', 'execute_sites': True,
-     'queues': [{'id': 'BNL_OSG_PanDA_1'}, {'id': 'BNL_OSG_EPIC_PROD_1'}]},
+     'queues': [{'id': 'BNL_OSG_PanDA_1'}]},
     {'id': 'grex', 'name': 'GREX',
      'queues': [{'id': 'UM_GREX_PanDA_1'}]},
     {'id': 'compute-canada', 'name': 'Compute Canada',
