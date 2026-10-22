@@ -1892,10 +1892,12 @@ class EpicProdOpsAgent(BaseAgent):
         except Exception:
             pass
         creds = summary.get('credentials', [])
-        # A token has no expiry to carry (it is minted for hours); the days
-        # map is the credentials that expire, which the front's gate reads.
-        days = {c['credential']: c.get('days_left') for c in creds
-                if c.get('kind') != 'token'}
+        # The days map is what the front's credential gate reads: the
+        # credentials that expire and count, without the token and a
+        # superseded proxy, whose days stay on the record apart.
+        from swf_epicprod.credential_check import gate_days, superseded_days
+        days = gate_days(creds)
+        superseded = superseded_days(creds)
         reason = '; '.join(
             f"{c['credential']}: {c['status']}"
             + (f" ({c['days_left']}d left)" if 'days_left' in c else '')
@@ -1903,7 +1905,7 @@ class EpicProdOpsAgent(BaseAgent):
         if p.returncode == 0:
             self._log_action('credential_expiry_check', t0,
                              username=str(m.get('created_by') or ''),
-                             days_left=days)
+                             days_left=days, superseded=superseded)
         elif p.returncode == 3:
             # An expiry inside the window is the ping's to carry; only a
             # credential the check cannot vouch for at all stays live.
@@ -1915,13 +1917,13 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              sublevel='high' if unvouched else 'low',
                              live_default=bool(unvouched),
-                             level=logging.WARNING, days_left=days)
+                             level=logging.WARNING, days_left=days, superseded=superseded)
         else:
             self._log_action('credential_expiry_check', t0, outcome='error',
                              reason=reason or self._derive_reason(p),
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True,
-                             level=logging.ERROR, days_left=days)
+                             level=logging.ERROR, days_left=days, superseded=superseded)
 
     def _handle_dataset_definitions_sweep(self, m):
         """The definitions sweep on demand, off the receiver thread: the PC
