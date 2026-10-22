@@ -231,14 +231,17 @@ def _payload_from_ref(ref, dest):
     return payload_dir, commit
 
 
-def _assemble_sandbox(spec, proxy_path, root, payload_dir=None, token_path=None):
+def _assemble_sandbox(spec, proxy_path, root, payload_dir=None, token_path=None,
+                      ship_proxy=True):
     """Build the submission dir: spec.json + a sandbox/ holding the worker-facing
     files (manifest, env, dispatcher, proxy). Returns the submission dir path.
 
     The kernel and spec live OUTSIDE sandbox/ so they are not shipped to the
     worker; only the four worker files travel in the tarball. A developer's
     canary ships ``payload_dir`` instead of the deployed payload, and with
-    ``token_path`` ships that token as BEARER_TOKEN_FILE and no proxy.
+    ``token_path`` ships that token as BEARER_TOKEN_FILE and no proxy. With
+    ``ship_proxy`` false it ships no credential and empties X509_USER_PROXY,
+    so the job has only the tokens it gets from the PanDA server.
     """
     os.makedirs(root, exist_ok=True)
     workdir = tempfile.mkdtemp(prefix=f"{spec['csvBase']}.", dir=root)
@@ -256,6 +259,10 @@ def _assemble_sandbox(spec, proxy_path, root, payload_dir=None, token_path=None)
     env = dict(spec.get('env') or {})
     if token_path:
         env['BEARER_TOKEN_FILE'] = TOKEN_SANDBOX_NAME
+    elif not ship_proxy:
+        # Empty, not absent: the pilot's own proxy would otherwise stay in
+        # X509_USER_PROXY and stand in for a token that did not come.
+        env['X509_USER_PROXY'] = ''
     else:
         env['X509_USER_PROXY'] = proxy_base
     _stage_bg_files(env, sandbox)
@@ -281,7 +288,7 @@ def _assemble_sandbox(spec, proxy_path, root, payload_dir=None, token_path=None)
     if token_path:
         shutil.copy(token_path, os.path.join(sandbox, TOKEN_SANDBOX_NAME))
         os.chmod(os.path.join(sandbox, TOKEN_SANDBOX_NAME), 0o600)
-    else:
+    elif ship_proxy:
         shutil.copy(proxy_path, os.path.join(sandbox, proxy_base))
 
     # The epicprod payload, whole, from the frozen package unless a
@@ -544,10 +551,12 @@ def main():
     ap.add_argument("--canary-switch", action="append", default=[],
                     help="payload canary: EPICPROD_SWITCH_<NAME>=<value> in the "
                          "job's environment; repeatable")
-    ap.add_argument("--canary-credential", choices=["x509", "token"], default="x509",
+    ap.add_argument("--canary-credential", choices=["x509", "token", "panda"], default="x509",
                     help="payload canary: x509 ships the eicprod proxy (default); "
                          "token ships no proxy and the token file of "
-                         "--canary-token-file as BEARER_TOKEN_FILE")
+                         "--canary-token-file as BEARER_TOKEN_FILE; panda ships "
+                         "no credential, so the job writes and registers only "
+                         "with the tokens it gets from the PanDA server")
     ap.add_argument("--canary-token-file", default=os.environ.get("CANARY_TOKEN_FILE", ""),
                     help="payload canary, token credential: the token file shipped "
                          "(default $CANARY_TOKEN_FILE)")
@@ -966,7 +975,8 @@ def main():
     # 3. Assemble the sandbox.
     try:
         workdir = _assemble_sandbox(spec, args.proxy, SUBMIT_TMP_ROOT,
-                                    payload_dir=payload_override, token_path=token_path)
+                                    payload_dir=payload_override, token_path=token_path,
+                                    ship_proxy=args.canary_credential != "panda")
     except Exception as e:
         _log(f"ERROR: could not assemble sandbox: {e}")
         _record_submission_failure(args, f"could not assemble sandbox: {e}")
