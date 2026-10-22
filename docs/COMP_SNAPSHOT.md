@@ -447,6 +447,12 @@ the task is in one:
 `level` is red for a task in a failure-rate alarm, amber for one that
 has lost files, green while it runs, grey while its jobs only wait.
 
+The board holds every production task in flight wherever it is placed
+(Torre Wenaus, 2026-10-22, when the front placed two tasks on
+BNL_OSG_EPIC_PROD_1 after it had left the floor). A task with jobs or
+rows on a queue no floor site holds is red, its detail opening "Off the
+floor: placed on <queue>", and its `sites` hold no id for that queue.
+
 `queues` are the floor's queues the task is active at: those holding its
 running, starting or queued jobs, and the queue of its rows still to
 generate. `sites` are those queues' site ids, the ids of `sites[].id`.
