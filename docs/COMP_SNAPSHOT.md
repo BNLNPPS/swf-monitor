@@ -78,7 +78,7 @@ report            {text, items: [{level, text, link}],
                                 title, narration}}
 live              {link, items: [{id, at, level, title, detail, link}]}
 tasks             {link, items: [{id, at, level, title, counts, detail, link}]}
-  counts          {queued, running, finished, failed}
+  counts          {ungenerated, queued, running, finished, failed}
 trends            {window_hours, bin_minutes, t[], sampled_at, source_as_of,
                    gaps[], sites[], link}
   sites[]         {id, name, running[], queued[], finished[], failed[], detail}
@@ -398,20 +398,23 @@ None of these changes the records on the logs page.
 ### Tasks
 
 The room's task board, beside the live screen (Torre Wenaus,
-2026-10-22): exactly the production tasks on the floor, those with jobs
-running, starting or queued (the census's states) at a queue of
-`comp.sites`; a task with none there is off the board. Newest first by
-`at`, the task's start (its creation before it starts), ISO UTC. `id` is
-the JEDI task id, `link` the task's page; `tasks.link` lists the
-production tasks.
+2026-10-22): exactly the production tasks in flight on the floor, those
+not finished in JEDI (done, finished, failed, broken, aborted) that have
+jobs running, starting or queued (the census's states) at a queue of
+`comp.sites`, or rows JEDI has not yet made into jobs for such a queue.
+A task with neither is off the board. Newest first by `at`, the task's
+start (its creation before it starts), ISO UTC. `id` is the JEDI task id,
+`link` the task's page; `tasks.link` lists the production tasks.
 
 The board is the tasks in flight. A line is the task id (`title`) and
-its counts, just the numbers: jobs queued and running, files finished
-and files failed after their retries (a job that failed and then
-succeeded on a retry is not a failure of the task), finished shown green
-and failed red:
+its counts, just the numbers: rows still to generate (`ungenerated`,
+shown "To generate": the task's input rows JEDI has not yet made into
+jobs, the census's measure, `census.ungenerated_by_task`), jobs queued
+and running, files finished and files failed after their retries (a job
+that failed and then succeeded on a retry is not a failure of the task),
+finished shown green and failed red:
 
-    40856   2,244  865  13,772  2,184
+    40856   30,631  2,133  747  14,250  2,244
 
 The detail, on hover, is the task's physics in the concise form of the
 PCS description (`physics_description`, the one composer PCS pages use)

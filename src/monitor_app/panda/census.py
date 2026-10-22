@@ -99,32 +99,39 @@ def _tasks_active():
         return {str(site): int(n or 0) for site, n in cursor.fetchall()}
 
 
-def _ungenerated():
-    """Per queue, the rows of its non-terminal production tasks that
-    JEDI has not generated jobs for: ``nFilesToBeUsed - nFilesUsed`` on
-    each task's input dataset (the largest input where a task carries
+def ungenerated_by_task():
+    """Per non-terminal, unpaused production task, ``(queue, rows)``: the
+    rows JEDI has not generated jobs for, ``nFilesToBeUsed - nFilesUsed``
+    on the task's input dataset (the largest input where a task carries
     several, as an EVGEN task carries two pseudo inputs with one count).
-    The work committed to a queue beyond its activated pool; the
-    pressure front's phase-two depth counts it once the ePIC job
-    throttler paces generation (swf-epicprod CONTINUOUS_PRODUCTION.md,
-    Two regulators)."""
+    The census sums it per queue; the computing centre's task board shows
+    it per task (COMP_SNAPSHOT.md, Tasks)."""
     placeholders = ', '.join(['%s'] * len(TASK_TERMINAL_STATUSES))
     sql = f"""
-        SELECT site, SUM(remaining) FROM (
-            SELECT COALESCE(t."site", 'unknown') AS site, t."jeditaskid",
-                   MAX(GREATEST(COALESCE(d."nfilestobeused", 0) - COALESCE(d."nfilesused", 0), 0)) AS remaining
-            FROM "{PANDA_SCHEMA}"."jedi_tasks" t
-            JOIN "{PANDA_SCHEMA}"."jedi_datasets" d ON d."jeditaskid" = t."jeditaskid"
-            WHERE t."processingtype" = 'epicproduction'
-              AND (t."status" IS NULL OR t."status" NOT IN ({placeholders}, 'paused'))
-              AND d."type" IN ('input', 'pseudo_input') AND d."masterid" IS NULL
-            GROUP BY 1, 2
-        ) per_task
-        GROUP BY 1
+        SELECT COALESCE(t."site", 'unknown') AS site, t."jeditaskid",
+               MAX(GREATEST(COALESCE(d."nfilestobeused", 0) - COALESCE(d."nfilesused", 0), 0))
+        FROM "{PANDA_SCHEMA}"."jedi_tasks" t
+        JOIN "{PANDA_SCHEMA}"."jedi_datasets" d ON d."jeditaskid" = t."jeditaskid"
+        WHERE t."processingtype" = 'epicproduction'
+          AND (t."status" IS NULL OR t."status" NOT IN ({placeholders}, 'paused'))
+          AND d."type" IN ('input', 'pseudo_input') AND d."masterid" IS NULL
+        GROUP BY 1, 2
     """
     with connections['panda'].cursor() as cursor:
         cursor.execute(sql, list(TASK_TERMINAL_STATUSES))
-        return {str(site): int(n or 0) for site, n in cursor.fetchall()}
+        return {int(tid): (str(site), int(n or 0)) for site, tid, n in cursor.fetchall()}
+
+
+def _ungenerated():
+    """Per queue, the rows of its non-terminal production tasks that
+    JEDI has not generated jobs for (``ungenerated_by_task``). The work
+    committed to a queue beyond its activated pool; the pressure front's
+    phase-two depth counts it once the ePIC job throttler paces generation
+    (swf-epicprod CONTINUOUS_PRODUCTION.md, Two regulators)."""
+    per = {}
+    for site, rows in ungenerated_by_task().values():
+        per[site] = per.get(site, 0) + rows
+    return per
 
 
 def _calibration():

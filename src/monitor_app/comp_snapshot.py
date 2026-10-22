@@ -278,9 +278,12 @@ class _Build:
         """The task board (COMP_SNAPSHOT.md, Tasks): every production task
         with jobs running, starting or queued at the floor's queues, newest
         first; a task with none there is off the board."""
-        from monitor_app.panda.census import NOT_STARTED, RUNNING
+        from monitor_app.panda.census import (NOT_STARTED, RUNNING,
+                                              TASK_TERMINAL_STATUSES,
+                                              ungenerated_by_task)
         from pcs.models import Dataset
         from pcs.views import physics_description
+        terminal = list(TASK_TERMINAL_STATUSES)
         sql = f'''
             SELECT a.jeditaskid, t.taskname, t.status,
                    COALESCE(t.starttime, t.creationdate),
@@ -290,8 +293,20 @@ class _Build:
             JOIN "{self.S}"."jedi_tasks" t ON t.jeditaskid = a.jeditaskid
             WHERE a.computingsite = ANY(%s) AND a.jobstatus = ANY(%s)
               AND t.processingtype = 'epicproduction'
+              AND (t.status IS NULL OR NOT t.status = ANY(%s))
             GROUP BY a.jeditaskid, t.taskname, t.status, t.starttime, t.creationdate'''
-        rows = _rows(sql, (list(RUNNING), list(site_name), list(NOT_STARTED + RUNNING)))
+        rows = _rows(sql, (list(RUNNING), list(site_name), list(NOT_STARTED + RUNNING), terminal))
+        # A task with rows JEDI has not yet made into jobs is on the floor
+        # though none of its jobs waits or runs now.
+        to_generate = {tid: n for tid, (queue, n) in ungenerated_by_task().items()
+                       if queue in site_name and n > 0}
+        waiting = sorted(set(to_generate) - {int(r[0]) for r in rows})
+        if waiting:
+            sql = f'''
+                SELECT jeditaskid, taskname, status, COALESCE(starttime, creationdate),
+                       0, 0, site
+                FROM "{self.S}"."jedi_tasks" WHERE jeditaskid = ANY(%s)'''
+            rows = list(rows) + list(_rows(sql, (waiting,)))
         ids = [int(r[0]) for r in rows]
         files = {}
         if ids:
@@ -329,7 +344,8 @@ class _Build:
                 'level': ('red' if tid in alarmed else 'amber' if lost
                           else 'green' if running else 'grey'),
                 'title': str(tid),
-                'counts': {'queued': active - running, 'running': running,
+                'counts': {'ungenerated': to_generate.get(tid, 0),
+                           'queued': active - running, 'running': running,
                            'finished': done, 'failed': lost},
                 'detail': detail,
                 'link': f'{PUBLIC}/panda/tasks/{tid}/'})
