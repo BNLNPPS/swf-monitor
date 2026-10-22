@@ -10,7 +10,7 @@ cannot be read is listed in ``errors`` and left out, never shown as zero.
 import logging
 import re
 import time
-from datetime import timedelta, timezone as dt_timezone
+from datetime import datetime, timedelta, timezone as dt_timezone
 
 from django.db import connections
 from django.utils import timezone
@@ -113,8 +113,15 @@ def _pilot_supply_part(p, queued, started_1h, submitted_1h):
     if not p:
         return _part('amber' if queued else 'grey', None, 'no harvester report names the queue')
     age = p.get('report_age_seconds')
-    if age is None or age > REPORT_STALE_SECONDS:
+    stale_seconds = p.get('report_stale_seconds', REPORT_STALE_SECONDS)
+    if age is None or age > stale_seconds:
         return _part('amber' if queued else 'grey', None, f"harvester report {int((age or 0) // 60)} min old")
+    if p.get('error'):
+        return _part('amber' if queued else 'grey', None, p['error'])
+    demand_age = p.get('demand_age_seconds')
+    if queued and p.get('demand_max_age_seconds') is not None and (
+            demand_age is None or demand_age > p['demand_max_age_seconds']):
+        return _part('amber', demand_age, 'job-demand cache missing or stale')
     waiting, limit = p['waiting'], p.get('limit')
     if queued and not waiting and not started_1h and not submitted_1h:
         return _part('red', 0, f"{queued} jobs queued, no pilot waiting, submitted "
@@ -124,7 +131,7 @@ def _pilot_supply_part(p, queued, started_1h, submitted_1h):
                                       f"it applies is not reported")
     seen = f"harvester counts {waiting} waiting (its limit {limit})"
     idle = p.get('waiting_schedd')
-    if idle is not None and (p.get('schedd_age_seconds') or 0) <= REPORT_STALE_SECONDS:
+    if idle is not None and (p.get('schedd_age_seconds') or 0) <= stale_seconds:
         seen += f", the schedd holds {idle}"
         if waiting >= 2 * limit and idle < limit:
             return _part('red' if queued else 'amber', waiting - idle,
@@ -257,17 +264,27 @@ class _Build:
             if not found:
                 continue
             record = found.get('record') or {}
-            now = (record.get('harvester_db') or {}).get('workers_now') or {}
+            db = record.get('harvester_db') or {}
+            now = db.get('workers_now') or {}
+            try:
+                demand_at = datetime.fromisoformat(db['cache_updates']['job_statistics.json']).replace(tzinfo=dt_timezone.utc)
+                demand_age = (self.now - demand_at).total_seconds()
+            except (KeyError, ValueError, TypeError):
+                demand_age = None
             # the limit harvester applied, from its adjuster log; pq_table's
             # n_queue_limit_worker is only the cap it is computed under
             applied = (record.get('adjustment') or {}).get('queues') or {}
             limits = {r['queue']: r for r in (record.get('harvester_db') or {}).get('launch_limits', [])
                       if isinstance(r, dict) and 'queue' in r}
-            for q in set(now) | set(applied) | set(limits):
+            for q in (set(now) - {'error'}) | set(applied) | set(limits):
                 w = now.get(q) or {}
                 a = applied.get(q) or {}
                 limit = effective_waiting_limit(limits.get(q), a, self.now)
                 out[q] = {
+                    'error': db.get('error') or now.get('error'),
+                    'demand_age_seconds': demand_age,
+                    'demand_max_age_seconds': 90 if key == 'osgsub01-harvester' else 900,
+                    'report_stale_seconds': 180 if key == 'osgsub01-harvester' else REPORT_STALE_SECONDS,
                     # harvester's idle is a pilot evicted back to waiting
                     'waiting': int(w.get('submitted') or 0) + int(w.get('idle') or 0),
                     'waiting_schedd': None,

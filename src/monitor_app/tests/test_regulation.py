@@ -18,3 +18,10 @@ class RegulationTests(SimpleTestCase):
                           'n_queue_limit_worker': '600'}, old, now), 600)
         self.assertIsNone(effective_waiting_limit({'n_queue_limit_worker_ratio': '30'}, old, now))
         self.assertEqual(_pilot_supply_part(None, 1000, 0, 0)['level'], 'amber')
+
+    def test_failed_count_or_stale_demand_cannot_be_green(self):
+        p = {'report_age_seconds': 1, 'waiting': 600, 'limit': 600,
+             'error': 'worker count query failed'}
+        self.assertEqual(_pilot_supply_part(p, 1000, 10, 10)['level'], 'amber')
+        p.update(error=None, demand_age_seconds=120, demand_max_age_seconds=90)
+        self.assertEqual(_pilot_supply_part(p, 1000, 10, 10)['level'], 'amber')
