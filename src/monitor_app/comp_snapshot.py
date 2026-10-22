@@ -220,6 +220,27 @@ class _Build:
             out.setdefault(site, []).append((label, int(n)))
         return out
 
+    def production_alarms(self):
+        """The active alarm events that concern production: a task's
+        failure-rate alarm only when the task is a production task
+        (processingtype epicproduction). The failure-rate alarms watch
+        every EIC task, a user's included, and the room reports
+        production."""
+        alarms = _active_alarms()
+        ids = {int(m.group(1)) for m in (TASK_ALARM_RE.match(a['title']) for a in alarms) if m}
+        types = {}
+        if ids:
+            sql = f'''SELECT jeditaskid, processingtype FROM "{self.S}"."jedi_tasks"
+                      WHERE jeditaskid = ANY(%s)'''
+            types = {int(t): p for t, p in _rows(sql, (list(ids),))}
+        out = []
+        for a in alarms:
+            m = TASK_ALARM_RE.match(a['title'])
+            if m and types.get(int(m.group(1))) != 'epicproduction':
+                continue
+            out.append(a)
+        return out
+
     def opened(self):
         """Harvester workers per queue in the last hour: started (a slot
         opened: the pilot got a slot at the site) and submitted (sent to
@@ -572,7 +593,7 @@ def build():
         'storage': storage,
         'report': {'text': _report_text(front, sites, storage),
                    'items': _report_items(front, sites, storage,
-                                          b.part('alarms', _active_alarms, []),
+                                          b.part('alarms', b.production_alarms, []),
                                           b.part('assessment', _assessment_freshness, None)),
                    'assessment': None},
         'errors': b.errors,
