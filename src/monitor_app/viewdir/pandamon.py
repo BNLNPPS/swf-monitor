@@ -330,7 +330,17 @@ def _get_jobs_days(request):
     """The jobs page's window in days: whole days from the selector, or
     the fraction of a day the page narrowed a too-large request to
     (``_judge_jobs_request``), which its table and count calls carry
-    back. Default 7."""
+    back. Default 7. ``hours`` sets it in hours when ``days`` is not
+    given: the computing-centre floor's displays cover 12 hours and its
+    links say hours=12 (Torre Wenaus, 2026-10-22)."""
+    if 'days' not in request.GET and request.GET.get('hours'):
+        try:
+            hours = float(request.GET['hours'])
+        except (ValueError, TypeError):
+            hours = 0
+        if hours > 0:
+            days = hours / 24
+            return int(days) if days == int(days) else days
     raw = request.GET.get('days', 7)
     try:
         days = float(raw)
@@ -416,15 +426,19 @@ def _get_ended_window(request):
     return after, before
 
 
-def _days_context(days):
+def _days_context(days, options=DAYS_OPTIONS):
     """Build days selector context for templates."""
     return {
         'days': days,
         'days_options': [
             {'value': value, 'label': label, 'active': value == days}
-            for value, label in DAYS_OPTIONS
+            for value, label in options
         ],
     }
+
+
+# The jobs page also offers the floor's 12 hours.
+JOBS_DAYS_OPTIONS = [(0.5, '12h')] + DAYS_OPTIONS
 
 
 # ── Activity overview ────────────────────────────────────────────────────────
@@ -867,7 +881,7 @@ def panda_jobs_list(request):
                            '48h' if days <= 2 else
                            '7d' if days <= 7 else '30d'),
     }
-    context.update(_days_context(days))
+    context.update(_days_context(days, JOBS_DAYS_OPTIONS))
     return render(request, 'monitor_app/panda_jobs_list.html', context)
 
 
