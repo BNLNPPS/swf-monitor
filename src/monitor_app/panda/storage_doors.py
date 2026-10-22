@@ -163,18 +163,14 @@ def settings():
 
 
 def catalog_client(cfg):
-    """The catalog, read as the production account through the proxy the
-    ops agent holds. Raises when there is no proxy: a cycle that cannot
-    read the catalog has no doors to probe and says so."""
-    from rucio.client import Client
-    proxy = os.environ.get('EVGEN_X509_PROXY', '')
-    if not proxy or not os.path.exists(proxy):
-        raise RuntimeError('no proxy (EVGEN_X509_PROXY) on this host; '
-                           'the catalog was not read')
+    """The catalog, read as the production account by a token from the
+    PanDA server, else through the proxy the ops agent holds
+    (swf_epicprod.jlab_auth). Raises when neither works: a cycle that
+    cannot read the catalog has no doors to probe and says so."""
+    from swf_epicprod.jlab_auth import rucio_client
     base = str(cfg['catalog_url'])
-    return Client(rucio_host=base, auth_host=base, account=str(cfg['account']),
-                  auth_type='x509_proxy', creds={'client_proxy': proxy},
-                  timeout=30)
+    return rucio_client(account=str(cfg['account']), host=base,
+                        proxy=os.environ.get('EVGEN_X509_PROXY') or None, timeout=30)
 
 
 def catalog_doors(cfg):
@@ -265,8 +261,19 @@ def run_cycle(*, dry_run=False, created_by='storage-doors', force=False,
             continue
         path = canary_doors.probe_path(door['prefix'], cfg['probe_prefix'],
                                        cfg['probe_name'])
-        reading = _safe(f'{rse} probe', lambda door=door, path=path: canary_doors.probe_door(
-            door['door'], path, timeout_s=cfg['timeout_s']), failed(f'{rse} probe'))
+        # The door's credential as production now writes: a storage token
+        # where the door takes one (over TLS), else the proxy the cycle's
+        # script put in X509_USER_PROXY (swf_epicprod.jlab_auth).
+        from swf_epicprod.jlab_auth import door_access
+        url, env, how = door_access(
+            door['door'], canary_doors.server_path(path),
+            verbs=('storage.create', 'storage.modify', 'storage.read'),
+            proxy=os.environ.get('X509_USER_PROXY') or None)
+        reading = _safe(f'{rse} probe', lambda url=url, path=path, env=env: canary_doors.probe_door(
+            url, path, timeout_s=cfg['timeout_s'], env=env), failed(f'{rse} probe'))
+        if reading is not None:
+            reading['door'] = door['door']
+            reading['credential'] = how
         if reading is None:
             state[rse] = {**was, 'rse': rse, 'door': door['door']}
             continue

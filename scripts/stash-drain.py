@@ -145,8 +145,10 @@ def hand_entry(owes):
 
 
 def stored_at(door, path, proxy):
-    """(bytes, adler32) of a file at a door, or None when it is not there."""
-    env = dict(os.environ, X509_USER_PROXY=proxy)
+    """(bytes, adler32) of a file at a door, or None when it is not there.
+    A storage token where the door takes one, else the proxy, else none."""
+    from swf_epicprod.jlab_auth import door_access
+    door, env, _how = door_access(door, path, proxy=proxy)
     try:
         stat = subprocess.run(['xrdfs', door, 'stat', path],
                               capture_output=True, text=True, timeout=120, env=env)
@@ -369,8 +371,11 @@ def main():
     summary['entries'] = len(entries)
 
     evgen = _reg._evgen
+    # The proxy is the fallback: the catalog takes a token from the PanDA
+    # server, the stash door a storage token (swf_epicprod.jlab_auth).
+    proxy, _ = evgen.resolve_proxy_or_none()
     try:
-        proxy, _ = evgen.resolve_proxy()
+        evgen.rucio_client(proxy)
     except evgen.DoerError as e:
         summary['failed'].append(f'no usable credential: {e}')
         if not args.dry_run:

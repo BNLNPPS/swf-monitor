@@ -243,21 +243,32 @@ def plan_datasets(files, adlers):
 
 
 def rucio_client(proxy):
-    """The Rucio client as the production account, authenticated by the
-    proxy; refuses a proxy that maps to any other account."""
-    from rucio.client import Client
+    """The Rucio client as the production account: by a token from the
+    PanDA server, else by the proxy (swf_epicprod.jlab_auth); refuses a
+    credential that maps to any other account. ``proxy`` may be None once
+    the proxy is gone; the token is then the only credential."""
     from rucio.common.exception import RucioException
+    from swf_epicprod.jlab_auth import rucio_client as jlab_rucio_client
     try:
-        client = Client(rucio_host=RUCIO_HOST, auth_host=RUCIO_HOST,
-                        account=RUCIO_ACCOUNT, auth_type='x509_proxy',
-                        creds={'client_proxy': proxy})
+        client = jlab_rucio_client(account=RUCIO_ACCOUNT, host=RUCIO_HOST, proxy=proxy)
         who = client.whoami()
-    except RucioException as e:
+    except (RucioException, RuntimeError) as e:
         raise DoerError(EXIT_RUCIO, f'Rucio auth failed: {e}')
     if who.get('account') != RUCIO_ACCOUNT:
-        raise DoerError(EXIT_RUCIO, f'proxy maps to account {who.get("account")!r}, '
-                        f'not {RUCIO_ACCOUNT!r}')
+        raise DoerError(EXIT_RUCIO, f'{client.jlab_auth} maps to account '
+                        f'{who.get("account")!r}, not {RUCIO_ACCOUNT!r}')
+    _log(f'JLab Rucio as {RUCIO_ACCOUNT} by {client.jlab_auth}')
     return client
+
+
+def resolve_proxy_or_none():
+    """resolve_proxy's (path, summary), or (None, {'error': reason}) when
+    there is no usable proxy: for passes whose catalog work a token does
+    alone, the proxy is only the fallback."""
+    try:
+        return resolve_proxy()
+    except DoerError as e:
+        return None, {'error': str(e)}
 
 
 def count_events(datasets, proxy, write=True):

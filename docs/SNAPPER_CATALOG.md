@@ -153,8 +153,9 @@ the component's state at any instant answers through
 ## Implementation notes
 
 - `monitor_app/snapper_catalog.py`: the maintainer, registered beside
-  the platform maintainer in the System-status refresh; the probe with
-  the production proxy the refresh doer already holds; the interval
+  the platform maintainer in the System-status refresh; the probe's read
+  as `eicprod` by a token from the PanDA server, else with the production
+  proxy the refresh doer holds (`swf_epicprod/jlab_auth.py`); the interval
   read of the digest (`jobmetrics` regex, one query over the interval's
   ended jobs, jobsactive4 and jobsarchived4); the latency read over
   `swf_epicprod_jobs`; the registrar read.
