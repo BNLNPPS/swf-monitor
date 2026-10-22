@@ -98,17 +98,28 @@ def _pilot_supply_part(p, queued, started_1h, submitted_1h):
     if age is None or age > REPORT_STALE_SECONDS:
         return _part('grey', None, f"harvester report {int((age or 0) // 60)} min old")
     waiting, limit = p['waiting'], p.get('limit')
-    seen = f"harvester counts {waiting} waiting (limit {limit})"
-    idle = p.get('waiting_schedd')
-    if idle is not None and (p.get('schedd_age_seconds') or 0) <= REPORT_STALE_SECONDS:
-        seen += f", the schedd holds {idle}"
-        if limit and waiting >= 2 * limit and idle < limit:
-            return _part('red' if queued else 'amber', waiting - idle,
-                         f"{seen}: harvester counts pilots the schedd no longer has "
-                         f"and submits none")
     if queued and not waiting and not started_1h and not submitted_1h:
         return _part('red', 0, f"{queued} jobs queued, no pilot waiting, submitted "
                                f"or started in the last hour")
+    if limit is None:
+        return _part('grey', waiting, f"harvester counts {waiting} waiting; the limit "
+                                      f"it applies is not reported")
+    seen = f"harvester counts {waiting} waiting (its limit {limit})"
+    idle = p.get('waiting_schedd')
+    if idle is not None and (p.get('schedd_age_seconds') or 0) <= REPORT_STALE_SECONDS:
+        seen += f", the schedd holds {idle}"
+        if waiting >= 2 * limit and idle < limit:
+            return _part('red' if queued else 'amber', waiting - idle,
+                         f"{seen}: harvester counts pilots the schedd no longer has "
+                         f"and submits none")
+        # what the pool can start: the pilots the schedd holds idle and
+        # those harvester will still submit before its count reaches its limit
+        startable = idle + max(limit - waiting, 0)
+        if startable < limit / 2:
+            return _part('red' if queued else 'amber', startable,
+                         f"{seen}: harvester will add {max(limit - waiting, 0)}, so the "
+                         f"pool can start {startable}, under half the limit; harvester "
+                         f"has not yet seen its waiting pilots start")
     return _part('green', waiting, seen)
 
 
@@ -227,23 +238,20 @@ class _Build:
             found = latest(key)
             if not found:
                 continue
-            hdb = (found.get('record') or {}).get('harvester_db') or {}
-            now = hdb.get('workers_now') or {}
-            limits = {}
-            for row in hdb.get('launch_limits') or []:
-                if isinstance(row, dict) and row.get('queue'):
-                    try:
-                        n = int(row.get('n_queue_limit_worker'))
-                    except (TypeError, ValueError):
-                        continue
-                    limits[row['queue']] = limits.get(row['queue'], 0) + n
-            for q in set(now) | set(limits):
+            record = found.get('record') or {}
+            now = (record.get('harvester_db') or {}).get('workers_now') or {}
+            # the limit harvester applied, from its adjuster log; pq_table's
+            # n_queue_limit_worker is only the cap it is computed under
+            applied = (record.get('adjustment') or {}).get('queues') or {}
+            for q in set(now) | set(applied):
                 w = now.get(q) or {}
+                a = applied.get(q) or {}
                 out[q] = {
                     # harvester's idle is a pilot evicted back to waiting
                     'waiting': int(w.get('submitted') or 0) + int(w.get('idle') or 0),
                     'waiting_schedd': None,
-                    'limit': limits.get(q),
+                    'limit': a.get('queue_limit'),
+                    'limit_at': a.get('at'),
                     'running': int(w.get('running') or 0),
                     'per_slot': PILOTS_PER_WORKER.get(q, 1),
                     'report': key,

@@ -5,7 +5,8 @@ Runs on a harvester host (pandaharvester01, osgsub01) and posts one record
 per run to swf-monitor (docs/HARVESTER_REPORTER.md): per queue, the
 harvester's job fetches since the last run (asked, got, the outcome, the
 last attempt), the workers it submitted and for which jobs, the worker
-counts the submitter last read; every failed call to the PanDA server by
+counts the submitter last read, the waiting-worker limit the worker
+adjuster last applied; every failed call to the PanDA server by
 daemon, call and error class; the age of every harvester log; the
 harvester's process count; and, from the harvester's own database and its
 condor logs, its launch limits per queue, its workers now, the workers
@@ -59,6 +60,7 @@ REASON_HOURS = 24
 DB_TIMEOUT_S = 60
 FETCHER_LOG = os.path.join(LOG_DIR, 'panda-job_fetcher.log')
 SUBMITTER_LOG = os.path.join(LOG_DIR, 'panda-submitter.log')
+ADJUSTER_LOG = os.path.join(LOG_DIR, 'panda-worker_adjuster.log')
 CALL_LOGS = (('communicator', os.path.join(LOG_DIR, 'panda-communicator.log')),
              ('propagator', os.path.join(LOG_DIR, 'panda-propagator.log')))
 DEFAULT_STATE = os.path.expanduser('~/.swf-harvester-reporter')
@@ -80,6 +82,8 @@ STATUS_RE = re.compile(STAMP + r'panda\.log\.submitter: \w+\s+run <[^>]*queue=([
                        r'workers status: (\{.*\})')
 CHUNKS_RE = re.compile(STAMP + r'panda\.log\.submitter: \w+\s+run <[^>]*queue=([^ >]+)[^>]*> '
                        r'got (\d+) job chunks')
+LIMIT_RE = re.compile(STAMP + r'panda\.log\.worker_adjuster: \w+\s+define_num_workers <site=([^>]+)> '
+                      r'limiting max_queued_workers to min\(n_activated=(\d+), queue_limit=(\d+)\)')
 FAILED_RE = re.compile(STAMP + r'panda\.log\.(\w+): \w+\s+(\w+).*?failed to POST with '
                        r"<class '([\w.]+)'>")
 CLASS_RE = re.compile(r"<class '([\w.]+)'>:?(.*)")
@@ -210,6 +214,24 @@ def submission(lines, info):
             q['job_chunks_at'] = utc(stamp)
     return {'read': info, 'queues': queues, 'recent_pushes': pushes[-RECENT_PUSHES:],
             'pushes_in_interval': len(pushes)}
+
+
+def adjustment(lines, info, last):
+    """Per queue, the waiting-worker limit the worker adjuster last
+    applied, with when it logged it. Harvester computes it from its running
+    workers (nQueueLimitWorkerRatio, Min, Max), so pq_table's
+    nQueueLimitWorker is only its cap. The adjuster logs it only in some
+    cycles (on osgsub01 on 2026-10-22, in bursts half an hour apart), so
+    the last value seen is kept in ``last``, the state map, and delivered
+    with its time."""
+    queues = last
+    for line in lines:
+        hit = LIMIT_RE.match(line)
+        if hit:
+            stamp, queue, activated, limit = hit.groups()
+            queues[queue] = {'queue_limit': int(limit), 'n_activated': int(activated),
+                             'at': utc(stamp)}
+    return {'read': info, 'queues': queues}
 
 
 def failed_calls(positions, first_run):
@@ -501,7 +523,7 @@ def not_finished(conf, until, cache):
 def collect(state):
     """The record this run delivers; ``state`` is advanced in place."""
     started = time.time()
-    record = {'host': HOST, 'collected_at': now_iso(), 'reporter_version': '1.1'}
+    record = {'host': HOST, 'collected_at': now_iso(), 'reporter_version': '1.2'}
     positions = state.setdefault('positions', {})
     last_run = state.get('last_run_at')
     first_run = not last_run
@@ -517,6 +539,8 @@ def collect(state):
     record['fetching'] = fetching(lines, info)
     lines, info = read_since(SUBMITTER_LOG, positions, first_run)
     record['submission'] = submission(lines, info)
+    lines, info = read_since(ADJUSTER_LOG, positions, first_run)
+    record['adjustment'] = adjustment(lines, info, state.setdefault('adjustment', {}))
     record['failed_calls'] = failed_calls(positions, first_run)
     record['daemons'] = daemons()
     record['processes'] = processes()

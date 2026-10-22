@@ -30,6 +30,7 @@ run sets the positions and counts nothing).
 |---|---|---|
 | Job fetching | `/var/log/harvester/panda-job_fetcher.log` | per queue: fetch attempts, jobs asked for and got, attempts that failed and their error classes in the interval; the last attempt with its time, label, numbers and outcome (`OK`, `No jobs in PanDA`, or the error) |
 | Worker submission | `panda-submitter.log` | per queue: workers submitted in the interval, the last worker counts the submitter read (`nQueue`, `nReady`, `nRunning`, `nNewWorkers`), the last job-chunk count; the most recent worker-to-PandaID pairs |
+| Worker adjustment | `panda-worker_adjuster.log` | per queue: the waiting-worker limit the adjuster last applied and the activated jobs it was set against, with the time it was logged. Harvester computes the limit from its running workers, so `pq_table`'s `nQueueLimitWorker` is only its cap. The adjuster logs it only in some cycles (half an hour apart on osgsub01, 2026-10-22), so the last value is kept in the reporter's state and delivered every run |
 | Calls to the PanDA server | `panda-communicator.log`, `panda-propagator.log` | failed calls in the interval by daemon, call and error class, with the last such line |
 | Daemon log freshness | `/var/log/harvester/panda-*.log` | seconds since each log's last write, and its size |
 | Harvester processes | the process table | the count of harvester processes |

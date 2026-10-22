@@ -54,8 +54,8 @@ sites[]           {id, name, status, capacity, capacity_source, in_use,
   queues[]        {id, name, status, status_reason,
                    running, starting, queued, ungenerated,
                    harvester_slots_opened_1h, harvester_pilots_submitted_1h,
-                   pilots: {waiting, waiting_schedd, limit, running, per_slot,
-                            report, report_age_seconds},
+                   pilots: {waiting, waiting_schedd, limit, limit_at, running,
+                            per_slot, report, report_age_seconds},
                    finished_1h, failed_1h, capacity, capacity_source, in_use,
                    finished_core_h_1h, failed_core_h_1h,
                    front: {state, reason, feed},
@@ -113,10 +113,16 @@ Per queue, from the PanDA database:
   harvester reporter's latest record (HARVESTER_REPORTER.md); `null` for
   a queue no harvester reports. `waiting` is the slots submitted and not
   yet started (an evicted pilot back in the batch queue included),
-  `running` the slots running, `limit` harvester's configured maximum of
-  waiting slots, `per_slot` the pilots in one slot (8 at GREX, 1
-  elsewhere). Harvester submits new slots only while `waiting` is below
-  its limit, so `waiting` is what the site has not yet started: at GREX
+  `running` the slots running, `per_slot` the pilots in one slot (8 at
+  GREX, 1 elsewhere). `limit` is the waiting limit harvester last
+  applied, from its worker-adjuster log, and `limit_at` when it logged
+  it: harvester computes the limit from its running slots under the
+  queue's ratio, floor and cap, and the configured `nQueueLimitWorker`
+  is only the cap (on 2026-10-22 OSG applied 200 under a cap of 300,
+  GREX 610 under 625, JLab 10 under 50). `limit` is `null` until the
+  reporter has seen the adjuster log it. Harvester submits new slots
+  only while `waiting` is below its limit, so `waiting` is what the site
+  has not yet started: at GREX
   on 2026-10-21, 592 slots waited while GREX ran 118 and started 3 in an
   hour. For the OSG queues `waiting_schedd` is the idle pilots the
   submit schedd actually holds, from the OSG submit reporter
@@ -184,15 +190,29 @@ A queue's parts:
   ended jobs, the signature of an outage, and `amber` when the failures
   are more than a quarter of them.
 - `pilot_supply`, whether pilots keep reaching the queue, from the
-  queue's `pilots` reading. `red` when harvester counts at least twice
-  its waiting limit while the schedd holds fewer than the limit and jobs
-  are queued (`amber` with none queued): harvester then submits nothing,
-  because its own count says the queue is full. In normal running
-  harvester's count stays within one cycle of its limit, so twice the
-  limit is never a lag. `red` also when jobs are queued and in the last
-  hour no pilot waited, was submitted or started. `grey` when no
-  harvester report names the queue or the report is more than fifteen
-  minutes old; otherwise `green`, with the counts in the note.
+  queue's `pilots` reading. Harvester submits only while its own count
+  of waiting pilots is below its limit, and that count changes only
+  when its monitor rechecks a pilot, so a count the schedd no longer
+  bears out stops supply while the queue reads full. With jobs queued
+  the part is `red` (`amber` with none queued) when:
+  - harvester counts at least twice its limit while the schedd holds
+    fewer than the limit: pilots left the schedd without harvester's
+    knowledge (2026-10-21, 4,311 counted against 131 held);
+  - the pilots the pool can start, those the schedd holds idle plus
+    those harvester will still submit before its count reaches its
+    limit, are fewer than half the limit: harvester has not yet seen
+    its waiting pilots start. On 2026-10-21, with harvester's recheck at
+    30 minutes, it counted 196 against a limit of 200 while the schedd
+    held 39, so the pool could start 43, and OSG's running fell from
+    1,137 to 433 in five hours; four minutes after the recheck went to
+    five minutes the schedd held 163 of 200.
+
+  It is `red` also when jobs are queued and in the last hour no pilot
+  waited, was submitted or started. The two schedd rules need the OSG
+  submit reporter's count and apply to the OSG queues only. `grey` when
+  no harvester report names the queue, the report is more than fifteen
+  minutes old, or the limit harvester applies is not yet reported;
+  otherwise `green`, with the counts in the note.
 
 A site's health is the worst of its queues'. An execute site's health
 has the `prod_activity` part only.
