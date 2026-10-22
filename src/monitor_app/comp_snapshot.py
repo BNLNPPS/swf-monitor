@@ -77,9 +77,10 @@ VERDICT_LEVELS = {'ok': 'green', 'attention': 'amber', 'alarm': 'red'}
 # on screen (Torre, 2026-10-22).
 LIVE_LEVELS = ('WARNING', 'ERROR', 'CRITICAL')
 LIVE_ITEMS = 10
-# The floor's trend plots: twelve hours in half-hour bins (Torre, 2026-10-22).
+# The floor's trend plots: twelve hours (Torre, 2026-10-22) in quarter-hour
+# bins, fine enough to show a ramp or a dip.
 TREND_HOURS = 12
-TREND_BIN_MINUTES = 30
+TREND_BIN_MINUTES = 15
 # The floor is the control room: live-now records only, the last 12 hours;
 # the logs page holds the history (Torre, 2026-10-22).
 LIVE_WINDOW_H = 12
@@ -1065,14 +1066,19 @@ def _live_records():
 
 def _trends(sites):
     """The floor's trend plots (COMP_SNAPSHOT.md, Trends): per site with a
-    live queue, the last 12 hours in 30-minute bins on one shared axis:
+    live queue, the last 12 hours in 15-minute bins on one shared axis:
     running and queued jobs at each bin's end, and jobs finished and failed
     in the bin, summed over the site's live queues. The source is the
     Snapper Site view's series product, one product for the floor's live
-    queues; a bin with no sample is null, never zero."""
+    queues: its state curves change only when the state does, and its
+    finished and failed curves count up from the window's start, so a
+    bin's ended jobs are the difference of the count at its two ends. A
+    value whose bin end, or either end of whose bin, falls in a recorded
+    gap of collection is null, never carried across the gap."""
     from bisect import bisect_right
 
     from monitor_app.panda.census import NOT_STARTED
+    from snapper_ai.models import CurrentComponent
     from snapper_ai.products import series_product
 
     live = [(s, [q['id'] for q in s['queues'] if q['status'] == 'live']) for s in sites]
@@ -1082,59 +1088,74 @@ def _trends(sites):
     product = series_product('epicprod', 'site', window='24h',
                              selection=','.join(q for _, qs in live for q in qs))
     curves = product.get('curves') or {}
-
-    def points(cid):
-        return [(datetime.fromisoformat(stamp), value)
-                for stamp, value in (curves.get(cid) or {}).get('points') or []]
-
-    # The axis: the completion bins' ends (30-minute aligned, the last one
-    # the partial bin ending at the newest snap), the last twelve hours.
-    axis = sorted({stamp for _, qs in live for q in qs for stamp, _ in points(f'sjfin_{q}')})
-    axis = axis[-(TREND_HOURS * 60 // TREND_BIN_MINUTES):]
+    if not product.get('series_end'):
+        return None
+    last = datetime.fromisoformat(product['series_end'])
+    step_s = TREND_BIN_MINUTES * 60
+    bins = TREND_HOURS * 60 // TREND_BIN_MINUTES
+    # Bin ends on the quarter hour, the last bin the partial one ending at
+    # the newest snap; edges carries the first bin's start before them.
+    aligned = datetime.fromtimestamp(last.timestamp() // step_s * step_s, last.tzinfo)
+    if aligned < last:
+        ends = [aligned - timedelta(seconds=step_s * k) for k in range(bins - 2, -1, -1)] + [last]
+    else:
+        ends = [aligned - timedelta(seconds=step_s * k) for k in range(bins - 1, -1, -1)]
+    edges = [ends[0] - timedelta(seconds=step_s)] + ends
     gaps = [(datetime.fromisoformat(g[0]), datetime.fromisoformat(g[1]))
             for g in product.get('gaps') or []]
-    gaps = [g for g in gaps if axis and g[1] >= axis[0]]
+    gaps = [g for g in gaps if g[1] >= edges[0]]
 
-    def step(cid):
-        """The curve's value at each bin end; a missing curve is zero
-        throughout (the state never occurred), a bin end before its first
-        sample or inside a gap is null."""
-        series = points(cid)
+    def in_gap(at):
+        return any(a <= at <= b for a, b in gaps)
+
+    def at_edges(cid, absent=0):
+        """The curve's value at each edge: null before its first sample or
+        inside a gap; a curve the series does not carry is ``absent``."""
+        series = (curves.get(cid) or {}).get('points') or []
         if not series:
-            return [0] * len(axis)
-        stamps = [x for x, _ in series]
+            return [absent] * len(edges)
+        stamps = [datetime.fromisoformat(x) for x, _ in series]
         out = []
-        for end in axis:
-            i = bisect_right(stamps, end)
-            gap = any(a <= end <= b for a, b in gaps)
-            out.append(series[i - 1][1] if i and not gap else None)
+        for edge in edges:
+            i = bisect_right(stamps, edge)
+            out.append(series[i - 1][1] if i and not in_gap(edge) else None)
         return out
-
-    def binned(cid):
-        by_end = dict(points(cid))
-        return [by_end.get(end) for end in axis]
 
     def total(rows):
         return [None if any(v is None for v in col) else sum(col) for col in zip(*rows)]
 
+    def ended(counts):
+        return [None if a is None or b is None else max(0, round(b - a))
+                for a, b in zip(counts, counts[1:])]
+
     out = []
     for site, queues in live:
-        out.append({
-            'id': site['id'], 'name': short_name(site['name']),
-            'running': total([step(f'sj_{q}_running') for q in queues]),
-            'queued': total([step(f'sj_{q}_{state}') for q in queues for state in NOT_STARTED]),
-            'finished': total([binned(f'sjfin_{q}') for q in queues]),
-            'failed': total([binned(f'sjfail_{q}') for q in queues]),
-        })
-    utc = [x.astimezone(dt_timezone.utc).isoformat() for x in axis]
-    end = product.get('series_end')
+        running = total([at_edges(f'sj_{q}_running') for q in queues])[1:]
+        queued = total([at_edges(f'sj_{q}_{state}') for q in queues
+                        for state in NOT_STARTED])[1:]
+        fin = total([at_edges(f'sjfw_{q}') for q in queues])
+        fail = total([at_edges(f'sjxw_{q}') for q in queues])
+        finished, failed = ended(fin), ended(fail)
+        hour = len(ends) - 60 // TREND_BIN_MINUTES
+        last_hour = [sum(v or 0 for v in xs[hour:]) for xs in (finished, failed)]
+        name = short_name(site['name'])
+        detail = (f"{name}: {running[-1] if running[-1] is not None else '?'} running, "
+                  f"{queued[-1] if queued[-1] is not None else '?'} queued; "
+                  f"{last_hour[0]:,} finished, {last_hour[1]:,} failed in the last hour")
+        out.append({'id': site['id'], 'name': name, 'running': running,
+                    'queued': queued, 'finished': finished, 'failed': failed,
+                    'detail': detail})
+    panda = CurrentComponent.objects.filter(scope='epicprod', name='panda').first()
+
+    def iso(x):
+        return x.astimezone(dt_timezone.utc).isoformat() if x else None
+
     return {
         'window_hours': TREND_HOURS, 'bin_minutes': TREND_BIN_MINUTES,
-        't': utc,
-        'sampled_at': (datetime.fromisoformat(end).astimezone(dt_timezone.utc).isoformat()
-                       if end else None),
-        'gaps': [[a.astimezone(dt_timezone.utc).isoformat(),
-                  b.astimezone(dt_timezone.utc).isoformat()] for a, b in gaps],
+        't': [iso(x) for x in ends],
+        'sampled_at': iso(last),
+        'source_as_of': iso(panda.source_as_of) if panda else None,
+        'gaps': [[iso(a), iso(b)] for a, b in gaps],
         'sites': out,
         'link': f'{PUBLIC}/snapper/epicprod/site/',
     }
