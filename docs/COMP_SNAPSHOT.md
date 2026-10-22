@@ -305,8 +305,10 @@ grouped by the job's end, not measured transfer bandwidth or the files'
 availability times; volume per hour is the bin's bytes times four. A
 bin's jobs are final once archived, so the bins are kept (cached product
 `jlab_flow:v1`) and each build reads again only the last two bins before
-the newest kept one; a bin never read is null, and `flow` is null when
-the reading fails or the trends axis is absent.
+the newest kept one, and each build reads an hour of the window's bins
+not yet kept, so the twelve hours fill within twelve builds (a single
+read of the whole window takes minutes); a bin not yet read is null, and
+`flow` is null when the reading fails or the trends axis is absent.
 
 For both, `latest_arrival_s` is the seconds since the newest
 registration, and `by_site[]` splits `arrived_1h`, `bytes_1h` and
@@ -420,9 +422,11 @@ start (its creation before it starts), ISO UTC. `id` is the JEDI task id,
 `link` the task's page; `tasks.link` lists the production tasks.
 
 The board is the tasks in flight. A line is the task id (`title`) and
-its counts, just the numbers: rows still to generate (`ungenerated`,
-shown "To generate": the task's input rows JEDI has not yet made into
-jobs, the census's measure, `census.ungenerated_by_task`), jobs queued
+its counts, just the numbers: jobs still to generate (`ungenerated`,
+the board's "generate": the task's input rows JEDI has not yet made into
+jobs, the census's measure, `census.ungenerated_by_task`; a row is one
+job under the production tasks' one-row-per-job manifest, one event
+range per job), jobs queued
 and running, files finished and files failed after their retries (a job
 that failed and then succeeded on a retry is not a failure of the task),
 finished shown green and failed red:
@@ -469,8 +473,10 @@ the states that hold jobs). The finished and failed counters count up,
 so a bin's ended jobs are the difference of the count at its two ends.
 A value is null, never carried forward, when the newest sample before
 its bin end is more than 15 minutes older (the PanDA reading refreshes
-every five), when the bin end lies in a gap of collection, or, for ended
-jobs, when the bin overlaps one. The gaps come from Snapper's own
+every five) or the bin end lies in a gap of collection. The counters
+being cumulative, a gap inside a bin loses none of its ended jobs; they
+are null only where the count at either end of the bin is, or where the
+count fell (a reset). The gaps come from Snapper's own
 coverage record (the gaps recovering snaps closed and the capture
 cursor's open gap), listed in `gaps`. A queue with no sample is null
 throughout.

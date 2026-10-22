@@ -1225,8 +1225,9 @@ def _trends(series):
     than TREND_STALE_MINUTES before the edge, or an edge inside a coverage
     gap, gives null, never a value carried forward. Finished and failed
     count up, so a bin's ended jobs are the difference of the count at its
-    two ends, null for a bin overlapping a gap. A queue with no sample is
-    null throughout."""
+    two ends, exact across a gap inside the bin; null where an end is
+    unknown or the count fell (a reset). A queue with no sample is null
+    throughout."""
     from bisect import bisect_right
 
     from monitor_app.panda.census import NOT_STARTED
@@ -1261,12 +1262,11 @@ def _trends(series):
         return [None if any(v is None for v in col) else sum(col) for col in zip(*rows)]
 
     def ended(counts):
-        out = []
-        for k in range(1, len(edges)):
-            a, b = counts[k - 1], counts[k]
-            overlap = any(g0 <= edges[k] and g1 >= edges[k - 1] for g0, g1 in gaps)
-            out.append(None if a is None or b is None or overlap else max(0, round(b - a)))
-        return out
+        # The counters are cumulative: a gap inside a bin loses none of its
+        # ended jobs while the count at both ends is known; a count that
+        # fell was reset, and the bin is unknown.
+        return [None if a is None or b is None or b < a else round(b - a)
+                for a, b in zip(counts, counts[1:])]
 
     def known_sum(xs):
         return None if any(v is None for v in xs) else sum(xs)
