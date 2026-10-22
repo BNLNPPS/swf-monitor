@@ -4297,16 +4297,13 @@ def build_tasks_window(days=7, cap=5000):
 def job_filter_counts(days=7, status=None, username=None, site=None,
                       taskid=None, reqid=None,
                       ended_after=None, ended_before=None, execsite=None):
-    """Get filter option counts for job list (status, user, site)."""
+    """Get filter option counts for job list (status, user, site, task)."""
     base_where, base_params = _job_window_filter(
         days, ended_after=ended_after, ended_before=ended_before)
 
     if execsite:
         base_where.append('"destinationsite" = %s')
         base_params.append(execsite)
-    if taskid:
-        base_where.append('"jeditaskid" = %s')
-        base_params.append(int(taskid))
     if reqid:
         base_where.append('"reqid" = %s')
         base_params.append(int(reqid))
@@ -4318,6 +4315,7 @@ def job_filter_counts(days=7, status=None, username=None, site=None,
         ('jobstatus', 'status', status),
         ('produsername', 'username', username),
         ('computingsite', 'site', site),
+        ('jeditaskid', 'taskid', taskid),
     ]
 
     for db_field, filter_name, current_value in filter_config:
@@ -4340,6 +4338,10 @@ def job_filter_counts(days=7, status=None, username=None, site=None,
                     clause, vals = _status_clause(other_value)
                     where.append(clause)
                     params.extend(vals)
+                    continue
+                if other_name == 'taskid':
+                    where.append('"jeditaskid" = %s')
+                    params.append(int(other_value))
                     continue
                 clause, val = like_or_eq(other_db_field, other_value)
                 where.append(clause)
@@ -4366,6 +4368,9 @@ def job_filter_counts(days=7, status=None, username=None, site=None,
                 rows = cursor.fetchall()
                 if filter_name == 'username':
                     result[filter_name] = _aggregate_effective_user_counts(rows)
+                elif filter_name == 'taskid':
+                    # As text, the form the page's filter state holds.
+                    result[filter_name] = [(str(row[0]), row[1]) for row in rows]
                 else:
                     result[filter_name] = [(row[0], row[1]) for row in rows]
         except Exception as e:

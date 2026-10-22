@@ -803,11 +803,6 @@ def panda_jobs_list(request):
     if request.GET.get('status') == 'queued':
         description += '<br>Queued: defined, waiting, assigned, activated and sent jobs'
     refresh = request.GET.get('refresh') == '1'
-    # The task filter's control keeps every other filter: set and clear
-    # change the task alone (Torre Wenaus, 2026-10-22).
-    keep = request.GET.copy()
-    for name in ('taskid', 'refresh'):
-        keep.pop(name, None)
     try:
         outcomes_product = _jobs_outcomes_product(
             days, selected_site, refresh,
@@ -848,13 +843,14 @@ def panda_jobs_list(request):
             {'name': 'status', 'label': 'Status', 'type': 'select'},
             {'name': 'username', 'label': 'User', 'type': 'select'},
             {'name': 'site', 'label': 'Site', 'type': 'select'},
+            # The floor's site name opens this list; a task narrows it
+            # (Torre Wenaus, 2026-10-22).
+            {'name': 'taskid', 'label': 'Task', 'type': 'select'},
         ],
         'selected_status': request.GET.get('status', ''),
         'selected_username': request.GET.get('username', ''),
         'selected_site': request.GET.get('site', ''),
         'selected_taskid': selected_taskid,
-        'taskid_keep_params': [(k, v) for k, values in keep.lists() for v in values],
-        'taskid_clear_query': keep.urlencode(),
         'selected_execsite': selected_execsite,
         'ended_after': (ended_after.isoformat()
                         if ended_after is not None else ''),

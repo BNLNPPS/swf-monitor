@@ -14,15 +14,8 @@
     <a href="?days={{ opt.value }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}{% if selected_execsite %}&execsite={{ selected_execsite|urlencode }}{% endif %}" class="swf-days-link" data-days="{{ opt.value }}" style="margin-right:0.8em;">{{ opt.label }}</a>
     {% endif %}
     {% endfor %}
-    | <form method="get" class="d-inline-flex align-items-baseline gap-1" style="margin:0;">
-        {% for name, value in taskid_keep_params %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
-        <label for="jobs-taskid" class="fw-bold">Task:</label>
-        <input id="jobs-taskid" type="text" name="taskid" value="{{ selected_taskid }}" inputmode="numeric" pattern="[0-9]*" placeholder="task id" size="8" class="form-control form-control-sm d-inline-block" style="width:7em;">
-        <button type="submit" class="btn btn-sm btn-primary">Filter</button>
-    </form>
     {% if selected_taskid %}
-    <a href="{% url 'monitor_app:panda_task_detail' selected_taskid %}" style="margin-left:0.3em;">task {{ selected_taskid }}</a>
-    <a href="?{{ taskid_clear_query }}" style="margin-left:0.5em;color:#dc3545;" title="Show every task's jobs, keeping the other filters">[clear task]</a>
+    | <a href="{% url 'monitor_app:panda_task_detail' selected_taskid %}">task {{ selected_taskid }}</a>
     {% endif %}
     <a href="{% url 'snapper_ai:snapper_report' scope='epicprod' %}?window={{ snapper_window }}"
        style="margin-left:1cm;font-weight:bold;">Snapper view</a>
