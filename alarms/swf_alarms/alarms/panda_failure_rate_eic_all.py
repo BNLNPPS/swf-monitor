@@ -1,6 +1,7 @@
 """Alarm: panda_failure_rate_eic_all.
 
-Catch-all alert on any PanDA task whose computed failure rate exceeds the
+Catch-all alert on any production task (processingtype epicproduction,
+the shared helper's default) whose computed failure rate exceeds the
 configured threshold over the configured lookback. Tuning channel for
 shaping future per-owner alarms.
 """
