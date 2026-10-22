@@ -304,9 +304,8 @@ class _Build:
               AND (t.status IS NULL OR NOT t.status = ANY(%s))
             GROUP BY a.jeditaskid, t.taskname, t.status, t.starttime, t.creationdate'''
         # Every production task in flight is on the board wherever it is
-        # placed: one on a queue the floor does not show is listed red with
-        # that queue named, never left out (Torre Wenaus, 2026-10-22, when
-        # two tasks sat on a queue taken off the floor).
+        # placed, by the same rules as any other (Torre Wenaus, 2026-10-22,
+        # when two tasks sat on a queue taken off the floor).
         rows = _rows(sql, (list(RUNNING), list(NOT_STARTED + RUNNING), terminal))
         # A task with rows JEDI has not yet made into jobs is on the board
         # though none of its jobs waits or runs now.
@@ -351,17 +350,14 @@ class _Build:
             physics = physics_description(d, concise=True) if d else ''
             lost_pct = 100.0 * lost / (done + lost) if done + lost else 0.0
             local = at.astimezone(ZoneInfo('America/New_York')) if at else None
-            off_floor = [q for q in queues if q not in site_name]
-            detail = ((f"Off the floor: placed on {', '.join(off_floor)}, a queue the room "
-                       f"does not show. " if off_floor else '')
-                      + ' at '.join(x for x in (physics, site_name.get(queue, queue)) if x)
+            detail = (' at '.join(x for x in (physics, site_name.get(queue, queue)) if x)
                       + f". {name}, {status} on {queue}"
                       + (f" since {local:%m-%d %H:%M} ET" if local else '')
                       + f"; {done:,} of {n:,} files done, {lost:,} lost after retries"
                       + (f" ({lost_pct:.1f}%), in alarm" if tid in alarmed else '') + '.')
             items.append({
                 'id': tid, 'at': at.isoformat() if at else None,
-                'level': ('red' if tid in alarmed or off_floor else 'amber' if lost
+                'level': ('red' if tid in alarmed else 'amber' if lost
                           else 'green' if running else 'grey'),
                 'title': str(tid),
                 'counts': {'ungenerated': to_generate.get(tid, 0),

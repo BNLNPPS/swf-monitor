@@ -449,9 +449,9 @@ has lost files, green while it runs, grey while its jobs only wait.
 
 The board holds every production task in flight wherever it is placed
 (Torre Wenaus, 2026-10-22, when the front placed two tasks on
-BNL_OSG_EPIC_PROD_1 after it had left the floor). A task with jobs or
-rows on a queue no floor site holds is red, its detail opening "Off the
-floor: placed on <queue>", and its `sites` hold no id for that queue.
+BNL_OSG_EPIC_PROD_1 after it had left the floor), by the same rules as
+any other; its detail names its queue, and its `sites` hold no id for a
+queue no floor site holds.
 
 `queues` are the floor's queues the task is active at: those holding its
 running, starting or queued jobs, and the queue of its rows still to
