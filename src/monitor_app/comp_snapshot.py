@@ -313,12 +313,8 @@ class _Build:
             n, done, lost = files.get(tid, (0, 0, 0))
             d = datasets.get(names[name])
             physics = physics_description(d, concise=True) if d else ''
-            title = ' · '.join(x for x in (
-                f'{tid} {physics}'.strip(), site_name.get(queue, queue),
-                f'{done:,}/{n:,}' if n else '', f'{running:,} running') if x)
+            title = f'{tid} {physics}'.strip() + f' · {site_name.get(queue, queue)}'
             lost_pct = 100.0 * lost / (done + lost) if done + lost else 0.0
-            if lost:
-                title += f' · {lost_pct:.1f}% lost'
             local = at.astimezone(ZoneInfo('America/New_York')) if at else None
             detail = (f"{name}: {physics_description(d) if d else ''}. "
                       f"{status} on {queue}"
@@ -330,7 +326,10 @@ class _Build:
                 'id': tid, 'at': at.isoformat() if at else None,
                 'level': ('red' if tid in alarmed else 'amber' if lost
                           else 'green' if running else 'grey'),
-                'title': title, 'detail': detail,
+                'title': title,
+                'counts': {'queued': active - running, 'running': running,
+                           'finished': done, 'failed': lost},
+                'detail': detail,
                 'link': f'{PUBLIC}/panda/tasks/{tid}/'})
         return {'link': f'{PUBLIC}/panda/tasks/?processingtype=epicproduction',
                 'items': items}

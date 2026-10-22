@@ -77,7 +77,8 @@ report            {text, items: [{level, text, link}],
                    assessment: {verdict, level, at, link, campaign,
                                 title, narration}}
 live              {link, items: [{id, at, level, title, detail, link}]}
-tasks             {link, items: [{id, at, level, title, detail, link}]}
+tasks             {link, items: [{id, at, level, title, counts, detail, link}]}
+  counts          {queued, running, finished, failed}
 errors[]          {part, error}
 ```
 
@@ -401,13 +402,15 @@ running, starting or queued (the census's states) at a queue of
 the JEDI task id, `link` the task's page; `tasks.link` lists the
 production tasks.
 
-The title is the task in one short line: the id, its physics in the
-concise form of the PCS description (`physics_description`, the one
-composer PCS pages use), the site's short name, files done of the
-task's files, the jobs running, and the share of files lost after their
-retries when there are any:
+The board is the tasks in flight. A line is the title, the task's id,
+its physics in the concise form of the PCS description
+(`physics_description`, the one composer PCS pages use) and the site's
+short name, then its counts, just the numbers: jobs queued and running,
+files finished and files failed after their retries (a job that failed
+and then succeeded on a retry is not a failure of the task), finished
+shown green and failed red:
 
-    40856 DIS, eAu 9x100, Q2 10 to 100, BeAGLE · GREX · 13,762/50,006 · 862 running · 13.7% lost
+    40856 DIS, eAu 9x100, Q2 10 to 100, BeAGLE · GREX   2,259  862  13,762  2,181
 
 The detail, on hover, is the composed name with the full physics
 description, the status, queue and start, running and queued jobs, and
