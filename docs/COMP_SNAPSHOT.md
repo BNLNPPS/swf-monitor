@@ -48,7 +48,8 @@ schema            "comp-snapshot/1"
 observed_at       ISO UTC
 build_seconds     seconds the build took
 units             {"capacity": "cores", "core_hours": "core-hours in the last hour"}
-pressure_front    {ready_tasks, released_1h, enabled, mode, jedi_throttled, link}
+pressure_front    {ready_tasks, released_1h, enabled, mode, jedi_throttled, link,
+                   detail, cycle_at, items[], queues[]}
 sites[]           {id, name, status, capacity, capacity_source, in_use,
                    health, links, queues[], execute_sites[]}
   queues[]        {id, name, status, status_reason,
@@ -92,6 +93,16 @@ errors[]          {part, error}
   front's placement).
 - `released_1h`: the front's `fed` decisions in the last hour.
 - `enabled`, `mode`, `jedi_throttled`: the front's SysConfig switches.
+- What the pillar shows on hover and opens (Torre Wenaus, 2026-10-22),
+  from the state the front's cycle stored (`front_state`, as of
+  `cycle_at`): `items[]` is the ready buffer task by task, `{task,
+  queue, order, kind, by_hand, priority, jobs, eligible, problems,
+  link}`, in each queue's feed order, a task pinned to a closed queue
+  not eligible and the closure among its problems; `queues[]` is each
+  production queue's latest decision, `{queue, state, reason,
+  committed_h, h_low, h_high, running, ready_total, ready_eligible,
+  last_feed_age_h, closed}`; `detail` is the hover line; `link` opens
+  the front page at its ready buffer.
 
 ### Sites and queues
 

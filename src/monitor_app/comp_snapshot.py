@@ -985,7 +985,8 @@ def build():
         'ready_tasks': ready, 'released_1h': released,
         'enabled': cfg.get('front.enabled'), 'mode': cfg.get('front.mode'),
         'jedi_throttled': cfg.get('front.jedi_throttled'),
-        'link': f'{PUBLIC}/panda/front/',
+        'link': f'{PUBLIC}/panda/front/#ready',
+        **(b.part('front_board', lambda: _front_board(ready, released), None) or {}),
     }
 
     alarms = b.part('alarms', b.production_alarms, [])
@@ -1015,6 +1016,57 @@ def _ready_tasks():
     with connections['default'].cursor() as cursor:
         cursor.execute("SELECT COUNT(*) FROM pcs_prod_task WHERE overrides ? 'queued'")
         return int(cursor.fetchone()[0])
+
+
+def _front_board(ready, released):
+    """What the pressure-front pillar shows on hover and opens on click
+    (Torre Wenaus, 2026-10-22): the ready buffer task by task, in each
+    queue's feed order, and each production queue's latest decision, from
+    the state the front's cycle stored (cached product ``front_state``)."""
+    from monitor_app.models import CachedProduct
+    from swf_epicprod.front import STATE_KEY, closed_queues
+
+    row = CachedProduct.objects.filter(key=STATE_KEY).first()
+    state = (row.value if row else None) or {}
+    closed = closed_queues()
+    items = []
+    for queue, entries in (state.get('backlog') or {}).items():
+        for order, e in enumerate(entries or [], 1):
+            items.append({
+                'task': e.get('task'), 'queue': None if queue == 'unplaced' else queue,
+                'order': order, 'kind': e.get('kind'), 'by_hand': bool(e.get('hand')),
+                'priority': e.get('level'), 'jobs': e.get('rows'),
+                'eligible': not e.get('problems') and queue not in closed,
+                'problems': list(e.get('problems') or [])
+                + ([f'queue closed: {closed[queue]}'] if queue in closed else []),
+                'link': f"{PUBLIC}/pcs/tasks/{e.get('task')}/"})
+    queues = []
+    for name, d in (state.get('queues') or {}).items():
+        queues.append({
+            'queue': name, 'state': d.get('state'), 'reason': d.get('reason'),
+            'committed_h': d.get('committed_h'), 'h_low': d.get('h_low'),
+            'h_high': d.get('h_high'), 'running': d.get('running'),
+            'ready_total': d.get('ready_total'), 'ready_eligible': d.get('ready_eligible'),
+            'last_feed_age_h': d.get('last_feed_age_h'), 'closed': name in closed})
+    lines = [f"{ready if ready is not None else '?'} tasks ready, "
+             f"{released if released is not None else '?'} released in the last hour"]
+    for q in queues:
+        waiting = [i for i in items if i['queue'] == q['queue']]
+        if not waiting and q['closed']:
+            continue
+        lines.append(
+            f"{q['queue']}: {q['state'] or '?'}"
+            + (f", {q['committed_h']:.1f} h committed of {q['h_low']:g}-{q['h_high']:g} h"
+               if isinstance(q['committed_h'], (int, float)) and q['h_low'] is not None else '')
+            + (f"; {len(waiting)} ready, next {waiting[0]['task']}" if waiting else '')
+            + (' (closed)' if q['closed'] else ''))
+    decided = {q['queue'] for q in queues}
+    for queue in dict.fromkeys(i['queue'] for i in items if i['queue'] not in decided):
+        waiting = [i for i in items if i['queue'] == queue]
+        lines.append(f"{queue or 'no queue yet'}: {len(waiting)} ready, next {waiting[0]['task']}"
+                     + (' (queue closed, held)' if queue in closed else ''))
+    return {'items': items, 'queues': queues, 'cycle_at': state.get('cycle_at'),
+            'detail': '. '.join(lines) + '.'}
 
 
 def _released(since):
