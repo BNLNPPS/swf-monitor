@@ -165,6 +165,17 @@ def like_or_eq(field, value):
     return f'"{field}" = %s', value
 
 
+def site_clause(value):
+    """Return (where_clause, params) for the job list's queue filter:
+    several queues comma-separated (a floor site's live queues), else one
+    queue as like_or_eq takes it."""
+    queues = [q.strip() for q in value.split(',') if q.strip()]
+    if len(queues) > 1:
+        return '"computingsite" = ANY(%s)', [queues]
+    clause, val = like_or_eq('computingsite', queues[0] if queues else value)
+    return clause, [val]
+
+
 # ── DataTables SQL builders ──────────────────────────────────────────────────
 
 def build_union_query_dt(fields, where_clauses, params, order_by, limit, offset):

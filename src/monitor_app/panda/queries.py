@@ -30,7 +30,7 @@ from .sql import (
     build_union_query_dt, build_union_count, build_union_count_by_field,
     build_task_count, build_task_count_by_field,
     build_search_clauses,
-    row_to_dict, extract_errors, like_or_eq,
+    row_to_dict, extract_errors, like_or_eq, site_clause,
 )
 
 logger = logging.getLogger(__name__)
@@ -2069,9 +2069,9 @@ def job_outcomes(days=7, site=None, start_time=None, end_time=None,
     filters = ''
     extra_params = []
     if site:
-        clause, val = like_or_eq('computingsite', site)
+        clause, vals = site_clause(site)
         filters += f' AND {clause}'
-        extra_params.append(val)
+        extra_params.extend(vals)
     statuses = ('finished', 'failed', 'cancelled') + (
         ('closed',) if include_closed else ())
     where = (
@@ -4139,9 +4139,9 @@ def _job_list_where(days, status=None, username=None, site=None,
         where.append(clause)
         params.extend(vals)
     if site:
-        clause, val = like_or_eq('computingsite', site)
+        clause, vals = site_clause(site)
         where.append(clause)
-        params.append(val)
+        params.extend(vals)
     if taskid:
         where.append('"jeditaskid" = %s')
         params.append(int(taskid))
@@ -4342,6 +4342,11 @@ def job_filter_counts(days=7, status=None, username=None, site=None,
                 if other_name == 'taskid':
                     where.append('"jeditaskid" = %s')
                     params.append(int(other_value))
+                    continue
+                if other_name == 'site':
+                    clause, vals = site_clause(other_value)
+                    where.append(clause)
+                    params.extend(vals)
                     continue
                 clause, val = like_or_eq(other_db_field, other_value)
                 where.append(clause)

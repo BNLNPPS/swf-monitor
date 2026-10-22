@@ -793,9 +793,13 @@ def panda_jobs_list(request):
     else:
         description = f'Production jobs from the {_window_label(days)}.'
         jobs_window_label = _window_label(days)
-    if selected_site:
-        site_url = reverse('monitor_app:epic_queue_detail', args=[selected_site])
-        description += f'<br><a href="{site_url}">Site info for <strong>{selected_site}</strong></a>'
+    # site= takes one queue or several comma-separated: a floor site's live
+    # queues together (Torre Wenaus, 2026-10-22).
+    site_queues = [q.strip() for q in selected_site.split(',') if q.strip()]
+    if site_queues:
+        description += '<br>Site info for ' + ', '.join(
+            f'<a href="{reverse("monitor_app:epic_queue_detail", args=[q])}">'
+            f'<strong>{escape(q)}</strong></a>' for q in site_queues)
     selected_execsite = request.GET.get('execsite', '')
     if selected_execsite:
         description += (f'<br>Execute site <strong>{escape(selected_execsite)}</strong>, '
@@ -820,7 +824,7 @@ def panda_jobs_list(request):
         logger.error('jobs outcomes build failed: %s', e)
         job_outcomes_data = {'error': str(e)}
     job_outcomes_pie = None
-    if selected_site:
+    if len(site_queues) == 1:
         try:
             job_outcomes_pie = _jobs_site_pie_product(
                 days, selected_site, refresh,
