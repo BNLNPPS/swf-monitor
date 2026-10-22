@@ -687,9 +687,11 @@ class _Build:
                     kept[t] = [sum(n for n, _b, _e in kinds), sum(b for _n, b, _e in kinds),
                                sum(outcomes.get(t, {}).get(k, 0) for k in REGISTRATION_OWED)]
         kept = {t: v for t, v in kept.items() if t >= ends[0]}
-        CachedProduct.objects.update_or_create(
-            key=JLAB_FLOW_KEY, defaults={'value': {'bins': {str(t): v for t, v in kept.items()}},
-                                         'built_at': timezone.now()})
+        from .cached_product import stores
+        if stores():
+            CachedProduct.objects.update_or_create(
+                key=JLAB_FLOW_KEY, defaults={'value': {'bins': {str(t): v for t, v in kept.items()}},
+                                             'built_at': timezone.now()})
         column = {t: v for t, v in kept.items()}
         return {
             'files': [column[t][0] if t in column else None for t in ends],

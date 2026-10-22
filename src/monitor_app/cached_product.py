@@ -15,6 +15,7 @@ pattern.
 """
 
 import logging
+import os
 import threading
 import time
 import zlib
@@ -41,6 +42,17 @@ ADVISORY_NAMESPACE = 7311
 # An explicit update that finds another worker mid-build waits up to this
 # long for that build to land before giving up and serving what exists.
 REFRESH_WAIT_SECONDS = 15
+
+
+RELEASE_ROOT = os.environ.get('SWF_RELEASE_ROOT', '/opt/swf-monitor')
+
+
+def stores():
+    """True when this process runs the deployed release, the one writer of
+    the shared store (CACHED_PRODUCTS.md, Contract). A development tree
+    reads what the release stored and never writes over it."""
+    root = os.path.realpath(RELEASE_ROOT).rstrip('/') + '/'
+    return os.path.realpath(__file__).startswith(root)
 
 
 def _advisory_key(key):
@@ -166,6 +178,17 @@ def get_product(key, builder, ttl_seconds, refresh=False,
 
     row = CachedProduct.objects.filter(key=key).first()
     have_product = row is not None and row.built_at is not None
+
+    if not stores():
+        # A development tree: the stored product however old, else (or on
+        # an explicit refresh) its own build, never written.
+        if have_product and not refresh:
+            return {'value': row.value, 'built_at': row.built_at,
+                    'age_seconds': round(
+                        (timezone.now() - row.built_at).total_seconds(), 1),
+                    'refreshing': False, 'built_now': False}
+        return {'value': builder(), 'built_at': timezone.now(),
+                'age_seconds': 0.0, 'refreshing': False, 'built_now': True}
 
     # A large focus product must not hold the page request open on its first
     # build. The report already understands a truthful empty/refreshing shell

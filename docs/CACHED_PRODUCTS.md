@@ -30,6 +30,17 @@ variant.
   serve; it happens once per key.
 - **Failures surface.** A broken builder logs with its key and clears
   the lock; it never presents as silently stale data.
+- **Only the deployed release stores** (Torre Wenaus, 2026-10-22). The
+  store is the shared database, so a reader running from a development
+  tree would otherwise rebuild a stale product with the code under edit
+  and the production face would serve it; on 2026-10-22 a half-edited
+  tree stored a comp snapshot without its tasks. A process whose code is
+  not under the release root (`SWF_RELEASE_ROOT`, default
+  `/opt/swf-monitor`, compared through symlinks) serves the stored
+  product however old, never starts a rebuild, and builds only when
+  nothing is stored or on an explicit refresh, returning that value
+  without writing it. A builder that keeps state of its own in the
+  store writes it only under the same rule (`cached_product.stores()`).
 
 ## Mechanism
 
