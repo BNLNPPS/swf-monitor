@@ -350,6 +350,17 @@ the logs page is behind the login wall; the messages are those the
 action stream records, which name tasks, queues, nodes and errors and
 carry no credential.
 
+The screen shows the ten newest such records that are still open. A
+failure (outcome error, timeout, partial or unrecorded) leaves the screen
+once it has recovered: a later record of the same action from the same
+source on the same subject reports ok, the identity the epicprod-live
+channel uses for its recovery notices (`live_notices.failure_key`). Any
+record leaves the screen when the operator's question about it has been
+answered: a `live_cleared` record in the action stream names the cleared
+record ids and the reason. Neither changes the records on the logs page.
+`scripts/live-clear.py <id> ... --reason "..."` writes a `live_cleared`
+record through the log REST endpoint.
+
 ## Links
 
 Every queue links to its ePIC queue page (`panda/epic-queues/<queue>/`),

@@ -38,6 +38,15 @@ PROGRESS_PATTERNS = {
 }
 
 
+def failure_key(instance_name, extra):
+    """The identity a failure and its recovery share: the same action from
+    the same source on the same subject. The room's epicprod-live screen
+    reads recovery by this key too (COMP_SNAPSHOT.md, Live)."""
+    return json.dumps([str(extra.get('action') or ''), instance_name,
+                       extra.get('subject_type'), extra.get('subject_key'),
+                       extra.get('source'), extra.get('operation')])
+
+
 def select_notice(row, extra, failures, live_policy):
     """Return delivery attributes, or None for a quiet channel event.
 
@@ -61,9 +70,7 @@ def select_notice(row, extra, failures, live_policy):
     if automated and action in MAINTENANCE:
         quiet = True
     elif automated:
-        key = json.dumps([action, row.instance_name,
-                          extra.get('subject_type'), extra.get('subject_key'),
-                          extra.get('source'), extra.get('operation')])
+        key = failure_key(row.instance_name, extra)
         if failure:
             current = {'outcome': outcome, 'reason': notice.get('reason', '')}
             quiet = failures.get(key) == current

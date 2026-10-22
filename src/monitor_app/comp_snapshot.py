@@ -920,17 +920,71 @@ def _live_records():
     """The epicprod-live screen: the newest warning and error records of
     the live stream, the logs page's live view (ACTION_STREAM.md), each
     with its own page. The room reads the record anonymously and the logs
-    page is behind the login wall, so the records ride here."""
-    from monitor_app.epicprod_logging import live_stream_q
+    page is behind the login wall, so the records ride here. Off the
+    screen: a record a ``live_cleared`` record names, and a failure whose
+    action has since run ok (COMP_SNAPSHOT.md, Live)."""
+    from monitor_app.epicprod_logging import EPICPROD_APP_NAME, live_stream_q
+    from monitor_app.live_notices import FAILURE_OUTCOMES, failure_key
     from monitor_app.models import AppLog
+    cleared = set()
+    for ids in (AppLog.objects
+                .filter(app_name=EPICPROD_APP_NAME,
+                        extra_data__action='live_cleared')
+                .values_list('extra_data__cleared_ids', flat=True)):
+        cleared.update(int(i) for i in ids or ())
     rows = (AppLog.objects.filter(live_stream_q(), levelname__in=LIVE_LEVELS)
+            .exclude(id__in=cleared)
             .order_by('-timestamp')
-            .values('id', 'timestamp', 'levelname', 'message', 'extra_data__sublevel')[:LIVE_ITEMS])
-    return {'link': f'{PUBLIC}/logs/?app_name=epicprod&live=1',
-            'items': [{'id': r['id'], 'at': r['timestamp'].isoformat(),
-                       'level': r['levelname'], 'importance': r['extra_data__sublevel'],
-                       'text': r['message'], 'link': f"{PUBLIC}/logs/{r['id']}/"}
-                      for r in rows]}
+            .values('id', 'timestamp', 'levelname', 'message', 'instance_name',
+                    'extra_data'))
+    last_ok = {}
+    items = []
+    for r in _pages(rows):
+        extra = r['extra_data'] or {}
+        if str(extra.get('outcome') or '') in FAILURE_OUTCOMES:
+            key = failure_key(r['instance_name'], extra)
+            if key not in last_ok:
+                last_ok[key] = _last_ok(r['instance_name'], extra, key)
+            if last_ok[key] and last_ok[key] > r['timestamp']:
+                continue
+        items.append({'id': r['id'], 'at': r['timestamp'].isoformat(),
+                      'level': r['levelname'], 'importance': extra.get('sublevel'),
+                      'text': r['message'], 'link': f"{PUBLIC}/logs/{r['id']}/"})
+        if len(items) == LIVE_ITEMS:
+            break
+    return {'link': f'{PUBLIC}/logs/?app_name=epicprod&live=1', 'items': items}
+
+
+def _last_ok(instance_name, extra, key):
+    """Time of the newest ok record carrying a failure's identity
+    (live_notices.failure_key), or None: the recovery the epicprod-live
+    channel announces."""
+    from monitor_app.epicprod_logging import EPICPROD_APP_NAME
+    from monitor_app.live_notices import failure_key
+    from monitor_app.models import AppLog
+    oks = AppLog.objects.filter(app_name=EPICPROD_APP_NAME,
+                                instance_name=instance_name,
+                                extra_data__action=extra.get('action'),
+                                extra_data__outcome='ok')
+    for field in ('subject_type', 'subject_key', 'source', 'operation'):
+        if extra.get(field) is not None:
+            oks = oks.filter(**{f'extra_data__{field}': extra[field]})
+    for ok in _pages(oks.order_by('-timestamp').values('timestamp', 'extra_data')):
+        if failure_key(instance_name, ok['extra_data'] or {}) == key:
+            return ok['timestamp']
+    return None
+
+
+def _pages(queryset, size=100):
+    """Rows of an ordered queryset in LIMIT/OFFSET pages: each page is an
+    index scan, where a server-side cursor plans a sort of the whole set."""
+    start = 0
+    while True:
+        page = list(queryset[start:start + size])
+        yield from page
+        if len(page) < size:
+            return
+        start += size
 
 
 def _jlab_pending():

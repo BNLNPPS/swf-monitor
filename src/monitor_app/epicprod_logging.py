@@ -475,6 +475,13 @@ ACTION_DEFAULTS = {
         'description': "Operator change to an action's live-stream override "
                        "on the live-policy page.",
     },
+    'live_cleared': {
+        'sublevel': 'low', 'live': False,
+        'description': "Live records taken off the computing centre's "
+                       "epicprod-live screen once the operator's question "
+                       "about them is answered: the record ids and why. The "
+                       "records themselves are unchanged.",
+    },
     'host_reporter_install': {
         'sublevel': 'high', 'live': True,
         'description': "A host reporter installed on a service host it "
