@@ -77,6 +77,7 @@ report            {text, items: [{level, text, link}],
                    assessment: {verdict, level, at, link, campaign,
                                 title, narration}}
 live              {link, items: [{id, at, level, title, detail, link}]}
+tasks             {link, items: [{id, at, level, title, detail, link}]}
 errors[]          {part, error}
 ```
 
@@ -389,6 +390,30 @@ A record leaves the floor when it is no longer news:
   "..."` writes one through the log REST endpoint.
 
 None of these changes the records on the logs page.
+
+### Tasks
+
+The room's task board, beside the live screen (Torre Wenaus,
+2026-10-22): exactly the production tasks on the floor, those with jobs
+running, starting or queued (the census's states) at a queue of
+`comp.sites`; a task with none there is off the board. Newest first by
+`at`, the task's start (its creation before it starts), ISO UTC. `id` is
+the JEDI task id, `link` the task's page; `tasks.link` lists the
+production tasks.
+
+The title is the task in one short line: the id, its physics in the
+concise form of the PCS description (`physics_description`, the one
+composer PCS pages use), the site's short name, files done of the
+task's files, the jobs running, and the share of files lost after their
+retries when there are any:
+
+    40856 DIS, eAu 9x100, Q2 10 to 100, BeAGLE · GREX · 13,762/50,006 · 862 running · 13.7% lost
+
+The detail, on hover, is the composed name with the full physics
+description, the status, queue and start, running and queued jobs, and
+files done and lost, with the alarm when the task is in one. `level` is
+red for a task in a failure-rate alarm, amber for one that has lost
+files, green while it runs, grey while its jobs only wait.
 
 ## Links
 

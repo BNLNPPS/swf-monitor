@@ -12,6 +12,7 @@ import logging
 import re
 import time
 from datetime import datetime, timedelta, timezone as dt_timezone
+from zoneinfo import ZoneInfo
 from urllib.parse import quote
 
 from django.db import connections
@@ -268,6 +269,71 @@ class _Build:
                 continue
             out.append(a)
         return out
+
+    def floor_tasks(self, site_name, alarms):
+        """The task board (COMP_SNAPSHOT.md, Tasks): every production task
+        with jobs running, starting or queued at the floor's queues, newest
+        first; a task with none there is off the board."""
+        from monitor_app.panda.census import NOT_STARTED, RUNNING
+        from pcs.models import Dataset
+        from pcs.views import physics_description
+        sql = f'''
+            SELECT a.jeditaskid, t.taskname, t.status,
+                   COALESCE(t.starttime, t.creationdate),
+                   SUM(CASE WHEN a.jobstatus = ANY(%s) THEN 1 ELSE 0 END), COUNT(*),
+                   MODE() WITHIN GROUP (ORDER BY a.computingsite)
+            FROM "{self.S}"."jobsactive4" a
+            JOIN "{self.S}"."jedi_tasks" t ON t.jeditaskid = a.jeditaskid
+            WHERE a.computingsite = ANY(%s) AND a.jobstatus = ANY(%s)
+              AND t.processingtype = 'epicproduction'
+            GROUP BY a.jeditaskid, t.taskname, t.status, t.starttime, t.creationdate'''
+        rows = _rows(sql, (list(RUNNING), list(site_name), list(NOT_STARTED + RUNNING)))
+        ids = [int(r[0]) for r in rows]
+        files = {}
+        if ids:
+            sql = f'''SELECT jeditaskid, SUM(nfiles), SUM(nfilesfinished), SUM(nfilesfailed)
+                      FROM "{self.S}"."jedi_datasets"
+                      WHERE jeditaskid = ANY(%s) AND masterid IS NULL
+                        AND type IN ('input', 'pseudo_input')
+                      GROUP BY jeditaskid'''
+            files = {int(t): (int(n or 0), int(f or 0), int(x or 0))
+                     for t, n, f, x in _rows(sql, (ids,))}
+        alarmed = {int(m.group(1)) for m in (TASK_ALARM_RE.match(a['title']) for a in alarms) if m}
+        names = {r[1]: re.sub(r'\.try\d+$', '', r[1]) for r in rows}
+        datasets = {d.composed_name: d for d in
+                    Dataset.objects.filter(composed_name__in=set(names.values()))
+                    .select_related('physics_tag', 'evgen_tag')
+                    .order_by('composed_name', 'block_num').distinct('composed_name')}
+        items = []
+        for tid, name, status, at, running, active, queue in sorted(
+                rows, key=lambda r: r[3], reverse=True):
+            tid, running, active = int(tid), int(running or 0), int(active or 0)
+            if at is not None and at.tzinfo is None:
+                at = at.replace(tzinfo=dt_timezone.utc)  # PanDA stores UTC
+            n, done, lost = files.get(tid, (0, 0, 0))
+            d = datasets.get(names[name])
+            physics = physics_description(d, concise=True) if d else ''
+            title = ' · '.join(x for x in (
+                f'{tid} {physics}'.strip(), site_name.get(queue, queue),
+                f'{done:,}/{n:,}' if n else '', f'{running:,} running') if x)
+            lost_pct = 100.0 * lost / (done + lost) if done + lost else 0.0
+            if lost:
+                title += f' · {lost_pct:.1f}% lost'
+            local = at.astimezone(ZoneInfo('America/New_York')) if at else None
+            detail = (f"{name}: {physics_description(d) if d else ''}. "
+                      f"{status} on {queue}"
+                      + (f" since {local:%m-%d %H:%M} ET" if local else '')
+                      + f"; {running:,} running, {active - running:,} queued; "
+                      f"{done:,} of {n:,} files done, {lost:,} lost after retries"
+                      + (f" ({lost_pct:.1f}%), in alarm" if tid in alarmed else '') + '.')
+            items.append({
+                'id': tid, 'at': at.isoformat() if at else None,
+                'level': ('red' if tid in alarmed else 'amber' if lost
+                          else 'green' if running else 'grey'),
+                'title': title, 'detail': detail,
+                'link': f'{PUBLIC}/panda/tasks/{tid}/'})
+        return {'link': f'{PUBLIC}/panda/tasks/?processingtype=epicproduction',
+                'items': items}
 
     def opened(self):
         """Harvester workers per queue in the last hour: started (a slot
@@ -784,6 +850,9 @@ def build():
         'link': f'{PUBLIC}/panda/front/',
     }
 
+    alarms = b.part('alarms', b.production_alarms, [])
+    site_name = {q['id']: short_name(s.get('name') or s['id'])
+                 for s in sites_cfg for q in s.get('queues', [])}
     record = {
         'schema': SCHEMA,
         'observed_at': b.now.isoformat(),
@@ -792,11 +861,11 @@ def build():
         'sites': sites,
         'storage': storage,
         'report': {'text': _report_text(front, sites, storage),
-                   'items': _report_items(front, sites, storage,
-                                          b.part('alarms', b.production_alarms, []),
+                   'items': _report_items(front, sites, storage, alarms,
                                           b.part('assessment', _assessment_freshness, None)),
                    'assessment': b.part('daily_assessment', _latest_daily_assessment, None)},
         'live': b.part('live', _live_records, None),
+        'tasks': b.part('tasks', lambda: b.floor_tasks(site_name, alarms), None),
         'errors': b.errors,
     }
     record['build_seconds'] = round(time.monotonic() - t0, 2)
