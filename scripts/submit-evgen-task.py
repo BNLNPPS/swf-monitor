@@ -66,6 +66,36 @@ PAYLOAD_SOURCE_MIRROR = os.environ.get(
 PAYLOAD_REF_RE = re.compile(r"^(pr:\d{1,7}|(?:[A-Za-z0-9][A-Za-z0-9-]{0,38}:)?[A-Za-z0-9][A-Za-z0-9_./-]{0,199})$")
 PAYLOAD_SWITCH_RE = re.compile(r"^EPICPROD_SWITCH_[A-Z0-9_]{1,60}=[A-Za-z0-9_.,:/+=-]{0,200}$")
 TOKEN_SANDBOX_NAME = "bearer-token"
+# The panda canary credential's stand-in for the eicprod proxy: an expired
+# self-signed certificate. JLab's read door ignores a client certificate,
+# so the input still streams; nothing that checks a credential takes it,
+# so a write or a registration goes through a token or fails. That is the
+# job production runs after 2026-10-28, with the eicprod proxy expired.
+EXPIRED_CERT_NAME = "expired-placeholder-proxy"
+
+
+def _expired_placeholder(path):
+    """Write an expired self-signed certificate and its key to ``path``
+    (mode 0600; xrootd refuses wider)."""
+    import datetime as dt
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "epicprod canary expired placeholder")])
+    now = dt.datetime.now(dt.timezone.utc)
+    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
+            .public_key(key.public_key()).serial_number(x509.random_serial_number())
+            .not_valid_before(now - dt.timedelta(days=30))
+            .not_valid_after(now - dt.timedelta(days=1))
+            .sign(key, hashes.SHA256()))
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(cert.public_bytes(serialization.Encoding.PEM))
+        f.write(key.private_bytes(serialization.Encoding.PEM,
+                                  serialization.PrivateFormat.TraditionalOpenSSL,
+                                  serialization.NoEncryption()))
 
 # The submission kernel + the in-job dispatcher live beside this doer.
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -240,8 +270,9 @@ def _assemble_sandbox(spec, proxy_path, root, payload_dir=None, token_path=None,
     worker; only the four worker files travel in the tarball. A developer's
     canary ships ``payload_dir`` instead of the deployed payload, and with
     ``token_path`` ships that token as BEARER_TOKEN_FILE and no proxy. With
-    ``ship_proxy`` false it ships no credential and empties X509_USER_PROXY,
-    so the job has only the tokens it gets from the PanDA server.
+    ``ship_proxy`` false it ships an expired self-signed certificate in the
+    proxy's place (EXPIRED_CERT_NAME), so the job has only the tokens it
+    gets from the PanDA server for anything that checks a credential.
     """
     os.makedirs(root, exist_ok=True)
     workdir = tempfile.mkdtemp(prefix=f"{spec['csvBase']}.", dir=root)
@@ -260,9 +291,10 @@ def _assemble_sandbox(spec, proxy_path, root, payload_dir=None, token_path=None,
     if token_path:
         env['BEARER_TOKEN_FILE'] = TOKEN_SANDBOX_NAME
     elif not ship_proxy:
-        # Empty, not absent: the pilot's own proxy would otherwise stay in
-        # X509_USER_PROXY and stand in for a token that did not come.
-        env['X509_USER_PROXY'] = ''
+        # Not empty and not absent: an empty X509_USER_PROXY fails xrootd's
+        # login at the read door (canary 40980), and an absent one leaves
+        # the pilot's proxy to stand in for a token that did not come.
+        env['X509_USER_PROXY'] = EXPIRED_CERT_NAME
     else:
         env['X509_USER_PROXY'] = proxy_base
     _stage_bg_files(env, sandbox)
@@ -290,6 +322,8 @@ def _assemble_sandbox(spec, proxy_path, root, payload_dir=None, token_path=None,
         os.chmod(os.path.join(sandbox, TOKEN_SANDBOX_NAME), 0o600)
     elif ship_proxy:
         shutil.copy(proxy_path, os.path.join(sandbox, proxy_base))
+    else:
+        _expired_placeholder(os.path.join(sandbox, EXPIRED_CERT_NAME))
 
     # The epicprod payload, whole, from the frozen package unless a
     # developer's canary names another: the dispatcher runs
@@ -555,8 +589,9 @@ def main():
                     help="payload canary: x509 ships the eicprod proxy (default); "
                          "token ships no proxy and the token file of "
                          "--canary-token-file as BEARER_TOKEN_FILE; panda ships "
-                         "no credential, so the job writes and registers only "
-                         "with the tokens it gets from the PanDA server")
+                         "an expired self-signed certificate in the proxy's place, "
+                         "so the job writes and registers only with the tokens it "
+                         "gets from the PanDA server, as after 2026-10-28")
     ap.add_argument("--canary-token-file", default=os.environ.get("CANARY_TOKEN_FILE", ""),
                     help="payload canary, token credential: the token file shipped "
                          "(default $CANARY_TOKEN_FILE)")
