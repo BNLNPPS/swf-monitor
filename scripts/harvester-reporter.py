@@ -400,9 +400,11 @@ def harvester_db(since, until, cache):
 
     try:
         cols = ('queue', 'site', 'job_type', 'resource_type', 'n_queue_limit_worker',
-                'max_workers', 'n_new_workers', 'n_queue_limit_job', 'job_fetch_time', 'submit_time')
+                'max_workers', 'n_new_workers', 'n_queue_limit_job', 'job_fetch_time', 'submit_time',
+                'n_queue_limit_worker_ratio', 'n_queue_limit_worker_min', 'n_queue_limit_worker_max')
         rows = query(conf, 'SELECT queueName, siteName, jobType, resourceType, nQueueLimitWorker, '
-                           'maxWorkers, nNewWorkers, nQueueLimitJob, jobFetchTime, submitTime FROM pq_table')
+                           'maxWorkers, nNewWorkers, nQueueLimitJob, jobFetchTime, submitTime, '
+                           'nQueueLimitWorkerRatio, nQueueLimitWorkerMin, nQueueLimitWorkerMax FROM pq_table')
         out['launch_limits'] = [dict(zip(cols, r)) for r in rows]
     except Exception as exc:                                  # noqa: BLE001
         out['launch_limits'] = {'error': '{}: {}'.format(exc.__class__.__name__, exc)}
@@ -416,6 +418,22 @@ def harvester_db(since, until, cache):
         out['workers_now'] = now
     except Exception as exc:                                  # noqa: BLE001
         out['workers_now'] = {'error': '{}: {}'.format(exc.__class__.__name__, exc)}
+
+    try:
+        rows = query(conf, "SELECT computingSite, COUNT(*) FROM work_table "
+                           "WHERE startTime > '{}' AND startTime <= '{}' GROUP BY 1".format(since, until))
+        out['workers_started'] = {site: int(n) for site, n in rows}
+        for site in out.get('workers_now', {}):
+            out['workers_started'].setdefault(site, 0)
+    except Exception as exc:
+        out['workers_started'] = {'error': '{}: {}'.format(exc.__class__.__name__, exc)}
+
+    try:
+        rows = query(conf, "SELECT mainKey, lastUpdate FROM cache_table WHERE mainKey IN "
+                           "('job_statistics.json','job_statistics_new.json','panda_queues.json')")
+        out['cache_updates'] = dict(rows)
+    except Exception as exc:
+        out['cache_updates'] = {'error': '{}: {}'.format(exc.__class__.__name__, exc)}
 
     try:
         out['workers_ended'] = workers_ended(conf, since, until)
@@ -523,7 +541,7 @@ def not_finished(conf, until, cache):
 def collect(state):
     """The record this run delivers; ``state`` is advanced in place."""
     started = time.time()
-    record = {'host': HOST, 'collected_at': now_iso(), 'reporter_version': '1.2'}
+    record = {'host': HOST, 'collected_at': now_iso(), 'reporter_version': '1.3'}
     positions = state.setdefault('positions', {})
     last_run = state.get('last_run_at')
     first_run = not last_run

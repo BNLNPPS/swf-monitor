@@ -25,6 +25,7 @@ from django.db import connections
 from django.utils import timezone
 
 from .constants import PANDA_SCHEMA
+from swf_epicprod.regulation import CAPACITY_POOLS
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ FAST_FAILURE_FLOOR_S = 20 * 60
 # in the window: one fast trial job read a p90 start latency of 0.04 h at
 # UM_GREX_PanDA_1 (2026-09-30). Below it the queue reads uncalibrated.
 CALIBRATION_MIN_JOBS = 20
-CALIBRATION_CACHE_KEY = 'panda:queue-census:calibration:v3'
+CALIBRATION_CACHE_KEY = 'panda:queue-census:calibration:v4'
 CALIBRATION_TTL_S = 3600
 # JEDI task statuses that end a task (as monitor_app.snapper_panda reads them).
 TASK_TERMINAL_STATUSES = ('done', 'finished', 'failed', 'broken', 'aborted',
@@ -115,7 +116,7 @@ def _ungenerated():
             FROM "{PANDA_SCHEMA}"."jedi_tasks" t
             JOIN "{PANDA_SCHEMA}"."jedi_datasets" d ON d."jeditaskid" = t."jeditaskid"
             WHERE t."processingtype" = 'epicproduction'
-              AND (t."status" IS NULL OR t."status" NOT IN ({placeholders}))
+              AND (t."status" IS NULL OR t."status" NOT IN ({placeholders}, 'paused'))
               AND d."type" IN ('input', 'pseudo_input') AND d."masterid" IS NULL
             GROUP BY 1, 2
         ) per_task
@@ -144,6 +145,10 @@ def _calibration():
           AND "starttime" IS NOT NULL AND "endtime" > NOW() - INTERVAL %s
         GROUP BY 1
     """
+    pool_unions = ''.join(' UNION ALL SELECT %s, t, d FROM ev WHERE s = ANY(%s)'
+                          for _ in CAPACITY_POOLS)
+    pool_params = [value for pool, members in CAPACITY_POOLS.items()
+                   for value in (f'pool:{pool}', list(members))]
     peak_sql = f"""
         WITH ev AS (
             SELECT "computingsite" AS s, "starttime" AS t, 1 AS d
@@ -157,13 +162,13 @@ def _calibration():
             SELECT "computingsite", "starttime", 1
             FROM "{PANDA_SCHEMA}"."jobsactive4"
             WHERE "jobstatus" IN ('running', 'starting') AND "starttime" IS NOT NULL
-        )
+        ), expanded AS (SELECT * FROM ev {pool_unions})
         SELECT s, MAX(run) FROM (
             SELECT s, SUM(d) OVER (PARTITION BY s ORDER BY t, d ROWS UNBOUNDED PRECEDING) AS run
-            FROM ev) x
+            FROM expanded) x
         GROUP BY s
     """
-    out = {}
+    out, pools = {}, {}
     with connections['panda'].cursor() as cursor:
         cursor.execute(walltime_sql, [days])
         for site, n, med, p90, start_p90 in cursor.fetchall():
@@ -176,11 +181,14 @@ def _calibration():
                 'p90_start_latency_h': (round(float(start_p90) / 3600.0, 2)
                                         if start_p90 is not None else None),
             })
-        cursor.execute(peak_sql, [days, days])
+        cursor.execute(peak_sql, [days, days] + pool_params)
         for site, peak in cursor.fetchall():
-            out.setdefault(str(site), {})['peak_running'] = int(peak or 0)
+            if str(site).startswith('pool:'):
+                pools[str(site)[5:]] = int(peak or 0)
+            else:
+                out.setdefault(str(site), {})['peak_running'] = int(peak or 0)
     return {'built_at': timezone.now().isoformat(), 'days': CALIBRATION_DAYS,
-            'queues': out}
+            'queues': out, 'pools': pools}
 
 
 def calibration(refresh=False):
@@ -195,13 +203,10 @@ def calibration(refresh=False):
 
 
 def _explained_tasks():
-    """{jeditaskid: finding id} of the tasks whose failures a finding
-    explains (monitor_app.segfaults.finding_task_ids); empty, and logged,
-    when the findings cannot be read, so the window then counts every
-    failure as before."""
+    """Failure-scoped rules; unreadable findings exempt no failures."""
     try:
-        from monitor_app.segfaults import finding_task_ids
-        return finding_task_ids()
+        from monitor_app.segfaults import finding_failure_rules
+        return finding_failure_rules()
     except Exception:  # noqa: BLE001
         logger.exception('census: findings unreadable; the gate window counts every failure')
         return {}
@@ -209,31 +214,35 @@ def _explained_tasks():
 
 def _gate_window(calib_queues):
     """Per queue over the last GATE_HOURS hours: finished and failed
-    production jobs, and the failures that died fast. A failure of a task
-    a finding explains (a crash or memory kill the catalog attributes to
-    the task) says nothing about the queue: it is counted apart as
-    explained, with the findings that explain it, and not as failed."""
+    production jobs, and the failures that died fast. Only failures matching a finding in task, failure mechanism or exit code,
+    and payload stage count as explained. Other failures of the same task
+    remain in the queue gate."""
+    from monitor_app.segfaults import memory_kill_sql, matching_failure_finding
+    memory_sql, memory_params = memory_kill_sql()
     rows = []
     with connections['panda'].cursor() as cursor:
         cursor.execute(f"""
             SELECT "computingsite", "jobstatus",
-                   EXTRACT(EPOCH FROM ("endtime" - "starttime")), "jeditaskid"
-            FROM "{PANDA_SCHEMA}"."jobsarchived4"
+                   EXTRACT(EPOCH FROM ("endtime" - "starttime")), "jeditaskid",
+                   {memory_sql}, COALESCE(NULLIF(j."exeerrorcode", 0)::text, j."transexitcode"),
+                   substring(j."jobmetrics" from 'payloadStage=([A-Za-z_]+)')
+            FROM "{PANDA_SCHEMA}"."jobsarchived4" j
             WHERE "processingtype" = 'epicproduction'
               AND "endtime" > NOW() - INTERVAL %s
               AND "jobstatus" IN ('finished', 'failed')
-        """, [f"{GATE_HOURS} hours"])
+        """, memory_params + [f"{GATE_HOURS} hours"])
         rows = cursor.fetchall()
     explained = _explained_tasks()
     out = {}
-    for site, status, seconds, task in rows:
+    for site, status, seconds, task, memory, exit_code, stage in rows:
         site = str(site)
         g = out.setdefault(site, {'finished': 0, 'failed': 0, 'fast_failed': 0,
                                   'explained': 0, 'explained_by': []})
         if status == 'finished':
             g['finished'] += 1
             continue
-        fid = explained.get(int(task)) if task is not None else None
+        fid = matching_failure_finding(explained.get(int(task), []),
+                                        memory=memory, exit_code=exit_code, stage=stage) if task is not None else None
         if fid:
             g['explained'] += 1
             if fid not in g['explained_by']:
@@ -300,6 +309,26 @@ def queue_census(refresh=False):
                 'useful_rate_per_h': round(g['finished'] / GATE_HOURS, 2),
             },
         }
+    for pool, members in CAPACITY_POOLS.items():
+        present = [queues[q] for q in members if q in queues]
+        ceiling = max(int((calib.get('pools') or {}).get(pool, 0)),
+                      sum(q['running'] for q in present))
+        runnable_h = ungenerated_h = 0.0
+        calibrated = ceiling > 0
+        for q in present:
+            med = q['calibration']['median_walltime_h']
+            if (q['not_started'] or q['ungenerated']) and not med:
+                calibrated = False
+            if med and ceiling:
+                runnable_h += q['not_started'] * med / ceiling
+                ungenerated_h += q['ungenerated'] * med / ceiling
+        for q in present:
+            q['capacity_pool'] = pool
+            q['ceiling'] = ceiling
+            q['hours_at_capacity'] = (round(q['not_started'] * q['calibration']['median_walltime_h'] / ceiling, 2)
+                                      if ceiling and q['calibration']['median_walltime_h'] else None)
+            q['pool_runnable_h'] = round(runnable_h, 2) if calibrated else None
+            q['pool_ungenerated_h'] = round(ungenerated_h, 2) if calibrated else None
     return {
         'observed_at': observed_at.isoformat(),
         'calibration_built_at': calib.get('built_at'),

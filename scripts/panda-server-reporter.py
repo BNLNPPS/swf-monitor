@@ -410,11 +410,31 @@ def save_state(state_dir, state):
         print('could not save state: {}'.format(exc), file=sys.stderr)
 
 
+def jedi_regulation():
+    """Bounded tail of runtime evidence emitted after the regulator's checks."""
+    path = os.path.join(LOG_DIR, 'panda-EpicProdJobThrottler.log')
+    voices = {}
+    try:
+        with open(path, 'rb') as handle:
+            handle.seek(0, os.SEEK_END)
+            handle.seek(max(0, handle.tell() - 1024 * 1024))
+            lines = handle.read().decode('utf-8', 'replace').splitlines()
+        for line in lines:
+            match = re.search(r'REGULATION_OK vo=(wlcg|epic) mode=throttle lock=true exclusions=true decision=(PASS|SKIP)', line)
+            stamp = re.search(r'\d{4}-\d\d-\d\d[ T]\d\d:\d\d:\d\d', line)
+            if match and stamp:
+                voices[match.group(1)] = {'at': stamp.group().replace(' ', 'T') + 'Z',
+                                          'decision': match.group(2)}
+        return {'voices': voices}
+    except OSError as exc:
+        return {'error': str(exc), 'voices': voices}
+
+
 def collect(state):
     """The record this run delivers; ``state`` is advanced in place."""
     started = time.time()
     record = {'host': HOST, 'collected_at': now_iso(),
-              'reporter_version': '1.0'}
+              'reporter_version': '1.1'}
     positions = state.setdefault('positions', {})
     last_run = state.get('last_run_at')
     first_run = not last_run
@@ -437,6 +457,7 @@ def collect(state):
     record['services'] = services()
     record['processes'] = processes()
     record['database'] = database()
+    record['jedi_regulation'] = jedi_regulation()
     record['health'] = host_state()
     record['collect_seconds'] = round(time.time() - started, 2)
     state['last_run_at'] = record['collected_at']

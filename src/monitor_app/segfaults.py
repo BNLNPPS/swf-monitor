@@ -1784,6 +1784,41 @@ def findings(*, name=None, version=None, include_history=False):
     return entries, ''
 
 
+def finding_failure_rules():
+    """Findings scoped to their task, failure mechanism and payload stage."""
+    out = defaultdict(list)
+    for entry in finding_entries():
+        fid = finding_id((entry.data or {}).get('serial')) or entry.name
+        keys = (entry.data or {}).get('signatures') or [entry.name]
+        signatures = list(CrashSignature.objects.filter(key__in=keys))
+        for sig in list(signatures):
+            if sig.level == 'trace':
+                signatures.extend(CrashSignature.objects.filter(
+                    key__in=(sig.data or {}).get('members', [])))
+        for sig in signatures:
+            if sig.level == 'trace':
+                continue
+            for task in sig.tasks or []:
+                if task.get('jeditaskid'):
+                    out[int(task['jeditaskid'])].append({
+                        'fid': fid, 'memory': is_memory(sig), 'exit_code': sig.exit_code,
+                        'stage': stage_label((sig.data or {}).get('stage'))})
+    return dict(out)
+
+
+def matching_failure_finding(rules, *, memory, exit_code, stage):
+    """A finding never exempts another failure mode of the same task."""
+    for rule in rules:
+        if rule['stage'] and rule['stage'] != stage_label(stage):
+            continue
+        if rule['memory']:
+            if memory:
+                return rule['fid']
+        elif not memory and str(exit_code) == str(rule['exit_code']):
+            return rule['fid']
+    return None
+
+
 def finding_task_ids():
     """{jeditaskid: finding id} for every PanDA task whose failures a
     finding explains: the tasks of each catalog signature a finding names

@@ -263,3 +263,7 @@ front page (`panda/front/`) and every storage element to the storage
 doors page (`panda/storage-doors/`). All links are on the public face
 (`https://epic-devcloud.org/prod/...`), and each was checked to answer
 200 there on 2026-10-21.
+
+## Regulation telemetry, 22 October 2026
+
+The 22 October regulation correction reads fixed ratio-zero waiting limits from the fresh Harvester database report. Ratio-derived limits need a fresh adjuster observation. Missing or stale pilot evidence is amber when work waits, so another green component cannot conceal missing protection. The scheduled production notifier evaluates this record independently of browser requests.

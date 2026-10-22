@@ -100,3 +100,7 @@ reporter.
   [OSG_SUBMIT_REPORTER.md](OSG_SUBMIT_REPORTER.md) — the other host reporters.
 - [PRODUCTION_DEPLOYMENT.md](PRODUCTION_DEPLOYMENT.md) § SSL/TLS — the
   2026-10-02 certificate outage.
+
+## Regulation telemetry, 22 October 2026
+
+Version 1.3 adds actual worker starts, job-demand cache update times, and the ratio/minimum/maximum fields of the worker limit. OSG reporting runs every minute; other hosts keep their existing cadence.

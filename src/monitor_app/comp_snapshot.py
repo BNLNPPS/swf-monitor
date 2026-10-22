@@ -46,7 +46,7 @@ DEFAULT_SITES = [
 ]
 
 # GREX runs eight pilots per Slurm worker (2026-10-20).
-PILOTS_PER_WORKER = {'UM_GREX_PanDA_1': 8}
+from swf_epicprod.regulation import PILOTS_PER_WORKER
 OSG_SUBMIT_HOST = 'osgsub01'
 # The harvester reporters (docs/HARVESTER_REPORTER.md); each record names
 # the queues its harvester serves. osgsub01's own key is the OSG submit
@@ -87,22 +87,40 @@ def _activity_part(finished, failed):
                  f'{finished} finished, {failed} failed in the last hour')
 
 
+def effective_waiting_limit(config, applied, now):
+    """A fixed DB limit is authoritative; a ratio-derived log value expires."""
+    config = config or {}
+    try:
+        if int(config['n_queue_limit_worker_ratio']) == 0:
+            return int(config['n_queue_limit_worker'])
+    except (KeyError, ValueError, TypeError):
+        pass
+    try:
+        from datetime import datetime
+        at = datetime.fromisoformat(applied['at'].replace('Z', '+00:00'))
+        if 0 <= (now - at).total_seconds() <= REPORT_STALE_SECONDS:
+            return int(applied['queue_limit'])
+    except (KeyError, ValueError, TypeError):
+        pass
+    return None
+
+
 def _pilot_supply_part(p, queued, started_1h, submitted_1h):
     """Whether pilots keep reaching the queue (docs/COMP_SNAPSHOT.md, Pilot
     supply). Harvester holds new pilots back against its own count of
     those waiting, so a count the schedd no longer bears out stops supply
     while the queue reads full."""
     if not p:
-        return _part('grey', None, 'no harvester report names the queue')
+        return _part('amber' if queued else 'grey', None, 'no harvester report names the queue')
     age = p.get('report_age_seconds')
     if age is None or age > REPORT_STALE_SECONDS:
-        return _part('grey', None, f"harvester report {int((age or 0) // 60)} min old")
+        return _part('amber' if queued else 'grey', None, f"harvester report {int((age or 0) // 60)} min old")
     waiting, limit = p['waiting'], p.get('limit')
     if queued and not waiting and not started_1h and not submitted_1h:
         return _part('red', 0, f"{queued} jobs queued, no pilot waiting, submitted "
                                f"or started in the last hour")
     if limit is None:
-        return _part('grey', waiting, f"harvester counts {waiting} waiting; the limit "
+        return _part('amber' if queued else 'grey', waiting, f"harvester counts {waiting} waiting; the limit "
                                       f"it applies is not reported")
     seen = f"harvester counts {waiting} waiting (its limit {limit})"
     idle = p.get('waiting_schedd')
@@ -243,14 +261,17 @@ class _Build:
             # the limit harvester applied, from its adjuster log; pq_table's
             # n_queue_limit_worker is only the cap it is computed under
             applied = (record.get('adjustment') or {}).get('queues') or {}
-            for q in set(now) | set(applied):
+            limits = {r['queue']: r for r in (record.get('harvester_db') or {}).get('launch_limits', [])
+                      if isinstance(r, dict) and 'queue' in r}
+            for q in set(now) | set(applied) | set(limits):
                 w = now.get(q) or {}
                 a = applied.get(q) or {}
+                limit = effective_waiting_limit(limits.get(q), a, self.now)
                 out[q] = {
                     # harvester's idle is a pilot evicted back to waiting
                     'waiting': int(w.get('submitted') or 0) + int(w.get('idle') or 0),
                     'waiting_schedd': None,
-                    'limit': a.get('queue_limit'),
+                    'limit': limit,
                     'limit_at': a.get('at'),
                     'running': int(w.get('running') or 0),
                     'per_slot': PILOTS_PER_WORKER.get(q, 1),
