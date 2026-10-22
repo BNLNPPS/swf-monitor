@@ -351,8 +351,9 @@ is behind the login wall; they name tasks, queues, nodes and errors and
 carry no credential.
 
 The screen shows the title and gives the detail on hover. The title says
-what happened and where in a few words: the execute site for a node
-guard decision (`Node guard · ComputeCanada-Fir`), the task for a task
+what happened and where in a few words: for a node guard decision its
+number on the queue's blacklist and the execute site (`Node guard 6 ·
+ComputeCanada-Fir`), so nodes at one site read apart; the task for a task
 operation (`Move · task 40857`), else the site, storage element, queue
 or configuration the record names. The detail is the informative
 message, concise. For a node guard decision it is the decision record's

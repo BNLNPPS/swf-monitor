@@ -71,6 +71,8 @@ def board_text(message, extra):
     label = BOARD_LABELS.get(action) or action.replace('_', ' ').capitalize()
     if action == 'node_guard_decision':
         where = extra.get('site') or extra.get('queue')
+        if extra.get('queue_rank'):
+            label = f"{label} {extra['queue_rank']}"
         return (f'{label} · {where}' if where else label), node_guard_text(extra)
     if action == 'panda_task_operation':
         op = str(extra.get('operation') or '')
