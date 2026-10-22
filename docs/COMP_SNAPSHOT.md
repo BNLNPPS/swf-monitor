@@ -60,7 +60,7 @@ sites[]           {id, name, status, capacity, capacity_source, in_use,
                    finished_core_h_1h, failed_core_h_1h,
                    front: {state, reason, feed},
                    health, links}
-  execute_sites[] {id, name, running, finished_1h, failed_1h,
+  execute_sites[] {id, name, short, running, finished_1h, failed_1h,
                    capacity, capacity_source, in_use,
                    finished_core_h_1h, failed_core_h_1h, health,
                    links: {jobs}}
@@ -351,19 +351,20 @@ is behind the login wall; they name tasks, queues, nodes and errors and
 carry no credential.
 
 The screen shows the title and gives the detail on hover. The title says
-what happened and where in a few words: for a node guard decision its
-number on the queue's blacklist and the execute site (`Node guard 6 ·
-ComputeCanada-Fir`), so nodes at one site read apart; the task for a task
-operation (`Move · task 40857`), else the site, storage element, queue
-or configuration the record names. The detail is the informative
-message, concise. For a node guard decision it is the decision record's
-own message: the node's number on its queue's blacklist, in exclusion
-order (`node_guard.exclusion_ranks`), the node and its site, the reason
-and the evidence:
+what happened and where in a few words, names in their short form
+(`monitor_app/short_names.py`, the one filter for concise settings): for
+a node guard decision the execute site and the node's number on its
+queue's blacklist, in exclusion order (`Fir node guard 6`,
+`node_guard.exclusion_ranks`), so nodes at one site read apart; the task
+for a task operation (`Move · task 40857`), else the site, storage
+element, queue or configuration the record names. The detail is the
+informative message, concise. For a node guard decision it is the
+decision record's own message: the guard, its queue, the node, the
+reason and the evidence:
 
-    Node guard 6 on BNL_OSG_PanDA_1: fc20513 at ComputeCanada-Fir. Kills
-    jobs at a fixed run time, ~109 min (memory or slot limit): 12/12
-    failed in 4 h; tasks 40958, 40970 run fine elsewhere.
+    Fir node guard 6 on BNL_OSG_PanDA_1: fc20513. Kills jobs at a fixed
+    run time, ~109 min (memory or slot limit): 12/12 failed in 4 h;
+    tasks 40958, 40970 run fine elsewhere.
 
 For a task operation it is the task and the operation's reading;
 otherwise the record's reason led by its subject. Both come from

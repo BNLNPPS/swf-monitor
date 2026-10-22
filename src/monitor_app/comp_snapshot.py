@@ -17,6 +17,8 @@ from urllib.parse import quote
 from django.db import connections
 from django.utils import timezone
 
+from monitor_app.short_names import short_name
+
 logger = logging.getLogger(__name__)
 
 PRODUCT_KEY = 'comp_snapshot:v1'
@@ -397,6 +399,7 @@ class _Build:
             out.append({
                 'id': re.sub(r'[^a-z0-9]+', '-', label.lower()).strip('-'),
                 'name': label,
+                'short': short_name(label),
                 'running': r_jobs,
                 'finished_1h': e['finished'], 'failed_1h': e['failed'],
                 'capacity': None, 'capacity_source': None,

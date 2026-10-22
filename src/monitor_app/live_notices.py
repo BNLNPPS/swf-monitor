@@ -7,6 +7,8 @@ only outstanding automated failures, not a second incident archive.
 import json
 import re
 
+from monitor_app.short_names import short_name
+
 
 STATE_KEY = 'epicprod_live_failures'
 ROUTINE_SUCCESSES = frozenset({
@@ -70,18 +72,15 @@ def board_text(message, extra):
     action = str(extra.get('action') or '')
     label = BOARD_LABELS.get(action) or action.replace('_', ' ').capitalize()
     if action == 'node_guard_decision':
-        where = extra.get('site') or extra.get('queue')
-        if extra.get('queue_rank'):
-            label = f"{label} {extra['queue_rank']}"
-        return (f'{label} · {where}' if where else label), node_guard_text(extra)
+        return _node_guard_name(extra), node_guard_text(extra)
     if action == 'panda_task_operation':
         op = str(extra.get('operation') or '')
         task = extra.get('task_name') or f"task {extra.get('subject_key')}"
         return (f"{OPERATION_LABELS.get(op, op.capitalize() or label)} · "
                 f"task {extra.get('subject_key')}",
                 f"{task}: {extra.get('reason') or message}")
-    where = (extra.get('site') or extra.get('rse') or extra.get('queue')
-             or extra.get('subject_label'))
+    where = short_name(extra.get('site') or extra.get('rse') or extra.get('queue')
+                       or extra.get('subject_label'))
     if not where:
         tags = CONFIG_TAGS.search(str(extra.get('subject_key') or ''))
         where = tags.group(1) if tags else ''
@@ -92,24 +91,31 @@ def board_text(message, extra):
     return (f'{label} · {where}' if where else label), detail
 
 
+def _node_guard_name(f):
+    """'Fir node guard 6': the site's short name and the node's number on
+    its queue's blacklist, where known."""
+    site = short_name(f.get('site') or f.get('queue'))
+    name = f'{site} node guard' if site else 'Node guard'
+    return f"{name} {f['queue_rank']}" if f.get('queue_rank') else name
+
+
 def node_guard_text(f):
     """A node guard decision, concisely: which guard on the queue, the node
     and its site, why, and the evidence. The decision record's message and
     the screen's detail.
 
-    Node guard 6 on BNL_OSG_PanDA_1: fc20513 at ComputeCanada-Fir. Kills
-    jobs at a fixed run time, ~109 min (memory or slot limit): 12/12 failed
-    in 4 h; tasks 40958, 40970 run fine elsewhere.
+    Fir node guard 6 on BNL_OSG_PanDA_1: fc20513. Kills jobs at a fixed run
+    time, ~109 min (memory or slot limit): 12/12 failed in 4 h; tasks
+    40958, 40970 run fine elsewhere.
     """
-    host, site, queue = f.get('host'), f.get('site'), f.get('queue')
+    host, site, queue = f.get('host'), short_name(f.get('site')), f.get('queue')
     state = str(f.get('state') or '')
-    node = f'{host} at {site}' if site else str(host)
     reason = f.get('reason')
     why = NODE_REASONS.get(reason, str(reason or '').replace('_', ' '))
     if state != 'excluded':
+        node = f'{host} at {site}' if site else str(host)
         return f"{node}: {state.replace('_', ' ')} on {queue}" + (f' ({why}).' if why else '.')
-    rank = f.get('queue_rank')
-    text = f"Node guard{f' {rank}' if rank else ''} on {queue}: {node}."
+    text = f'{_node_guard_name(f)} on {queue}: {host}.'
     died = (f.get('failed_duration_s') or {}).get('median')
     if reason == 'fixed_time' and died:
         why += f', ~{round(died / 60)} min (memory or slot limit)'

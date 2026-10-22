@@ -173,6 +173,11 @@ page template:
   via `{% load swf_fmt %}` and
   `<td class="{{ value|state_class }}">{{ value }}</td>` (or
   `task_badge`/`job_badge` for badge form). Never a bare status cell.
+- **Short names**: a concise setting (the computing-centre floor, board
+  lines, compact tables, titles) shows a site, queue or resource name
+  through the one filter, `{{ name|short }}` in templates or
+  `monitor_app.short_names.short_name` in code (ComputeCanada-Fir reads
+  Fir). A new abbreviation is added there, never in a page or view.
 - **Names and fields**: do not wrap human-facing names, identifiers, field
   paths, policies, publishers, or resolvers in `<code>`. The active theme
   renders code text red, which signals an error. Use a descriptive title and,
