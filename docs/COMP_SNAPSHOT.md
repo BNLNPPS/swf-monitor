@@ -516,3 +516,17 @@ and assessment links on 2026-10-22.
 ## Regulation telemetry, 22 October 2026
 
 The 22 October regulation correction reads fixed ratio-zero waiting limits from the fresh Harvester database report. Ratio-derived limits retain the last applied adjuster observation, with its timestamp and `limit_source: adjuster`; the health note calls this the last applied limit. The adjuster skips that log line while the waiting queue is full, so an old event timestamp alone does not invalidate the value. The enclosing report must still be fresh, and a failed adjuster-log read is degraded. A limit never observed remains unknown. Missing or stale pilot evidence is amber when work waits, so another green component cannot conceal missing protection. The scheduled production notifier evaluates this record independently of browser requests.
+
+### JLab commissioning evidence
+
+While JLAB_PanDA_1 is not live, its reason and health come from the PanDA
+Harvester worker record: statuses of workers submitted in the preceding
+48 hours, plus the latest worker and diagnostic. Failed or cancelled
+workers show red even before any PanDA payload starts. An unavailable
+query says unknown and shows amber. The former static claim that JLab's
+CE had not routed jobs was false and was removed on 22 October 2026.
+Other queue status policies are unchanged. Worker start/end timestamps
+are not used to infer runtime: Harvester can stamp them when discovering
+an already finished worker. The 48-hour failure history can remain red
+after a successful commissioning probe; the latest worker is stated
+separately, and admission to production remains an operator decision.

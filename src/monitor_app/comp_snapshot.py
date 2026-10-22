@@ -46,8 +46,7 @@ DEFAULT_SITES = [
      'queues': [{'id': 'BNL_ePIC_GOOGLE', 'status': 'off'},
                 {'id': 'BNL_ePIC_GOOGLE_es', 'status': 'off'}]},
     {'id': 'jlab', 'name': 'JLab',
-     'queues': [{'id': 'JLAB_PanDA_1', 'status': 'off',
-                 'status_reason': "waiting for JLab's CE to route our jobs"}]},
+     'queues': [{'id': 'JLAB_PanDA_1', 'status': 'off'}]},
 ]
 
 # GREX runs eight pilots per Slurm worker (2026-10-20).
@@ -376,6 +375,34 @@ class _Build:
         sql = f'''SELECT panda_queue, data->>'status' FROM "{self.S}"."schedconfig_json"
                   WHERE panda_queue = ANY(%s)'''
         return {q: (st or '') for q, st in _rows(sql, (list(names),))}
+
+    def jlab_worker_outcomes(self):
+        """Commissioning evidence, including failures before a pilot gets a job.
+
+        Harvester can stamp starttime when it discovers a finished worker, so
+        this deliberately reports statuses, not inferred starts or runtimes.
+        """
+        rows = _rows(f'''SELECT status, COUNT(*)
+                        FROM "{self.S}"."harvester_workers"
+                        WHERE computingsite = %s AND submittime >= %s
+                        GROUP BY status''',
+                     ('JLAB_PanDA_1', self.now - timedelta(hours=48)))
+        counts = {status: int(n) for status, n in rows}
+        latest = _rows(f'''SELECT workerid, status, diagmessage, submittime
+                          FROM "{self.S}"."harvester_workers"
+                          WHERE computingsite = %s ORDER BY submittime DESC LIMIT 1''',
+                       ('JLAB_PanDA_1',))
+        last = latest[0] if latest else None
+        detail = ', '.join(f'{n} {status}' for status, n in sorted(counts.items()))
+        reason = f'commissioning; workers submitted in 48 h: {detail or "none"}'
+        if last:
+            reason += f'; latest worker {last[0]}: {last[1]}'
+            if last[2]:
+                reason += f' ({str(last[2])[:240]})'
+        return {'counts_48h': counts, 'latest_worker': last[0] if last else None,
+                'latest_submitted_at': last[3].isoformat() if last and last[3] else None,
+                'reason': reason,
+                'level': 'red' if counts.get('failed') or counts.get('cancelled') else 'grey'}
 
     def front_decisions(self, names):
         from monitor_app.models import AppLog
@@ -813,6 +840,8 @@ def build():
     decisions = b.part('front', lambda: b.front_decisions(names), {})
     pool = b.part('osg_pool', b.osg_pool, None)
     pilots = b.part('pilots', b.pilots, {})
+    jlab_workers = (b.part('jlab_workers', b.jlab_worker_outcomes, None)
+                    if 'JLAB_PanDA_1' in names else None)
 
     sites = []
     for s in sites_cfg:
@@ -830,6 +859,9 @@ def build():
             in_panda = q in pandastatus
             status = qc.get('status') or ('live' if in_panda else 'not_built')
             reason = qc.get('status_reason') or ('' if in_panda else 'not in PanDA')
+            if q == 'JLAB_PanDA_1' and status != 'live':
+                reason = (jlab_workers or {}).get('reason',
+                           'commissioning; worker status unavailable')
 
             # capacity, best source first
             capacity, source = None, None
@@ -866,6 +898,9 @@ def build():
                                   'snapper_errors': snap, 'pilot_supply': supply})
             else:
                 health = _health({'status': _part('grey', status, reason or status)})
+                if q == 'JLAB_PanDA_1':
+                    health = _health({'status': _part(
+                        (jlab_workers or {}).get('level', 'amber'), status, reason)})
 
             queues.append({
                 'id': q, 'name': qc.get('name') or q,
