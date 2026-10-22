@@ -64,9 +64,18 @@ sites[]           {id, name, status, capacity, capacity_source, in_use,
                    capacity, capacity_source, in_use,
                    finished_core_h_1h, failed_core_h_1h, health,
                    links: {jobs}}
-storage[]         {id, name, holds, health, links}
+storage[]         {id, name, holds, status, counts,
+                   arrived_1h, bytes_1h, events_1h, arrived_by_kind_1h,
+                   failed_1h, pending, pending_parts, pending_at,
+                   latest_arrival_s, by_site[], capacity, rses[],
+                   health, links}
+  by_site[]       {site, arrived_1h, bytes_1h, failed_1h}
+  capacity        {rse, used_bytes, limit_bytes, fraction, as_of}
+  rses[]          {id, name, type, used_bytes, limit_bytes, fraction,
+                   files, as_of}
 report            {text, items: [{level, text, link}],
-                   assessment: {verdict, at, link}}
+                   assessment: {verdict, level, at, link, campaign,
+                                title, narration}}
 errors[]          {part, error}
 ```
 
@@ -221,25 +230,82 @@ has the `prod_activity` part only.
 
 ### Storage
 
-The E1s' Rucio storage, with health only (no volume yet):
+The E1s' Rucio storage, reported as the queues are: what arrived in the
+last hour, what did not, what is still owed, and the capacity.
 
-| id | name | holds |
-|---|---|---|
-| `jlab-rucio` | JLab Rucio | science data |
-| `bnl-rucio` | BNL Rucio | logs |
+| id | name | holds | counts |
+|---|---|---|---|
+| `jlab-rucio` | JLab Rucio | science data | files |
+| `bnl-rucio` | BNL Rucio | logs | logs |
 
-Parts for `jlab-rucio`:
+`counts` names the unit of the counts. Production tasks register their
+science outputs in JLab Rucio themselves, so PanDA's file table holds
+none of them; the only file PanDA stages for a production job is the
+pilot's log tarball, registered in BNL Rucio
+(swf-epicprod LOG_STAGEOUT_FALLBACK.md).
 
-- `registration`: jobs that ended in the last hour whose output
-  registration failed or went to the failover stash, from the payload's
-  job metrics.
-- `latest_arrival`: the age of the newest file registered at JLab, from
-  the storage record.
+For `jlab-rucio`, from the payload reports of the last hour's finished
+production jobs (the PanDA metatable, swf-epicprod
+EPICPROD_PAYLOAD.md):
 
-Parts for `bnl-rucio`:
+- `arrived_1h`: the files the jobs registered, each DID the report's
+  registration lists. A clash registered under a derived name (outcome
+  `diverted`, swf-epicprod RUCIO_RESILIENCE.md, Measure 3) is a
+  registered file.
+- `bytes_1h`, `events_1h`: the bytes and events of those files, from
+  the report's outputs joined to the DIDs by file name. A file
+  registered under a derived name matches no output and adds no bytes.
+- `arrived_by_kind_1h`: the files by output kind (`reco`, `full`, an
+  internal EVGEN task's own kind), `other` for a derived name.
+- `failed_1h`: jobs whose registration did not complete (`pending` or
+  `unfinished`); the registrar completes a pending registration later.
+- `pending`: the files owed the catalog now, the sum of
+  `pending_parts`: `stash`, the failover stash's entries not yet home
+  (the drain's record, cached product `stash_state`,
+  RUCIO_FAILOVER_STASH.md), and `registrar`, the registrations the
+  registrar's last pass deferred (its action record). The drain runs
+  every 30 minutes and the registrar hourly; `pending_at` is the older
+  of the two passes.
+- `capacity`: the production output RSE, BNL-XRD, which every
+  production configuration names as its output RSE; `rses[]`: every
+  JLab RSE. Both are from the latest storage component
+  (swf-epicprod STORAGE.md, per RSE capacity), refreshed every four
+  hours: the production account's usage, its limit and the fraction,
+  with the usage record's time. On 2026-10-22 BNL-XRD held 582.6 TB
+  against a limit of 750 TB.
+
+For `bnl-rucio`, from the PanDA job and file tables over the jobs that
+ended in the last hour:
+
+- `arrived_1h`, `bytes_1h`: the logs registered and their bytes. A
+  failed job's log is registered too: PanDA marks every file of a failed
+  job failed, but the log is at BNL_PROD_DISK_1 (checked on
+  2026-10-22). Only a job failed at log stage-out, or one whose pilot
+  held its log in the stage-out bucket (`logHeld`), has no log there.
+- `failed_1h`: jobs failed at log stage-out.
+- `pending`: logs held in the stage-out bucket and not yet moved into
+  BNL Rucio, from the hourly log-rescue pass's record:
+  `pending_parts.held` over its window less `pending_parts.moved`.
+- `capacity` is `null` and `rses[]` empty: no usage record covers
+  BNL_PROD_DISK_1.
+
+For both, `latest_arrival_s` is the seconds since the newest
+registration, and `by_site[]` splits `arrived_1h`, `bytes_1h` and
+`failed_1h` by the producing site (a `sites[]` id). Each reading is a
+part of its own: one that cannot be read is listed in `errors[]` and its
+fields are `null`.
+
+Health parts for `jlab-rucio`:
+
+- `registration`: the share of the last hour's finished jobs whose
+  registration did not complete; `amber` over 5%, `red` over half.
+- `latest_arrival`: the age of the newest registration; `amber` over 30
+  minutes, `red` over two hours or with none in two days.
+
+Health parts for `bnl-rucio`:
 
 - `log_stageout`: jobs that ended in the last hour with a log stage-out
-  error.
+  error; `amber` from 5, `red` from 50.
 
 The storage-door record's state joins both once the door check leaves
 shadow mode.
@@ -261,9 +327,12 @@ shadow mode.
   page's campaign-assessments row; the verdicts are held by corun-ai,
   which this build does not call). The text before the first ": " names
   what the line is about.
-- `report.assessment`: the latest campaign assessment's verdict, time
-  and link (daily, from the assessment record); `null` until it is
-  wired.
+- `report.assessment`: the newest daily campaign assessment, from its
+  `assessment_register` action record (swf-epicprod
+  EPICPROD_ASSESSMENTS.md): the verdict, the verdict as a health level
+  (`ok` green, `attention` amber, `alarm` red, anything else grey), the
+  registration time, the assessment's page, the campaign, the report
+  title and the narration; `null` when none is registered.
 - `errors[]`: a part that could not be read is listed here and left out
   of the record, never shown as zero.
 
@@ -282,9 +351,18 @@ reported that site (`panda/jobs/?execsite=<site>`). A site's links are
 those of its busiest live queue, for OSG the queue production runs on.
 The pressure front links to the
 front page (`panda/front/`) and every storage element to the storage
-doors page (`panda/storage-doors/`). All links are on the public face
-(`https://epic-devcloud.org/prod/...`), and each was checked to answer
-200 there on 2026-10-21.
+doors page (`panda/storage-doors/`). A storage element's pillars open:
+for `jlab-rucio`, `links.arrived` the Storage view
+(`snapper/epicprod/storage/`) and `links.pending` the stash page
+(`pcs/stash/`), with `links.failed` `null`, since no page lists pending
+registrations; for `bnl-rucio`, `links.arrived` the finished jobs
+(`panda/jobs/?status=finished&days=1`) and `links.failed` the pilot
+errors (`panda/errors/?error_source=pilot&days=1`), with
+`links.pending` `null`, since no page lists held logs. The daily
+assessment links to its own page (`ai/assessments/<campaign>/daily/<date>/`).
+All links are on the public face (`https://epic-devcloud.org/prod/...`),
+and each was checked to answer 200 there on 2026-10-21, the storage
+and assessment links on 2026-10-22.
 
 ## Regulation telemetry, 22 October 2026
 

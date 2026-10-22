@@ -1082,7 +1082,10 @@ async def swf_comp_snapshot(refresh: bool = False) -> dict:
     opened, jobs finished and failed in the last hour, capacity in cores
     with its source, cores in use, finished and failed core-hours, the
     front's decision, health with its parts, links); OSG's execute sites;
-    the JLab and BNL Rucio storage health; a summary report; and the
+    the JLab and BNL Rucio storage (science files and logs registered in
+    the last hour with bytes and events, those not registered, what is
+    still owed, per site, the output RSE's capacity, health, links); a
+    summary report with the newest daily campaign assessment; and the
     parts that could not be read. Served from a cached product refreshed
     behind the request once a minute; refresh=True rebuilds first (about
     15-25 s).

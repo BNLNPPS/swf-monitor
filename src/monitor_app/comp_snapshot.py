@@ -56,6 +56,19 @@ HARVESTER_REPORTS = ('osgsub01-harvester', 'pandaharvester01', 'pandaharvester02
 # The reporters run every five minutes; three missed runs make a record stale.
 REPORT_STALE_SECONDS = 900
 LEVELS = ('grey', 'green', 'amber', 'red')
+# The pilot's log stage-out error codes.
+LOG_STAGEOUT_CODES = (1137, 1151, 1152)
+# The registration outcomes that leave a file owed to JLab Rucio: pending
+# (the registrar completes it) and unfinished. ``diverted`` is a clash
+# registered under a derived name (swf-epicprod RUCIO_RESILIENCE.md,
+# Measure 3), so it is registered.
+REGISTRATION_OWED = ('pending', 'unfinished')
+# The production output RSE: every production configuration names it as
+# OUT_RSE (swf-epicprod RUCIO_FAILOVER_STASH.md).
+OUTPUT_RSE = 'BNL-XRD'
+# A daily assessment's verdict as a health level (swf-epicprod
+# EPICPROD_ASSESSMENTS.md: ok | attention | alarm).
+VERDICT_LEVELS = {'ok': 'green', 'attention': 'amber', 'alarm': 'red'}
 
 
 def _worst(levels):
@@ -153,6 +166,11 @@ def _pilot_supply_part(p, queued, started_1h, submitted_1h):
                          f"pool can start {startable}, under half the limit; harvester "
                          f"has not yet seen its waiting pilots start")
     return _part('green', waiting, seen)
+
+
+def _aware(t):
+    """A PanDA time (naive UTC) made aware."""
+    return timezone.make_aware(t, dt_timezone.utc) if t is not None and timezone.is_naive(t) else t
 
 
 def _rows(sql, params=()):
@@ -383,55 +401,225 @@ class _Build:
             })
         return out
 
-    def storage(self):
+    def science_arrivals(self):
+        """Per queue and output kind, the science files the last hour's
+        finished production jobs registered in JLab Rucio, with their bytes
+        and events: each DID the payload report's registration lists,
+        joined by file name to the output it reports. A clash registered
+        under a derived name (outcome ``diverted``) is a registered file
+        whose name matches no output, so it counts with kind ``other`` and
+        no bytes. PanDA's own file table holds no science output, since
+        production tasks register their outputs themselves."""
         sql = f'''
-            SELECT substring(jobmetrics from 'payloadRegistration=([A-Za-z_]+)'), COUNT(*), MAX(endtime)
+            WITH r AS (
+              SELECT j.computingsite AS site, m.metadata::jsonb -> 'payload' AS p
+              FROM "{self.S}"."metatable" m JOIN "{self.S}"."jobsarchived4" j ON j.pandaid = m.pandaid
+              WHERE j.endtime >= %s AND j.processingtype = 'epicproduction' AND j.jobstatus = 'finished'
+                AND (j.jobmetrics LIKE %s OR j.jobmetrics LIKE %s)),
+            d AS (
+              SELECT r.site, r.p, did FROM r, jsonb_array_elements_text(
+                CASE WHEN jsonb_typeof(r.p -> 'registration' -> 'dids') = 'array'
+                     THEN r.p -> 'registration' -> 'dids' ELSE '[]'::jsonb END) did)
+            SELECT d.site, COALESCE(o.key, 'other'), COUNT(*),
+                   SUM((o.value ->> 'bytes')::bigint), SUM((o.value ->> 'events')::bigint)
+            FROM d LEFT JOIN LATERAL (
+              SELECT o.key, o.value FROM jsonb_each(
+                CASE WHEN jsonb_typeof(d.p -> 'outputs') = 'object'
+                     THEN d.p -> 'outputs' ELSE '{{}}'::jsonb END) o
+              WHERE d.did LIKE '%%/' || (o.value ->> 'file') LIMIT 1) o ON true
+            GROUP BY 1, 2'''
+        out = {}
+        for site, kind, n, nbytes, events in _rows(sql, (self.hour_ago,
+                                                         '%payloadRegistration=registered%',
+                                                         '%payloadRegistration=diverted%')):
+            out.setdefault(site or '', {})[kind] = (int(n), int(nbytes or 0), int(events or 0))
+        return out
+
+    def registration_outcomes(self):
+        """Per queue, the last hour's finished production jobs by the
+        payload's registration outcome (``payloadRegistration``), and the
+        end time of the newest that registered."""
+        sql = f'''
+            SELECT computingsite, substring(jobmetrics from 'payloadRegistration=([A-Za-z_]+)'),
+                   COUNT(*), MAX(endtime)
             FROM "{self.S}"."jobsarchived4"
             WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus = 'finished'
+            GROUP BY 1, 2'''
+        out, last = {}, None
+        for site, outcome, n, end in _rows(sql, (self.hour_ago,)):
+            out.setdefault(site or '', {})[outcome or ''] = int(n)
+            if outcome == 'registered' and end is not None and (last is None or end > last):
+                last = end
+        return out, _aware(last)
+
+    def log_arrivals(self):
+        """Per queue, the log tarballs of the last hour's ended production
+        jobs that reached BNL Rucio, with their bytes, and the jobs that
+        failed at log stage-out. A failed job's log is registered too
+        (PanDA marks every file of a failed job failed, but its log is at
+        BNL_PROD_DISK_1, checked 2026-10-22), so only a job failed at log
+        stage-out, or one whose pilot held its log in the stage-out bucket
+        (``logHeld``), has no log there."""
+        stageout = (f"(j.piloterrorcode IN ({','.join(str(c) for c in LOG_STAGEOUT_CODES)}) "
+                    f"OR j.piloterrordiag ILIKE %s)")
+        missing = f"((j.jobstatus = 'failed' AND {stageout}) OR COALESCE(j.jobmetrics, '') LIKE %s)"
+        sql = f'''
+            SELECT j.computingsite,
+                   SUM(CASE WHEN {missing} THEN 0 ELSE 1 END),
+                   SUM(CASE WHEN {missing} THEN 0 ELSE f.fsize END),
+                   SUM(CASE WHEN j.jobstatus = 'failed' AND {stageout} THEN 1 ELSE 0 END),
+                   MAX(CASE WHEN {missing} THEN NULL ELSE j.endtime END)
+            FROM (
+              SELECT pandaid, computingsite, jobstatus, jobmetrics, piloterrorcode, piloterrordiag, endtime
+                FROM "{self.S}"."jobsarchived4"
+               WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus IN ('finished', 'failed')
+              UNION ALL
+              SELECT pandaid, computingsite, jobstatus, jobmetrics, piloterrorcode, piloterrordiag, endtime
+                FROM "{self.S}"."jobsactive4"
+               WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus IN ('finished', 'failed')) j
+            JOIN "{self.S}"."filestable4" f ON f.pandaid = j.pandaid AND f.type = 'log'
             GROUP BY 1'''
-        reg = {k or '': (int(n), t) for k, n, t in _rows(sql, (self.hour_ago,))}
-        registered = reg.get('registered', (0, None))
-        unsettled = sum(reg.get(k, (0, None))[0] for k in ('unfinished', 'pending', 'diverted'))
-        done = registered[0] + unsettled
-        if done == 0:
-            reg_part = _part('grey', 0, 'no finished jobs in the last hour')
-        else:
-            share = unsettled / done
-            reg_part = _part('red' if share > 0.5 else 'amber' if share > 0.05 else 'green',
-                             round(share, 3),
-                             f'{registered[0]} registered, {unsettled} not registered or diverted to the BNL stash')
+        diag, held = '%stage-out%', '%logHeld=%'
+        rows = _rows(sql, (diag, held, diag, held, diag, diag, held, self.hour_ago, self.hour_ago))
+        out, last = {}, None
+        for site, n, nbytes, failed, end in rows:
+            out[site or ''] = (int(n or 0), int(nbytes or 0), int(failed or 0))
+            if end is not None and (last is None or end > last):
+                last = end
+        return out, _aware(last)
+
+    def latest_finished(self, metrics_like, negate=False):
+        """The end time of the newest finished production job in two days
+        whose job metrics match (or, negated, do not match) the pattern:
+        the newest arrival when none arrived in the last hour."""
         last = _rows(f'''
             SELECT MAX(endtime) FROM "{self.S}"."jobsarchived4"
             WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus = 'finished'
-              AND jobmetrics LIKE %s''', (self.now - timedelta(days=2), '%payloadRegistration=registered%'))[0][0]
+              AND COALESCE(jobmetrics, '') {'NOT ' if negate else ''}LIKE %s''',
+                     (self.now - timedelta(days=2), metrics_like))[0][0]
+        return _aware(last)
+
+    def storage(self, site_of):
+        """The E1s' Rucio storage (docs/COMP_SNAPSHOT.md, Storage): what
+        arrived in the last hour, what did not, what is still owed, the
+        output RSE's capacity, and the health."""
+        def site_id(queue):
+            return site_of.get(queue) or re.sub(r'[^a-z0-9]+', '-', (queue or 'not reported').lower()).strip('-')
+
+        # JLab Rucio: science data
+        arrivals = self.part('science_arrivals', self.science_arrivals, None)
+        outcomes, last = self.part('registration_outcomes', self.registration_outcomes, (None, None))
+        reg = {}
+        for per in (outcomes or {}).values():
+            for k, n in per.items():
+                reg[k] = reg.get(k, 0) + n
+        if outcomes is None:
+            reg_part = _part('grey', None, 'registration outcomes not read')
+        else:
+            registered = reg.get('registered', 0) + reg.get('diverted', 0)
+            unsettled = sum(reg.get(k, 0) for k in REGISTRATION_OWED)
+            done = registered + unsettled
+            if done == 0:
+                reg_part = _part('grey', 0, 'no finished jobs in the last hour')
+            else:
+                share = unsettled / done
+                reg_part = _part('red' if share > 0.5 else 'amber' if share > 0.05 else 'green',
+                                 round(share, 3),
+                                 f'{registered} registered, {unsettled} not registered (pending or unfinished)')
+        if last is None:
+            last = self.part('latest_registration',
+                             lambda: self.latest_finished('%payloadRegistration=registered%'), None)
         if last is None:
             arrival = _part('red', None, 'no output registered in two days')
+            jlab_age = None
         else:
-            if timezone.is_naive(last):
-                last = timezone.make_aware(last, dt_timezone.utc)
-            age_min = max(0.0, round((self.now - last).total_seconds() / 60, 1))
+            jlab_age = max(0, int((self.now - last).total_seconds()))
+            age_min = round(jlab_age / 60, 1)
             arrival = _part('green' if age_min <= 30 else 'amber' if age_min <= 120 else 'red',
                             age_min, f'latest output registered {age_min} min ago')
-        logs = _rows(f'''
-            SELECT COUNT(*) FROM (
-              SELECT piloterrordiag FROM "{self.S}"."jobsarchived4"
-               WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus = 'failed'
-                 AND (piloterrorcode IN (1137, 1151, 1152) OR piloterrordiag ILIKE %s)
-              UNION ALL
-              SELECT piloterrordiag FROM "{self.S}"."jobsactive4"
-               WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus = 'failed'
-                 AND (piloterrorcode IN (1137, 1151, 1152) OR piloterrordiag ILIKE %s)) t''',
-                     (self.hour_ago, '%stage-out%', self.hour_ago, '%stage-out%'))[0][0]
-        logs = int(logs or 0)
-        log_part = _part('red' if logs >= 50 else 'amber' if logs >= 5 else 'green', logs,
-                         f'{logs} jobs failed at log stage-out in the last hour')
+        jlab_sites, by_kind = {}, {}
+        for queue, kinds in (arrivals or {}).items():
+            s = jlab_sites.setdefault(site_id(queue), {'arrived_1h': 0, 'bytes_1h': 0, 'failed_1h': 0})
+            for kind, (n, nbytes, events) in kinds.items():
+                s['arrived_1h'] += n
+                s['bytes_1h'] += nbytes
+                k = by_kind.setdefault(kind, {'files': 0, 'bytes': 0, 'events': 0})
+                k['files'] += n
+                k['bytes'] += nbytes
+                k['events'] += events
+        for queue, per in (outcomes or {}).items():
+            owed = sum(per.get(k, 0) for k in REGISTRATION_OWED)
+            if owed:
+                jlab_sites.setdefault(site_id(queue), {'arrived_1h': 0, 'bytes_1h': 0,
+                                                       'failed_1h': 0})['failed_1h'] += owed
+        jlab_pending = self.part('jlab_pending', _jlab_pending, None)
+        capacity = self.part('storage_record', _storage_capacity, None)
+
+        # BNL Rucio: logs
+        logs, last_log = self.part('log_arrivals', self.log_arrivals, (None, None))
+        if logs is None:
+            log_part = _part('grey', None, 'log stage-out not read')
+            log_failed = None
+        else:
+            log_failed = sum(f for _n, _b, f in logs.values())
+            log_part = _part('red' if log_failed >= 50 else 'amber' if log_failed >= 5 else 'green',
+                             log_failed, f'{log_failed} jobs failed at log stage-out in the last hour')
+        bnl_sites = {}
+        for queue, (n, nbytes, failed) in (logs or {}).items():
+            s = bnl_sites.setdefault(site_id(queue), {'arrived_1h': 0, 'bytes_1h': 0, 'failed_1h': 0})
+            s['arrived_1h'] += n
+            s['bytes_1h'] += nbytes
+            s['failed_1h'] += failed
+        if last_log is None:
+            last_log = self.part('latest_log',
+                                 lambda: self.latest_finished('%logHeld=%', negate=True), None)
+        log_pending = self.part('log_pending', _log_pending, None)
+
+        def site_rows(sites):
+            return [dict(site=k, **v) for k, v in
+                    sorted(sites.items(), key=lambda kv: -kv[1]['arrived_1h'])]
+
         return [
             {'id': 'jlab-rucio', 'name': 'JLab Rucio', 'holds': 'science data',
+             'status': 'live', 'counts': 'files',
+             'arrived_1h': (sum(k['files'] for k in by_kind.values()) if arrivals is not None else None),
+             'bytes_1h': (sum(k['bytes'] for k in by_kind.values()) if arrivals is not None else None),
+             'events_1h': (sum(k['events'] for k in by_kind.values()) if arrivals is not None else None),
+             'arrived_by_kind_1h': ({k: v['files'] for k, v in by_kind.items()}
+                                    if arrivals is not None else None),
+             'failed_1h': (sum(reg.get(k, 0) for k in REGISTRATION_OWED) if outcomes is not None else None),
+             'pending': (jlab_pending or {}).get('pending'),
+             'pending_parts': (jlab_pending or {}).get('parts'),
+             'pending_at': (jlab_pending or {}).get('at'),
+             'latest_arrival_s': jlab_age,
+             'by_site': site_rows(jlab_sites),
+             'capacity': (capacity or {}).get('output'),
+             'rses': (capacity or {}).get('rses') or [],
              'health': _health({'registration': reg_part, 'latest_arrival': arrival}),
-             'links': {'storage': f'{PUBLIC}/panda/storage-doors/'}},
+             'links': {'storage': f'{PUBLIC}/panda/storage-doors/',
+                       'arrived': f'{PUBLIC}/snapper/epicprod/storage/',
+                       'failed': None,
+                       'pending': f'{PUBLIC}/pcs/stash/'}},
             {'id': 'bnl-rucio', 'name': 'BNL Rucio', 'holds': 'logs',
+             'status': 'live', 'counts': 'logs',
+             'arrived_1h': (sum(n for n, _b, _f in logs.values()) if logs is not None else None),
+             'bytes_1h': (sum(b for _n, b, _f in logs.values()) if logs is not None else None),
+             'events_1h': None,
+             'arrived_by_kind_1h': None,
+             'failed_1h': log_failed,
+             'pending': (log_pending or {}).get('pending'),
+             'pending_parts': (log_pending or {}).get('parts'),
+             'pending_at': (log_pending or {}).get('at'),
+             'latest_arrival_s': (max(0, int((self.now - last_log).total_seconds()))
+                                  if last_log is not None else None),
+             'by_site': site_rows(bnl_sites),
+             'capacity': None,
+             'rses': [],
              'health': _health({'log_stageout': log_part}),
-             'links': {'storage': f'{PUBLIC}/panda/storage-doors/'}},
+             'links': {'storage': f'{PUBLIC}/panda/storage-doors/',
+                       'arrived': f'{PUBLIC}/panda/jobs/?status=finished&days=1',
+                       'failed': f'{PUBLIC}/panda/errors/?error_source=pilot&days=1',
+                       'pending': None}},
         ]
 
 
@@ -573,7 +761,8 @@ def build():
                 site['execute_sites'] = b.part('execute_sites', lambda: b.execute_sites(live), [])
         sites.append(site)
 
-    storage = b.part('storage', b.storage, [])
+    site_of = {q['id']: s['id'] for s in sites_cfg for q in s.get('queues', [])}
+    storage = b.part('storage', lambda: b.storage(site_of), [])
 
     ready = b.part('ready_tasks', lambda: _ready_tasks(), None)
     released = b.part('released', lambda: _released(b.hour_ago), None)
@@ -595,7 +784,7 @@ def build():
                    'items': _report_items(front, sites, storage,
                                           b.part('alarms', b.production_alarms, []),
                                           b.part('assessment', _assessment_freshness, None)),
-                   'assessment': None},
+                   'assessment': b.part('daily_assessment', _latest_daily_assessment, None)},
         'errors': b.errors,
     }
     record['build_seconds'] = round(time.monotonic() - t0, 2)
@@ -698,6 +887,99 @@ def _assessment_freshness():
     from swf_epicprod.assessment.freshness import assessment_freshness
     status, summary, _data = assessment_freshness()
     return {'status': status, 'summary': summary}
+
+
+def _latest_daily_assessment():
+    """The newest daily campaign assessment (swf-epicprod
+    EPICPROD_ASSESSMENTS.md), from its ``assessment_register`` record: the
+    verdict, the verdict as a health level, and the assessment's page."""
+    from monitor_app.models import AppLog
+    from swf_epicprod.assessment.freshness import DAILY_KINDS
+    rec = (AppLog.objects.filter(app_name='epicprod', extra_data__action='assessment_register',
+                                 extra_data__subject_type='campaign',
+                                 extra_data__assessment_kind__in=DAILY_KINDS)
+           .order_by('-timestamp').values('timestamp', 'extra_data').first())
+    if not rec:
+        return None
+    x = rec['extra_data'] or {}
+    path = x.get('url') or x.get('report_path')
+    verdict = x.get('verdict') or ''
+    return {'verdict': verdict, 'level': VERDICT_LEVELS.get(verdict, 'grey'),
+            'at': rec['timestamp'].isoformat(),
+            'link': f'{PUBLIC}{path}' if path else None,
+            'campaign': x.get('subject_key'), 'title': x.get('report_title'),
+            'narration': x.get('narration')}
+
+
+def _jlab_pending():
+    """What JLab Rucio is still owed: the failover stash's entries not yet
+    home, from the drain's own record (the cached product ``stash_state``,
+    swf-epicprod RUCIO_FAILOVER_STASH.md), and the registrations the
+    registrar's last pass deferred, from its action record."""
+    from monitor_app.models import AppLog, CachedProduct
+    with connections['default'].cursor() as cursor:
+        # counted in the database: after an outage the stash holds tens of
+        # thousands of entries
+        cursor.execute(f'''
+            SELECT value ->> 'built_at',
+                   (SELECT COUNT(*) FROM jsonb_array_elements(
+                      CASE WHEN jsonb_typeof(value -> 'entries') = 'array'
+                           THEN value -> 'entries' ELSE '[]'::jsonb END) e
+                     WHERE e ->> 'outcome' IS DISTINCT FROM 'home')
+            FROM {CachedProduct._meta.db_table} WHERE key = 'stash_state' ''')
+        row = cursor.fetchone()
+    stash, stash_at = (int(row[1]), row[0]) if row else (None, None)
+    rec = (AppLog.objects.filter(app_name='epicprod', extra_data__action='registrar',
+                                 extra_data__has_key='deferred')
+           .order_by('-timestamp').values('timestamp', 'extra_data').first())
+    deferred = int(rec['extra_data'].get('deferred') or 0) if rec else None
+    known = [n for n in (stash, deferred) if n is not None]
+    times = [t for t in (stash_at, rec['timestamp'].isoformat() if rec else None) if t]
+    return {'pending': sum(known) if known else None,
+            'parts': {'stash': stash, 'registrar': deferred},
+            'at': min(times) if times else None}
+
+
+def _log_pending():
+    """The logs pilots held in the stage-out bucket that are not yet in BNL
+    Rucio, from the hourly log-rescue pass's record: those held over its
+    window less those it moved (swf-epicprod LOG_STAGEOUT_FALLBACK.md,
+    Recovery)."""
+    from monitor_app.models import AppLog
+    rec = (AppLog.objects.filter(app_name='epicprod', extra_data__action='log_rescue',
+                                 extra_data__has_key='held')
+           .order_by('-timestamp').values('timestamp', 'extra_data').first())
+    if not rec:
+        return None
+    held = int(rec['extra_data'].get('held') or 0)
+    moved = int(rec['extra_data'].get('moved') or 0)
+    return {'pending': max(0, held - moved), 'parts': {'held': held, 'moved': moved},
+            'at': rec['timestamp'].isoformat()}
+
+
+def _storage_capacity():
+    """Each JLab disk RSE's usage against the production account's limit,
+    from the latest storage component (swf-epicprod STORAGE.md, per RSE
+    capacity), and the production output RSE's alone."""
+    from monitor_app.snapper_storage import _current_data
+    data = _current_data()
+    if not data:
+        raise LookupError('no storage component published')
+    rses = []
+    for name, r in sorted((data.get('rses') or {}).items()):
+        c = (r or {}).get('capacity') or {}
+        # the fraction is the account's usage over its limit where the
+        # account figure is present, else the RSE-wide usage
+        account = c.get('account_used') is not None
+        rses.append({'id': name.lower(), 'name': name, 'type': (r or {}).get('type'),
+                     'used_bytes': c.get('account_used') if account else c.get('used'),
+                     'limit_bytes': c.get('limit'), 'fraction': c.get('fraction'),
+                     'files': c.get('account_files') if account else c.get('files'),
+                     'as_of': c.get('as_of')})
+    output = next(({'rse': r['name'], 'used_bytes': r['used_bytes'], 'limit_bytes': r['limit_bytes'],
+                    'fraction': r['fraction'], 'as_of': r['as_of']}
+                   for r in rses if r['name'] == OUTPUT_RSE), None)
+    return {'output': output, 'rses': rses}
 
 
 def _report_items(front, sites, storage, alarms, assessment):
