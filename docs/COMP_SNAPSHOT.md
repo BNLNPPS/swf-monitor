@@ -77,7 +77,7 @@ report            {text, items: [{level, text, link}],
                    assessment: {verdict, level, at, link, campaign,
                                 title, narration}}
 live              {link, items: [{id, at, level, title, detail, link}]}
-tasks             {link, items: [{id, at, level, title, counts, detail, link}]}
+tasks             {link, items: [{id, at, level, title, counts, detail, sites, queues, link}]}
   counts          {ungenerated, queued, running, finished, failed}
 trends            {window_hours, bin_minutes, t[], sampled_at, source_as_of,
                    gaps[], sites[], link}
@@ -446,6 +446,13 @@ the task is in one:
 
 `level` is red for a task in a failure-rate alarm, amber for one that
 has lost files, green while it runs, grey while its jobs only wait.
+
+`queues` are the floor's queues the task is active at: those holding its
+running, starting or queued jobs, and the queue of its rows still to
+generate. `sites` are those queues' site ids, the ids of `sites[].id`.
+Both are sorted lists, one entry for a task at one site. Each site disc
+writes the ids of the tasks whose `sites` hold it (Torre Wenaus,
+2026-10-22: "Tasks: n1 n2 n3", nothing written when there are none).
 
 ### Trends
 

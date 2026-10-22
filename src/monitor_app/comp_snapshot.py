@@ -281,7 +281,7 @@ class _Build:
             out.append(a)
         return out
 
-    def floor_tasks(self, site_name, alarms):
+    def floor_tasks(self, site_name, alarms, site_of):
         """The task board (COMP_SNAPSHOT.md, Tasks): every production task
         with jobs running, starting or queued at the floor's queues, newest
         first; a task with none there is off the board."""
@@ -295,7 +295,8 @@ class _Build:
             SELECT a.jeditaskid, t.taskname, t.status,
                    COALESCE(t.starttime, t.creationdate),
                    SUM(CASE WHEN a.jobstatus = ANY(%s) THEN 1 ELSE 0 END), COUNT(*),
-                   MODE() WITHIN GROUP (ORDER BY a.computingsite)
+                   MODE() WITHIN GROUP (ORDER BY a.computingsite),
+                   ARRAY_AGG(DISTINCT a.computingsite)
             FROM "{self.S}"."jobsactive4" a
             JOIN "{self.S}"."jedi_tasks" t ON t.jeditaskid = a.jeditaskid
             WHERE a.computingsite = ANY(%s) AND a.jobstatus = ANY(%s)
@@ -305,13 +306,14 @@ class _Build:
         rows = _rows(sql, (list(RUNNING), list(site_name), list(NOT_STARTED + RUNNING), terminal))
         # A task with rows JEDI has not yet made into jobs is on the floor
         # though none of its jobs waits or runs now.
-        to_generate = {tid: n for tid, (queue, n) in ungenerated_by_task().items()
+        ungenerated = {tid: (queue, n) for tid, (queue, n) in ungenerated_by_task().items()
                        if queue in site_name and n > 0}
+        to_generate = {tid: n for tid, (_queue, n) in ungenerated.items()}
         waiting = sorted(set(to_generate) - {int(r[0]) for r in rows})
         if waiting:
             sql = f'''
                 SELECT jeditaskid, taskname, status, COALESCE(starttime, creationdate),
-                       0, 0, site
+                       0, 0, site, NULL
                 FROM "{self.S}"."jedi_tasks" WHERE jeditaskid = ANY(%s)'''
             rows = list(rows) + list(_rows(sql, (waiting,)))
         ids = [int(r[0]) for r in rows]
@@ -331,9 +333,13 @@ class _Build:
                     .select_related('physics_tag', 'evgen_tag')
                     .order_by('composed_name', 'block_num').distinct('composed_name')}
         items = []
-        for tid, name, status, at, running, active, queue in sorted(
+        for tid, name, status, at, running, active, queue, queues in sorted(
                 rows, key=lambda r: r[3], reverse=True):
             tid, running, active = int(tid), int(running or 0), int(active or 0)
+            # The floor's queues the task has jobs at, and the queue of its
+            # rows still to generate.
+            queues = sorted(set(queues or ())
+                            | ({ungenerated[tid][0]} if tid in ungenerated else set()))
             if at is not None and at.tzinfo is None:
                 at = at.replace(tzinfo=dt_timezone.utc)  # PanDA stores UTC
             n, done, lost = files.get(tid, (0, 0, 0))
@@ -355,6 +361,8 @@ class _Build:
                            'queued': active - running, 'running': running,
                            'finished': done, 'failed': lost},
                 'detail': detail,
+                'sites': sorted({site_of[q] for q in queues if q in site_of}),
+                'queues': queues,
                 'link': f'{PUBLIC}/panda/tasks/{tid}/'})
         return {'link': f'{PUBLIC}/panda/tasks/?processingtype=epicproduction',
                 'items': items}
@@ -990,7 +998,7 @@ def build():
                                           b.part('assessment', _assessment_freshness, None)),
                    'assessment': b.part('daily_assessment', _latest_daily_assessment, None)},
         'live': b.part('live', _live_records, None),
-        'tasks': b.part('tasks', lambda: b.floor_tasks(site_name, alarms), None),
+        'tasks': b.part('tasks', lambda: b.floor_tasks(site_name, alarms, site_of), None),
         'trends': b.part('trends', lambda: _trends(trend), None),
         'errors': b.errors,
     }
