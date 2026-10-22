@@ -402,21 +402,27 @@ running, starting or queued (the census's states) at a queue of
 the JEDI task id, `link` the task's page; `tasks.link` lists the
 production tasks.
 
-The board is the tasks in flight. A line is the title, the task's id,
-its physics in the concise form of the PCS description
-(`physics_description`, the one composer PCS pages use) and the site's
-short name, then its counts, just the numbers: jobs queued and running,
-files finished and files failed after their retries (a job that failed
-and then succeeded on a retry is not a failure of the task), finished
-shown green and failed red:
+The board is the tasks in flight. A line is the task id (`title`) and
+its counts, just the numbers: jobs queued and running, files finished
+and files failed after their retries (a job that failed and then
+succeeded on a retry is not a failure of the task), finished shown green
+and failed red:
 
-    40856 DIS, eAu 9x100, Q2 10 to 100, BeAGLE · GREX   2,259  862  13,762  2,181
+    40856   2,244  865  13,772  2,184
 
-The detail, on hover, is the composed name with the full physics
-description, the status, queue and start, running and queued jobs, and
-files done and lost, with the alarm when the task is in one. `level` is
-red for a task in a failure-rate alarm, amber for one that has lost
-files, green while it runs, grey while its jobs only wait.
+The detail, on hover, is the task's physics in the concise form of the
+PCS description (`physics_description`, the one composer PCS pages use)
+and the site's short name, then the composed name, status, queue and
+start, and files done of the task's files and lost, with the alarm when
+the task is in one:
+
+    DIS, eAu 9x100, Q2 10 to 100, BeAGLE at GREX.
+    group.EIC.26.07.3.epic_craterlake.p2428.e53.s11.r11, running on
+    UM_GREX_PanDA_1 since 10-17 23:39 ET; 13,772 of 50,006 files done,
+    2,184 lost after retries (13.7%), in alarm.
+
+`level` is red for a task in a failure-rate alarm, amber for one that
+has lost files, green while it runs, grey while its jobs only wait.
 
 ## Links
 

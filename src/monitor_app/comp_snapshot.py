@@ -313,20 +313,18 @@ class _Build:
             n, done, lost = files.get(tid, (0, 0, 0))
             d = datasets.get(names[name])
             physics = physics_description(d, concise=True) if d else ''
-            title = f'{tid} {physics}'.strip() + f' · {site_name.get(queue, queue)}'
             lost_pct = 100.0 * lost / (done + lost) if done + lost else 0.0
             local = at.astimezone(ZoneInfo('America/New_York')) if at else None
-            detail = (f"{name}: {physics_description(d) if d else ''}. "
-                      f"{status} on {queue}"
+            detail = (' at '.join(x for x in (physics, site_name.get(queue, queue)) if x)
+                      + f". {name}, {status} on {queue}"
                       + (f" since {local:%m-%d %H:%M} ET" if local else '')
-                      + f"; {running:,} running, {active - running:,} queued; "
-                      f"{done:,} of {n:,} files done, {lost:,} lost after retries"
+                      + f"; {done:,} of {n:,} files done, {lost:,} lost after retries"
                       + (f" ({lost_pct:.1f}%), in alarm" if tid in alarmed else '') + '.')
             items.append({
                 'id': tid, 'at': at.isoformat() if at else None,
                 'level': ('red' if tid in alarmed else 'amber' if lost
                           else 'green' if running else 'grey'),
-                'title': title,
+                'title': str(tid),
                 'counts': {'queued': active - running, 'running': running,
                            'finished': done, 'failed': lost},
                 'detail': detail,
