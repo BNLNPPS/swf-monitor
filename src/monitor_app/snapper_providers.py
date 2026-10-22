@@ -459,6 +459,19 @@ def _queue_stack_members():
     return _QUEUE_STACK_CACHE['members']
 
 
+def _plotted_job_states(by_status):
+    """The plotted in-flight job states of one recorded PanDA state: every
+    lifecycle state the plots show, zero where the record holds none (the
+    PanDA adapter lists only the states that hold jobs, so a state that
+    empties would otherwise keep its last count on the curve), and any
+    other state the record carries."""
+    by_status = by_status or {}
+    states = {s: 0 for s in _JOB_LIFECYCLE_EARLY + _JOB_LIFECYCLE_LATE + ('running',)}
+    states.update({s: int(n or 0) for s, n in by_status.items()})
+    return {s: n for s, n in states.items()
+            if s != 'starting' and s not in _EPICPROD_DISABLED_PLOT_JOB_STATES}
+
+
 def _site_curve_values(panda):
     """Per-site job lifecycle curves from the sites maps recorded in
     every snap: the in-flight population by status (submission through
@@ -472,11 +485,8 @@ def _site_curve_values(panda):
     # of named queues and one 'other' band carrying every remaining
     # queue, so the stack always sums to the whole running-core count.
     for site, block in job_sites.items():
-        for status, count in (block.get('by_status_now') or {}).items():
-            if (status == 'starting'
-                    or status in _EPICPROD_DISABLED_PLOT_JOB_STATES):
-                continue
-            values[f'sj_{site}_{status}'] = int(count or 0)
+        for status, count in _plotted_job_states(block.get('by_status_now')).items():
+            values[f'sj_{site}_{status}'] = count
         if block.get('running_cores_now') is not None:
             cores = int(block.get('running_cores_now') or 0)
             values[f'sjc_{site}'] = cores
@@ -697,11 +707,8 @@ def _epicprod_curve_values(state):
     tasks_now = (panda.get('tasks') or {}).get('in_flight_now') or {}
     if jobs_now:
         values['running_cores'] = int(jobs_now.get('running_cores') or 0)
-        for status, count in (jobs_now.get('by_status') or {}).items():
-            if (status == 'starting'
-                    or status in _EPICPROD_DISABLED_PLOT_JOB_STATES):
-                continue
-            values[f'job_{status}'] = int(count or 0)
+        for status, count in _plotted_job_states(jobs_now.get('by_status')).items():
+            values[f'job_{status}'] = count
         type_states = jobs_now.get('by_type_status') or {}
         for ptype, count in (jobs_now.get('by_type') or {}).items():
             states = type_states.get(ptype) or {}

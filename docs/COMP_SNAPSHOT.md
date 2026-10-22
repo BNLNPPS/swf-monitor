@@ -67,7 +67,7 @@ sites[]           {id, name, status, capacity, capacity_source, in_use,
 storage[]         {id, name, holds, status, counts,
                    arrived_1h, bytes_1h, events_1h, arrived_by_kind_1h,
                    failed_1h, pending, pending_parts, pending_at,
-                   latest_arrival_s, by_site[], capacity, rses[],
+                   latest_arrival_s, flow, by_site[], capacity, rses[],
                    health, links}
   by_site[]       {site, arrived_1h, bytes_1h, failed_1h}
   capacity        {rse, used_bytes, limit_bytes, fraction, as_of}
@@ -295,6 +295,19 @@ ended in the last hour:
 - `capacity` is `null` and `rses[]` empty: no usage record covers
   BNL_PROD_DISK_1.
 
+For `jlab-rucio`, `flow` is the output flow on the trends axis
+(`trends.t`, the same whole quarter-hour bins): `files` and `bytes`, the
+files the finished production jobs ending in each bin registered and
+their bytes, and `registration_incomplete_jobs`, those jobs whose
+registration did not complete, all from the same payload-report reading
+as `arrived_1h`. These are registrations as the payload reports them,
+grouped by the job's end, not measured transfer bandwidth or the files'
+availability times; volume per hour is the bin's bytes times four. A
+bin's jobs are final once archived, so the bins are kept (cached product
+`jlab_flow:v1`) and each build reads again only the last two bins before
+the newest kept one; a bin never read is null, and `flow` is null when
+the reading fails or the trends axis is absent.
+
 For both, `latest_arrival_s` is the seconds since the newest
 registration, and `by_site[]` splits `arrived_1h`, `bytes_1h` and
 `failed_1h` by the producing site (a `sites[]` id). Each reading is a
@@ -435,28 +448,32 @@ has lost files, green while it runs, grey while its jobs only wait.
 The floor's trend plots (Torre Wenaus, 2026-10-22): utilization in the
 moment over the last 12 hours, per site with a live queue, on one shared
 axis. `t` is the ends of 48 whole quarter-hour bins in ISO UTC, the last
-ending on the quarter hour at or before the newest snap (`sampled_at`,
-when Snapper last captured); `source_as_of` is when the PanDA activity
-the snaps record was last read. For each site, summed over its live
-queues: `running` and `queued` are the jobs running and the jobs not yet
-started (the census's states: defined, waiting, assigned, activated,
-sent) at each bin end; `finished` and `failed` are the jobs that ended
-in the bin. `detail` is the site's hover line: running and queued at the
-last bin end, finished and failed in the hour before it.
+ending on the quarter hour at or before the series' newest sample
+(`sampled_at`); `source_as_of` is when the PanDA activity the snaps
+record was last read. For each site, summed over its live queues:
+`running` and `queued` are the jobs running and the jobs not yet started
+(the census's states: defined, waiting, assigned, activated, sent) at
+each bin end; `finished` and `failed` are the jobs that ended in the bin.
+`detail` is the site's hover line: running and queued at the last bin
+end, finished and failed in the hour before it.
 
 The source is the Snapper Site view's series product
 (`snapper_ai.products.series_product`, focus `site`), one product for
-the floor's live queues; `link` opens that view. Its state curves change
-only when the state does, so a value between changes is the state
-unchanged under continuous collection. Its finished and failed curves
-count up from the window's start, so a bin's ended jobs are the
-difference of the count at the bin's two ends. Gaps in collection come
-from Snapper's own coverage record (the gaps recovering snaps closed and
-the capture cursor's open gap), listed in `gaps`: a state at a bin end
-inside a gap, and the ended jobs of any bin overlapping one, are null,
-never carried across it. A site or counter the series does not carry is
-null; a queue state the series does not carry for an observed queue
-never occurred and is zero.
+the floor's live queues; `link` opens that view. Every sample of a
+queue's PanDA state carries the queue's finished counter, so the
+counter's points are the queue's sample times, and a value at a bin end
+is read at the queue's newest sample at or before it. The series records
+every plotted job state at every sample, zero for a state that holds no
+jobs (`snapper_providers._plotted_job_states`; the PanDA state lists only
+the states that hold jobs). The finished and failed counters count up,
+so a bin's ended jobs are the difference of the count at its two ends.
+A value is null, never carried forward, when the newest sample before
+its bin end is more than 15 minutes older (the PanDA reading refreshes
+every five), when the bin end lies in a gap of collection, or, for ended
+jobs, when the bin overlaps one. The gaps come from Snapper's own
+coverage record (the gaps recovering snaps closed and the capture
+cursor's open gap), listed in `gaps`. A queue with no sample is null
+throughout.
 
 ## Links
 

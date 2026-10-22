@@ -81,6 +81,14 @@ LIVE_ITEMS = 10
 # bins, fine enough to show a ramp or a dip.
 TREND_HOURS = 12
 TREND_BIN_MINUTES = 15
+# A state sample older than this before a bin end is not the state then: the
+# PanDA reading refreshes every five minutes.
+TREND_STALE_MINUTES = 15
+# The JLab output flow's kept bins, and how many before the newest kept one
+# each build reads again (jobs reach the archive shortly after they end).
+JLAB_FLOW_KEY = 'jlab_flow:v1'
+JLAB_FLOW_REREAD_BINS = 2
+JLAB_FLOW_BACKFILL_BINS = 4
 # The floor is the control room: live-now records only, the last 12 hours;
 # the logs page holds the history (Torre, 2026-10-22).
 LIVE_WINDOW_H = 12
@@ -495,7 +503,7 @@ class _Build:
             })
         return out
 
-    def science_arrivals(self):
+    def science_arrivals(self, since=None, until=None, bin_seconds=None):
         """Per queue and output kind, the science files the last hour's
         finished production jobs registered in JLab Rucio, with their bytes
         and events: each DID the payload report's registration lists,
@@ -503,18 +511,24 @@ class _Build:
         under a derived name (outcome ``diverted``) is a registered file
         whose name matches no output, so it counts with kind ``other`` and
         no bytes. PanDA's own file table holds no science output, since
-        production tasks register their outputs themselves."""
+        production tasks register their outputs themselves. ``since`` and
+        ``until`` set another window; ``bin_seconds`` keys the result by
+        the end of the job's end-time bin (epoch seconds) in place of the
+        queue."""
+        key = (f'((FLOOR(EXTRACT(EPOCH FROM d.endtime) / {int(bin_seconds)}) + 1)'
+               f' * {int(bin_seconds)})::bigint' if bin_seconds else 'd.site')
         sql = f'''
             WITH r AS (
-              SELECT j.computingsite AS site, m.metadata::jsonb -> 'payload' AS p
+              SELECT j.computingsite AS site, j.endtime, m.metadata::jsonb -> 'payload' AS p
               FROM "{self.S}"."metatable" m JOIN "{self.S}"."jobsarchived4" j ON j.pandaid = m.pandaid
-              WHERE j.endtime >= %s AND j.processingtype = 'epicproduction' AND j.jobstatus = 'finished'
+              WHERE j.endtime >= %s AND j.endtime < %s
+                AND j.processingtype = 'epicproduction' AND j.jobstatus = 'finished'
                 AND (j.jobmetrics LIKE %s OR j.jobmetrics LIKE %s)),
             d AS (
-              SELECT r.site, r.p, did FROM r, jsonb_array_elements_text(
+              SELECT r.site, r.endtime, r.p, did FROM r, jsonb_array_elements_text(
                 CASE WHEN jsonb_typeof(r.p -> 'registration' -> 'dids') = 'array'
                      THEN r.p -> 'registration' -> 'dids' ELSE '[]'::jsonb END) did)
-            SELECT d.site, COALESCE(o.key, 'other'), COUNT(*),
+            SELECT {key}, COALESCE(o.key, 'other'), COUNT(*),
                    SUM((o.value ->> 'bytes')::bigint), SUM((o.value ->> 'events')::bigint)
             FROM d LEFT JOIN LATERAL (
               SELECT o.key, o.value FROM jsonb_each(
@@ -523,25 +537,30 @@ class _Build:
               WHERE d.did LIKE '%%/' || (o.value ->> 'file') LIMIT 1) o ON true
             GROUP BY 1, 2'''
         out = {}
-        for site, kind, n, nbytes, events in _rows(sql, (self.hour_ago,
-                                                         '%payloadRegistration=registered%',
-                                                         '%payloadRegistration=diverted%')):
-            out.setdefault(site or '', {})[kind] = (int(n), int(nbytes or 0), int(events or 0))
+        for k, kind, n, nbytes, events in _rows(sql, (since or self.hour_ago, until or self.now,
+                                                      '%payloadRegistration=registered%',
+                                                      '%payloadRegistration=diverted%')):
+            out.setdefault(int(k) if bin_seconds else (k or ''), {})[kind] = (
+                int(n), int(nbytes or 0), int(events or 0))
         return out
 
-    def registration_outcomes(self):
+    def registration_outcomes(self, since=None, until=None, bin_seconds=None):
         """Per queue, the last hour's finished production jobs by the
         payload's registration outcome (``payloadRegistration``), and the
-        end time of the newest that registered."""
+        end time of the newest that registered. ``since``, ``until`` and
+        ``bin_seconds`` as for ``science_arrivals``."""
+        key = (f'((FLOOR(EXTRACT(EPOCH FROM endtime) / {int(bin_seconds)}) + 1)'
+               f' * {int(bin_seconds)})::bigint' if bin_seconds else 'computingsite')
         sql = f'''
-            SELECT computingsite, substring(jobmetrics from 'payloadRegistration=([A-Za-z_]+)'),
+            SELECT {key}, substring(jobmetrics from 'payloadRegistration=([A-Za-z_]+)'),
                    COUNT(*), MAX(endtime)
             FROM "{self.S}"."jobsarchived4"
-            WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus = 'finished'
+            WHERE endtime >= %s AND endtime < %s
+              AND processingtype = 'epicproduction' AND jobstatus = 'finished'
             GROUP BY 1, 2'''
         out, last = {}, None
-        for site, outcome, n, end in _rows(sql, (self.hour_ago,)):
-            out.setdefault(site or '', {})[outcome or ''] = int(n)
+        for k, outcome, n, end in _rows(sql, (since or self.hour_ago, until or self.now)):
+            out.setdefault(int(k) if bin_seconds else (k or ''), {})[outcome or ''] = int(n)
             if outcome == 'registered' and end is not None and (last is None or end > last):
                 last = end
         return out, _aware(last)
@@ -593,7 +612,57 @@ class _Build:
                      (self.now - timedelta(days=2), metrics_like))[0][0]
         return _aware(last)
 
-    def storage(self, site_of):
+    def jlab_flow(self, edges):
+        """The JLab output flow on the trends axis (COMP_SNAPSHOT.md,
+        Storage): per bin, the science files finished production jobs
+        registered and their bytes, and the jobs whose registration did not
+        complete, grouped by the job's end, through the hour's own
+        reducers. A bin's jobs are final once archived, so the bins are
+        kept (cached product ``jlab_flow:v1``) and each build reads again
+        the JLAB_FLOW_REREAD_BINS bins before the newest kept one, and
+        backfills JLAB_FLOW_BACKFILL_BINS of the window's bins not yet
+        kept: a read of the whole window at once takes minutes. A bin not
+        yet read is null."""
+        from .models import CachedProduct
+
+        width = int((edges[1] - edges[0]).total_seconds())
+        ends = [int(e.timestamp()) for e in edges[1:]]
+        row = CachedProduct.objects.filter(key=JLAB_FLOW_KEY).first()
+        kept = {int(k): v for k, v in ((row.value or {}).get('bins') or {}).items()} if row else {}
+        first = int(edges[0].timestamp())
+        # Spans (start, end] of bin ends to read: the newest bins again, and
+        # one hour of the window's bins not yet kept, before the oldest kept.
+        if kept:
+            spans = [(max(first, max(kept) - JLAB_FLOW_REREAD_BINS * width), ends[-1])]
+            oldest = min(t for t in kept if t >= ends[0]) if any(t >= ends[0] for t in kept) else ends[-1]
+            if oldest - width > first:
+                spans.append((max(first, oldest - width - JLAB_FLOW_BACKFILL_BINS * width),
+                              oldest - width))
+        else:
+            spans = [(max(first, ends[-1] - JLAB_FLOW_BACKFILL_BINS * width), ends[-1])]
+        for start, end in spans:
+            since = datetime.fromtimestamp(start, dt_timezone.utc)
+            until = datetime.fromtimestamp(end, dt_timezone.utc)
+            arrivals = self.science_arrivals(since=since, until=until, bin_seconds=width)
+            outcomes, _last = self.registration_outcomes(since=since, until=until,
+                                                         bin_seconds=width)
+            for t in ends:
+                if start < t <= end:
+                    kinds = arrivals.get(t, {}).values()
+                    kept[t] = [sum(n for n, _b, _e in kinds), sum(b for _n, b, _e in kinds),
+                               sum(outcomes.get(t, {}).get(k, 0) for k in REGISTRATION_OWED)]
+        kept = {t: v for t, v in kept.items() if t >= ends[0]}
+        CachedProduct.objects.update_or_create(
+            key=JLAB_FLOW_KEY, defaults={'value': {'bins': {str(t): v for t, v in kept.items()}},
+                                         'built_at': timezone.now()})
+        column = {t: v for t, v in kept.items()}
+        return {
+            'files': [column[t][0] if t in column else None for t in ends],
+            'bytes': [column[t][1] if t in column else None for t in ends],
+            'registration_incomplete_jobs': [column[t][2] if t in column else None for t in ends],
+        }
+
+    def storage(self, site_of, edges=None):
         """The E1s' Rucio storage (docs/COMP_SNAPSHOT.md, Storage): what
         arrived in the last hour, what did not, what is still owed, the
         output RSE's capacity, and the health."""
@@ -648,6 +717,7 @@ class _Build:
                                                        'failed_1h': 0})['failed_1h'] += owed
         jlab_pending = self.part('jlab_pending', _jlab_pending, None)
         capacity = self.part('storage_record', _storage_capacity, None)
+        flow = self.part('jlab_flow', lambda: self.jlab_flow(edges), None) if edges else None
 
         # BNL Rucio: logs
         logs, last_log = self.part('log_arrivals', self.log_arrivals, (None, None))
@@ -686,6 +756,7 @@ class _Build:
              'pending_parts': (jlab_pending or {}).get('parts'),
              'pending_at': (jlab_pending or {}).get('at'),
              'latest_arrival_s': jlab_age,
+             'flow': flow,
              'by_site': site_rows(jlab_sites),
              'capacity': (capacity or {}).get('output'),
              'rses': (capacity or {}).get('rses') or [],
@@ -856,7 +927,9 @@ def build():
         sites.append(site)
 
     site_of = {q['id']: s['id'] for s in sites_cfg for q in s.get('queues', [])}
-    storage = b.part('storage', lambda: b.storage(site_of), [])
+    trend = b.part('trend_series', lambda: _trend_series(sites), None)
+    storage = b.part('storage', lambda: b.storage(
+        site_of, edges=trend['edges'] if trend else None), [])
 
     ready = b.part('ready_tasks', lambda: _ready_tasks(), None)
     released = b.part('released', lambda: _released(b.hour_ago), None)
@@ -883,7 +956,7 @@ def build():
                    'assessment': b.part('daily_assessment', _latest_daily_assessment, None)},
         'live': b.part('live', _live_records, None),
         'tasks': b.part('tasks', lambda: b.floor_tasks(site_name, alarms), None),
-        'trends': b.part('trends', lambda: _trends(sites), None),
+        'trends': b.part('trends', lambda: _trends(trend), None),
         'errors': b.errors,
     }
     record['build_seconds'] = round(time.monotonic() - t0, 2)
@@ -1106,65 +1179,86 @@ def _coverage_gaps(scope, start):
     return sorted(gaps)
 
 
-def _trends(sites):
-    """The floor's trend plots (COMP_SNAPSHOT.md, Trends): per site with a
-    live queue, the last 12 hours in 48 whole quarter-hour bins on one
-    shared axis: running and queued jobs at each bin's end, and jobs
-    finished and failed in the bin, summed over the site's live queues.
-    The source is the Snapper Site view's series product, one product for
-    the floor's live queues: its state curves change only when the state
-    does, and its finished and failed curves count up from the window's
-    start, so a bin's ended jobs are the difference of the count at its
-    two ends. Collection gaps come from Snapper's coverage record, not the
-    focused series: a state at a bin end inside a gap, and the ended jobs
-    of a bin overlapping one, are null, never carried across it. A site or
-    counter the series does not carry is null; a queue state it does not
-    carry for an observed queue never occurred, zero."""
-    from bisect import bisect_right
-
-    from monitor_app.panda.census import NOT_STARTED
-    from snapper_ai.models import CurrentComponent, SystemSnap
+def _trend_series(sites):
+    """The floor's trend record (COMP_SNAPSHOT.md, Trends): the Snapper
+    Site view's series product for the floor's live queues, with the axis
+    of 48 whole quarter-hour bins ending at or before the product's own
+    newest sample, and Snapper's coverage gaps over it. The task board's
+    output flow shares the axis. None when no queue is live or the product
+    holds no sample."""
     from snapper_ai.products import series_product
 
     live = [(s, [q['id'] for q in s['queues'] if q['status'] == 'live']) for s in sites]
     live = [(s, queues) for s, queues in live if queues]
     if not live:
         return None
-    sampled = (SystemSnap.objects.filter(scope='epicprod').order_by('-snap_time')
-               .values_list('snap_time', flat=True).first())
-    if sampled is None:
-        return None
-    step_s = TREND_BIN_MINUTES * 60
-    bins = TREND_HOURS * 60 // TREND_BIN_MINUTES
-    aligned = datetime.fromtimestamp(sampled.timestamp() // step_s * step_s, dt_timezone.utc)
-    edges = [aligned - timedelta(seconds=step_s * k) for k in range(bins, -1, -1)]
-    gaps = [g for g in _coverage_gaps('epicprod', edges[0]) if g[1] >= edges[0]]
     product = series_product('epicprod', 'site', window='24h',
                              selection=','.join(q for _, qs in live for q in qs))
     curves = product.get('curves') or {}
 
-    def at_edges(cid):
-        """The curve's value at each edge, null before its first sample or
-        at an edge inside a gap; None when the series lacks the curve."""
-        series = (curves.get(cid) or {}).get('points') or []
-        if not series:
-            return None
-        stamps = [datetime.fromisoformat(x) for x, _ in series]
+    def stamps(cid):
+        return [datetime.fromisoformat(x) for x, _ in
+                (curves.get(cid) or {}).get('points') or []]
+
+    # Each sample of a queue's PanDA state carries its finished counter, so
+    # the counter's stamps are the queue's sample times.
+    samples = {q: stamps(f'sjfw_{q}') for _, qs in live for q in qs}
+    newest = max((x[-1] for x in samples.values() if x), default=None)
+    if newest is None:
+        return None
+    step_s = TREND_BIN_MINUTES * 60
+    bins = TREND_HOURS * 60 // TREND_BIN_MINUTES
+    aligned = datetime.fromtimestamp(newest.timestamp() // step_s * step_s, dt_timezone.utc)
+    edges = [aligned - timedelta(seconds=step_s * k) for k in range(bins, -1, -1)]
+    gaps = [g for g in _coverage_gaps('epicprod', edges[0]) if g[1] >= edges[0]]
+    return {'live': live, 'curves': curves, 'samples': samples, 'newest': newest,
+            'edges': edges, 'gaps': gaps}
+
+
+def _trends(series):
+    """The floor's trend plots (COMP_SNAPSHOT.md, Trends): per site with a
+    live queue, on the trend record's axis, running and queued jobs at each
+    bin's end and jobs finished and failed in the bin, summed over the
+    site's live queues. A value is read at the queue's newest sample at or
+    before the edge: a job state absent from that sample was zero then (the
+    PanDA state lists only the states that hold jobs), and a sample older
+    than TREND_STALE_MINUTES before the edge, or an edge inside a coverage
+    gap, gives null, never a value carried forward. Finished and failed
+    count up, so a bin's ended jobs are the difference of the count at its
+    two ends, null for a bin overlapping a gap. A queue with no sample is
+    null throughout."""
+    from bisect import bisect_right
+
+    from monitor_app.panda.census import NOT_STARTED
+    from snapper_ai.models import CurrentComponent
+
+    if series is None:
+        return None
+    curves, samples, edges, gaps = (series['curves'], series['samples'],
+                                    series['edges'], series['gaps'])
+    stale = timedelta(minutes=TREND_STALE_MINUTES)
+
+    def values(cid):
+        return {datetime.fromisoformat(x): v for x, v in
+                (curves.get(cid) or {}).get('points') or []}
+
+    def at_edges(q, cid, absent_is_zero):
+        """The curve at each edge, from the queue's newest sample at or
+        before it."""
+        times = samples.get(q) or []
+        by_time = values(cid)
         out = []
         for edge in edges:
-            i = bisect_right(stamps, edge)
-            gap = any(a <= edge <= b for a, b in gaps)
-            out.append(series[i - 1][1] if i and not gap else None)
+            i = bisect_right(times, edge)
+            if not i or edge - times[i - 1] > stale or any(a <= edge <= b for a, b in gaps):
+                out.append(None)
+                continue
+            v = by_time.get(times[i - 1])
+            out.append(v if v is not None else (0 if absent_is_zero else None))
         return out
 
     def total(rows):
-        if not rows or any(r is None for r in rows):
-            return [None] * len(edges)
         return [None if any(v is None for v in col) else sum(col) for col in zip(*rows)]
-
-    def state(q, name, observed):
-        values = at_edges(f'sj_{q}_{name}')
-        return values if values is not None else ([0] * len(edges) if observed else None)
 
     def ended(counts):
         out = []
@@ -1174,25 +1268,25 @@ def _trends(sites):
             out.append(None if a is None or b is None or overlap else max(0, round(b - a)))
         return out
 
-    def known_sum(values):
-        return None if any(v is None for v in values) else sum(values)
+    def known_sum(xs):
+        return None if any(v is None for v in xs) else sum(xs)
+
+    def num(v):
+        return 'unknown' if v is None else f'{v:,}'
 
     hour = 60 // TREND_BIN_MINUTES
-    to = aligned.astimezone(ZoneInfo('America/New_York')).strftime('%H:%M')
+    to = edges[-1].astimezone(ZoneInfo('America/New_York')).strftime('%H:%M')
     out = []
-    for site, queues in live:
-        observed = {q: at_edges(f'sjfw_{q}') is not None for q in queues}
-        running = total([state(q, 'running', observed[q]) for q in queues])[1:]
-        queued = total([state(q, s, observed[q]) for q in queues for s in NOT_STARTED])[1:]
-        finished = ended(total([at_edges(f'sjfw_{q}') for q in queues]))
-        failed = ended(total([at_edges(f'sjxw_{q}') for q in queues]))
+    for site, queues in series['live']:
+        running = total([at_edges(q, f'sj_{q}_running', True) for q in queues])[1:]
+        queued = total([at_edges(q, f'sj_{q}_{s}', True) for q in queues
+                        for s in NOT_STARTED])[1:]
+        finished = ended(total([at_edges(q, f'sjfw_{q}', False) for q in queues]))
+        failed = ended(total([at_edges(q, f'sjxw_{q}', False) for q in queues]))
         name = short_name(site['name'])
-        fin_h, fail_h = known_sum(finished[-hour:]), known_sum(failed[-hour:])
-
-        def num(v):
-            return 'unknown' if v is None else f'{v:,}'
         detail = (f'{name} at {to} ET: {num(running[-1])} running, {num(queued[-1])} queued; '
-                  f'{num(fin_h)} finished, {num(fail_h)} failed in the hour before')
+                  f'{num(known_sum(finished[-hour:]))} finished, '
+                  f'{num(known_sum(failed[-hour:]))} failed in the hour before')
         out.append({'id': site['id'], 'name': name, 'running': running,
                     'queued': queued, 'finished': finished, 'failed': failed,
                     'detail': detail})
@@ -1204,7 +1298,7 @@ def _trends(sites):
     return {
         'window_hours': TREND_HOURS, 'bin_minutes': TREND_BIN_MINUTES,
         't': [iso(x) for x in edges[1:]],
-        'sampled_at': iso(sampled),
+        'sampled_at': iso(series['newest']),
         'source_as_of': iso(panda.source_as_of) if panda else None,
         'gaps': [[iso(a), iso(b)] for a, b in gaps],
         'sites': out,
