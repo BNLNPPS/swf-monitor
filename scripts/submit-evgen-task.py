@@ -201,7 +201,11 @@ def _reporting_env():
 
 
 def _stage_bg_files(env, sandbox):
-    """Copy or fetch BG_FILES into the worker sandbox when background mixing uses it."""
+    """Write, copy or fetch BG_FILES into the worker sandbox when background
+    mixing uses it. PCS sends the sources JSON it holds as BG_FILES_CONTENT
+    (swf-epicprod PCS_BACKGROUND_TAG.md, The sources JSON is held in PCS);
+    a submission without it downloads the file from config_data."""
+    content = env.pop('BG_FILES_CONTENT', None)
     bg_files = (env.get('BG_FILES') or '').strip()
     if not bg_files:
         return
@@ -210,7 +214,11 @@ def _stage_bg_files(env, sandbox):
         raise RuntimeError(f"invalid BG_FILES value: {bg_files!r}")
     target = os.path.join(sandbox, bg_base)
 
-    if os.path.isfile(bg_files):
+    if content:
+        with open(target, "w") as f:
+            f.write(content)
+        _log(f"staging BG_FILES {bg_base} from PCS")
+    elif os.path.isfile(bg_files):
         if os.path.abspath(bg_files) != os.path.abspath(target):
             shutil.copy(bg_files, target)
     else:
@@ -219,7 +227,7 @@ def _stage_bg_files(env, sandbox):
             f"{BG_CONFIG_BASE.format(dataset_tag=urllib.parse.quote(dataset_tag, safe=''))}/"
             f"{urllib.parse.quote(bg_files, safe='')}"
         )
-        _log(f"staging BG_FILES from {url}")
+        _log(f"staging BG_FILES from {url} (not stored in PCS)")
         urllib.request.urlretrieve(url, target)
     env['BG_FILES'] = bg_base
 
