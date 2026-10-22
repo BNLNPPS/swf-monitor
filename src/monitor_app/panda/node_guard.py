@@ -40,6 +40,7 @@ from datetime import timedelta
 from django.db import connections
 from django.utils import timezone
 
+from monitor_app.live_notices import node_guard_text
 from monitor_app.panda.constants import PANDA_SCHEMA
 
 logger = logging.getLogger(__name__)
@@ -411,11 +412,9 @@ def run_cycle(*, dry_run=False, created_by='node-guard'):
                 sublevel='normal' if new == 'black_hole' else 'low',
                 live_default=new == 'black_hole',
                 level=logging.WARNING if new == 'black_hole' else logging.INFO,
-                message=(f'node guard {queue} {host}: {state} ({why}), was {old}'
-                         + (f'; {e["failed"]} of {e["jobs"]} jobs failed, {e["fast_failed"]} fast, '
-                            f'in the last {cfg["window_h"]} h; '
-                            f'{len(e["tasks_finished_elsewhere"])} of {len(e["tasks_failed"])} '
-                            f'failed tasks finish on other nodes' if e else '')),
+                message=node_guard_text(dict(e, host=host, queue=queue, state=state,
+                                             reason=why, old_state=old,
+                                             window_h=cfg['window_h'])),
                 state=state, old_state=old, reason=why, mode=mode, host=host, queue=queue,
                 window_h=cfg['window_h'], **e), failed(f'{queue}/{host} record'))
             if shown is not None:

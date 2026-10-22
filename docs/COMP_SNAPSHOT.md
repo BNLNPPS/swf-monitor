@@ -76,7 +76,7 @@ storage[]         {id, name, holds, status, counts,
 report            {text, items: [{level, text, link}],
                    assessment: {verdict, level, at, link, campaign,
                                 title, narration}}
-live              {link, items: [{id, at, level, importance, text, link}]}
+live              {link, items: [{id, at, level, title, detail, importance, text, link}]}
 errors[]          {part, error}
 ```
 
@@ -341,9 +341,20 @@ shadow mode.
 
 The room's epicprod-live screen (Torre Wenaus, 2026-10-22): the ten
 newest records of the epicprod live stream at level WARNING, ERROR or
-CRITICAL, newest first, each with its time, level, importance (the
-record's sublevel), message and page (`logs/<id>/`); `live.link` is the
-logs page's live view (`logs/?app_name=epicprod&live=1`). The stream is
+CRITICAL, newest first, each with its time, level, title, detail,
+importance (the record's sublevel), message and page (`logs/<id>/`);
+`live.link` is the logs page's live view
+(`logs/?app_name=epicprod&live=1`). The screen shows the title and gives
+the detail on hover. The title names what happened and where, in a few
+words: the execute site for a node guard decision (`Node guard ·
+ComputeCanada-Fir`), the task for a task operation (`Move · task 40857`),
+else the site, storage element, queue or configuration the record
+names. The detail is the informative message: for a node guard decision
+the node, its site and queue, the decision and its reason in words, and
+the evidence (the decision record's own message is the same text); for
+a task operation the task and the operation's reading; otherwise the
+record's reason, led by its subject. Both come from
+`live_notices.board_text`. The stream is
 the logs page's own selection (`live_stream_q`, ACTION_STREAM.md). The
 records ride in the snapshot because the room reads it anonymously and
 the logs page is behind the login wall; the messages are those the

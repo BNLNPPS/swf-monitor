@@ -38,6 +38,88 @@ PROGRESS_PATTERNS = {
 }
 
 
+# The room's epicprod-live screen (COMP_SNAPSHOT.md, Live) shows a short
+# title, what and where, with the informative message under it.
+BOARD_LABELS = {
+    'node_guard_decision': 'Node guard', 'node_guard_cycle': 'Node guard cycle',
+    'panda_task_operation': 'Task operation', 'evgen_task_submit': 'EVGEN submit',
+    'evgen_register': 'EVGEN registration', 'evgen_events': 'EVGEN events',
+    'storage_door_cycle': 'Storage doors', 'storage_door_verdict': 'Storage door',
+    'storage_sweep': 'Storage sweep', 'stash_drain': 'Stash drain',
+    'system_status_refresh': 'System status', 'report_sweep': 'Report sweep',
+    'log_rescue': 'Log rescue', 'catalog_sync': 'Catalog sync',
+    'payload_log_fetch': 'Payload log fetch', 'declared_state_sync': 'Declared state',
+    'es_closeout_cycle': 'ES close-out', 'snapper_capture': 'Snapper capture',
+    'file_events_measure': 'File events', 'credential_expiry_check': 'Credential expiry',
+    'panda_sandbox_keepalive': 'Sandbox keepalive',
+}
+OPERATION_LABELS = {'reassign': 'Move', 'pause': 'Pause', 'resume': 'Resume',
+                    'retry': 'Retry', 'finish': 'Finish', 'kill': 'Kill',
+                    'abort': 'Abort'}
+NODE_REASONS = {
+    'black_hole': 'fails jobs that finish on other nodes',
+    'fixed_time': 'kills every job at the same run time (a memory ceiling or slot limit)',
+}
+CONFIG_TAGS = re.compile(r'\.(p\d+\.e\d+)\.')
+
+
+def board_text(message, extra):
+    """(title, detail) for one record on the room's epicprod-live screen:
+    the title names what happened and where (the execute site, storage
+    element or queue), the detail is the informative message."""
+    action = str(extra.get('action') or '')
+    label = BOARD_LABELS.get(action) or action.replace('_', ' ').capitalize()
+    if action == 'node_guard_decision':
+        where = extra.get('site') or extra.get('queue')
+        return (f'{label} · {where}' if where else label), node_guard_text(extra)
+    if action == 'panda_task_operation':
+        op = str(extra.get('operation') or '')
+        task = extra.get('task_name') or f"task {extra.get('subject_key')}"
+        return (f"{OPERATION_LABELS.get(op, op.capitalize() or label)} · "
+                f"task {extra.get('subject_key')}",
+                f"{task}: {extra.get('reason') or message}")
+    where = (extra.get('site') or extra.get('rse') or extra.get('queue')
+             or extra.get('subject_label'))
+    if not where:
+        tags = CONFIG_TAGS.search(str(extra.get('subject_key') or ''))
+        where = tags.group(1) if tags else ''
+    detail = str(extra.get('reason') or extra.get('summary') or message)
+    subject = str(extra.get('subject_label') or extra.get('subject_key') or '')
+    if subject and subject not in detail:
+        detail = f'{subject}: {detail}'
+    return (f'{label} · {where}' if where else label), detail
+
+
+def node_guard_text(f):
+    """A node guard decision in words: the node and where it runs, the
+    decision and why, and the evidence. The decision record's message
+    and the screen's detail."""
+    host, site, state = f.get('host'), f.get('site'), str(f.get('state') or '')
+    text = (f"{host} at {site}" if site else str(host)) + (
+        f": {state.replace('_', ' ')} {'from' if state == 'excluded' else 'on'} "
+        f"{f.get('queue')}")
+    reason = f.get('reason')
+    why = NODE_REASONS.get(reason, str(reason or '').replace('_', ' '))
+    if why:
+        text += f', {why}'
+    if f.get('jobs') is not None:
+        text += (f"; {f.get('failed')} of {f['jobs']} jobs failed in the last "
+                 f"{f.get('window_h')} h")
+        died = (f.get('failed_duration_s') or {}).get('median')
+        if reason == 'fixed_time' and died:
+            text += f', each at about {round(died / 60)} min'
+        elif f.get('fast_failed'):
+            text += f", {f['fast_failed']} of them fast"
+        done = f.get('tasks_finished_elsewhere') or []
+        if done:
+            text += (f"; task{'s' if len(done) > 1 else ''} "
+                     f"{', '.join(str(t) for t in done)} "
+                     f"finish{'' if len(done) > 1 else 'es'} on other nodes")
+    if f.get('old_state'):
+        text += f" (was {str(f['old_state']).replace('_', ' ')})"
+    return text + '.'
+
+
 def failure_key(instance_name, extra):
     """The identity a failure and its recovery share: the same action from
     the same source on the same subject. The room's epicprod-live screen

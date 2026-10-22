@@ -924,7 +924,7 @@ def _live_records():
     screen: a record a ``live_cleared`` record names, and a failure whose
     action has since run ok (COMP_SNAPSHOT.md, Live)."""
     from monitor_app.epicprod_logging import EPICPROD_APP_NAME, live_stream_q
-    from monitor_app.live_notices import FAILURE_OUTCOMES, failure_key
+    from monitor_app.live_notices import FAILURE_OUTCOMES, board_text, failure_key
     from monitor_app.models import AppLog
     cleared = set()
     for ids in (AppLog.objects
@@ -947,8 +947,10 @@ def _live_records():
                 last_ok[key] = _last_ok(r['instance_name'], extra, key)
             if last_ok[key] and last_ok[key] > r['timestamp']:
                 continue
+        title, detail = board_text(r['message'], extra)
         items.append({'id': r['id'], 'at': r['timestamp'].isoformat(),
-                      'level': r['levelname'], 'importance': extra.get('sublevel'),
+                      'level': r['levelname'], 'title': title, 'detail': detail,
+                      'importance': extra.get('sublevel'),
                       'text': r['message'], 'link': f"{PUBLIC}/logs/{r['id']}/"})
         if len(items) == LIVE_ITEMS:
             break
