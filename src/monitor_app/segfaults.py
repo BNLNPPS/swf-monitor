@@ -1214,7 +1214,7 @@ REFERENCE_QUEUE = 'BNL_NPPS_GPU'
 # reference queue's one slot is asked for only when the reading needs
 # the host (a memory ceiling, a core dump, a stall watched live).
 ELSEWHERE_QUEUE = 'UM_GREX_PanDA_1'
-ELSEWHERE_FROM = {'UM_GREX_PanDA_1': 'BNL_OSG_EPIC_PROD_1'}
+ELSEWHERE_FROM = {'UM_GREX_PanDA_1': 'BNL_OSG_PanDA_1'}
 CRASH_EXITS = {134, 135, 136, 139}
 
 
