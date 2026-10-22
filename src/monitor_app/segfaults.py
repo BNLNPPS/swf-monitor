@@ -40,20 +40,25 @@ logger = logging.getLogger(__name__)
 PHASE = 'payload_crash'
 MEMORY_PHASE = 'payload_memory'
 MEMORY_CLASS = 'memory'
+INPUT_PHASE = 'payload_input'
+INPUT_CLASS = 'input'
 SIGNAL_NAMES = {6: 'SIGABRT', 7: 'SIGBUS', 8: 'SIGFPE', 11: 'SIGSEGV'}
 CLASS_LABELS = {
     'storm': 'Storm', 'configuration_dead': 'Config dead',
     'sparse': 'Sparse', 'abort': 'Abort', 'mixed': 'Mixed',
-    MEMORY_CLASS: 'Memory',
+    MEMORY_CLASS: 'Memory', INPUT_CLASS: 'Bad input',
 }
 STAGE_LABELS = {'simulation': 'simu', 'reconstruction': 'reco'}
 # What a signature records, the Kind facet of the catalog and the runs
 # page: a segfault (the payload died on a signal it raised itself:
-# SIGSEGV, SIGABRT, SIGBUS, SIGFPE) or a himem job (killed from outside
-# for its memory).
-KIND_SEGFAULT, KIND_HIMEM = 'segfault', 'himem'
-KIND_LABELS = {KIND_SEGFAULT: 'Segfault', KIND_HIMEM: 'Himem'}
-KIND_ORDER = [KIND_SEGFAULT, KIND_HIMEM]
+# SIGSEGV, SIGABRT, SIGBUS, SIGFPE), a himem job (killed from outside
+# for its memory) or bad input (a stage that stopped on an error it
+# reported, exit 1; SEGFAULT_DIAGNOSIS.md, Bad input).
+KIND_SEGFAULT, KIND_HIMEM, KIND_INPUT = 'segfault', 'himem', 'badinput'
+KIND_LABELS = {KIND_SEGFAULT: 'Segfault', KIND_HIMEM: 'Himem', KIND_INPUT: 'Bad input'}
+KIND_ORDER = [KIND_SEGFAULT, KIND_HIMEM, KIND_INPUT]
+# The stages whose reported stop is a bad-input failure.
+INPUT_STAGES = ('simulation', 'reconstruction')
 # How a memory kill removed the job, read from the pilot error, with the
 # conventional status of the signal it received (128 plus the signal).
 MEMORY_MECHANISMS = {
@@ -67,9 +72,13 @@ def is_memory(sig):
     return getattr(sig, 'class_hint', '') == MEMORY_CLASS
 
 
+def is_input(sig):
+    return getattr(sig, 'class_hint', '') == INPUT_CLASS
+
+
 def sig_phase(sig):
     """The EpicProdJob phase of a signature's jobs."""
-    return MEMORY_PHASE if is_memory(sig) else PHASE
+    return MEMORY_PHASE if is_memory(sig) else INPUT_PHASE if is_input(sig) else PHASE
 
 
 def stage_label(stage):
@@ -93,6 +102,13 @@ def memory_key(jeditaskid, stage=''):
     return f'{key}:{stage}' if stage else key
 
 
+def input_key(jeditaskid, stage=''):
+    """A bad-input signature's key: the task, and the stage when the
+    task's failures split by stage."""
+    key = f'input:task{int(jeditaskid)}'
+    return f'{key}:{stage}' if stage else key
+
+
 def job_filter(sig):
     """The Q that selects a signature's own crashed jobs: its tasks, its
     exit code, and its stage where the entry is a stage entry; for a
@@ -105,10 +121,10 @@ def job_filter(sig):
             q |= job_filter(m)
         return q
     task_ids = [t.get('jeditaskid') for t in (sig.tasks or []) if t.get('jeditaskid')]
-    if is_memory(sig):
-        # A memory signature's jobs are its representatives, whatever
-        # status their removal left.
-        q = Q(phase=MEMORY_PHASE, jeditaskid__in=task_ids)
+    if is_memory(sig) or is_input(sig):
+        # A memory or bad-input signature's jobs are its representatives,
+        # whatever status the failure left.
+        q = Q(phase=sig_phase(sig), jeditaskid__in=task_ids)
     else:
         q = Q(phase=PHASE, jeditaskid__in=task_ids, data__crash__exit_code=sig.exit_code)
     stage = (sig.data or {}).get('stage')
@@ -118,7 +134,8 @@ def job_filter(sig):
         else:
             q &= (Q(data__crash__stage='') | Q(data__crash__stage__isnull=True))
     return q
-CLASS_ORDER = ['storm', 'configuration_dead', 'mixed', 'sparse', 'abort', MEMORY_CLASS]
+CLASS_ORDER = ['storm', 'configuration_dead', 'mixed', 'sparse', 'abort', MEMORY_CLASS,
+               INPUT_CLASS]
 STATUS_LABELS = dict(CrashSignature.STATUSES)
 
 # Fields the record pass owns; everything else on a signature (status,
@@ -716,6 +733,200 @@ def build_memory_signatures(jeditaskids):
     return summary
 
 
+def input_fail_sql():
+    """The condition selecting a bad-input failure among failed jobs
+    (alias ``j``) and its parameters (SEGFAULT_DIAGNOSIS.md, Bad input):
+    payload exit 1 with the simulation or reconstruction stage named as
+    the stage that failed."""
+    sql = f"""(j."transexitcode" = '1'
+              AND j."jobmetrics" LIKE '%%payloadStageStatus=fail%%'
+              AND {MEMORY_STAGE_SQL} = ANY(%s))"""
+    return sql, [list(INPUT_STAGES)]
+
+
+def input_tasks(since):
+    """The production tasks with a bad-input failure recorded after
+    ``since``; the builder's call, never a page's."""
+    from .panda.constants import PANDA_SCHEMA
+    cond, params = input_fail_sql()
+    rows = _panda_rows(
+        f"""SELECT DISTINCT j."jeditaskid" FROM "{PANDA_SCHEMA}"."jobsarchived4" j
+            JOIN "{PANDA_SCHEMA}"."jedi_tasks" t ON t."jeditaskid" = j."jeditaskid"
+            WHERE j."jobstatus" = 'failed' AND j."modificationtime" > %s
+              AND t."processingtype" = 'epicproduction' AND {cond}""",
+        [since] + params)
+    return sorted(int(r['jeditaskid']) for r in rows)
+
+
+def _input_aggregate(tids, by_stage, by_site=False):
+    """The bad-input failures of the tasks over their whole life, grouped
+    by task, by stage when asked, and by queue when asked."""
+    from .panda.constants import PANDA_SCHEMA
+    if not tids:
+        return []
+    cond, params = input_fail_sql()
+    stage = MEMORY_STAGE_SQL if by_stage else "''"
+    site_col = ', j."computingsite" AS site' if by_site else ''
+    group = '1, 2' + (', 3' if by_site else '')
+    return _panda_rows(
+        f"""SELECT j."jeditaskid", coalesce({stage}, '') AS stage{site_col},
+                   count(*) AS failures, count(DISTINCT j."modificationhost") AS hosts,
+                   percentile_cont(0.10) WITHIN GROUP (ORDER BY {MEMORY_MINUTES_SQL}) AS p10,
+                   percentile_cont(0.25) WITHIN GROUP (ORDER BY {MEMORY_MINUTES_SQL}) AS p25,
+                   percentile_cont(0.50) WITHIN GROUP (ORDER BY {MEMORY_MINUTES_SQL}) AS p50,
+                   percentile_cont(0.75) WITHIN GROUP (ORDER BY {MEMORY_MINUTES_SQL}) AS p75,
+                   min(j."endtime") AS first, max(j."endtime") AS last,
+                   max(t."taskname") AS taskname
+            FROM "{PANDA_SCHEMA}"."jobsarchived4" j
+            JOIN "{PANDA_SCHEMA}"."jedi_tasks" t ON t."jeditaskid" = j."jeditaskid"
+            WHERE j."jeditaskid" = ANY(%s) AND j."jobstatus" = 'failed' AND {cond}
+            GROUP BY {group}""",
+        [list(tids)] + params)
+
+
+def build_input_signatures(jeditaskids):
+    """The bad-input signatures of the tasks, recomputed over each task's
+    life from the PanDA record and upserted, split by stage as the memory
+    signatures are. Representatives and the reading are the inventory's;
+    everything a later stage wrote survives. Returns a summary with the
+    keys built."""
+    import re
+    from pcs.manifests import _taskparams
+    from pcs.models import PandaTasks
+    tids = sorted({int(t) for t in jeditaskids if t})
+    summary = {'signatures': 0, 'created': 0, 'retired': 0, 'keys': []}
+    if not tids:
+        return summary
+    staged = _input_aggregate(tids, by_stage=True)
+    stages_by_task = defaultdict(set)
+    for r in staged:
+        if r['stage']:
+            stages_by_task[int(r['jeditaskid'])].add(stage_label(r['stage']))
+    split = {tid for tid, s in stages_by_task.items() if len(s) >= 2}
+    groups = {}
+    for r in staged:
+        tid = int(r['jeditaskid'])
+        groups[(tid, stage_label(r['stage']) if tid in split else '')] = r
+    for r in _input_aggregate([t for t in tids if t not in split], by_stage=False):
+        groups[(int(r['jeditaskid']), '')] = r
+    stage_counts = defaultdict(dict)
+    for r in staged:
+        if r['stage']:
+            stage_counts[int(r['jeditaskid'])][r['stage']] = int(r['failures'])
+    sites = defaultdict(list)
+    for r in _input_aggregate(sorted(split), by_stage=True, by_site=True):
+        sites[(int(r['jeditaskid']), stage_label(r['stage']))].append(r)
+    for r in _input_aggregate([t for t in tids if t not in split], by_stage=False, by_site=True):
+        sites[(int(r['jeditaskid']), '')].append(r)
+
+    totals = task_totals(tids)
+    prod_tasks, payload_versions = {}, {}
+    for pt in PandaTasks.objects.filter(jedi_task_id__in=tids).select_related(
+            'prod_task', 'prod_task__dataset', 'prod_task__prod_config',
+            'prod_task__dataset__physics_tag', 'prod_task__campaign',
+            'prod_task__dataset__campaign'):
+        prod_tasks[pt.jedi_task_id] = pt.prod_task
+        payload_versions[pt.jedi_task_id] = (pt.metadata or {}).get('payload_version', '')
+    split_keys = defaultdict(list)
+    for (tid, stage) in groups:
+        if tid in split:
+            split_keys[tid].append(input_key(tid, stage))
+    now = timezone.now()
+    for (tid, stage), g in sorted(groups.items(), key=lambda kv: -int(kv[1]['failures'])):
+        key = input_key(tid, stage)
+        sig = CrashSignature.objects.filter(key=key).first()
+        created = sig is None
+        if created:
+            sig = CrashSignature(key=key, status='new')
+        failures = int(g['failures'])
+        tot = totals.get(tid, {'finished': 0, 'failed': 0})
+        denom = tot['finished'] + tot['failed']
+        sig.level = 'record'
+        sig.class_hint = INPUT_CLASS
+        sig.exit_code, sig.signal = 1, 0  # no signal: the stage reported its error
+        first, last = _utc(g['first']), _utc(g['last'])
+        sig.tasks = [{'jeditaskid': tid, 'taskname': g['taskname'] or '', 'crashes': failures,
+                      'finished': tot['finished'], 'failed': tot['failed'],
+                      'first_seen': _iso(first), 'last_seen': _iso(last)}]
+        sig.configuration = _configuration(prod_tasks.get(tid), payload_versions.get(tid, ''))
+        m = re.search(r'"container_name":\s*"([^"]+)"', _taskparams(tid) or '')
+        sig.configuration['container_image_ran'] = m.group(1) if m else ''
+        sig.sites = [{'site': s['site'], 'crashes': int(s['failures']), 'hosts': int(s['hosts'])}
+                     for s in sorted(sites.get((tid, stage), []), key=lambda s: -int(s['failures']))]
+        sig.crashes = failures
+        sig.rate = round(failures / denom, 4) if denom else None
+        sig.minutes_p10, sig.minutes_p50 = _min(g['p10']), _min(g['p50'])
+        sig.first_seen, sig.last_seen = first, last
+        sig.rows_lost, sig.events_lost = None, None
+        data = dict(sig.data or {})
+        data.update({
+            'kind': INPUT_CLASS,
+            'hosts': int(g['hosts']),
+            'minutes_p25': _min(g['p25']), 'minutes_p75': _min(g['p75']),
+            'stages': ({g['stage']: failures} if stage else {} if tid in split
+                       else dict(stage_counts.get(tid, {}))),
+            'rows_lost_note': 'not computed for bad-input failures: the failed rows are not kept per job',
+            'record_built_at': _iso(now),
+            'stage': stage,
+            'split': tid in split,
+            'split_keys': sorted(split_keys.get(tid, [])),
+        })
+        data.setdefault('input', {})
+        data.setdefault('representatives', [])
+        data.setdefault('rows_resolved', 0)
+        sig.data = data
+        sig.updated_at = now
+        sig.save()
+        summary['signatures'] += 1
+        summary['created'] += int(created)
+        summary['keys'].append(key)
+    return summary
+
+
+def _fatal_lines(text):
+    """The FATAL lines a stage's program wrote, whitespace collapsed, in
+    order: DDSim and Geant4 write them as '<component> FATAL +++ <text>'."""
+    import re
+    out = []
+    for line in (text or '').splitlines():
+        if re.search(r'\bFATAL\b', line):
+            out.append(' '.join(line.split())[:300])
+    return out
+
+
+def read_input_fatal(sig, fetch=None):
+    """Give a bad-input signature its reading when it has none: the FATAL
+    lines of the first representative whose payload log holds any, read
+    through the PanDA monitor's file browser (as the job study reads it).
+    ``fetch(pandaid)`` returns the payload.stdout text, for tests. Returns
+    True when a reading was recorded (SEGFAULT_DIAGNOSIS.md, Bad input)."""
+    data = dict(sig.data or {})
+    reading = dict(data.get('input') or {})
+    if reading.get('fatal'):
+        return False
+    if fetch is None:
+        from askpanda_atlas.log_analysis_impl import _fetch_log_text
+        from decouple import config
+        base_url = config('PANDA_BASE_URL', default='https://pandamon01.sdcc.bnl.gov')
+
+        def fetch(pid):
+            return _fetch_log_text(pid, 'payload.stdout', base_url, timeout=30)
+    for pid in data.get('representatives') or []:
+        try:
+            lines = _fatal_lines(fetch(pid))
+        except Exception as e:                                # noqa: BLE001
+            logger.warning('bad-input reading of %s from job %s failed: %s', sig.key, pid, e)
+            continue
+        if lines:
+            reading.update({'fatal': lines[0], 'fatal_lines': lines[:5],
+                            'read_from': pid, 'read_at': _iso(timezone.now())})
+            data['input'] = reading
+            sig.data = data
+            sig.save(update_fields=['data', 'updated_at'])
+            return True
+    return False
+
+
 # ---------------------------------------------------------- the reading
 
 # The campaign images all live at one cvmfs path; the version is the
@@ -735,11 +946,15 @@ def signature_summary(sig):
     if memory:
         mechanism = MEMORY_MECHANISMS.get(memory.get('dominant') or '', {})
         signal_name = f"killed for memory ({mechanism.get('label', 'removed')})"
+    elif is_input(sig):
+        fatal = ((sig.data or {}).get('input') or {}).get('fatal') or ''
+        signal_name = f'stopped on its error (exit 1){": " + fatal if fatal else ""}'
     else:
         signal_name = SIGNAL_NAMES.get(sig.signal, f'signal {sig.signal}')
     return {
         'key': sig.key,
-        'kind': KIND_HIMEM if is_memory(sig) else KIND_SEGFAULT,
+        'kind': (KIND_HIMEM if is_memory(sig) else KIND_INPUT if is_input(sig)
+                 else KIND_SEGFAULT),
         'level': sig.level,
         'exit_code': sig.exit_code,
         'signal': sig.signal,
@@ -874,7 +1089,7 @@ def signature_for_job(pandaid):
     """The signature a crashed job belongs to, for the job page's card,
     or None. A memory signature's representative names its memory
     signature."""
-    job = EpicProdJob.objects.filter(pandaid=pandaid, phase__in=(PHASE, MEMORY_PHASE)).only(
+    job = EpicProdJob.objects.filter(pandaid=pandaid, phase__in=(PHASE, MEMORY_PHASE, INPUT_PHASE)).only(
         'jeditaskid', 'phase', 'data').first()
     if job is None or not job.jeditaskid:
         return None
@@ -883,6 +1098,11 @@ def signature_for_job(pandaid):
         sig = (CrashSignature.objects.filter(
                    key=memory_key(job.jeditaskid, stage_label(crash.get('stage')))).first()
                or CrashSignature.objects.filter(key=memory_key(job.jeditaskid)).first())
+        return signature_summary(sig) if sig else None
+    if job.phase == INPUT_PHASE:
+        sig = (CrashSignature.objects.filter(
+                   key=input_key(job.jeditaskid, stage_label(crash.get('stage')))).first()
+               or CrashSignature.objects.filter(key=input_key(job.jeditaskid)).first())
         return signature_summary(sig) if sig else None
     exit_code = crash.get('exit_code')
     if not exit_code:

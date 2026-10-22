@@ -99,6 +99,7 @@ SIGNAL_NAMES = {6: 'SIGABRT', 7: 'SIGBUS', 8: 'SIGFPE', 11: 'SIGSEGV'}
 BATCH = 1000
 PHASE = 'payload_crash'
 MEMORY_PHASE = 'payload_memory'
+INPUT_PHASE = 'payload_input'
 MEMORY_REPRESENTATIVES = 3
 # Candidates tried around each anchor (shortest, median, longest) for a
 # representative whose manifest row resolves.
@@ -512,14 +513,21 @@ def _memory_summary(rec):
             f"at {rec.get('computingsite') or 'unknown site'}")
 
 
+def _input_summary(rec):
+    when = f" after {rec['minutes']:g} min" if rec.get('minutes') is not None else ''
+    return (f"{rec.get('stage') or 'payload'} stopped on its error (exit 1){when} "
+            f"at {rec.get('computingsite') or 'unknown site'}")
+
+
 def memory_candidates(sig):
-    """The pandaids of a memory signature's kills, by time to kill."""
+    """The pandaids of a memory or bad-input signature's failures, by time
+    to failure."""
     from monitor_app.segfaults import (MEMORY_MINUTES_SQL, MEMORY_STAGE_SQL, STAGE_LABELS,
-                                       memory_kill_sql)
+                                       input_fail_sql, is_input, memory_kill_sql)
     tid = int((sig.tasks or [{}])[0].get('jeditaskid') or 0)
     if not tid:
         return []
-    cond, params = memory_kill_sql()
+    cond, params = input_fail_sql() if is_input(sig) else memory_kill_sql()
     stage = (sig.data or {}).get('stage') or ''
     stage_cond, stage_params = '', []
     if (sig.data or {}).get('split'):
@@ -554,7 +562,8 @@ def memory_representatives(sig, manifests, chains, counts):
     among the kills whose manifest row resolves, written as EpicProdJob
     rows of phase payload_memory and named on the signature. Kept once
     chosen, so a reproduction requested against one stays valid."""
-    from monitor_app.segfaults import job_filter
+    from monitor_app.segfaults import is_input, job_filter
+    bad_input = is_input(sig)
     have = list(EpicProdJob.objects.filter(job_filter(sig)).values_list('pandaid', flat=True))
     if len(have) >= MEMORY_REPRESENTATIVES:
         return 0
@@ -600,14 +609,16 @@ def memory_representatives(sig, manifests, chains, counts):
                 continue
             rec = memory_record(j, seq, row, source)
             rec['container'] = manifests.container(tid)
+            if bad_input:
+                rec['kind'], rec['mechanism'] = 'input', 'stage_error'
             obj = EpicProdJob.objects.filter(pandaid=pid).first() or EpicProdJob(pandaid=pid)
             obj.jeditaskid = tid
             obj.prod_task = manifests.prod_task(tid)
             obj.seq_number = seq
             obj.job_index = seq - 1
             obj.status = 'failed'
-            obj.phase = MEMORY_PHASE
-            obj.failure_summary = _memory_summary(rec)
+            obj.phase = INPUT_PHASE if bad_input else MEMORY_PHASE
+            obj.failure_summary = _input_summary(rec) if bad_input else _memory_summary(rec)
             data = dict(obj.data or {})
             data['crash'] = rec
             obj.data = data
@@ -649,6 +660,31 @@ def memory_pass(since, manifests, chains, counts):
             'memory_rows_unresolved': counts['memory_rows_unresolved']}
 
 
+def input_pass(since, manifests, chains, counts):
+    """The bad-input signatures of the tasks with such a failure since
+    ``since``, rebuilt over their life, and their representatives
+    (SEGFAULT_DIAGNOSIS.md, Bad input)."""
+    from monitor_app.segfaults import build_input_signatures, input_tasks, read_input_fatal
+    tids = input_tasks(since)
+    log.info('input pass: %d tasks with a bad-input failure since %s', len(tids),
+             since.isoformat(timespec='seconds'))
+    before = counts['memory_rows_unresolved']
+    result = build_input_signatures(tids)
+    reps = readings = 0
+    for key in result['keys']:
+        sig = CrashSignature.objects.filter(key=key).first()
+        if sig is not None:
+            reps += memory_representatives(sig, manifests, chains, counts)
+            sig.refresh_from_db()
+            readings += int(read_input_fatal(sig))
+    log.info('  %d bad-input signatures (%d new), %d representatives written, %d read',
+             result['signatures'], result['created'], reps, readings)
+    return {'input_tasks': len(tids), 'input_signatures': result['signatures'],
+            'input_signatures_new': result['created'],
+            'input_representatives': reps, 'input_readings': readings,
+            'input_rows_unresolved': counts['memory_rows_unresolved'] - before}
+
+
 def run(args):
     since = _window(args)
     t0 = time.monotonic()
@@ -661,6 +697,12 @@ def run(args):
         manifests = ManifestRows(establish=not args.no_manifest_establish)
         summary = {'since': since.isoformat(timespec='seconds'), 'memory_only': True}
         summary.update(memory_pass(since, manifests, RetryChains(), counts))
+        summary['seconds'] = round(time.monotonic() - t0, 1)
+        return summary, t0
+    if args.input_only:
+        manifests = ManifestRows(establish=not args.no_manifest_establish)
+        summary = {'since': since.isoformat(timespec='seconds'), 'input_only': True}
+        summary.update(input_pass(since, manifests, RetryChains(), counts))
         summary['seconds'] = round(time.monotonic() - t0, 1)
         return summary, t0
     jobs = crashed_jobs(since, args.limit)
@@ -690,6 +732,8 @@ def run(args):
         summary.update(signature_pass(sorted(counts['tasks']), args))
     if not args.dry_run and not args.no_memory:
         summary.update(memory_pass(since, manifests, chains, counts))
+    if not args.dry_run and not args.no_input:
+        summary.update(input_pass(since, manifests, chains, counts))
     summary['seconds'] = round(time.monotonic() - t0, 1)
     return summary, t0
 
@@ -748,6 +792,10 @@ def main():
                     help='skip the memory pass')
     ap.add_argument('--memory-only', action='store_true',
                     help='the memory pass alone over the window (its back-fill)')
+    ap.add_argument('--no-input', action='store_true',
+                    help='skip the bad-input pass')
+    ap.add_argument('--input-only', action='store_true',
+                    help='the bad-input pass alone over the window (its back-fill)')
     ap.add_argument('--no-rows-lost', action='store_true',
                     help='skip the delivery lookup behind rows_lost')
     ap.add_argument('--no-manifest-establish', action='store_true',
@@ -790,6 +838,11 @@ def main():
                   f"{summary.get('memory_tasks', 0)} tasks, "
                   f"{summary.get('memory_representatives', 0)} representatives written"
                   if 'memory_signatures' in summary else '')
+        bad_input = (f"{summary.get('input_signatures', 0)} bad-input signatures "
+                     f"({summary.get('input_signatures_new', 0)} new) over "
+                     f"{summary.get('input_tasks', 0)} tasks, "
+                     f"{summary.get('input_representatives', 0)} representatives written"
+                     if 'input_signatures' in summary else '')
         log_epicprod_action(
             args.instance, 'segfault_inventory', outcome='ok',
             duration_ms=int((time.monotonic() - t0) * 1000),
@@ -799,6 +852,8 @@ def main():
                      if args.signatures else
                      f"segfault inventory since {summary['since'][:10]}: {memory}"
                      if args.memory_only else
+                     f"segfault inventory since {summary['since'][:10]}: {bad_input}"
+                     if args.input_only else
                      f"segfault inventory since {summary['since'][:10]}: "
                      f"{summary['jobs_seen']} crashed jobs, {summary['rows_added']} rows added, "
                      f"{summary['rows_updated']} updated, {summary['rows_unresolved']} rows "
@@ -807,7 +862,8 @@ def main():
                      f"({summary.get('manifests_unavailable', 0)} unavailable), "
                      f"{summary.get('signatures', 0)} signatures "
                      f"({summary.get('signatures_new', 0)} new)"
-                     + (f"; {memory}" if memory else '')),
+                     + (f"; {memory}" if memory else '')
+                     + (f"; {bad_input}" if bad_input else '')),
             **{k: v for k, v in summary.items() if isinstance(v, int) and not isinstance(v, bool)})
     print(json.dumps(summary))
     return 0
