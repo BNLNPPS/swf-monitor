@@ -1095,3 +1095,35 @@ async def swf_comp_snapshot(refresh: bool = False) -> dict:
         return await sync_to_async(get_snapshot)(refresh=refresh)
     except Exception as e:
         return {"error": f"comp snapshot failed: {e}"}
+
+
+@mcp.tool()
+@requires_authority
+async def epicprod_live_clear(ids: list, reason: str, username: str = None) -> dict:
+    """
+    Take records off the computing centre's epicprod-live screen
+    (docs/COMP_SNAPSHOT.md, Live).
+
+    WHEN: Torre asks about an error on the floor and the answer is that it
+    is taken care of. Clear it in the same turn as that answer.
+
+    Args:
+        ids: The log record ids: the screen item's id, the N in its
+            logs/N/ page (swf_comp_snapshot live.items[].id).
+        reason: How it was taken care of, one line.
+        username: Who clears (required for a token caller).
+
+    Writes one live_cleared action naming the records; they are unchanged
+    on the logs page. A failure whose action has since run ok leaves the
+    screen by itself and needs no clear. The screen shows the change at the
+    next snapshot rebuild; swf_comp_snapshot(refresh=True) rebuilds now.
+
+    Returns:
+        record_id, cleared_ids and reason, or error.
+    """
+    from monitor_app.comp_snapshot import clear_live_records
+    try:
+        who = _get_username(username)
+        return await sync_to_async(clear_live_records)(ids, reason, who)
+    except (ValueError, RuntimeError) as e:
+        return {"error": str(e)}

@@ -955,6 +955,33 @@ def _live_records():
     return {'link': f'{PUBLIC}/logs/?app_name=epicprod&live=1', 'items': items}
 
 
+def clear_live_records(ids, reason, username, instance='mcp'):
+    """Take records off the room's epicprod-live screen: one live_cleared
+    action naming them and why (COMP_SNAPSHOT.md, Live). An id outside the
+    epicprod stream is refused, never recorded."""
+    from monitor_app.epicprod_logging import EPICPROD_APP_NAME, log_epicprod_action
+    from monitor_app.models import AppLog
+    ids = sorted({int(i) for i in ids or ()})
+    reason = str(reason or '').strip()
+    if not ids:
+        raise ValueError('no record ids')
+    if not reason:
+        raise ValueError('a reason is required')
+    found = set(AppLog.objects.filter(id__in=ids, app_name=EPICPROD_APP_NAME)
+                .values_list('id', flat=True))
+    unknown = [i for i in ids if i not in found]
+    if unknown:
+        raise ValueError(f'not epicprod records: {unknown}')
+    summary = (f"cleared {len(ids)} record(s) from the epicprod-live screen: "
+               f"{', '.join(str(i) for i in ids)}; {reason}")
+    row_id = log_epicprod_action(instance, 'live_cleared', username=username,
+                                 message=summary, cleared_ids=ids,
+                                 reason=reason, summary=summary)
+    if row_id is None:
+        raise RuntimeError('the live_cleared record was not written')
+    return {'record_id': row_id, 'cleared_ids': ids, 'reason': reason}
+
+
 def _last_ok(instance_name, extra, key):
     """Time of the newest ok record carrying a failure's identity
     (live_notices.failure_key), or None: the recovery the epicprod-live

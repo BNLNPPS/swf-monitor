@@ -358,8 +358,9 @@ channel uses for its recovery notices (`live_notices.failure_key`). Any
 record leaves the screen when the operator's question about it has been
 answered: a `live_cleared` record in the action stream names the cleared
 record ids and the reason. Neither changes the records on the logs page.
-`scripts/live-clear.py <id> ... --reason "..."` writes a `live_cleared`
-record through the log REST endpoint.
+The `epicprod_live_clear` MCP tool writes one; out of process,
+`scripts/live-clear.py <id> ... --reason "..."` writes one through the log
+REST endpoint.
 
 ## Links
 

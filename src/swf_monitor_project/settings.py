@@ -403,6 +403,7 @@ COMMON QUERIES:
 - List physics tags? → pcs_list_tags(tag_type='p')
 - What is tag p1001? → pcs_get_tag(tag_label='p1001')
 - Ghost DIDs by RSE, stuck rules, stalled datasets? → epicprod_storage(listing='ghosts', rse='ASGC-XRD') — the storage record's store; never scan Rucio for these
+- Torre asked about an error on the computing-centre floor and it is taken care of? → epicprod_live_clear(ids=[<log id>], reason='...') in the same turn — takes it off the room's epicprod-live screen
 - Reco tags? → pcs_list_tags(tag_type='r')
 - Photoproduction tags? → pcs_search_tags(query='photoproduction')
 - DIS tags? → pcs_list_tags(tag_type='p', category='DIS')

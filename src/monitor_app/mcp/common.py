@@ -49,6 +49,7 @@ CALLER: contextvars.ContextVar = contextvars.ContextVar('mcp_caller', default=''
 #: declared name cannot go stale.
 AUTHORITY_GUARDED_TOOLS = frozenset({
     'ai_decide_proposal', 'ai_propose_ping', 'epic_register_ai_assessment',
+    'epicprod_live_clear',
     'pcs_dataset_intake', 'pcs_prodtask_intake', 'pcs_prodtask_link_input',
     'panda_segfault_finding_set', 'panda_segfault_reproduce', 'pcs_prodtask_set_status',
     'swf_end_execution', 'swf_kill_agent',
@@ -354,6 +355,11 @@ def get_available_tools_list() -> list:
             "name": "epicprod_list_actions",
             "description": "Query the epicprod action stream: structured records of production actions (sweeps, submissions, assessments) with who/what/outcome/duration. summarize=True gives counts and duration stats — prefer it for reporting.",
             "parameters": ["action", "instance", "subject_type", "subject_key", "username", "outcome", "start_time", "end_time", "summarize", "limit", "offset"],
+        },
+        {
+            "name": "epicprod_live_clear",
+            "description": "Take records off the computing centre's epicprod-live screen once Torre's question about them is answered as taken care of: one live_cleared action naming the record ids and why.",
+            "parameters": ["ids", "reason", "username"],
         },
         # PanDA Monitor tools
         {
