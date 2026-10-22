@@ -76,6 +76,7 @@ storage[]         {id, name, holds, status, counts,
 report            {text, items: [{level, text, link}],
                    assessment: {verdict, level, at, link, campaign,
                                 title, narration}}
+live              {link, items: [{id, at, level, importance, text, link}]}
 errors[]          {part, error}
 ```
 
@@ -335,6 +336,19 @@ shadow mode.
   title and the narration; `null` when none is registered.
 - `errors[]`: a part that could not be read is listed here and left out
   of the record, never shown as zero.
+
+### Live
+
+The room's epicprod-live screen (Torre Wenaus, 2026-10-22): the ten
+newest records of the epicprod live stream at level WARNING, ERROR or
+CRITICAL, newest first, each with its time, level, importance (the
+record's sublevel), message and page (`logs/<id>/`); `live.link` is the
+logs page's live view (`logs/?app_name=epicprod&live=1`). The stream is
+the logs page's own selection (`live_stream_q`, ACTION_STREAM.md). The
+records ride in the snapshot because the room reads it anonymously and
+the logs page is behind the login wall; the messages are those the
+action stream records, which name tasks, queues, nodes and errors and
+carry no credential.
 
 ## Links
 

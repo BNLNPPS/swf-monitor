@@ -69,6 +69,10 @@ OUTPUT_RSE = 'BNL-XRD'
 # A daily assessment's verdict as a health level (swf-epicprod
 # EPICPROD_ASSESSMENTS.md: ok | attention | alarm).
 VERDICT_LEVELS = {'ok': 'green', 'attention': 'amber', 'alarm': 'red'}
+# The epicprod-live screen: warning and error records only, five to ten
+# on screen (Torre, 2026-10-22).
+LIVE_LEVELS = ('WARNING', 'ERROR', 'CRITICAL')
+LIVE_ITEMS = 10
 
 
 def _worst(levels):
@@ -785,6 +789,7 @@ def build():
                                           b.part('alarms', b.production_alarms, []),
                                           b.part('assessment', _assessment_freshness, None)),
                    'assessment': b.part('daily_assessment', _latest_daily_assessment, None)},
+        'live': b.part('live', _live_records, None),
         'errors': b.errors,
     }
     record['build_seconds'] = round(time.monotonic() - t0, 2)
@@ -909,6 +914,23 @@ def _latest_daily_assessment():
             'link': f'{PUBLIC}{path}' if path else None,
             'campaign': x.get('subject_key'), 'title': x.get('report_title'),
             'narration': x.get('narration')}
+
+
+def _live_records():
+    """The epicprod-live screen: the newest warning and error records of
+    the live stream, the logs page's live view (ACTION_STREAM.md), each
+    with its own page. The room reads the record anonymously and the logs
+    page is behind the login wall, so the records ride here."""
+    from monitor_app.epicprod_logging import live_stream_q
+    from monitor_app.models import AppLog
+    rows = (AppLog.objects.filter(live_stream_q(), levelname__in=LIVE_LEVELS)
+            .order_by('-timestamp')
+            .values('id', 'timestamp', 'levelname', 'message', 'extra_data__sublevel')[:LIVE_ITEMS])
+    return {'link': f'{PUBLIC}/logs/?app_name=epicprod&live=1',
+            'items': [{'id': r['id'], 'at': r['timestamp'].isoformat(),
+                       'level': r['levelname'], 'importance': r['extra_data__sublevel'],
+                       'text': r['message'], 'link': f"{PUBLIC}/logs/{r['id']}/"}
+                      for r in rows]}
 
 
 def _jlab_pending():
