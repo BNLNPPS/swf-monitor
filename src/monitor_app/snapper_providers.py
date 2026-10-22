@@ -415,6 +415,8 @@ def _delivery_curve_values(state):
 
 _QUEUE_STACK_CACHE = {'members': (
     'NERSC_Perlmutter_epic',
+    'BNL_OSG_PanDA_1',
+    # Keep the draining queue's actual usage and historical series visible.
     'BNL_OSG_EPIC_PROD_1',
     'UM_GREX_PanDA_1',
     'BNL_ePIC_GOOGLE',

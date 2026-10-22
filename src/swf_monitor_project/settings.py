@@ -13,6 +13,11 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 from pathlib import Path
 import os
 from decouple import config
+from swf_epicprod.regulation import RETIRED_QUEUES
+
+# Permanent admission closures also apply to new site probes. Existing
+# production jobs and collection of already-submitted probes keep running.
+CANARY_CLOSED_QUEUES = RETIRED_QUEUES
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent

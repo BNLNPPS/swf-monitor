@@ -952,6 +952,16 @@ def main():
         _log(f"trial {spec['outDS']} on {spec.get('site') or '(brokered)'}: "
              f"{args.trial_events} events, outputs under "
              f"epic:/{args.trial_root}, lifetime {args.trial_lifetime_days}d")
+    # Recheck the final destination in the credentialed doer: a request
+    # queued before retirement, a trial or a payload canary bypasses the
+    # current PCS admission check. This creates tasks, never existing jobs.
+    from swf_epicprod.regulation import require_task_destination
+    try:
+        require_task_destination(spec.get('site'))
+    except ValueError as exc:
+        _log(f"ERROR: {exc}")
+        _record_submission_failure(args, str(exc))
+        return 2
     if spec.get('site') in OBJECT_STORE_LOG_QUEUES:
         # The kernel drops the log dataset on noLog (evgen_panda_submit.py).
         spec['noLog'] = True
