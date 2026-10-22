@@ -669,6 +669,10 @@ FRONT_REASONS = {
 PART_NAMES = {'prod_activity': 'jobs', 'canary': 'canary',
               'snapper_errors': 'failures', 'pilot_supply': 'pilot supply'}
 LEVEL_ORDER = {'red': 0, 'amber': 1, 'grey': 2, 'green': 3}
+# Queues production no longer uses, left out of the report by name (Torre,
+# 2026-10-22): BNL_OSG_EPIC_PROD_1 since production moved to BNL_OSG_PanDA_1
+# on 2026-10-21 (swf-epicprod OSG_SUBMISSION.md).
+NOT_IN_PRODUCTION = ('BNL_OSG_EPIC_PROD_1',)
 # The alarm engine's titles: 'task 40962 (failed) final-failure rate 100.0% —
 # <task name>' and a ping's 'due in 7 days (2026-10-28): <what>'.
 TASK_ALARM_RE = re.compile(r'^task (\d+) \(([^)]*)\) final-failure rate ([\d.]+%) — (.*)$')
@@ -717,9 +721,7 @@ def _report_items(front, sites, storage, alarms, assessment):
             continue
         for q in live:
             f = q.get('front') or {}
-            # a queue production does not use (feed off, nothing running or
-            # queued: BNL_OSG_EPIC_PROD_1 since 2026-10-21) is not reported
-            if f.get('feed') is False and not q['running'] and not q['queued']:
+            if q['id'] in NOT_IN_PRODUCTION:
                 continue
             level, words = FRONT_STATES.get(f.get('state'), ('grey', f.get('state') or ''))
             if f.get('state') and f.get('state') not in ('supplied', 'fed'):
