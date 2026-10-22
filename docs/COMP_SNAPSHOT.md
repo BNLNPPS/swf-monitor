@@ -344,7 +344,7 @@ the control room: it shows what is live now, and the logs page keeps the
 history (`live.link`, the logs page's live view,
 `logs/?app_name=epicprod&live=1`). The items are records of the epicprod
 live stream (`live_stream_q`, ACTION_STREAM.md) at level WARNING, ERROR
-or CRITICAL from the last 24 hours, newest first, at most ten, each with
+or CRITICAL from the last 12 hours, newest first, at most ten, each with
 its time, level, title, detail and page (`logs/<id>/`). The records ride
 in the snapshot because the room reads it anonymously and the logs page
 is behind the login wall; they name tasks, queues, nodes and errors and

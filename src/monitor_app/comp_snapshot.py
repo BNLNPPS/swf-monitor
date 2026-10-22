@@ -76,10 +76,9 @@ VERDICT_LEVELS = {'ok': 'green', 'attention': 'amber', 'alarm': 'red'}
 # on screen (Torre, 2026-10-22).
 LIVE_LEVELS = ('WARNING', 'ERROR', 'CRITICAL')
 LIVE_ITEMS = 10
-# The floor is the control room: live-now records only, the logs page
-# holds the history (Torre, 2026-10-22). A day keeps a nightly step's
-# failure on screen until its next run.
-LIVE_WINDOW_H = 24
+# The floor is the control room: live-now records only, the last 12 hours;
+# the logs page holds the history (Torre, 2026-10-22).
+LIVE_WINDOW_H = 12
 
 
 def _worst(levels):
