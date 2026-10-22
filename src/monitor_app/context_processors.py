@@ -195,6 +195,7 @@ def _active_nav(request):
         'pcs_datasets': namespace == 'pcs' and url_name in pcs_dataset_names,
         'pcs_evgen_inputs': namespace == 'pcs' and url_name in (
             'evgen_inputs', 'evgen_inputs_update'),
+        'pcs_status_grids': namespace == 'pcs' and url_name == 'status_grids',
         'pcs_storage': namespace == 'pcs' and url_name in (
             'storage_listings', 'storage_listings_home'),
         'snapper_storage': (namespace == 'snapper_ai'
