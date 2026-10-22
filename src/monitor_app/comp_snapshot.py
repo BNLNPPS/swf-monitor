@@ -88,7 +88,12 @@ def _activity_part(finished, failed):
 
 
 def effective_waiting_limit(config, applied, now):
-    """A fixed DB limit is authoritative; a ratio-derived log value expires."""
+    """Use the fixed DB limit or the last applied value carried by the reporter.
+
+    The adjuster skips its limit log when the waiting queue is already full.
+    Its timestamp records an event, not a heartbeat: freshness belongs to the
+    enclosing report, checked separately by ``_pilot_supply_part``.
+    """
     config = config or {}
     try:
         if int(config['n_queue_limit_worker_ratio']) == 0:
@@ -96,10 +101,10 @@ def effective_waiting_limit(config, applied, now):
     except (KeyError, ValueError, TypeError):
         pass
     try:
-        from datetime import datetime
         at = datetime.fromisoformat(applied['at'].replace('Z', '+00:00'))
-        if 0 <= (now - at).total_seconds() <= REPORT_STALE_SECONDS:
-            return int(applied['queue_limit'])
+        limit = int(applied['queue_limit'])
+        if at <= now and limit >= 0:
+            return limit
     except (KeyError, ValueError, TypeError):
         pass
     return None
@@ -129,7 +134,8 @@ def _pilot_supply_part(p, queued, started_1h, submitted_1h):
     if limit is None:
         return _part('amber' if queued else 'grey', waiting, f"harvester counts {waiting} waiting; the limit "
                                       f"it applies is not reported")
-    seen = f"harvester counts {waiting} waiting (its limit {limit})"
+    label = 'last applied limit' if p.get('limit_source') == 'adjuster' else 'limit'
+    seen = f"harvester counts {waiting} waiting (its {label} {limit})"
     idle = p.get('waiting_schedd')
     if idle is not None and (p.get('schedd_age_seconds') or 0) <= stale_seconds:
         seen += f", the schedd holds {idle}"
@@ -280,8 +286,11 @@ class _Build:
                 w = now.get(q) or {}
                 a = applied.get(q) or {}
                 limit = effective_waiting_limit(limits.get(q), a, self.now)
+                fixed = str((limits.get(q) or {}).get('n_queue_limit_worker_ratio')) == '0'
+                adjustment_error = ((record.get('adjustment') or {}).get('read') or {}).get('error')
                 out[q] = {
-                    'error': db.get('error') or now.get('error'),
+                    'error': db.get('error') or now.get('error') or (
+                        f'cannot read adjuster log: {adjustment_error}' if adjustment_error and not fixed else None),
                     'demand_age_seconds': demand_age,
                     'demand_max_age_seconds': 90 if key == 'osgsub01-harvester' else 900,
                     'report_stale_seconds': 180 if key == 'osgsub01-harvester' else REPORT_STALE_SECONDS,
@@ -289,6 +298,7 @@ class _Build:
                     'waiting': int(w.get('submitted') or 0) + int(w.get('idle') or 0),
                     'waiting_schedd': None,
                     'limit': limit,
+                    'limit_source': 'database' if fixed else 'adjuster',
                     'limit_at': a.get('at'),
                     'running': int(w.get('running') or 0),
                     'per_slot': PILOTS_PER_WORKER.get(q, 1),

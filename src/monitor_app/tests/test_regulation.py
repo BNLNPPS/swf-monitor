@@ -11,12 +11,22 @@ class RegulationTests(SimpleTestCase):
         self.assertIsNone(matching_failure_finding(rules, memory=False, exit_code=78, stage='simulation'))
         self.assertIsNone(matching_failure_finding(rules, memory=True, exit_code=137, stage='reconstruction'))
 
-    def test_fixed_limit_is_current_but_old_dynamic_limit_is_unknown(self):
+    def test_quiet_adjuster_retains_limit_but_report_must_be_fresh(self):
         now = datetime.now(timezone.utc)
         old = {'queue_limit': 200, 'at': (now - timedelta(hours=2)).isoformat()}
         self.assertEqual(effective_waiting_limit({'n_queue_limit_worker_ratio': '0',
                           'n_queue_limit_worker': '600'}, old, now), 600)
-        self.assertIsNone(effective_waiting_limit({'n_queue_limit_worker_ratio': '30'}, old, now))
+        limit = effective_waiting_limit({'n_queue_limit_worker_ratio': '30'}, old, now)
+        self.assertEqual(limit, 200)
+        p = {'report_age_seconds': 10, 'waiting': 200, 'limit': limit,
+             'limit_source': 'adjuster'}
+        part = _pilot_supply_part(p, 1000, 10, 10)
+        self.assertEqual(part['level'], 'green')
+        self.assertIn('last applied limit 200', part['note'])
+        p['report_age_seconds'] = 901
+        self.assertEqual(_pilot_supply_part(p, 1000, 10, 10)['level'], 'amber')
+        self.assertIsNone(effective_waiting_limit({}, {}, now))
+        self.assertIsNone(effective_waiting_limit({}, dict(old, queue_limit=-1), now))
         self.assertEqual(_pilot_supply_part(None, 1000, 0, 0)['level'], 'amber')
 
     def test_failed_count_or_stale_demand_cannot_be_green(self):
