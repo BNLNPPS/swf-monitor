@@ -1892,7 +1892,10 @@ class EpicProdOpsAgent(BaseAgent):
         except Exception:
             pass
         creds = summary.get('credentials', [])
-        days = {c['credential']: c.get('days_left') for c in creds}
+        # A token has no expiry to carry (it is minted for hours); the days
+        # map is the credentials that expire, which the front's gate reads.
+        days = {c['credential']: c.get('days_left') for c in creds
+                if c.get('kind') != 'token'}
         reason = '; '.join(
             f"{c['credential']}: {c['status']}"
             + (f" ({c['days_left']}d left)" if 'days_left' in c else '')
@@ -1905,7 +1908,8 @@ class EpicProdOpsAgent(BaseAgent):
             # An expiry inside the window is the ping's to carry; only a
             # credential the check cannot vouch for at all stays live.
             unvouched = [c for c in creds
-                         if c.get('status') not in ('ok', 'expiring')]
+                         if c.get('status') not in ('ok', 'expiring', 'superseded',
+                                                    'unavailable')]
             self._log_action('credential_expiry_check', t0, outcome='warning',
                              reason=reason or 'credential inside warning window',
                              username=str(m.get('created_by') or ''),
