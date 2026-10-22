@@ -717,6 +717,10 @@ def _report_items(front, sites, storage, alarms, assessment):
             continue
         for q in live:
             f = q.get('front') or {}
+            # a queue production does not use (feed off, nothing running or
+            # queued: BNL_OSG_EPIC_PROD_1 since 2026-10-21) is not reported
+            if f.get('feed') is False and not q['running'] and not q['queued']:
+                continue
             level, words = FRONT_STATES.get(f.get('state'), ('grey', f.get('state') or ''))
             if f.get('state') and f.get('state') not in ('supplied', 'fed'):
                 reason = FRONT_REASONS.get(f.get('reason'), '')
