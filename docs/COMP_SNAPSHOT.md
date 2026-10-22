@@ -434,15 +434,15 @@ has lost files, green while it runs, grey while its jobs only wait.
 
 The floor's trend plots (Torre Wenaus, 2026-10-22): utilization in the
 moment over the last 12 hours, per site with a live queue, on one shared
-axis. `t` is the 48 bin ends in ISO UTC, on the quarter hour except the
-last, which is the partial bin ending at the newest snap (`sampled_at`);
-`source_as_of` is when the PanDA activity the snaps record was last
-read. For each site, summed over its live queues: `running` and `queued`
-are the jobs running and the jobs not yet started (the census's states:
-defined, waiting, assigned, activated, sent) at each bin end; `finished`
-and `failed` are the jobs that ended in the bin. `detail` is the site's
-hover line: running and queued now, finished and failed in the last
-hour.
+axis. `t` is the ends of 48 whole quarter-hour bins in ISO UTC, the last
+ending on the quarter hour at or before the newest snap (`sampled_at`,
+when Snapper last captured); `source_as_of` is when the PanDA activity
+the snaps record was last read. For each site, summed over its live
+queues: `running` and `queued` are the jobs running and the jobs not yet
+started (the census's states: defined, waiting, assigned, activated,
+sent) at each bin end; `finished` and `failed` are the jobs that ended
+in the bin. `detail` is the site's hover line: running and queued at the
+last bin end, finished and failed in the hour before it.
 
 The source is the Snapper Site view's series product
 (`snapper_ai.products.series_product`, focus `site`), one product for
@@ -450,9 +450,13 @@ the floor's live queues; `link` opens that view. Its state curves change
 only when the state does, so a value between changes is the state
 unchanged under continuous collection. Its finished and failed curves
 count up from the window's start, so a bin's ended jobs are the
-difference of the count at the bin's two ends. A value whose bin end, or
-either end of whose bin, falls in a recorded gap of collection (`gaps`)
-is null, never carried across the gap and never zero.
+difference of the count at the bin's two ends. Gaps in collection come
+from Snapper's own coverage record (the gaps recovering snaps closed and
+the capture cursor's open gap), listed in `gaps`: a state at a bin end
+inside a gap, and the ended jobs of any bin overlapping one, are null,
+never carried across it. A site or counter the series does not carry is
+null; a queue state the series does not carry for an observed queue
+never occurred and is zero.
 
 ## Links
 

@@ -1080,84 +1080,119 @@ def _live_records():
     return {'link': f'{PUBLIC}/logs/?app_name=epicprod&live=1', 'items': items}
 
 
+def _coverage_gaps(scope, start):
+    """Snapper's own record of the spans its collection missed since
+    ``start``, ``[(gap start, gap end)]``: each gap a recovering snap closed
+    (one whose start is unknown runs from the snap before it), and the open
+    gap the capture cursor holds, to now."""
+    from django.db.models import Q
+    from snapper_ai.models import CaptureCursor, SystemSnap
+
+    gaps = []
+    rows = (SystemSnap.objects.filter(scope=scope, snap_time__gte=start)
+            .filter(Q(recovered_gap_started_at__isnull=False)
+                    | ~Q(recovered_gap_start_unknown=False))
+            .values_list('snap_time', 'recovered_gap_started_at',
+                         'recovered_gap_start_unknown'))
+    for snap_time, gap_start, unknown in rows:
+        if gap_start is None or unknown is not False:
+            before = (SystemSnap.objects.filter(scope=scope, snap_time__lt=snap_time)
+                      .order_by('-snap_time').values_list('snap_time', flat=True).first())
+            gap_start = before or start
+        gaps.append((gap_start, snap_time))
+    cursor = CaptureCursor.objects.filter(scope=scope).first()
+    if cursor is not None and cursor.coverage_gap_started_at:
+        gaps.append((cursor.coverage_gap_started_at, timezone.now()))
+    return sorted(gaps)
+
+
 def _trends(sites):
     """The floor's trend plots (COMP_SNAPSHOT.md, Trends): per site with a
-    live queue, the last 12 hours in 15-minute bins on one shared axis:
-    running and queued jobs at each bin's end, and jobs finished and failed
-    in the bin, summed over the site's live queues. The source is the
-    Snapper Site view's series product, one product for the floor's live
-    queues: its state curves change only when the state does, and its
-    finished and failed curves count up from the window's start, so a
-    bin's ended jobs are the difference of the count at its two ends. A
-    value whose bin end, or either end of whose bin, falls in a recorded
-    gap of collection is null, never carried across the gap."""
+    live queue, the last 12 hours in 48 whole quarter-hour bins on one
+    shared axis: running and queued jobs at each bin's end, and jobs
+    finished and failed in the bin, summed over the site's live queues.
+    The source is the Snapper Site view's series product, one product for
+    the floor's live queues: its state curves change only when the state
+    does, and its finished and failed curves count up from the window's
+    start, so a bin's ended jobs are the difference of the count at its
+    two ends. Collection gaps come from Snapper's coverage record, not the
+    focused series: a state at a bin end inside a gap, and the ended jobs
+    of a bin overlapping one, are null, never carried across it. A site or
+    counter the series does not carry is null; a queue state it does not
+    carry for an observed queue never occurred, zero."""
     from bisect import bisect_right
 
     from monitor_app.panda.census import NOT_STARTED
-    from snapper_ai.models import CurrentComponent
+    from snapper_ai.models import CurrentComponent, SystemSnap
     from snapper_ai.products import series_product
 
     live = [(s, [q['id'] for q in s['queues'] if q['status'] == 'live']) for s in sites]
     live = [(s, queues) for s, queues in live if queues]
     if not live:
         return None
+    sampled = (SystemSnap.objects.filter(scope='epicprod').order_by('-snap_time')
+               .values_list('snap_time', flat=True).first())
+    if sampled is None:
+        return None
+    step_s = TREND_BIN_MINUTES * 60
+    bins = TREND_HOURS * 60 // TREND_BIN_MINUTES
+    aligned = datetime.fromtimestamp(sampled.timestamp() // step_s * step_s, dt_timezone.utc)
+    edges = [aligned - timedelta(seconds=step_s * k) for k in range(bins, -1, -1)]
+    gaps = [g for g in _coverage_gaps('epicprod', edges[0]) if g[1] >= edges[0]]
     product = series_product('epicprod', 'site', window='24h',
                              selection=','.join(q for _, qs in live for q in qs))
     curves = product.get('curves') or {}
-    if not product.get('series_end'):
-        return None
-    last = datetime.fromisoformat(product['series_end'])
-    step_s = TREND_BIN_MINUTES * 60
-    bins = TREND_HOURS * 60 // TREND_BIN_MINUTES
-    # Bin ends on the quarter hour, the last bin the partial one ending at
-    # the newest snap; edges carries the first bin's start before them.
-    aligned = datetime.fromtimestamp(last.timestamp() // step_s * step_s, last.tzinfo)
-    if aligned < last:
-        ends = [aligned - timedelta(seconds=step_s * k) for k in range(bins - 2, -1, -1)] + [last]
-    else:
-        ends = [aligned - timedelta(seconds=step_s * k) for k in range(bins - 1, -1, -1)]
-    edges = [ends[0] - timedelta(seconds=step_s)] + ends
-    gaps = [(datetime.fromisoformat(g[0]), datetime.fromisoformat(g[1]))
-            for g in product.get('gaps') or []]
-    gaps = [g for g in gaps if g[1] >= edges[0]]
 
-    def in_gap(at):
-        return any(a <= at <= b for a, b in gaps)
-
-    def at_edges(cid, absent=0):
-        """The curve's value at each edge: null before its first sample or
-        inside a gap; a curve the series does not carry is ``absent``."""
+    def at_edges(cid):
+        """The curve's value at each edge, null before its first sample or
+        at an edge inside a gap; None when the series lacks the curve."""
         series = (curves.get(cid) or {}).get('points') or []
         if not series:
-            return [absent] * len(edges)
+            return None
         stamps = [datetime.fromisoformat(x) for x, _ in series]
         out = []
         for edge in edges:
             i = bisect_right(stamps, edge)
-            out.append(series[i - 1][1] if i and not in_gap(edge) else None)
+            gap = any(a <= edge <= b for a, b in gaps)
+            out.append(series[i - 1][1] if i and not gap else None)
         return out
 
     def total(rows):
+        if not rows or any(r is None for r in rows):
+            return [None] * len(edges)
         return [None if any(v is None for v in col) else sum(col) for col in zip(*rows)]
 
-    def ended(counts):
-        return [None if a is None or b is None else max(0, round(b - a))
-                for a, b in zip(counts, counts[1:])]
+    def state(q, name, observed):
+        values = at_edges(f'sj_{q}_{name}')
+        return values if values is not None else ([0] * len(edges) if observed else None)
 
+    def ended(counts):
+        out = []
+        for k in range(1, len(edges)):
+            a, b = counts[k - 1], counts[k]
+            overlap = any(g0 <= edges[k] and g1 >= edges[k - 1] for g0, g1 in gaps)
+            out.append(None if a is None or b is None or overlap else max(0, round(b - a)))
+        return out
+
+    def known_sum(values):
+        return None if any(v is None for v in values) else sum(values)
+
+    hour = 60 // TREND_BIN_MINUTES
+    to = aligned.astimezone(ZoneInfo('America/New_York')).strftime('%H:%M')
     out = []
     for site, queues in live:
-        running = total([at_edges(f'sj_{q}_running') for q in queues])[1:]
-        queued = total([at_edges(f'sj_{q}_{state}') for q in queues
-                        for state in NOT_STARTED])[1:]
-        fin = total([at_edges(f'sjfw_{q}') for q in queues])
-        fail = total([at_edges(f'sjxw_{q}') for q in queues])
-        finished, failed = ended(fin), ended(fail)
-        hour = len(ends) - 60 // TREND_BIN_MINUTES
-        last_hour = [sum(v or 0 for v in xs[hour:]) for xs in (finished, failed)]
+        observed = {q: at_edges(f'sjfw_{q}') is not None for q in queues}
+        running = total([state(q, 'running', observed[q]) for q in queues])[1:]
+        queued = total([state(q, s, observed[q]) for q in queues for s in NOT_STARTED])[1:]
+        finished = ended(total([at_edges(f'sjfw_{q}') for q in queues]))
+        failed = ended(total([at_edges(f'sjxw_{q}') for q in queues]))
         name = short_name(site['name'])
-        detail = (f"{name}: {running[-1] if running[-1] is not None else '?'} running, "
-                  f"{queued[-1] if queued[-1] is not None else '?'} queued; "
-                  f"{last_hour[0]:,} finished, {last_hour[1]:,} failed in the last hour")
+        fin_h, fail_h = known_sum(finished[-hour:]), known_sum(failed[-hour:])
+
+        def num(v):
+            return 'unknown' if v is None else f'{v:,}'
+        detail = (f'{name} at {to} ET: {num(running[-1])} running, {num(queued[-1])} queued; '
+                  f'{num(fin_h)} finished, {num(fail_h)} failed in the hour before')
         out.append({'id': site['id'], 'name': name, 'running': running,
                     'queued': queued, 'finished': finished, 'failed': failed,
                     'detail': detail})
@@ -1168,8 +1203,8 @@ def _trends(sites):
 
     return {
         'window_hours': TREND_HOURS, 'bin_minutes': TREND_BIN_MINUTES,
-        't': [iso(x) for x in ends],
-        'sampled_at': iso(last),
+        't': [iso(x) for x in edges[1:]],
+        'sampled_at': iso(sampled),
         'source_as_of': iso(panda.source_as_of) if panda else None,
         'gaps': [[iso(a), iso(b)] for a, b in gaps],
         'sites': out,
