@@ -57,8 +57,8 @@ OPERATION_LABELS = {'reassign': 'Move', 'pause': 'Pause', 'resume': 'Resume',
                     'retry': 'Retry', 'finish': 'Finish', 'kill': 'Kill',
                     'abort': 'Abort'}
 NODE_REASONS = {
-    'black_hole': 'fails jobs that finish on other nodes',
-    'fixed_time': 'kills every job at the same run time (a memory ceiling or slot limit)',
+    'black_hole': 'Black hole',
+    'fixed_time': 'Kills jobs at a fixed run time',
 }
 CONFIG_TAGS = re.compile(r'\.(p\d+\.e\d+)\.')
 
@@ -91,33 +91,36 @@ def board_text(message, extra):
 
 
 def node_guard_text(f):
-    """A node guard decision in words: the node and where it runs, the
-    decision and why, and the evidence. The decision record's message
-    and the screen's detail."""
-    host, site, state = f.get('host'), f.get('site'), str(f.get('state') or '')
-    text = (f"{host} at {site}" if site else str(host)) + (
-        f": {state.replace('_', ' ')} {'from' if state == 'excluded' else 'on'} "
-        f"{f.get('queue')}")
+    """A node guard decision, concisely: which guard on the queue, the node
+    and its site, why, and the evidence. The decision record's message and
+    the screen's detail.
+
+    Node guard 6 on BNL_OSG_PanDA_1: fc20513 at ComputeCanada-Fir. Kills
+    jobs at a fixed run time, ~109 min (memory or slot limit): 12/12 failed
+    in 4 h; tasks 40958, 40970 run fine elsewhere.
+    """
+    host, site, queue = f.get('host'), f.get('site'), f.get('queue')
+    state = str(f.get('state') or '')
+    node = f'{host} at {site}' if site else str(host)
     reason = f.get('reason')
     why = NODE_REASONS.get(reason, str(reason or '').replace('_', ' '))
-    if why:
-        text += f', {why}'
+    if state != 'excluded':
+        return f"{node}: {state.replace('_', ' ')} on {queue}" + (f' ({why}).' if why else '.')
+    rank = f.get('queue_rank')
+    text = f"Node guard{f' {rank}' if rank else ''} on {queue}: {node}."
+    died = (f.get('failed_duration_s') or {}).get('median')
+    if reason == 'fixed_time' and died:
+        why += f', ~{round(died / 60)} min (memory or slot limit)'
     if f.get('jobs') is not None:
-        text += (f"; {f.get('failed')} of {f['jobs']} jobs failed in the last "
-                 f"{f.get('window_h')} h")
-        died = (f.get('failed_duration_s') or {}).get('median')
-        if reason == 'fixed_time' and died:
-            text += f', each at about {round(died / 60)} min'
-        elif f.get('fast_failed'):
-            text += f", {f['fast_failed']} of them fast"
+        why += f": {f.get('failed')}/{f['jobs']} failed in {f.get('window_h')} h"
+        if reason != 'fixed_time' and f.get('fast_failed'):
+            why += f", {f['fast_failed']} fast"
         done = f.get('tasks_finished_elsewhere') or []
         if done:
-            text += (f"; task{'s' if len(done) > 1 else ''} "
-                     f"{', '.join(str(t) for t in done)} "
-                     f"finish{'' if len(done) > 1 else 'es'} on other nodes")
-    if f.get('old_state'):
-        text += f" (was {str(f['old_state']).replace('_', ' ')})"
-    return text + '.'
+            why += (f"; task{'s' if len(done) > 1 else ''} "
+                    f"{', '.join(str(t) for t in done)} run{'' if len(done) > 1 else 's'} "
+                    f"fine elsewhere")
+    return f'{text} {why}.' if why else text
 
 
 def failure_key(instance_name, extra):

@@ -45,6 +45,19 @@ from monitor_app.panda.constants import PANDA_SCHEMA
 
 logger = logging.getLogger(__name__)
 
+
+def exclusion_ranks():
+    """(queue, host) -> n for every excluded node: its place on its
+    queue's blacklist in the order the guard excluded them, so the
+    newest exclusion is the queue's count (node guard n on the queue)."""
+    from canary.store import nodes as node_record
+    per = {}
+    for x in sorted(node_record.current_exclusion(),
+                    key=lambda x: (x['queue'], x['since'] or '')):
+        per.setdefault(x['queue'], []).append(x['host'])
+    return {(q, h): i + 1 for q, hosts in per.items() for i, h in enumerate(hosts)}
+
+
 STATE_KEY = 'node_guard_state'
 STATE_TTL_S = 24 * 3600
 MODES = ('shadow', 'live')
@@ -402,10 +415,12 @@ def run_cycle(*, dry_run=False, created_by='node-guard'):
             if applied is not None:
                 changes, trips = applied
         by_key = {(n['queue'], n['host']): n for n in nodes}
+        ranks = _safe('ranks', exclusion_ranks, {}) if changes else {}
         for queue, host, old, new, why in changes:
             state = RECORD_STATES.get(new, {}).get(mode, new)
             shown = by_key.get((queue, host))
             e = (shown or {}).get('evidence') or {}
+            rank = {'queue_rank': ranks[(queue, host)]} if (queue, host) in ranks else {}
             log_id = _safe(f'{queue}/{host} record', lambda: log_epicprod_action(
                 'node-guard', 'node_guard_decision', subject_type='panda_node',
                 subject_key=f'{queue}/{host}', username=created_by, outcome=state,
@@ -414,9 +429,9 @@ def run_cycle(*, dry_run=False, created_by='node-guard'):
                 level=logging.WARNING if new == 'black_hole' else logging.INFO,
                 message=node_guard_text(dict(e, host=host, queue=queue, state=state,
                                              reason=why, old_state=old,
-                                             window_h=cfg['window_h'])),
+                                             window_h=cfg['window_h'], **rank)),
                 state=state, old_state=old, reason=why, mode=mode, host=host, queue=queue,
-                window_h=cfg['window_h'], **e), failed(f'{queue}/{host} record'))
+                window_h=cfg['window_h'], **rank, **e), failed(f'{queue}/{host} record'))
             if shown is not None:
                 shown['recorded'] = True
                 shown['log_id'] = log_id

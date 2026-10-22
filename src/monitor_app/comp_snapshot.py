@@ -7,6 +7,7 @@ product ``comp_snapshot:v1`` (docs/CACHED_PRODUCTS.md) by REST at
 No remote call and no LLM: the build reads tables only. A part that
 cannot be read is listed in ``errors`` and left out, never shown as zero.
 """
+import json
 import logging
 import re
 import time
@@ -73,6 +74,10 @@ VERDICT_LEVELS = {'ok': 'green', 'attention': 'amber', 'alarm': 'red'}
 # on screen (Torre, 2026-10-22).
 LIVE_LEVELS = ('WARNING', 'ERROR', 'CRITICAL')
 LIVE_ITEMS = 10
+# The floor is the control room: live-now records only, the logs page
+# holds the history (Torre, 2026-10-22). A day keeps a nightly step's
+# failure on screen until its next run.
+LIVE_WINDOW_H = 24
 
 
 def _worst(levels):
@@ -920,9 +925,12 @@ def _live_records():
     """The epicprod-live screen: the newest warning and error records of
     the live stream, the logs page's live view (ACTION_STREAM.md), each
     with its own page. The room reads the record anonymously and the logs
-    page is behind the login wall, so the records ride here. Off the
-    screen: a record a ``live_cleared`` record names, and a failure whose
-    action has since run ok (COMP_SNAPSHOT.md, Live)."""
+    page is behind the login wall, so the records ride here. The floor is
+    live now: records from the window only, a node guard trip only for a
+    node new to the blacklist, and off it a record a ``live_cleared``
+    record names, a failure whose action has since run ok, and a record a
+    later one on its subject supersedes or repeats (COMP_SNAPSHOT.md,
+    Live)."""
     from monitor_app.epicprod_logging import EPICPROD_APP_NAME, live_stream_q
     from monitor_app.live_notices import FAILURE_OUTCOMES, board_text, failure_key
     from monitor_app.models import AppLog
@@ -937,21 +945,47 @@ def _live_records():
             .order_by('-timestamp')
             .values('id', 'timestamp', 'levelname', 'message', 'instance_name',
                     'extra_data'))
+    cutoff = timezone.now() - timedelta(hours=LIVE_WINDOW_H)
+    ranks = None
     last_ok = {}
+    shown = set()
     items = []
     for r in _pages(rows):
+        if r['timestamp'] < cutoff:
+            break
         extra = r['extra_data'] or {}
+        # A node guard trip is news only for a node not already on the
+        # blacklist; a re-trip from half open is a node the floor knows.
+        if (extra.get('action') == 'node_guard_decision'
+                and extra.get('old_state') not in (None, '', 'clear')):
+            continue
+        subject = _subject(r['instance_name'], extra)
+        if subject in shown:
+            continue
         if str(extra.get('outcome') or '') in FAILURE_OUTCOMES:
             key = failure_key(r['instance_name'], extra)
             if key not in last_ok:
                 last_ok[key] = _last_ok(r['instance_name'], extra, key)
             if last_ok[key] and last_ok[key] > r['timestamp']:
                 continue
+        if _superseded(r['instance_name'], extra, r['timestamp']):
+            continue
+        shown.add(subject)
+        if extra.get('action') == 'node_guard_decision' and not extra.get('queue_rank'):
+            if ranks is None:
+                from monitor_app.panda.node_guard import exclusion_ranks
+                try:
+                    ranks = exclusion_ranks()
+                except Exception:
+                    logger.exception('live screen: node guard blacklist unreadable')
+                    ranks = {}
+            rank = ranks.get((extra.get('queue'), extra.get('host')))
+            if rank:
+                extra = dict(extra, queue_rank=rank)
         title, detail = board_text(r['message'], extra)
         items.append({'id': r['id'], 'at': r['timestamp'].isoformat(),
                       'level': r['levelname'], 'title': title, 'detail': detail,
-                      'importance': extra.get('sublevel'),
-                      'text': r['message'], 'link': f"{PUBLIC}/logs/{r['id']}/"})
+                      'link': f"{PUBLIC}/logs/{r['id']}/"})
         if len(items) == LIVE_ITEMS:
             break
     return {'link': f'{PUBLIC}/logs/?app_name=epicprod&live=1', 'items': items}
@@ -982,6 +1016,35 @@ def clear_live_records(ids, reason, username, instance='mcp'):
     if row_id is None:
         raise RuntimeError('the live_cleared record was not written')
     return {'record_id': row_id, 'cleared_ids': ids, 'reason': reason}
+
+
+def _subject(instance_name, extra):
+    """What a live record is about: its action on its subject, or for an
+    action with no subject (a maintenance pass), the action from its
+    source. The screen shows one record per subject, the newest."""
+    if extra.get('subject_key'):
+        return json.dumps([extra.get('action'), extra.get('subject_type'),
+                           extra.get('subject_key')])
+    return json.dumps([extra.get('action'), instance_name])
+
+
+def _superseded(instance_name, extra, at):
+    """True when a later record of the same action on the same subject
+    reports another outcome: a node guard decision the node has moved on
+    from, a task operation followed by another. A later record with the
+    same outcome (the node guard's hourly standing record) continues it."""
+    from monitor_app.epicprod_logging import EPICPROD_APP_NAME
+    from monitor_app.models import AppLog
+    later = AppLog.objects.filter(app_name=EPICPROD_APP_NAME, timestamp__gt=at,
+                                  extra_data__action=extra.get('action'))
+    if extra.get('subject_key'):
+        later = later.filter(extra_data__subject_type=extra.get('subject_type'),
+                             extra_data__subject_key=extra['subject_key'])
+    else:
+        later = later.filter(instance_name=instance_name)
+    if extra.get('outcome') is not None:
+        later = later.exclude(extra_data__outcome=extra['outcome'])
+    return later.exists()
 
 
 def _last_ok(instance_name, extra, key):

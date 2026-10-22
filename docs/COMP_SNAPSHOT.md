@@ -76,7 +76,7 @@ storage[]         {id, name, holds, status, counts,
 report            {text, items: [{level, text, link}],
                    assessment: {verdict, level, at, link, campaign,
                                 title, narration}}
-live              {link, items: [{id, at, level, title, detail, importance, text, link}]}
+live              {link, items: [{id, at, level, title, detail, link}]}
 errors[]          {part, error}
 ```
 
@@ -339,39 +339,54 @@ shadow mode.
 
 ### Live
 
-The room's epicprod-live screen (Torre Wenaus, 2026-10-22): the ten
-newest records of the epicprod live stream at level WARNING, ERROR or
-CRITICAL, newest first, each with its time, level, title, detail,
-importance (the record's sublevel), message and page (`logs/<id>/`);
-`live.link` is the logs page's live view
-(`logs/?app_name=epicprod&live=1`). The screen shows the title and gives
-the detail on hover. The title names what happened and where, in a few
-words: the execute site for a node guard decision (`Node guard ·
-ComputeCanada-Fir`), the task for a task operation (`Move · task 40857`),
-else the site, storage element, queue or configuration the record
-names. The detail is the informative message: for a node guard decision
-the node, its site and queue, the decision and its reason in words, and
-the evidence (the decision record's own message is the same text); for
-a task operation the task and the operation's reading; otherwise the
-record's reason, led by its subject. Both come from
-`live_notices.board_text`. The stream is
-the logs page's own selection (`live_stream_q`, ACTION_STREAM.md). The
-records ride in the snapshot because the room reads it anonymously and
-the logs page is behind the login wall; the messages are those the
-action stream records, which name tasks, queues, nodes and errors and
+The room's epicprod-live screen (Torre Wenaus, 2026-10-22). The floor is
+the control room: it shows what is live now, and the logs page keeps the
+history (`live.link`, the logs page's live view,
+`logs/?app_name=epicprod&live=1`). The items are records of the epicprod
+live stream (`live_stream_q`, ACTION_STREAM.md) at level WARNING, ERROR
+or CRITICAL from the last 24 hours, newest first, at most ten, each with
+its time, level, title, detail and page (`logs/<id>/`). The records ride
+in the snapshot because the room reads it anonymously and the logs page
+is behind the login wall; they name tasks, queues, nodes and errors and
 carry no credential.
 
-The screen shows the ten newest such records that are still open. A
-failure (outcome error, timeout, partial or unrecorded) leaves the screen
-once it has recovered: a later record of the same action from the same
-source on the same subject reports ok, the identity the epicprod-live
-channel uses for its recovery notices (`live_notices.failure_key`). Any
-record leaves the screen when the operator's question about it has been
-answered: a `live_cleared` record in the action stream names the cleared
-record ids and the reason. Neither changes the records on the logs page.
-The `epicprod_live_clear` MCP tool writes one; out of process,
-`scripts/live-clear.py <id> ... --reason "..."` writes one through the log
-REST endpoint.
+The screen shows the title and gives the detail on hover. The title says
+what happened and where in a few words: the execute site for a node
+guard decision (`Node guard · ComputeCanada-Fir`), the task for a task
+operation (`Move · task 40857`), else the site, storage element, queue
+or configuration the record names. The detail is the informative
+message, concise. For a node guard decision it is the decision record's
+own message: the node's number on its queue's blacklist, in exclusion
+order (`node_guard.exclusion_ranks`), the node and its site, the reason
+and the evidence:
+
+    Node guard 6 on BNL_OSG_PanDA_1: fc20513 at ComputeCanada-Fir. Kills
+    jobs at a fixed run time, ~109 min (memory or slot limit): 12/12
+    failed in 4 h; tasks 40958, 40970 run fine elsewhere.
+
+For a task operation it is the task and the operation's reading;
+otherwise the record's reason led by its subject. Both come from
+`live_notices.board_text`.
+
+A record leaves the floor when it is no longer news:
+
+- a node guard decision is shown only for a node new to the blacklist
+  (it was clear); a re-trip from half open is a node the floor knows;
+- one record per subject, the newest (an action on its subject, or a
+  pass with no subject from its source), and a record leaves when a
+  later record on its subject reports another outcome, such as a node
+  the guard has moved to half open;
+- a failure (outcome error, timeout, partial or unrecorded) leaves once
+  it has recovered: a later record of the same action from the same
+  source on the same subject reports ok, the identity the epicprod-live
+  channel uses for its recovery notices (`live_notices.failure_key`);
+- any record leaves when the operator's question about it has been
+  answered: a `live_cleared` record in the action stream names the
+  cleared record ids and the reason. The `epicprod_live_clear` MCP tool
+  writes one; out of process, `scripts/live-clear.py <id> ... --reason
+  "..."` writes one through the log REST endpoint.
+
+None of these changes the records on the logs page.
 
 ## Links
 
