@@ -79,6 +79,8 @@ report            {text, items: [{level, text, link}],
 live              {link, items: [{id, at, level, title, detail, link}]}
 tasks             {link, items: [{id, at, level, title, counts, detail, link}]}
   counts          {queued, running, finished, failed}
+trends            {window_hours, bin_minutes, t[], sampled_at, gaps[], sites[], link}
+  sites[]         {id, name, running[], queued[], finished[], failed[]}
 errors[]          {part, error}
 ```
 
@@ -423,6 +425,22 @@ the task is in one:
 
 `level` is red for a task in a failure-rate alarm, amber for one that
 has lost files, green while it runs, grey while its jobs only wait.
+
+### Trends
+
+The floor's trend plots (Torre Wenaus, 2026-10-22): utilization in the
+moment over the last 12 hours, per site with a live queue, on one shared
+axis. `t` is the 24 bin ends in ISO UTC, half-hour aligned except the
+last, which is the partial bin ending at the newest snap (`sampled_at`).
+For each site, summed over its live queues: `running` and `queued` are
+the jobs running and the jobs not yet started (the census's states:
+defined, waiting, assigned, activated, sent) at each bin end; `finished`
+and `failed` are the jobs that ended in the bin, so the success rate is
+finished / (finished + failed) per bin. A value with no sample behind it
+is null, never zero; `gaps` lists the recorded observation gaps in the
+window. The source is the Snapper Site view's series product
+(`snapper_ai.products.series_product`, focus `site`), one product for the
+floor's live queues; `link` opens that view.
 
 ## Links
 
