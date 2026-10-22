@@ -773,12 +773,16 @@ def panda_jobs_list(request):
     days = _get_jobs_days(request)
     ended_after, ended_before = _get_ended_window(request)
     selected_site = request.GET.get('site', '')
+    # A task id is a number; anything else filters nothing.
+    selected_taskid = request.GET.get('taskid', '').strip()
+    if not selected_taskid.isdigit():
+        selected_taskid = ''
     # The request is examined before anything is built for it: too
     # large an ask is narrowed to its newest slice and the page says so.
     days, ended_after, ended_before, request_notice = _judge_jobs_request(
         days, request.GET.get('status', '') or None,
         request.GET.get('username', '') or None, selected_site or None,
-        request.GET.get('taskid', '') or None, ended_after, ended_before)
+        selected_taskid or None, ended_after, ended_before)
     if ended_after is not None:
         et = ZoneInfo(settings.TIME_ZONE)
         ended_range_label = (
@@ -799,6 +803,11 @@ def panda_jobs_list(request):
     if request.GET.get('status') == 'queued':
         description += '<br>Queued: defined, waiting, assigned, activated and sent jobs'
     refresh = request.GET.get('refresh') == '1'
+    # The task filter's control keeps every other filter: set and clear
+    # change the task alone (Torre Wenaus, 2026-10-22).
+    keep = request.GET.copy()
+    for name in ('taskid', 'refresh'):
+        keep.pop(name, None)
     try:
         outcomes_product = _jobs_outcomes_product(
             days, selected_site, refresh,
@@ -843,7 +852,9 @@ def panda_jobs_list(request):
         'selected_status': request.GET.get('status', ''),
         'selected_username': request.GET.get('username', ''),
         'selected_site': request.GET.get('site', ''),
-        'selected_taskid': request.GET.get('taskid', ''),
+        'selected_taskid': selected_taskid,
+        'taskid_keep_params': [(k, v) for k, values in keep.lists() for v in values],
+        'taskid_clear_query': keep.urlencode(),
         'selected_execsite': selected_execsite,
         'ended_after': (ended_after.isoformat()
                         if ended_after is not None else ''),
