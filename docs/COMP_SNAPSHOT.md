@@ -475,8 +475,12 @@ A value is null, never carried forward, when the newest sample before
 its bin end is more than 15 minutes older (the PanDA reading refreshes
 every five) or the bin end lies in a gap of collection. The counters
 being cumulative, a gap inside a bin loses none of its ended jobs; they
-are null only where the count at either end of the bin is, or where the
-count fell (a reset). The gaps come from Snapper's own
+are null only where the count at either end of the bin is. Limits: the
+state is sampled when the PanDA reading refreshes, every five minutes,
+so a state is the one at the newest refresh before the bin end, not at
+the bin end itself; and the series rebases the finished and failed
+counters by summing their nonnegative increments, so a raw counter
+reset reads as a bin with no ended jobs rather than as unknown. The gaps come from Snapper's own
 coverage record (the gaps recovering snaps closed and the capture
 cursor's open gap), listed in `gaps`. A queue with no sample is null
 throughout.

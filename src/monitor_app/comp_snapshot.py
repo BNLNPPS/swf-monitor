@@ -1225,9 +1225,10 @@ def _trends(series):
     than TREND_STALE_MINUTES before the edge, or an edge inside a coverage
     gap, gives null, never a value carried forward. Finished and failed
     count up, so a bin's ended jobs are the difference of the count at its
-    two ends, exact across a gap inside the bin; null where an end is
-    unknown or the count fell (a reset). A queue with no sample is null
-    throughout."""
+    two ends, exact across a gap inside the bin, null where an end is
+    unknown. The series rebases those counters by summing their nonnegative
+    increments, so a raw counter reset reads as no increment, not as a
+    detectable fall. A queue with no sample is null throughout."""
     from bisect import bisect_right
 
     from monitor_app.panda.census import NOT_STARTED
@@ -1263,8 +1264,9 @@ def _trends(series):
 
     def ended(counts):
         # The counters are cumulative: a gap inside a bin loses none of its
-        # ended jobs while the count at both ends is known; a count that
-        # fell was reset, and the bin is unknown.
+        # ended jobs while the count at both ends is known. The series has
+        # already rebased them (nonnegative increments), so b < a cannot
+        # occur from a reset; it is guarded, not relied on.
         return [None if a is None or b is None or b < a else round(b - a)
                 for a, b in zip(counts, counts[1:])]
 
