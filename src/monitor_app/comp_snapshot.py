@@ -11,6 +11,7 @@ import logging
 import re
 import time
 from datetime import datetime, timedelta, timezone as dt_timezone
+from urllib.parse import quote
 
 from django.db import connections
 from django.utils import timezone
@@ -355,6 +356,9 @@ class _Build:
                 'finished_core_h_1h': e['finished_core_h'],
                 'failed_core_h_1h': e['failed_core_h'],
                 'health': _health({'prod_activity': _activity_part(e['finished'], e['failed'])}),
+                # the execute site's jobs, by the site its pilot reported
+                'links': ({'jobs': f'{PUBLIC}/panda/jobs/?execsite={quote(name)}&days=1'}
+                          if name else {}),
             })
         return out
 
@@ -511,6 +515,12 @@ def build():
                     'snapper': f'{PUBLIC}/panda/errors/?site={q}',
                     # the canary root redirects, which the proxy cannot relay
                     'canary': f'{PUBLIC}/canary/probes/',
+                    # the pillars' drilldowns: the queue's running jobs, its
+                    # queued jobs (the census's not-started set, `queued`
+                    # here), and its harvester workers
+                    'running': f'{PUBLIC}/panda/jobs/?site={q}&status=running&days=2',
+                    'queued': f'{PUBLIC}/panda/jobs/?site={q}&status=queued&days=30',
+                    'slots': f'{PUBLIC}/panda/epic-queues/{q}/#workers',
                 },
             })
         if s.get('execute_sites') and pool and pool.get('admitted') is not None:
@@ -528,7 +538,11 @@ def build():
                       (queues[0]['status'] if queues else 'off'),
             'health': {'level': _worst(q['health']['level'] for q in queues),
                        'parts': {q['id']: q['health']['level'] for q in queues}},
-            'links': {'panda_queue': queues[0]['links']['panda_queue'] if queues else None},
+            # a site's links are those of its busiest live queue: for the
+            # OSG pool, the queue production runs on
+            'links': (dict(max((q for q in queues if q['status'] == 'live'),
+                               key=lambda q: q['running'], default=queues[0])['links'])
+                      if queues else {'panda_queue': None}),
             'queues': queues,
             'execute_sites': [],
         }
@@ -556,7 +570,11 @@ def build():
         'pressure_front': front,
         'sites': sites,
         'storage': storage,
-        'report': {'text': _report_text(front, sites, storage), 'assessment': None},
+        'report': {'text': _report_text(front, sites, storage),
+                   'items': _report_items(front, sites, storage,
+                                          b.part('alarms', _active_alarms, []),
+                                          b.part('assessment', _assessment_freshness, None)),
+                   'assessment': None},
         'errors': b.errors,
     }
     record['build_seconds'] = round(time.monotonic() - t0, 2)
@@ -603,6 +621,112 @@ def _report_text(front, sites, storage):
             if p['level'] in ('amber', 'red'):
                 lines.append(f"{st['name']} {name} {p['level']}: {p['note']}")
     return '\n'.join(lines)
+
+
+# What a front decision means, in the words CONTINUOUS_PRODUCTION.md gives
+# its states and reason codes, with the level the report shows it at.
+FRONT_STATES = {
+    'supplied': ('green', 'enough work queued, nothing to feed'),
+    'fed': ('green', 'fed a task in its last cycle'),
+    'awaiting_observation': ('grey', 'waiting for its last submission to activate'),
+    'idle_capacity': ('amber', 'capacity idle while work is queued: the queue is not '
+                               'pulling it (worker supply or site, not the front)'),
+    'degraded': ('red', 'held, a gate is red'),
+    'half_open': ('amber', 'trying one task after a gate cleared'),
+    'held': ('grey', 'held'),
+    'oversize': ('amber', 'the next task alone is too large, waiting for the operator'),
+    'no_work': ('grey', 'no eligible task in the ready buffer'),
+}
+FRONT_REASONS = {
+    'queue_off': 'its feed is off', 'front_off': 'the front is off',
+    'declared': 'a declared downtime', 'would_exceed_high': 'a feed would pass the high mark',
+    'task_cap': 'the task cap', 'job_cap': 'the job cap',
+    'unsized_task': 'a task that cannot be sized', 'no_calibration': 'no calibration yet',
+    'canary': 'the canary is failing', 'burn_through': 'jobs burning through',
+    'failure_window': 'the failure rate over its threshold', 'credential': 'a credential',
+}
+PART_NAMES = {'prod_activity': 'jobs', 'canary': 'canary',
+              'snapper_errors': 'failures', 'pilot_supply': 'pilot supply'}
+LEVEL_ORDER = {'red': 0, 'amber': 1, 'grey': 2, 'green': 3}
+
+
+def _active_alarms():
+    """The alarm engine's events not cleared (docs/alarms.md)."""
+    from monitor_app.alarms_data import CONTEXT_NAME
+    from monitor_app.models import Entry
+    rows = (Entry.objects.filter(context_id=CONTEXT_NAME, kind='event',
+                                 archived=False, deleted_at__isnull=True)
+            .order_by('-timestamp_created')[:500])
+    return [{'id': str(e.id), 'title': e.title or (e.data or {}).get('subject') or '',
+             'severity': (e.data or {}).get('severity') or 'alarm'}
+            for e in rows if (e.data or {}).get('clear_time') is None]
+
+
+def _assessment_freshness():
+    """Whether the scheduled campaign assessments arrived (the System
+    page's campaign-assessments row). The verdicts themselves are held
+    by corun-ai, which this DB-only build does not call."""
+    from swf_epicprod.assessment.freshness import assessment_freshness
+    status, summary, _data = assessment_freshness()
+    return {'status': status, 'summary': summary}
+
+
+def _report_items(front, sites, storage, alarms, assessment):
+    """The report as items (docs/COMP_SNAPSHOT.md, Report): what the room's
+    floor cannot show, each one line with a level and the page to open.
+    No per-site counts: the pillars carry those."""
+    items = []
+    if not front.get('enabled'):
+        items.append({'level': 'red', 'text': 'Pressure front: off, nothing is fed',
+                      'link': front.get('link')})
+    elif front.get('ready_tasks') == 0:
+        items.append({'level': 'grey', 'text': 'Pressure front: no task is ready to release',
+                      'link': front.get('link')})
+    for s in sites:
+        live = [q for q in s['queues'] if q['status'] == 'live']
+        if not live:
+            reason = next((q['status_reason'] for q in s['queues'] if q['status_reason']), '')
+            items.append({'level': 'grey',
+                          'text': f"{s['name']}: {'off' if not reason else reason}",
+                          'link': (s.get('links') or {}).get('panda_queue')})
+            continue
+        for q in live:
+            f = q.get('front') or {}
+            level, words = FRONT_STATES.get(f.get('state'), ('grey', f.get('state') or ''))
+            if f.get('state') and f.get('state') not in ('supplied', 'fed'):
+                reason = FRONT_REASONS.get(f.get('reason'), '')
+                items.append({'level': level,
+                              'text': f"Front, {q['id']}: {words}{', ' + reason if reason else ''}",
+                              'link': front.get('link')})
+            for name, p in q['health']['parts'].items():
+                if p['level'] not in ('amber', 'red'):
+                    continue
+                link = (q['links'].get('slots') if name == 'pilot_supply' else
+                        q['links'].get('canary') if name == 'canary' else
+                        q['links'].get('snapper'))
+                items.append({'level': p['level'],
+                              'text': f"{q['id']} {PART_NAMES.get(name, name)}: {p['note']}",
+                              'link': link})
+    for a in alarms or []:
+        # a ping is a dated obligation, an alarm only once overdue (PINGS.md)
+        ping = a.get('severity') == 'ping'
+        items.append({'level': 'amber' if ping else 'red',
+                      'text': f"{'Due' if ping else 'Alarm'}: {a['title'].replace(' — ', ': ')}",
+                      'link': f"{PUBLIC}/alarms/events/{a['id']}/"})
+    for st in storage:
+        for name, p in st['health']['parts'].items():
+            if p['level'] in ('amber', 'red'):
+                items.append({'level': p['level'], 'text': f"{st['name']}: {p['note']}",
+                              'link': (st.get('links') or {}).get('storage')})
+    if assessment:
+        level = {'ok': 'green', 'green': 'green', 'warn': 'amber', 'warning': 'amber',
+                 'amber': 'amber', 'fail': 'red', 'error': 'red', 'red': 'red'}.get(
+                     assessment['status'], 'grey')
+        items.append({'level': level,
+                      'text': f"Campaign assessment: {assessment['summary']}",
+                      'link': f'{PUBLIC}/ai/assessments/?subject_type=campaign_task,campaign'})
+    items.sort(key=lambda i: LEVEL_ORDER.get(i['level'], 2))
+    return items
 
 
 def get_snapshot(refresh=False):

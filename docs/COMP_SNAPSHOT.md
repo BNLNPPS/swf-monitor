@@ -62,9 +62,11 @@ sites[]           {id, name, status, capacity, capacity_source, in_use,
                    health, links}
   execute_sites[] {id, name, running, finished_1h, failed_1h,
                    capacity, capacity_source, in_use,
-                   finished_core_h_1h, failed_core_h_1h, health}
+                   finished_core_h_1h, failed_core_h_1h, health,
+                   links: {jobs}}
 storage[]         {id, name, holds, health, links}
-report            {text, assessment: {verdict, at, link}}
+report            {text, items: [{level, text, link}],
+                   assessment: {verdict, at, link}}
 errors[]          {part, error}
 ```
 
@@ -247,6 +249,18 @@ shadow mode.
 - `report.text`: a summary composed from the record on every build,
   without an LLM: the front, each live site's running and last-hour
   outcomes, and every non-green health part.
+- `report.items`: what the room's floor cannot show, one line each as
+  `{level, text, link}`, red first, then amber, then grey and green,
+  with no per-site counts (the pillars carry those): why the front
+  feeds nothing (the pressure front with no ready task, each live
+  queue's front decision in the words of CONTINUOUS_PRODUCTION.md's
+  states and reasons), every amber or red health part with its note,
+  every active alarm event (red; a ping, a dated obligation, amber),
+  storage parts not green, why each site that is not live is off, and
+  whether the scheduled campaign assessments arrived (the System
+  page's campaign-assessments row; the verdicts are held by corun-ai,
+  which this build does not call). The text before the first ": " names
+  what the line is about.
 - `report.assessment`: the latest campaign assessment's verdict, time
   and link (daily, from the assessment record); `null` until it is
   wired.
@@ -258,7 +272,15 @@ shadow mode.
 Every queue links to its ePIC queue page (`panda/epic-queues/<queue>/`),
 its errors view filtered to the queue (`panda/errors/?site=<queue>`) and
 the canary probes page (`canary/probes/`: the canary root answers with a
-redirect, which the proxy cannot relay). The pressure front links to the
+redirect, which the proxy cannot relay). The pillars' drilldowns: a
+queue's `links.running` opens its running jobs
+(`panda/jobs/?site=<queue>&status=running`), `links.queued` its queued
+jobs (`status=queued`, the census's not-started set, what `queued`
+counts), `links.slots` the Workers card of its queue page
+(`#workers`); an execute site's `links.jobs` opens the jobs whose pilot
+reported that site (`panda/jobs/?execsite=<site>`). A site's links are
+those of its busiest live queue, for OSG the queue production runs on.
+The pressure front links to the
 front page (`panda/front/`) and every storage element to the storage
 doors page (`panda/storage-doors/`). All links are on the public face
 (`https://epic-devcloud.org/prod/...`), and each was checked to answer

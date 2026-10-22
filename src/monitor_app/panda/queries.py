@@ -4101,23 +4101,39 @@ def _job_window_filter(days, ended_after=None, ended_before=None):
     return ['"modificationtime" >= %s'], [cutoff]
 
 
+def _status_clause(status):
+    """A status filter's clause. ``queued`` is the census's not-started
+    set (panda.census.NOT_STARTED), what the comp snapshot counts as a
+    queue's queued jobs; any other value is one job status."""
+    if status == 'queued':
+        from .census import NOT_STARTED
+        return ('"jobstatus" IN (' + ', '.join(['%s'] * len(NOT_STARTED)) + ')',
+                list(NOT_STARTED))
+    return '"jobstatus" = %s', [status]
+
+
 def _job_list_where(days, status=None, username=None, site=None,
                     taskid=None, reqid=None,
-                    ended_after=None, ended_before=None):
+                    ended_after=None, ended_before=None, execsite=None):
     """The WHERE clauses and parameters a jobs-list request selects.
 
     Closed jobs (never run, disposed of by JEDI; see get_activity) are
     left out unless the request asks for them by status: they are a
     question about the task record, not a listing anyone reads
-    through."""
+    through. ``execsite`` is the execute site the pilot reported
+    (``destinationsite``: an OSG glidein's site)."""
     where, params = _job_window_filter(
         days, ended_after=ended_after, ended_before=ended_before)
 
     if status:
-        where.append('"jobstatus" = %s')
-        params.append(status)
+        clause, vals = _status_clause(status)
+        where.append(clause)
+        params.extend(vals)
     else:
         where.append('"jobstatus" <> \'closed\'')
+    if execsite:
+        where.append('"destinationsite" = %s')
+        params.append(execsite)
     if username:
         clause, vals = _effective_username_filter('produsername', username)
         where.append(clause)
@@ -4158,12 +4174,12 @@ def job_request_size(days=7, status=None, username=None, site=None,
 def list_jobs_dt(days=7, status=None, username=None, site=None,
                  taskid=None, reqid=None,
                  order_by='"pandaid" DESC', limit=100, offset=0, search=None,
-                 ended_after=None, ended_before=None):
+                 ended_after=None, ended_before=None, execsite=None):
     """List PanDA jobs for DataTables (returns rows, total, filtered counts)."""
     where, params = _job_list_where(
         days, status=status, username=username, site=site,
         taskid=taskid, reqid=reqid,
-        ended_after=ended_after, ended_before=ended_before)
+        ended_after=ended_after, ended_before=ended_before, execsite=execsite)
 
     conn = connections['panda']
 
@@ -4280,11 +4296,14 @@ def build_tasks_window(days=7, cap=5000):
 
 def job_filter_counts(days=7, status=None, username=None, site=None,
                       taskid=None, reqid=None,
-                      ended_after=None, ended_before=None):
+                      ended_after=None, ended_before=None, execsite=None):
     """Get filter option counts for job list (status, user, site)."""
     base_where, base_params = _job_window_filter(
         days, ended_after=ended_after, ended_before=ended_before)
 
+    if execsite:
+        base_where.append('"destinationsite" = %s')
+        base_params.append(execsite)
     if taskid:
         base_where.append('"jeditaskid" = %s')
         base_params.append(int(taskid))
@@ -4314,6 +4333,11 @@ def job_filter_counts(days=7, status=None, username=None, site=None,
             if other_name != filter_name and other_value:
                 if other_name == 'username':
                     clause, vals = _effective_username_filter(other_db_field, other_value)
+                    where.append(clause)
+                    params.extend(vals)
+                    continue
+                if other_name == 'status':
+                    clause, vals = _status_clause(other_value)
                     where.append(clause)
                     params.extend(vals)
                     continue

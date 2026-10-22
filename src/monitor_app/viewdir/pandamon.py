@@ -792,6 +792,12 @@ def panda_jobs_list(request):
     if selected_site:
         site_url = reverse('monitor_app:epic_queue_detail', args=[selected_site])
         description += f'<br><a href="{site_url}">Site info for <strong>{selected_site}</strong></a>'
+    selected_execsite = request.GET.get('execsite', '')
+    if selected_execsite:
+        description += (f'<br>Execute site <strong>{escape(selected_execsite)}</strong>, '
+                        f'the site its pilot reported')
+    if request.GET.get('status') == 'queued':
+        description += '<br>Queued: defined, waiting, assigned, activated and sent jobs'
     refresh = request.GET.get('refresh') == '1'
     try:
         outcomes_product = _jobs_outcomes_product(
@@ -838,6 +844,7 @@ def panda_jobs_list(request):
         'selected_username': request.GET.get('username', ''),
         'selected_site': request.GET.get('site', ''),
         'selected_taskid': request.GET.get('taskid', ''),
+        'selected_execsite': selected_execsite,
         'ended_after': (ended_after.isoformat()
                         if ended_after is not None else ''),
         'ended_before': (ended_before.isoformat()
@@ -874,6 +881,7 @@ def panda_jobs_datatable_ajax(request):
         order_by=order_by, limit=dt.length, offset=dt.start,
         search=dt.search_value or None,
         ended_after=ended_after, ended_before=ended_before,
+        execsite=request.GET.get('execsite', '') or None,
     )
 
     window_params = {'days': days}
@@ -928,7 +936,8 @@ def panda_jobs_filter_counts(request):
     counts = job_filter_counts(days=days, status=status, username=username,
                                site=site, taskid=taskid, reqid=reqid,
                                ended_after=ended_after,
-                               ended_before=ended_before)
+                               ended_before=ended_before,
+                               execsite=request.GET.get('execsite', '') or None)
     return JsonResponse({'filter_counts': counts})
 
 
