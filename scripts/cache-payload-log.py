@@ -108,25 +108,30 @@ def resolve_pfn(scope, name):
 
 
 def route(pfn):
-    """(url, proxy) for the copy. A JLab log replica is catalogued by its
-    WebDAV door (davs://dtn-rucio.jlab.org:1094/...), which xrdcp cannot
-    read; the same door serves xrootd on the same port, and it admits the
-    JLab production proxy (EVGEN_X509_PROXY), not the BNL one. Every
-    other PFN is copied as catalogued with the BNL proxy."""
+    """(url, environment) for the copy. A JLab log replica is catalogued by
+    its WebDAV door (davs://dtn-rucio.jlab.org:1094/...), which xrdcp cannot
+    read; the same door serves xrootd on the same port, read with a storage
+    token for that one log (swf_epicprod.jlab_auth.door_access), else the
+    JLab production proxy (EVGEN_X509_PROXY), not the BNL one. Every other
+    PFN is copied as catalogued with the BNL proxy."""
     if pfn.startswith(("davs://", "https://")) and ".jlab.org" in pfn.split("/")[2]:
-        if not JLAB_X509_PROXY:
-            fail("EVGEN_X509_PROXY is not set; the JLab door needs the JLab proxy")
-        url = "root://" + pfn.split("://", 1)[1]
-        log(f"JLab door: {pfn} read as {url}")
-        return url, JLAB_X509_PROXY
-    return pfn, X509_PROXY
+        from urllib.parse import urlparse
+        from swf_epicprod.jlab_auth import door_access
+        parsed = urlparse(pfn)
+        door, env, how = door_access(f"root://{parsed.netloc}", parsed.path,
+                                     proxy=JLAB_X509_PROXY or None)
+        if how == "none":
+            fail("the JLab door gave no storage token and EVGEN_X509_PROXY is not set")
+        url = f"{door}//{parsed.path.lstrip('/')}"
+        log(f"JLab door: {pfn} read as {url} by {how}")
+        return url, env
+    if not os.path.exists(X509_PROXY):
+        fail(f"x509 proxy not found: {X509_PROXY}")
+    return pfn, dict(os.environ, X509_USER_PROXY=X509_PROXY)
 
 
 def xrdcp(pfn, dest):
-    pfn, proxy = route(pfn)
-    if not os.path.exists(proxy):
-        fail(f"x509 proxy not found: {proxy}")
-    env = dict(os.environ, X509_USER_PROXY=proxy)
+    pfn, env = route(pfn)
     log(f"xrdcp -> {dest}")
     try:
         p = subprocess.run(["xrdcp", "-f", "--nopbar", pfn, dest],

@@ -172,15 +172,21 @@ def fill_ghost(client, scope, lfn, rep, path):
         pfn = 'root://' + pfns[0].split('://', 1)[1]
     if pfn is None:
         raise RuntimeError(f'ghost {scope}:{lfn} names no replica path')
-    # A JLab door admits the JLab production proxy, not the BNL one, and its
-    # TLS refuses a proxy file readable by others, as the agent's BNL copy is
-    # (the payload-log fetch routes the same way).
+    # A JLab door takes a storage token for this one path, create only (a
+    # log is never overwritten), else the JLab production proxy, not the BNL
+    # one: its TLS refuses a proxy file readable by others, as the agent's
+    # BNL copy is (the payload-log fetch routes the same way).
     env = dict(os.environ)
     if '.jlab.org' in pfn.split('/')[2]:
-        jlab_proxy = os.environ.get('EVGEN_X509_PROXY', '')
-        if not jlab_proxy:
-            raise RuntimeError(f'EVGEN_X509_PROXY is not set; the JLab door at {pfn} needs it')
-        env['X509_USER_PROXY'] = jlab_proxy
+        from swf_epicprod.jlab_auth import door_access
+        door, _, door_path = pfn.partition('//')[2].partition('/')
+        url, env, how = door_access(f"{pfn.split('//')[0]}//{door}", f'/{door_path}',
+                                    verbs=('storage.create',),
+                                    proxy=os.environ.get('EVGEN_X509_PROXY') or None)
+        if how == 'none':
+            raise RuntimeError(f'the JLab door at {pfn} gave no storage token '
+                               'and EVGEN_X509_PROXY is not set')
+        pfn = f"{url}//{door_path.lstrip('/')}"
     proc = subprocess.run(['xrdcp', '--nopbar', path, pfn], capture_output=True, text=True,
                           timeout=600, env=env)
     if proc.returncode != 0 and 'file exists' in (proc.stderr or proc.stdout).lower():
