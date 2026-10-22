@@ -17,52 +17,94 @@ pattern.
 import logging
 import threading
 import time
+import zlib
 from datetime import timedelta
 
-from django.db import close_old_connections
+from django.db import close_old_connections, connection
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
-# A build slot older than this is considered abandoned (a worker died
-# mid-build) and may be reclaimed.
+# A build slot older than this is abandoned whatever else is known: the
+# backstop behind the holder check below.
 BUILD_LOCK_TIMEOUT_SECONDS = 600
+
+# A build holds a Postgres session advisory lock for its key while it
+# runs. The database releases it when the building process's connection
+# closes, so a slot whose builder died (a process recycle at deploy kills
+# the background thread before its ``finally`` clears the slot) reads as
+# abandoned at once. A slot younger than the grace is live without the
+# check: the claim precedes the builder taking the lock by a thread start.
+CLAIM_GRACE_SECONDS = 30
+ADVISORY_NAMESPACE = 7311
 
 # An explicit update that finds another worker mid-build waits up to this
 # long for that build to land before giving up and serving what exists.
 REFRESH_WAIT_SECONDS = 15
 
 
+def _advisory_key(key):
+    """The key's advisory lock id, an int4 under ADVISORY_NAMESPACE."""
+    return zlib.crc32(key.encode()) - 2 ** 31
+
+
+def _hold(key):
+    """Take the key's build lock on this connection: True when taken,
+    False while another live build holds it."""
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT pg_try_advisory_lock(%s, %s)',
+                       [ADVISORY_NAMESPACE, _advisory_key(key)])
+        return bool(cursor.fetchone()[0])
+
+
+def _release(key):
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT pg_advisory_unlock(%s, %s)',
+                       [ADVISORY_NAMESPACE, _advisory_key(key)])
+
+
+def _holder_alive(key):
+    """True while a live database session holds the key's build lock."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory'"
+            " AND classid = %s AND objid = %s AND objsubid = 2 AND granted)",
+            [ADVISORY_NAMESPACE, _advisory_key(key) % 2 ** 32])
+        return bool(cursor.fetchone()[0])
+
+
 def _lock_live(row):
     """True while the row's build slot is held by a live build.
 
-    A slot older than ``BUILD_LOCK_TIMEOUT_SECONDS`` belongs to a worker
-    that died mid-build (a process recycle kills the background thread
-    before its ``finally`` clears the slot). Every reader of
-    ``building_since`` goes through this rule, so an abandoned slot never
-    presents as an in-flight rebuild and never blocks the next one.
+    A slot is abandoned when no live session holds its build lock past the
+    claim grace, or when it is older than ``BUILD_LOCK_TIMEOUT_SECONDS``.
+    Every reader of ``building_since`` goes through this rule, so an
+    abandoned slot never presents as an in-flight rebuild and never blocks
+    the next one.
     """
     if row is None or row.building_since is None:
         return False
     age = (timezone.now() - row.building_since).total_seconds()
-    return age < BUILD_LOCK_TIMEOUT_SECONDS
+    if age >= BUILD_LOCK_TIMEOUT_SECONDS:
+        return False
+    return age < CLAIM_GRACE_SECONDS or _holder_alive(row.key)
 
 
 def _claim(key):
-    """Atomically claim the build slot for a key. True when claimed."""
-    from django.db.models import Q
-
+    """Atomically claim the build slot for a key. True when claimed. An
+    abandoned slot is taken over by compare-and-set on its stamp, so two
+    readers that find it abandoned do not both claim it."""
     from .models import CachedProduct
 
     now = timezone.now()
-    stale_lock = now - timedelta(seconds=BUILD_LOCK_TIMEOUT_SECONDS)
-    CachedProduct.objects.get_or_create(key=key)
-    claimed = (CachedProduct.objects
-               .filter(key=key)
-               .filter(Q(building_since__isnull=True)
-                       | Q(building_since__lt=stale_lock))
-               .update(building_since=now))
-    return claimed == 1
+    row, _ = CachedProduct.objects.get_or_create(key=key)
+    if row.building_since is None:
+        return CachedProduct.objects.filter(
+            key=key, building_since__isnull=True).update(building_since=now) == 1
+    if _lock_live(row):
+        return False
+    return CachedProduct.objects.filter(
+        key=key, building_since=row.building_since).update(building_since=now) == 1
 
 
 def _build_and_store(key, builder):
@@ -73,6 +115,11 @@ def _build_and_store(key, builder):
     """
     from .models import CachedProduct
 
+    if not _hold(key):
+        # A takeover raced a build that had not yet taken its lock: that
+        # build is alive and clears the slot when it lands.
+        logger.warning('cached product %s: a live build holds the lock', key)
+        return
     started = time.monotonic()
     try:
         value = builder()
@@ -86,6 +133,8 @@ def _build_and_store(key, builder):
         logger.exception('cached product build failed: %s', key)
         CachedProduct.objects.filter(key=key).update(building_since=None)
         raise
+    finally:
+        _release(key)
 
 
 def _background_build(key, builder):

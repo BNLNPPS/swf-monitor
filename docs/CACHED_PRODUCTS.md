@@ -14,12 +14,16 @@ variant.
 - **Staleness rebuilds behind the response.** A request that finds the
   product older than its TTL returns it anyway and triggers one
   background rebuild; `building_since` on the store row is the
-  cross-worker lock, so concurrent requests never stampede. A lock
-  older than `BUILD_LOCK_TIMEOUT_SECONDS` (600 s) is abandoned — its
-  worker died mid-build, as a process recycle at deploy does to a
-  background thread — and every reader treats it as absent: the next
-  request reclaims it and rebuilds. No product stays stale behind a
-  dead lock.
+  cross-worker lock, so concurrent requests never stampede. A running
+  build also holds a Postgres session advisory lock for its key, which
+  the database releases when the building process's connection closes.
+  A slot whose builder died, as a process recycle at deploy kills a
+  background thread, is therefore abandoned as soon as no live session
+  holds that lock (after a 30 s grace covering the thread's start), and
+  every reader treats it as absent: the next request takes it over and
+  rebuilds. A slot older than `BUILD_LOCK_TIMEOUT_SECONDS` (600 s) is
+  abandoned whatever else is known. No product stays stale behind a dead
+  lock.
 - **Explicit update rebuilds synchronously.** The uniform Update button
   passes `refresh=1`; the user chose to wait, and gets fresh data back.
 - **The first-ever fill builds synchronously** — there is nothing to
