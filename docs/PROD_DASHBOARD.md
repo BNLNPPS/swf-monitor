@@ -1,93 +1,80 @@
-# The production dashboard (plan)
+# Production dashboard
 
-A web page for collaborators that shows the state of ePIC production at a
-glance and opens onto the pages behind it. The computing-centre room in
-the etaverse dome is its proving ground: what serves its operator there is
-what the dashboard shows (Torre Wenaus, 2026-10-23: "every feed you send to
-the floor is a feed you will send to our prod dash"). This document is the
-plan; it becomes the page's reference once the page exists.
+The production home has three tabs, **Nav**, **Dash** and **Ops**. Nav is
+the default. Dash shows production at a glance and links to the live
+records behind each quantity:
 
-## Form: the floor's, at a glance
+- Home tab: https://epic-devcloud.org/prod/?tab=dash
+- Full-page dashboard: https://epic-devcloud.org/prod/panda/dashboard/
 
-The room is graphical and so is the dashboard. It is the room's
-information design carried onto a flat page, not a copy of its 3D
-objects: dense, read at a glance, the whole of production on one laptop
-screen that does not scroll. Where the room stands a pillar, the page
-draws a compact histogram of the same quantity over the last 12 hours, so
-one small figure gives the level now and how it got there. The room's
-trend panels and boards carry over nearly as they are, since they are
-already flat. Its visual language carries over too: the colours that mean
-running, queued, finished, failed and paused, number over word, and a
-level mark rather than a sentence. Space follows relevance at the moment:
-what is wrong or busy is large, and an idle or closed queue or a paused
-task is a mark and a number. Designs are judged against images of the
-room before they are shown.
+The square-and-arrow icon beside PROD opens the full-page dashboard in
+a new window. The home tab and standalone page use the same document,
+styles and JavaScript. The home embeds that document through `srcdoc`,
+which isolates the dashboard styles from the application navigation;
+the standalone route renders it without application headers. Both paths
+pass through the existing swf-remote proxy.
 
-## What it answers
+## Display
 
-Read top to bottom, the page answers, in order:
+The layout carries production supply, processing and science data across
+the top, with the daily assessment and paused tasks. OSG and GREX have
+running, queued, pilot and hourly outcome figures, cylinders and
+12-hour history. OSG execution sites have their own compact strip.
+Perlmutter, Google, Compute Canada and JLab follow in two columns.
+Tasks in flight, epicprod-live, Production now and Science data occupy
+the remaining columns. Site panes open by default; Open and Close act
+on every site pane.
 
-1. Is production healthy right now, and if not, what is wrong? The report
-   items, worst first, each with its link.
-2. Where is work running, and is each place keeping up? The sites: running
-   and queued jobs, cores in use against capacity, the last hour's finished
-   and failed jobs, health and its parts.
-3. What is waiting to run and why? The pressure front: tasks ready to
-   release, released in the last hour, the front's decision per queue.
-4. Which tasks are in production, and how far along? The task board, and
-   the paused tasks beside it.
-5. Is the data arriving? JLab and BNL Rucio storage: files registered and
-   bytes in the last hour, registration health.
-6. What happened recently? The live screen's warnings and errors, and the
-   daily assessment's verdict.
+Cylinder height represents running jobs on one 2,500-job scale. A compact
+execution-site cylinder retains its fixed height and shows the shared
+slash break when the value exceeds its display range. The green and red
+proportions represent finished and failed jobs in the preceding hour.
+The slash treatment is shared by both cylinder types. Plots convert
+quarter-hour completion bins to hourly rates. Task finish and fail
+columns retain JEDI input-file accounting; fail counts final failures
+after retries. Task rows extend downward without an internal scrollbar.
 
-Each number is a link: a queue to its Snapper history at the room's 12-hour
-scope, a task to its page, a failure line to the error summary, an alarm to
-its event.
+Weekly average running cores appear on the active OSG and GREX title
+rows. They are time-weighted from Snapper's recorded running-core curves,
+excluding collection gaps and stale intervals. OSG includes its retired
+production queue over the historical window. The initial record is a
+small static seed; a lazy request uses the existing Snapper series
+product when the cached average is more than an hour old. The browser
+reuses the result for an hour and refreshes it while attended.
 
-## The feed
+All displayed times use a 24-hour clock in Eastern Time. Hover details
+appear after a 150 ms pause. Daily assessment text is the record's
+narration, limited to two lines with the full text on hover; its title
+row carries verdict, finished-job count and creation time.
 
-The page reads only the comp snapshot (`comp_snapshot:v1`,
-[COMP_SNAPSHOT.md](COMP_SNAPSHOT.md)), the room's record, through its REST
-face `panda/comp/snapshot.json`. It adds no query of its own. Anything the
-page needs and the record lacks is added to the record, shaped for both
-readers (counts, levels, plain-text detail, links), so the room gains it
-too. The page refreshes from the record once a minute while attended
-(`swfPollGate`), as the room does.
+## Live record and links
 
-A live session's reading of an item (the readings layer swf-1 is planning:
-an explanation with author, evidence and expiry attached to a room item)
-shows on the page exactly as in the room, marked as an AI reading.
+The dashboard reads the shared comp snapshot, `comp_snapshot:v1`,
+through `panda/comp/snapshot.json` ([COMP_SNAPSHOT.md](COMP_SNAPSHOT.md)).
+The initial document includes the current cached record. It updates
+once a minute while attended and catches up when attention returns.
+A failed update is reported on the build-time line; an unavailable
+initial record does not expose the design's captured figures.
 
-## The page
+Links open queue-specific Snapper history, filtered job lists, task
+pages, the production front, storage history, live logs and individual
+assessment or alarm records. Hourly completion links compute their
+ending interval when opened. Queued links use the queue's not-started
+status set. Task file totals open the task accounting rather than a
+job count. Storage capacity links select BNL-XRD and the capacity view.
+A queue without Snapper history opens its queue details.
 
-A swf-monitor page on the production face, `/prod/panda/dashboard/`
-(name to settle), in the user view's nav. House conventions throughout:
-state colours by `state_class`, relative times, sortable tables, short
-names through the one filter, levels as the room draws them (green, amber,
-red, grey). It is read-only and needs no login beyond what the production
-face already asks.
+## Implementation
 
-The layout follows the room's (Form, above); the mockups settle it.
+- `monitor_app/viewdir/prod_dashboard.py` renders the shared document and
+  the home tab.
+- `monitor_app/templates/monitor_app/prod_dashboard.html` contains the
+  tuned layout; `prod_hub_dashboard.html` embeds it.
+- `monitor_app/static/monitor_app/prod_dashboard/` contains the panel
+  controls, live binding, drilldown helpers and weekly core averages.
+- `monitor_app/_prod_home_tabs.html` supplies the shared tab row.
 
-## How it is built: fast mockups, then the page
-
-Design moves in many fast iterations before any page code:
-
-1. Mockups are private Artifact pages built from a captured snapshot (the
-   live record saved as JSON at the time), so each iteration is an edit and
-   a publish in seconds, with real numbers and no deploy. Torre comments on
-   the mockup; the next version follows.
-2. When the design settles, the page is built in swf-monitor from the
-   mockup's markup and the live feed, deployed with the lightweight deploy,
-   and checked on the external face.
-3. Later changes to the design go through the mockup first when they are
-   more than a detail.
-
-## Open questions
-
-- The page's name and place in the nav.
-- Whether collaborators outside the production team see everything, or a
-  reduced view (`user_view`).
-- Phone layout: whether the page must read on a phone, or a desk screen
-  is enough.
+The standalone route is a read-only `panda/` page, covered by
+swf-remote's existing catch-all. Deployment uses
+`deploy-lightweight-ui-mcp.sh --ui --static`
+([PRODUCTION_DEPLOYMENT.md](PRODUCTION_DEPLOYMENT.md)).

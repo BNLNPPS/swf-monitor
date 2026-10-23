@@ -3512,7 +3512,11 @@ def _corun_narrative_count():
 
 
 def prod_hub(request):
-    """ePIC Production home — Nav (workflow hub) and Ops (dashboard) tabs."""
+    """ePIC Production home: Nav, Dash and Ops, with Nav as default."""
+    tab = request.GET.get('tab', 'nav')
+    if tab == 'dash' and request.GET.get('user_view') != '1':
+        from .viewdir.prod_dashboard import dashboard_home
+        return dashboard_home(request)
     from pcs.views import pcs_hub_counts
     from ai.models import Proposal
     from pcs.dashboard import (build_dashboard, get_dashboard_prefs,
@@ -3530,7 +3534,7 @@ def prod_hub(request):
                 logger.exception('home_tab preference save failed for %s',
                                  username)
     else:
-        tab = prefs.get('home_tab') if prefs.get('home_tab') in ('nav', 'ops') else 'nav'
+        tab = 'nav'
     from .cached_product import get_product
     # The summary strip (swf-epicprod docs/EPICPROD_DASHBOARD.md), on
     # both tabs: one campaign completion line per current or producing

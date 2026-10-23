@@ -126,6 +126,7 @@ from .viewdir.system_status import (
 from .viewdir.analysis import analysis_view
 from .viewdir.panda_census import panda_queue_census_json
 from .viewdir.comp_snapshot import comp_snapshot_json
+from .viewdir.prod_dashboard import prod_dashboard
 from .viewdir.panda_node_guard import (panda_node_guard, panda_node_guard_json,
                                        panda_node_guard_set)
 from .viewdir.panda_storage_doors import panda_storage_doors
@@ -258,6 +259,7 @@ urlpatterns = [
     # serves it.
     path('panda/queues/census/json/', panda_queue_census_json, name='panda_queue_census_json'),
     path('panda/comp/snapshot.json', comp_snapshot_json, name='comp_snapshot_json'),
+    path('panda/dashboard/', prod_dashboard, name='prod_dashboard'),
     path('panda-queues/update-from-github/', update_panda_queues_from_github, name='update_panda_queues_from_github'),
     path('panda-queues/<str:queue_name>/', panda_queue_detail, name='panda_queue_detail'),
     path('panda-queues/<str:queue_name>/json/', panda_queue_json, name='panda_queue_json'),
