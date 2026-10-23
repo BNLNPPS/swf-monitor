@@ -7,6 +7,25 @@ what the dashboard shows (Torre Wenaus, 2026-10-23: "every feed you send to
 the floor is a feed you will send to our prod dash"). This document is the
 plan; it becomes the page's reference once the page exists.
 
+## Form: the floor's, at a glance
+
+The room is fundamentally graphical, and so is the dashboard: it packs the
+room's information into one laptop screen that does not scroll, read at a
+glance. It uses the room's own forms, drawn as the room draws them
+(etaverse `scripts/audition/comp-room-drawing.js` and the room's
+`layout.json`): each site's and each Rucio's 12-hour trend panel (running
+as a green area, queued, finished/h and failed/h as lines, the scales in
+the top corners, "12 h ago" to "now"); the pillars as thin bars, the number
+over the word (running green with the failed share in red on top, queued
+mushroom, pilots waiting slate, slots/h light grey, the ready buffer and
+paused tasks as one piece per task, paused in gold); and the boards
+(epicprod-live, Tasks in flight) as the room draws them, a dark face,
+white title, muted column names, newest first, titles coloured by level.
+Text is labels and board lines only. Anything of low relevance at the
+moment, a queue that is off or a paused task, gets the space the room
+gives it, a mark and a number, never a panel of its own. Designs are
+checked against images of the room before they are shown.
+
 ## What it answers
 
 Read top to bottom, the page answers, in order:
@@ -52,19 +71,7 @@ names through the one filter, levels as the room draws them (green, amber,
 red, grey). It is read-only and needs no login beyond what the production
 face already asks.
 
-First layout, to be changed freely in the mockups:
-
-- A status strip: the overall level, the report items as chips worst first,
-  the daily verdict.
-- The sites as a row of cards, one per site, each with running and queued
-  bars, the finished/failed split of the last hour's core-hours as the room
-  colours its pillar, capacity, and the health parts as small labelled dots;
-  OSG's card opens to its execute sites.
-- The pressure front and its ready buffer.
-- The task board as a table, newest first, with the paused tasks as its own
-  short table in warning gold.
-- Storage, live screen and trends in a lower band, trends as small
-  12-hour curves linking to Snapper.
+The layout follows the room's (Form, above); the mockups settle it.
 
 ## How it is built: fast mockups, then the page
 
