@@ -56,7 +56,8 @@ remainder.
 
 The dashboard reads the shared comp snapshot, `comp_snapshot:v1`,
 through `panda/comp/snapshot.json` ([COMP_SNAPSHOT.md](COMP_SNAPSHOT.md)).
-The initial document includes the current cached record. It updates
+The production document includes the current cached record; the shared
+dev URL fetches the same record before showing its figures. It updates
 once a minute while visible, including on an unfocused operations display,
 and catches up when the tab returns. Each fetch reads the shared cache;
 a stale record starts one background rebuild. A page reload also uses

@@ -289,8 +289,15 @@
   // An operations display stays live when visible, including on an
   // unfocused screen. Poll the shared cache, never force a rebuild.
   function visible() { return !document.hidden; }
-  try { render(JSON.parse(document.getElementById('dashboard-record').textContent)); }
-  catch (error) { failed(error); update(); }
+  const initial = document.getElementById('dashboard-record');
+  if (initial) {
+    try { render(JSON.parse(initial.textContent)); }
+    catch (error) { failed(error); update(); }
+  } else {
+    document.body.classList.add('record-error');
+    text(document.getElementById('stamp'), 'Loading production record…');
+    update();
+  }
   setInterval(() => { if (visible()) update(); }, 60000);
   addEventListener('focus', () => { if (visible()) update(); });
   addEventListener('pageshow', () => { if (visible()) update(); });
