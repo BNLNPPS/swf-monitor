@@ -334,6 +334,11 @@ def _get_jobs_days(request):
     back. Default 7. ``hours`` sets it in hours when ``days`` is not
     given: the computing-centre floor's displays cover 12 hours and its
     links say hours=12 (Torre Wenaus, 2026-10-22)."""
+    taskid = request.GET.get('taskid', '').strip()
+    if taskid.isdigit() and (request.GET.get('days') == 'all' or
+                            not any(key in request.GET for key in ('days', 'hours'))):
+        from ..panda.queries import task_history_days
+        return task_history_days(taskid)
     if 'days' not in request.GET and request.GET.get('hours'):
         try:
             hours = float(request.GET['hours'])
@@ -371,7 +376,8 @@ def _window_label(days):
 
 
 def _judge_jobs_request(days, status, username, site, taskid,
-                        ended_after, ended_before):
+                        ended_after, ended_before, execsite=None,
+                        registration=None):
     """Examine what a jobs-list request asks for before building it.
 
     Counts the jobs the request covers; over JOBS_PAGE_CAP the window
@@ -380,9 +386,14 @@ def _judge_jobs_request(days, status, username, site, taskid,
     for, (days, ended_after, ended_before), and a notice for the page
     when it was narrowed, or None. A count that fails leaves the
     request as asked."""
+    # A task is an indexed, server-side selection with paged rows. Never
+    # silently replace its requested history with an all-site size limit.
+    if taskid:
+        return days, ended_after, ended_before, None
     asked = job_request_size(
         days=days, status=status, username=username, site=site,
-        taskid=taskid, ended_after=ended_after, ended_before=ended_before)
+        taskid=taskid, ended_after=ended_after, ended_before=ended_before,
+        execsite=execsite, registration=registration)
     if asked is None or asked <= JOBS_PAGE_CAP:
         return days, ended_after, ended_before, None
     asked_label = (
@@ -397,7 +408,8 @@ def _judge_jobs_request(days, status, username, site, taskid,
             days = days / 2
         count = job_request_size(
             days=days, status=status, username=username, site=site,
-            taskid=taskid, ended_after=ended_after, ended_before=ended_before)
+            taskid=taskid, ended_after=ended_after, ended_before=ended_before,
+            execsite=execsite, registration=registration)
         if count is None or count <= JOBS_PAGE_CAP:
             break
     shown_label = (
@@ -728,7 +740,8 @@ def compute_usage_data(request):
 
 def _jobs_outcomes_product(days, site, refresh,
                            ended_after=None, ended_before=None,
-                           include_closed=False):
+                           include_closed=False, execsite=None, taskid=None,
+                           registration=None, username=None):
     """Completed-job outcome series (finished/failed per bin with
     cumulative integrals) for the jobs page's graphical view, served
     as a cached product; closed jobs only when the page was asked for
@@ -739,7 +752,8 @@ def _jobs_outcomes_product(days, site, refresh,
         outcomes = job_outcomes(
             days=days, site=site or None,
             start_time=ended_after, end_time=ended_before,
-            include_closed=include_closed)
+            include_closed=include_closed, execsite=execsite, taskid=taskid,
+            registration=registration, username=username)
         if outcomes.get('error'):
             raise RuntimeError(outcomes['error'])
         return outcomes
@@ -748,7 +762,8 @@ def _jobs_outcomes_product(days, site, refresh,
         f':{ended_after.isoformat()}:{ended_before.isoformat()}'
         if ended_after is not None and ended_before is not None else '')
     return get_product(
-        f"jobs_outcomes:v3:{days}:{site or ''}{exact_key}"
+        f"jobs_outcomes:v4:{days}:{site or ''}:{execsite or ''}:{taskid or ''}:"
+        f"{registration or ''}:{username or ''}{exact_key}"
         f"{':closed' if include_closed else ''}", build,
         ttl_seconds=300, refresh=refresh)
 
@@ -788,6 +803,8 @@ def panda_jobs_list(request):
     days = _get_jobs_days(request)
     ended_after, ended_before = _get_ended_window(request)
     selected_site = request.GET.get('site', '')
+    selected_execsite = request.GET.get('execsite', '')
+    selected_registration = ('incomplete' if request.GET.get('registration') == 'incomplete' else '')
     # A task id is a number; anything else filters nothing.
     selected_taskid = request.GET.get('taskid', '').strip()
     if not selected_taskid.isdigit():
@@ -797,7 +814,9 @@ def panda_jobs_list(request):
     days, ended_after, ended_before, request_notice = _judge_jobs_request(
         days, request.GET.get('status', '') or None,
         request.GET.get('username', '') or None, selected_site or None,
-        selected_taskid or None, ended_after, ended_before)
+        selected_taskid or None, ended_after, ended_before,
+        execsite=selected_execsite or None,
+        registration=selected_registration or None)
     if ended_after is not None:
         et = ZoneInfo(settings.TIME_ZONE)
         ended_range_label = (
@@ -815,18 +834,22 @@ def panda_jobs_list(request):
         description += '<br>Site info for ' + ', '.join(
             f'<a href="{reverse("monitor_app:epic_queue_detail", args=[q])}">'
             f'<strong>{escape(q)}</strong></a>' for q in site_queues)
-    selected_execsite = request.GET.get('execsite', '')
     if selected_execsite:
         description += (f'<br>Execute site <strong>{escape(selected_execsite)}</strong>, '
                         f'the site its pilot reported')
     if request.GET.get('status') == 'queued':
         description += '<br>Queued: defined, waiting, assigned, activated and sent jobs'
+    if selected_registration:
+        description += '<br>Finished jobs with data registration recorded as pending or unfinished.'
     refresh = request.GET.get('refresh') == '1'
     try:
         outcomes_product = _jobs_outcomes_product(
             days, selected_site, refresh,
             ended_after=ended_after, ended_before=ended_before,
-            include_closed=request.GET.get('status', '') == 'closed')
+            include_closed=request.GET.get('status', '') == 'closed',
+            execsite=selected_execsite or None, taskid=selected_taskid or None,
+            registration=selected_registration or None,
+            username=request.GET.get('username', '') or None)
         job_outcomes_data = outcomes_product['value'] or {
             'error': 'Outcome history is building — reload shortly.'}
         if outcomes_product['value'] and outcomes_product['built_at']:
@@ -839,7 +862,7 @@ def panda_jobs_list(request):
         logger.error('jobs outcomes build failed: %s', e)
         job_outcomes_data = {'error': str(e)}
     job_outcomes_pie = None
-    if len(site_queues) == 1:
+    if len(site_queues) == 1 and not (selected_execsite or selected_taskid or selected_registration or request.GET.get('username')):
         try:
             job_outcomes_pie = _jobs_site_pie_product(
                 days, selected_site, refresh,
@@ -851,7 +874,10 @@ def panda_jobs_list(request):
         'job_outcomes': job_outcomes_data,
         'job_outcomes_pie': job_outcomes_pie,
         'request_notice': request_notice,
-        'table_title': 'PanDA Jobs',
+        'table_title': ('PanDA Jobs - Task ' + selected_taskid if selected_taskid
+                        else 'PanDA Jobs - ' + selected_execsite if selected_execsite
+                        else 'PanDA Jobs'),
+        'reload_on_filter_change': True,
         'table_description': description,
         'ajax_url': reverse('monitor_app:panda_jobs_datatable_ajax'),
         'filter_counts_url': reverse('monitor_app:panda_jobs_filter_counts'),
@@ -871,6 +897,7 @@ def panda_jobs_list(request):
         'selected_site': request.GET.get('site', ''),
         'selected_taskid': selected_taskid,
         'selected_execsite': selected_execsite,
+        'selected_registration': selected_registration,
         'ended_after': (ended_after.isoformat()
                         if ended_after is not None else ''),
         'ended_before': (ended_before.isoformat()
@@ -908,6 +935,7 @@ def panda_jobs_datatable_ajax(request):
         search=dt.search_value or None,
         ended_after=ended_after, ended_before=ended_before,
         execsite=request.GET.get('execsite', '') or None,
+        registration=request.GET.get('registration', '') or None,
     )
 
     window_params = {'days': days}
@@ -963,7 +991,8 @@ def panda_jobs_filter_counts(request):
                                site=site, taskid=taskid, reqid=reqid,
                                ended_after=ended_after,
                                ended_before=ended_before,
-                               execsite=request.GET.get('execsite', '') or None)
+                               execsite=request.GET.get('execsite', '') or None,
+                               registration=request.GET.get('registration', '') or None)
     return JsonResponse({'filter_counts': counts})
 
 

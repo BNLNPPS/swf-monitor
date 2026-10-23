@@ -136,12 +136,14 @@ function linkDashboard() {
     const taskLink = row.querySelector('td:first-child a');
     if (!taskLink) return;
     const task = taskLink.textContent.trim();
+    const detail = url('panda/tasks/' + task + '/');
+    link(taskLink, url('panda/jobs/', {taskid: task, days: 'all'}), 'Jobs for task ' + task);
     const cells = Array.from(row.cells);
     cells.slice(1).forEach((cell, index) => {
       if (!cell.textContent.trim()) return;
       const column = index + 1;
       const destination = column === 2 ? jobs('', 'running', 2160, {taskid: task}) :
-        column === 3 ? jobs('', 'queued', 2160, {taskid: task}) : taskLink.href;
+        column === 3 ? jobs('', 'queued', 2160, {taskid: task}) : detail;
       const description = column === 2 ? 'Running jobs for task ' + task :
         column === 3 ? 'Queued jobs for task ' + task : 'Task ' + task + ': input files';
       link(cell, destination, description);
@@ -149,6 +151,11 @@ function linkDashboard() {
   });
   link(document.querySelector('#paused-top .panelhead strong'), url('panda/tasks/', {status: 'paused', days: 90}),
     'Paused production tasks');
+  document.querySelectorAll('#paused-top .pausechip').forEach(chip => {
+    const task = chip.textContent.trim();
+    if (/^\d+$/.test(task)) link(chip, url('panda/jobs/', {taskid: task, days: 'all'}),
+      'Jobs for paused task ' + task);
+  });
 
   const data = document.querySelector('#storage .storagemain > div:first-child');
   if (data) {
@@ -156,7 +163,10 @@ function linkDashboard() {
     link(labels[0], storage(), 'JLab Rucio science data history');
     link(data.querySelector(':scope > b'), storage({quantity: 'files'}), 'Registered science data file history');
     link(data.querySelector(':scope > div.small:not(.green):not(.muted)'), storage({quantity: 'bytes'}), 'Registered science data volume history');
-    link(data.querySelector(':scope > .small.green'), url('pcs/stash/'), 'Pending science data registrations and failover stash');
+    const incomplete = data.querySelector('.registration-incomplete') ||
+      Array.from(data.querySelectorAll(':scope > .small')).find(node => /incomplete/.test(node.textContent));
+    link(incomplete, () => incomplete.dataset.drilldown || ended('', 'finished', {registration: 'incomplete'}),
+      'Jobs finished in the last hour with data registration pending or unfinished');
     link(labels[1], url('panda/storage-doors/'), 'BNL Rucio storage services');
     link(data.querySelector('.logs b'), () => ended('', ''), 'Jobs ending in the last hour');
     link(data.querySelector('.logs .small.green'), url('snapper/epicprod/errors/', {window: '12h', lens: 'component'}),

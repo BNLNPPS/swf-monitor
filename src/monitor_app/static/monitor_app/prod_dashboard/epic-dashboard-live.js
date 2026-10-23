@@ -94,6 +94,11 @@
       number(waiting) + ' pilots waiting', number(values[5]) + ' slots/1h'];
     pillars.forEach((node, i) => {
       node.title = titles[i];
+      node.dataset.value = String([values[0], values[3], waiting, values[5]][i] || 0);
+      if (i === 0) {
+        node.dataset.finished = String(values[1]);
+        node.dataset.failed = String(values[2]);
+      }
       if (node.firstElementChild && node.firstElementChild.tagName === 'A') node.firstElementChild.title = titles[i];
     });
     if (trend) plot(panel.querySelector('.plot'), [trend.running, trend.queued,
@@ -113,7 +118,7 @@
       measure.font = labelFont;
       const label = measure.measureText(name).width;
       measure.font = countFont;
-      return Math.max(16, label, measure.measureText(number(running)).width) + 8;
+      return Math.max(16, label, measure.measureText(number(running)).width) + 4;
     }
     const prefixes = [0];
     executors.forEach(item => prefixes.push(Math.max(prefixes[prefixes.length - 1],
@@ -125,7 +130,7 @@
       const overflow = i + 1 < executors.length;
       const columns = i + 1 + (overflow ? 1 : 0);
       const columnWidth = Math.max(prefixes[i + 1], overflow ? width('Other', remaining) : 0);
-      if (columns * columnWidth <= strip.clientWidth) visible = i + 1;
+      if (columns <= 15 && columns * columnWidth <= strip.clientWidth) visible = i + 1;
     });
     const shown = executors.slice(0, visible);
     const other = executors.slice(visible);
@@ -185,10 +190,15 @@
       const count = left.querySelector(':scope > b');
       text(count, number(science.arrived_1h));
       count.className = color(science.health && science.health.level);
-      const volume = left.querySelector(':scope > div.small:not(.green):not(.muted)');
+      const volume = left.querySelector('.science-volume') || left.querySelector(':scope > div.small:not(.green):not(.muted)');
+      volume.classList.add('science-volume');
       const amount = element('span', 'cyan', number(science.bytes_1h == null ? null : science.bytes_1h / 1e9) + ' GB/1h');
       volume.replaceChildren(amount, document.createTextNode(' · ' + number(science.events_1h) + ' events'));
-      text(left.querySelector(':scope > .small.green'), number(science.failed_1h) + ' incomplete');
+      const incomplete = left.querySelector('.registration-incomplete');
+      incomplete.className = 'small registration-incomplete ' +
+        (science.failed_1h == null ? 'muted' : science.failed_1h > 0 ? 'gold' : 'green');
+      incomplete.dataset.drilldown = science.links && science.links.failed || '';
+      text(incomplete, number(science.failed_1h) + ' incomplete');
       if (science.flow) plot(document.querySelector('#storage .plot'),
         [science.flow.files.map(n => n == null ? null : n * 4)], record.trends && record.trends.t);
       const capacity = science.capacity;
@@ -276,17 +286,13 @@
     } catch (error) { failed(error); }
     finally { loading = false; }
   }
-  function attended() {
-    const gate = window.swfPollGate || (parent !== window && parent.swfPollGate);
-    return gate ? gate.attended() : !document.hidden && document.hasFocus();
-  }
+  // An operations display stays live when visible, including on an
+  // unfocused screen. Poll the shared cache, never force a rebuild.
+  function visible() { return !document.hidden; }
   try { render(JSON.parse(document.getElementById('dashboard-record').textContent)); }
   catch (error) { failed(error); update(); }
-  setInterval(() => { if (attended()) update(); }, 60000);
-  const gate = window.swfPollGate || (parent !== window && parent.swfPollGate);
-  if (gate) gate.onReturn(update);
-  else {
-    addEventListener('focus', update);
-    document.addEventListener('visibilitychange', () => { if (attended()) update(); });
-  }
+  setInterval(() => { if (visible()) update(); }, 60000);
+  addEventListener('focus', () => { if (visible()) update(); });
+  addEventListener('pageshow', () => { if (visible()) update(); });
+  document.addEventListener('visibilitychange', () => { if (visible()) update(); });
 })();

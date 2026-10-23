@@ -360,6 +360,11 @@ $(document).ready(function() {
             }
         });
         const newUrl = window.location.pathname + (urlParams.toString() ? '?' + urlParams.toString() : '');
+        {% if reload_on_filter_change %}
+        // The title, request notice and charts share this selection.
+        window.location.assign(newUrl);
+        return;
+        {% endif %}
         window.history.replaceState({}, '', newUrl);
 
         // Update filter display

@@ -13,7 +13,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone as dt_timezone
 from zoneinfo import ZoneInfo
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from django.db import connections
 from django.utils import timezone
@@ -21,6 +21,7 @@ from django.utils import timezone
 from monitor_app.short_names import short_name
 from monitor_app import error_corrections
 from monitor_app.panda.constants import ERROR_COMPONENTS
+from monitor_app.panda.queries import INCOMPLETE_REGISTRATION_OUTCOMES
 from monitor_app.panda.error_labels import category_label
 from monitor_app.snapper_errors import _classify_sql
 
@@ -69,7 +70,8 @@ LOG_STAGEOUT_CODES = (1137, 1151, 1152)
 # (the registrar completes it) and unfinished. ``diverted`` is a clash
 # registered under a derived name (swf-epicprod RUCIO_RESILIENCE.md,
 # Measure 3), so it is registered.
-REGISTRATION_OWED = ('pending', 'unfinished')
+REGISTRATION_OWED = INCOMPLETE_REGISTRATION_OUTCOMES
+
 # The production output RSE: every production configuration names it as
 # OUT_RSE (swf-epicprod RUCIO_FAILOVER_STASH.md).
 OUTPUT_RSE = 'BNL-XRD'
@@ -879,7 +881,7 @@ class _Build:
              'health': _health({'registration': reg_part, 'latest_arrival': arrival}),
              'links': {'storage': f'{PUBLIC}/panda/storage-doors/',
                        'arrived': f'{PUBLIC}/snapper/epicprod/storage/',
-                       'failed': None,
+                       'failed': incomplete_registration_link(self.now),
                        'pending': f'{PUBLIC}/pcs/stash/'}},
             {'id': 'bnl-rucio', 'name': 'BNL Rucio', 'holds': 'logs',
              'status': 'live', 'counts': 'logs',
@@ -1721,6 +1723,17 @@ def _report_items(front, sites, storage, alarms, assessment):
     return items
 
 
+def incomplete_registration_link(observed_at):
+    """The same completion window and registration subset as the count."""
+    if isinstance(observed_at, str):
+        observed_at = datetime.fromisoformat(observed_at)
+    return f'{PUBLIC}/panda/jobs/?' + urlencode({
+        'status': 'finished', 'registration': 'incomplete', 'hours': 1,
+        'ended_after': (observed_at - timedelta(hours=1)).isoformat(),
+        'ended_before': observed_at.isoformat(),
+    })
+
+
 def get_snapshot(refresh=False):
     """The stored record, rebuilt behind the request when older than the
     TTL (docs/CACHED_PRODUCTS.md)."""
@@ -1732,6 +1745,11 @@ def get_snapshot(refresh=False):
         dict(item, short=short_name(item.get('name')))
         for item in site.get('execute_sites', [])
     ]) for site in value.get('sites', [])]
+    if value.get('observed_at'):
+        value['storage'] = [dict(row, links=dict(row.get('links') or {},
+            failed=incomplete_registration_link(value['observed_at'])))
+            if row.get('id') == 'jlab-rucio' else row
+            for row in value.get('storage', [])]
     value['age_seconds'] = result.get('age_seconds')
     value['refreshing'] = result.get('refreshing')
     return value

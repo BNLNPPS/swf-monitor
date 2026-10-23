@@ -81,7 +81,7 @@ document.querySelectorAll('#site-controls [data-site-action]').forEach(link=>{
 
 const sitePillarScale=2500;
 document.querySelectorAll('.site .queuepillar.svgcolumn').forEach(pillar=>{
- const numbers=Array.from(pillar.title.matchAll(/[\d,]+/g),match=>Number(match[0].replaceAll(',','')));
+ const numbers=Array.from(pillar.title.matchAll(/\d[\d,]*/g),match=>Number(match[0].replaceAll(',','')));
  const value=numbers[0]||0;
  const svg=pillar.querySelector('svg');
  const color=svg.querySelector('path').getAttribute('fill');

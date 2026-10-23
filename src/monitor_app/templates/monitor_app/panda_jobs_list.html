@@ -9,23 +9,26 @@
     <strong>Time window:</strong>
     {% for opt in days_options %}
     {% if opt.active %}
-    <a href="?days={{ opt.value }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}{% if selected_execsite %}&execsite={{ selected_execsite|urlencode }}{% endif %}" class="swf-days-link" data-days="{{ opt.value }}" style="font-weight:bold;text-decoration:underline;margin-right:0.8em;">{{ opt.label }}</a>
+    <a href="?days={{ opt.value }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}{% if selected_execsite %}&execsite={{ selected_execsite|urlencode }}{% endif %}{% if selected_registration %}&registration={{ selected_registration }}{% endif %}" class="swf-days-link" data-days="{{ opt.value }}" style="font-weight:bold;text-decoration:underline;margin-right:0.8em;">{{ opt.label }}</a>
     {% else %}
-    <a href="?days={{ opt.value }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}{% if selected_execsite %}&execsite={{ selected_execsite|urlencode }}{% endif %}" class="swf-days-link" data-days="{{ opt.value }}" style="margin-right:0.8em;">{{ opt.label }}</a>
+    <a href="?days={{ opt.value }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}{% if selected_execsite %}&execsite={{ selected_execsite|urlencode }}{% endif %}{% if selected_registration %}&registration={{ selected_registration }}{% endif %}" class="swf-days-link" data-days="{{ opt.value }}" style="margin-right:0.8em;">{{ opt.label }}</a>
     {% endif %}
     {% endfor %}
     {% if selected_taskid %}
+    <a href="?days=all&taskid={{ selected_taskid }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_site %}&site={{ selected_site|urlencode }}{% endif %}{% if selected_username %}&username={{ selected_username|urlencode }}{% endif %}{% if selected_execsite %}&execsite={{ selected_execsite|urlencode }}{% endif %}{% if selected_registration %}&registration={{ selected_registration }}{% endif %}" class="swf-days-link" data-days="all">All task history</a>
     | <a href="{% url 'monitor_app:panda_task_detail' selected_taskid %}">task {{ selected_taskid }}</a>
     {% endif %}
+    {% if not selected_taskid and not selected_execsite and not selected_registration and not selected_username %}
     <a href="{% url 'snapper_ai:snapper_report' scope='epicprod' %}?window={{ snapper_window }}"
        style="margin-left:1cm;font-weight:bold;">Snapper view</a>
+    {% endif %}
 </div>
 
 {% if job_outcomes %}
 <div class="mb-3">
   <div class="d-flex align-items-baseline">
-    <h5 class="mb-1">Completed jobs{% if selected_site %} · {{ selected_site }}{% endif %} · {{ jobs_window_label }}</h5>
-    {% if selected_site and ',' not in selected_site %}
+    <h5 class="mb-1">Completed jobs{% if selected_taskid %} · Task {{ selected_taskid }}{% endif %}{% if selected_execsite %} · {{ selected_execsite }}{% endif %}{% if selected_registration %} · incomplete registration{% endif %}{% if selected_site %} · {{ selected_site }}{% endif %} · {{ jobs_window_label }}</h5>
+    {% if selected_site and ',' not in selected_site and not selected_taskid and not selected_execsite and not selected_registration %}
     <a class="ms-3" href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='site' %}?site={{ selected_site|urlencode }}">State history in Snapper</a>
     {% endif %}
   </div>
@@ -45,7 +48,7 @@
   <div class="text-muted small">
     Bars are completions per {{ job_outcomes.bucket }} (Eastern time); lines are the cumulative integral over the window.
     {% if job_outcomes.built_at_text %}Built {{ job_outcomes.built_at_text }} ·
-    <a href="?days={{ days }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}{% if selected_execsite %}&execsite={{ selected_execsite|urlencode }}{% endif %}{% if ended_after %}&ended_after={{ ended_after|urlencode }}&ended_before={{ ended_before|urlencode }}{% endif %}&refresh=1" class="swf-update-btn">Update</a>{% endif %}
+    <a href="?days={{ days }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}{% if selected_execsite %}&execsite={{ selected_execsite|urlencode }}{% endif %}{% if selected_registration %}&registration={{ selected_registration }}{% endif %}{% if ended_after %}&ended_after={{ ended_after|urlencode }}&ended_before={{ ended_before|urlencode }}{% endif %}&refresh=1" class="swf-update-btn">Update</a>{% endif %}
   </div>
   {{ job_outcomes|json_script:"job-outcomes-data" }}
   <script>
@@ -219,6 +222,7 @@
     days: '{{ days }}',
     taskid: '{{ selected_taskid|default:"" }}',
     execsite: '{{ selected_execsite|escapejs }}',
+    registration: '{{ selected_registration|escapejs }}',
     ended_after: '{{ ended_after|escapejs }}',
     ended_before: '{{ ended_before|escapejs }}'
 }

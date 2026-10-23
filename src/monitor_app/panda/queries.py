@@ -2040,7 +2040,8 @@ def get_queue(panda_queue):
 
 
 def job_outcomes(days=7, site=None, start_time=None, end_time=None,
-                 include_closed=False):
+                 include_closed=False, execsite=None, taskid=None,
+                 registration=None, username=None):
     """Completed-job outcomes over time for the jobs page's graphical
     view: finished/failed/cancelled counts per Eastern-time bucket, and
     closed when asked for (never-run jobs; see get_activity), each with
@@ -2072,6 +2073,20 @@ def job_outcomes(days=7, site=None, start_time=None, end_time=None,
         clause, vals = site_clause(site)
         filters += f' AND {clause}'
         extra_params.extend(vals)
+    if execsite:
+        filters += ' AND "destinationsite" = %s'
+        extra_params.append(execsite)
+    if taskid:
+        filters += ' AND "jeditaskid" = %s'
+        extra_params.append(int(taskid))
+    if username:
+        clause, values = _effective_username_filter('produsername', username)
+        filters += ' AND ' + clause
+        extra_params.extend(values)
+    clause, values = _registration_clause(registration)
+    if clause:
+        filters += ' AND ' + clause
+        extra_params.extend(values)
     statuses = ('finished', 'failed', 'cancelled') + (
         ('closed',) if include_closed else ())
     where = (
@@ -2141,6 +2156,10 @@ def job_outcomes(days=7, site=None, start_time=None, end_time=None,
         'bins': [b.isoformat() for b in bins],
         'series': series,
         'site': site or '',
+        'taskid': int(taskid) if taskid else None,
+        'execsite': execsite or '',
+        'username': username or '',
+        'registration': registration or '',
         'window': {'start': window_start.isoformat(),
                    'end': window_end.isoformat(),
                    'days': days, 'timezone': 'America/New_York'},
@@ -4088,8 +4107,24 @@ TASK_ORDER_COLUMNS = {f: f'"{f}"' for f in TASK_LIST_FIELDS}
 # Searchable columns for DataTables global search
 JOB_SEARCH_FIELDS = ['pandaid', 'jeditaskid', 'produsername', 'jobstatus',
                      'computingsite', 'transformation']
+INCOMPLETE_REGISTRATION_OUTCOMES = ('pending', 'unfinished')
 TASK_SEARCH_FIELDS = ['jeditaskid', 'taskname', 'status', 'username',
                       'processingtype', 'workinggroup', 'transpath']
+
+
+def task_history_days(taskid):
+    """A window covering a task's entire lifetime, including its first day."""
+    with connections['panda'].cursor() as cursor:
+        cursor.execute(
+            f'SELECT "creationdate" FROM "{PANDA_SCHEMA}"."jedi_tasks" '
+            'WHERE "jeditaskid" = %s', [int(taskid)])
+        row = cursor.fetchone()
+    if not row or not row[0]:
+        raise ValueError(f'Task {taskid} has no creation time')
+    created = row[0]
+    if timezone.is_naive(created):
+        created = timezone.make_aware(created, timezone=dt_timezone.utc)
+    return max(1, (timezone.now() - created).days + 1)
 
 
 def _job_window_filter(days, ended_after=None, ended_before=None):
@@ -4112,9 +4147,21 @@ def _status_clause(status):
     return '"jobstatus" = %s', [status]
 
 
+def _registration_clause(registration):
+    """The payload registration subset used by the dashboard and job list."""
+    if registration != 'incomplete':
+        return '', []
+    return ('"processingtype" = %s AND "jobstatus" = %s AND '
+            '("jobmetrics" LIKE %s OR "jobmetrics" LIKE %s)',
+            ['epicproduction', 'finished'] + [
+                f'%payloadRegistration={outcome}%'
+                for outcome in INCOMPLETE_REGISTRATION_OUTCOMES])
+
+
 def _job_list_where(days, status=None, username=None, site=None,
                     taskid=None, reqid=None,
-                    ended_after=None, ended_before=None, execsite=None):
+                    ended_after=None, ended_before=None, execsite=None,
+                    registration=None):
     """The WHERE clauses and parameters a jobs-list request selects.
 
     Closed jobs (never run, disposed of by JEDI; see get_activity) are
@@ -4124,6 +4171,10 @@ def _job_list_where(days, status=None, username=None, site=None,
     (``destinationsite``: an OSG glidein's site)."""
     where, params = _job_window_filter(
         days, ended_after=ended_after, ended_before=ended_before)
+    clause, values = _registration_clause(registration)
+    if clause:
+        where.append(clause)
+        params.extend(values)
 
     if status:
         clause, vals = _status_clause(status)
@@ -4153,14 +4204,16 @@ def _job_list_where(days, status=None, username=None, site=None,
 
 def job_request_size(days=7, status=None, username=None, site=None,
                      taskid=None, reqid=None,
-                     ended_after=None, ended_before=None):
+                     ended_after=None, ended_before=None, execsite=None,
+                     registration=None):
     """How many jobs a jobs-list request covers, before anything is built
     for it: the number the page judges the request by. None when the
     count fails (logged), so the caller can proceed as asked."""
     where, params = _job_list_where(
         days, status=status, username=username, site=site,
         taskid=taskid, reqid=reqid,
-        ended_after=ended_after, ended_before=ended_before)
+        ended_after=ended_after, ended_before=ended_before,
+        execsite=execsite, registration=registration)
     count_sql, count_params = build_union_count(where, params)
     try:
         with connections['panda'].cursor() as cursor:
@@ -4174,12 +4227,14 @@ def job_request_size(days=7, status=None, username=None, site=None,
 def list_jobs_dt(days=7, status=None, username=None, site=None,
                  taskid=None, reqid=None,
                  order_by='"pandaid" DESC', limit=100, offset=0, search=None,
-                 ended_after=None, ended_before=None, execsite=None):
+                 ended_after=None, ended_before=None, execsite=None,
+                 registration=None):
     """List PanDA jobs for DataTables (returns rows, total, filtered counts)."""
     where, params = _job_list_where(
         days, status=status, username=username, site=site,
         taskid=taskid, reqid=reqid,
-        ended_after=ended_after, ended_before=ended_before, execsite=execsite)
+        ended_after=ended_after, ended_before=ended_before, execsite=execsite,
+        registration=registration)
 
     conn = connections['panda']
 
@@ -4296,10 +4351,15 @@ def build_tasks_window(days=7, cap=5000):
 
 def job_filter_counts(days=7, status=None, username=None, site=None,
                       taskid=None, reqid=None,
-                      ended_after=None, ended_before=None, execsite=None):
+                      ended_after=None, ended_before=None, execsite=None,
+                      registration=None):
     """Get filter option counts for job list (status, user, site, task)."""
     base_where, base_params = _job_window_filter(
         days, ended_after=ended_after, ended_before=ended_before)
+    clause, values = _registration_clause(registration)
+    if clause:
+        base_where.append(clause)
+        base_params.extend(values)
 
     if execsite:
         base_where.append('"destinationsite" = %s')

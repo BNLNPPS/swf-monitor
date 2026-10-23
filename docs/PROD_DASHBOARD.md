@@ -52,7 +52,11 @@ row carries verdict, finished-job count and creation time.
 The dashboard reads the shared comp snapshot, `comp_snapshot:v1`,
 through `panda/comp/snapshot.json` ([COMP_SNAPSHOT.md](COMP_SNAPSHOT.md)).
 The initial document includes the current cached record. It updates
-once a minute while attended and catches up when attention returns.
+once a minute while visible, including on an unfocused operations display,
+and catches up when the tab returns. Each fetch reads the shared cache;
+a stale record starts one background rebuild. A page reload also uses
+that cache, rather than rebuilding every source. The header stays pinned
+through the Open / Close controls.
 A failed update is reported on the build-time line; an unavailable
 initial record does not expose the design's captured figures.
 
@@ -60,9 +64,14 @@ Links open queue-specific Snapper history, filtered job lists, task
 pages, the production front, storage history, live logs and individual
 assessment or alarm records. Hourly completion links compute their
 ending interval when opened. Queued links use the queue's not-started
-status set. Task file totals open the task accounting rather than a
+status set. In-flight task IDs open all of that task's job history,
+with server-side task filtering and pagination. The jobs title and
+completion chart follow task and execute-site filters; a whole-queue
+pie is omitted for a narrower selection. Task file totals open the task accounting rather than a
 job count. Storage capacity links select BNL-XRD and the capacity view.
-A queue without Snapper history opens its queue details.
+A queue without Snapper history opens its queue details. Incomplete
+registrations are amber when nonzero and open the jobs with pending or
+unfinished payload registration in the same completion hour.
 
 ## Implementation
 
