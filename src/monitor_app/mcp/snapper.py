@@ -224,7 +224,7 @@ async def snapper_series(scope: str, focus: str, window: str = '24h',
         scope: 'epicprod' or 'testbed'.
         focus: the view's name as on its tab: 'platform', 'site',
             'errors', 'campaign'.
-        window: '6h', '24h', '48h', '7d', '14d', or '30d'.
+        window: '6h', '12h', '24h', '48h', '7d', '14d', or '30d'.
         selection: the view's option value(s), comma-separated, when the
             view has them (a site name for 'site', a task id for
             'errors', a campaign for 'campaign'); default: the view's
