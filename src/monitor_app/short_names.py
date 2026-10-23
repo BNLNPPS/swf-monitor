@@ -6,7 +6,24 @@ unchanged, and the full name stays in the record and on detail pages.
 """
 
 # A name whose short form no rule below gives.
-SHORT_NAMES = {}
+SHORT_NAMES = {
+    'IRISHEP-SSL-UCHICAGO': 'IRISHEP',
+    'UNL-PATH': 'UNL',
+    'UWM-Mortimer': 'UWM',
+    'Rhodes-HPC': 'Rhodes',
+    'OSG_US_FSU_HNPGRID': 'FSU',
+    'UW-La Crosse CSCPE': 'La Crosse',
+    'UA Little Rock ITS': 'UALR',
+    'Center for Advanced Research Computi': 'CARC',
+    'Center for Advanced Research Computing': 'CARC',
+    'WISC-PATH': 'WISC',
+    'FANDM-ITS': 'F&M',
+    'Colgate ITS': 'Colgate',
+    'SYRA-PATH': 'SYRA',
+    'OU-Sooner': 'OU',
+    'FIU-IRCC': 'FIU',
+    'ND_CAMLGPU': 'ND-CAML',
+}
 
 # Organisation prefixes a site name carries before the cluster's own name:
 # ComputeCanada-Fir reads Fir.

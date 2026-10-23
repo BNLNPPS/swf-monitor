@@ -1727,6 +1727,11 @@ def get_snapshot(refresh=False):
     from monitor_app.cached_product import get_product
     result = get_product(PRODUCT_KEY, build, TTL_SECONDS, refresh=refresh)
     value = dict(result.get('value') or {})
+    # Labels follow the current shared vocabulary even while counts are cached.
+    value['sites'] = [dict(site, execute_sites=[
+        dict(item, short=short_name(item.get('name')))
+        for item in site.get('execute_sites', [])
+    ]) for site in value.get('sites', [])]
     value['age_seconds'] = result.get('age_seconds')
     value['refreshing'] = result.get('refreshing')
     return value

@@ -1,7 +1,7 @@
 (() => {
   const config = window.epicDashboard;
   const number = value => value == null ? '—' : Math.round(value).toLocaleString('en-US');
-  const color = level => ({green: 'green', amber: 'gold', red: 'red', grey: 'muted'}[level] || 'muted');
+  const color = level => ({green: 'green', amber: 'gold', red: 'red', grey: 'muted', warning: 'gold', error: 'red', critical: 'red'}[String(level).toLowerCase()] || 'muted');
   const list = value => Array.isArray(value) ? value : value && value.items || [];
   const et = (value, date = false) => {
     if (!value) return '';
@@ -104,8 +104,31 @@
   function renderExecutors(sites) {
     const osg = sites.find(site => site.id === 'osg');
     const executors = (osg && osg.execute_sites || []).filter(item => item.running > 0);
-    const shown = executors.slice(0, 11);
-    const other = executors.slice(11);
+    const strip = document.querySelector('.executeplot');
+    const sample = strip.querySelector('.exec');
+    const labelFont = sample ? getComputedStyle(sample.querySelector('.ename')).font : '8px Arial';
+    const countFont = sample ? getComputedStyle(sample.querySelector('.count')).font : 'bold 9px Arial';
+    const measure = document.createElement('canvas').getContext('2d');
+    function width(name, running) {
+      measure.font = labelFont;
+      const label = measure.measureText(name).width;
+      measure.font = countFont;
+      return Math.max(16, label, measure.measureText(number(running)).width) + 8;
+    }
+    const prefixes = [0];
+    executors.forEach(item => prefixes.push(Math.max(prefixes[prefixes.length - 1],
+      width(item.short || item.name, item.running))));
+    let remaining = executors.reduce((sum, item) => sum + item.running, 0);
+    let visible = 0;
+    executors.forEach((item, i) => {
+      remaining -= item.running;
+      const overflow = i + 1 < executors.length;
+      const columns = i + 1 + (overflow ? 1 : 0);
+      const columnWidth = Math.max(prefixes[i + 1], overflow ? width('Other', remaining) : 0);
+      if (columns * columnWidth <= strip.clientWidth) visible = i + 1;
+    });
+    const shown = executors.slice(0, visible);
+    const other = executors.slice(visible);
     if (other.length) shown.push({name: 'Other', short: 'Other',
       running: other.reduce((n, item) => n + item.running, 0),
       finished_1h: other.reduce((n, item) => n + item.finished_1h, 0),
@@ -113,8 +136,9 @@
       detail: other.map(item => item.name + ': ' + number(item.running)).join(', ')});
     const nodes = shown.map(item => {
       const node = executorModel.cloneNode(true);
-      node.title = item.detail || item.name + ': ' + number(item.running) + ' running, ' +
-        number(item.finished_1h) + ' finished/1h, ' + number(item.failed_1h) + ' failed/1h';
+      node.title = item.name + ': ' + number(item.running) + ' running, ' +
+        number(item.finished_1h) + ' finished/1h, ' + number(item.failed_1h) + ' failed/1h' +
+        (item.detail ? '\n' + item.detail : '');
       node.href = item.links && item.links.jobs || 'https://epic-devcloud.org/prod/snapper/epicprod/site/?site=BNL_OSG_PanDA_1&window=12h';
       text(node.querySelector('.count'), number(item.running));
       text(node.querySelector('.ename'), item.short || item.name);
@@ -125,7 +149,8 @@
       pillar.querySelector('.failurecap').style.display = item.failed_1h > 0 ? '' : 'none';
       return node;
     });
-    document.querySelector('.executeplot').replaceChildren(...nodes);
+    strip.style.gridTemplateColumns = 'repeat(' + Math.max(1, nodes.length) + ',minmax(0,1fr))';
+    strip.replaceChildren(...nodes);
     text(document.querySelector('.executeintro .large'), number(executors.length));
     renderExecPillars();
   }
