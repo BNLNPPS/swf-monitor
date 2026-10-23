@@ -10,6 +10,13 @@ comp snapshot, which swf-monitor builds and serves. The room refreshes
 everything it shows from that record without a reload: about once a
 minute while someone is in the room, every thirty minutes otherwise.
 
+The record is also the feed for the production dashboard on the web, the
+one collaborators will use; the room is its proving ground (Torre Wenaus,
+2026-10-23: "every feed you send to the floor is a feed you will send to
+our prod dash"). Whatever is added for the room is shaped for both
+readers: counts, levels, plain-text detail and links, never the room's
+geometry.
+
 ## Where it is served
 
 One builder, three faces, the same record:
