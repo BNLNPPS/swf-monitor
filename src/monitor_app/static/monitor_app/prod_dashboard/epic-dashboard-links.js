@@ -61,31 +61,31 @@ function linkDashboard() {
   }
 
   link(document.querySelector('header .brand'), url('snapper/epicprod/report/', {window: '12h'}),
-    'Live production time history over the last 12 hours');
+    'Production · last 12h');
   document.querySelectorAll('#flow > .flowcell').forEach(cell => {
     const title = cell.querySelector('.label');
     if (!title) return;
     const metrics = cell.querySelectorAll('.flowrow > div');
     switch (title.textContent.trim()) {
       case 'Pressure front':
-        link(title, url('panda/front/'), 'Current production pressure front');
+        link(title, url('panda/front/'), 'Pressure front');
         link(metrics[0], url('panda/front/', {}, 'ready'), 'Ready production tasks');
         link(metrics[1], url('panda/front/'), 'Production releases and queue decisions');
         break;
       case 'Computing now':
-        link(title, url('snapper/epicprod/report/', {window: '12h'}), 'Live production time history');
-        link(metrics[0], jobs('', 'running', 48), 'Currently running production jobs');
+        link(title, url('snapper/epicprod/report/', {window: '12h'}), 'Production history');
+        link(metrics[0], jobs('', 'running', 48), 'Running jobs');
         link(metrics[1], () => ended('', 'finished'), 'Jobs finished in the last hour');
         break;
       case 'Work available':
         link(title, url('panda/front/'), 'Production supply and ready work');
         link(metrics[0], jobs('', 'queued', 720), 'Queued jobs: defined, waiting, assigned, activated and sent');
-        link(metrics[1], url('panda/tasks/', {days: 90}), 'Task input-file progress, including work not yet generated');
+        link(metrics[1], url('panda/tasks/', {days: 90}), 'Task input files');
         break;
       case 'Science data':
-        link(title, storage(), 'Science data arrival and storage time history');
-        link(metrics[0], storage({quantity: 'files'}), 'Science data file arrival history');
-        link(metrics[1], storage({quantity: 'bytes'}), 'Science data volume history');
+        link(title, storage(), 'Data arrivals and storage');
+        link(metrics[0], storage({quantity: 'files'}), 'Data file arrivals');
+        link(metrics[1], storage({quantity: 'bytes'}), 'Data volume');
         break;
     }
   });
@@ -94,12 +94,12 @@ function linkDashboard() {
     const title = panel.querySelector('.panelhead strong');
     const name = title.textContent.trim();
     if (!(name in queues)) return;
-    link(title, history(name), name + ': live queue history over the last 12 hours');
+    link(title, history(name), name + ': last 12h');
     const weekly = panel.querySelector('.weekly-cores');
-    link(weekly, history(name, '7d'), name + ': running-core history over the last week');
+    link(weekly, history(name, '7d'), name + ': running cores · last 7d');
     const status = panel.querySelector('.site-status');
     link(status, name === 'Perlmutter' ? url('panda/front/', {}, 'nersc-allocation') : queuePage(name),
-      name + ': current queue configuration and operating status');
+      name + ': queue status');
     link(panel.querySelector('.site-body'), queuePage(name), name + ': queue details');
     const metrics = panel.querySelectorAll('.metric');
     const destinations = [
@@ -111,10 +111,10 @@ function linkDashboard() {
     metrics.forEach((metric, i) => link(metric, destinations[i], name + ': ' + descriptions[i]));
     const plot = panel.querySelector('.plot');
     if (plot) link(plot.tagName === 'A' ? plot : plot.closest('a') || plot, history(name),
-      name + ': live queue history over the last 12 hours');
+      name + ': last 12h');
     panel.querySelectorAll('.queuepillar.svgcolumn').forEach((pillar, i) => {
       const targets = [history(name), jobs(name, 'queued', 720), queuePage(name, true), queuePage(name, true)];
-      link(pillar, targets[i], pillar.title + '; open focused live information');
+      link(pillar, targets[i], pillar.title);
     });
   });
 
@@ -131,7 +131,7 @@ function linkDashboard() {
   });
 
   link(document.querySelector('#tasks .panelhead strong'), url('panda/tasks/', {days: 90}),
-    'Live task list and input-file progress');
+    'Tasks and input files');
   document.querySelectorAll('#tasks tbody tr').forEach(row => {
     const taskLink = row.querySelector('td:first-child a');
     if (!taskLink) return;
@@ -143,7 +143,7 @@ function linkDashboard() {
       const destination = column === 2 ? jobs('', 'running', 2160, {taskid: task}) :
         column === 3 ? jobs('', 'queued', 2160, {taskid: task}) : taskLink.href;
       const description = column === 2 ? 'Running jobs for task ' + task :
-        column === 3 ? 'Queued jobs for task ' + task : 'Task ' + task + ': cumulative input-file accounting';
+        column === 3 ? 'Queued jobs for task ' + task : 'Task ' + task + ': input files';
       link(cell, destination, description);
     });
   });
@@ -158,15 +158,15 @@ function linkDashboard() {
     link(data.querySelector(':scope > div.small:not(.green):not(.muted)'), storage({quantity: 'bytes'}), 'Registered science data volume history');
     link(data.querySelector(':scope > .small.green'), url('pcs/stash/'), 'Pending science data registrations and failover stash');
     link(labels[1], url('panda/storage-doors/'), 'BNL Rucio storage services');
-    link(data.querySelector('.logs b'), () => ended('', ''), 'Jobs ending in the last hour, including their log stage-out');
+    link(data.querySelector('.logs b'), () => ended('', ''), 'Jobs ending in the last hour');
     link(data.querySelector('.logs .small.green'), url('snapper/epicprod/errors/', {window: '12h', lens: 'component'}),
-      'Recent data-management and log stage-out error history');
+      'Data management and log stage-out errors');
     link(data.querySelector(':scope > .small.muted'), url('pcs/stash/'), 'Science data failover stash and drain status');
   }
   link(document.querySelector('#storage .panelhead strong'), storage(), 'Science data and storage history');
-  link(document.querySelector('#storage .plot'), storage({quantity: 'files'}), 'Registered-file time history');
+  link(document.querySelector('#storage .plot'), storage({quantity: 'files'}), 'Registered files');
   link(document.querySelector('#storage .science-storage'),
-    storage({rse: 'BNL-XRD', panels: 'capacity', quantity: 'bytes'}), 'BNL-XRD production storage usage and quota history');
+    storage({rse: 'BNL-XRD', panels: 'capacity', quantity: 'bytes'}), 'BNL-XRD usage and quota');
   link(document.querySelector('#events .panelhead strong'), url('logs/', {live: 1}), 'Live production action stream');
   document.querySelectorAll('#events .boardrow').forEach(row => {
     const anchor = row.querySelector('a');
@@ -174,7 +174,7 @@ function linkDashboard() {
   });
   const assessment = document.querySelector('#daily-assessment .assessment-text a');
   if (assessment) document.querySelectorAll('#daily-assessment .assessment-title > span').forEach(element =>
-    link(element, assessment.href, 'Daily production assessment and its reporting interval'));
+    link(element, assessment.href, 'Daily assessment'));
   if (typeof fitPausedTasks === 'function') fitPausedTasks();
 }
 linkDashboard();
