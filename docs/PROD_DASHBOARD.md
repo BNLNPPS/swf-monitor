@@ -9,22 +9,19 @@ plan; it becomes the page's reference once the page exists.
 
 ## Form: the floor's, at a glance
 
-The room is fundamentally graphical, and so is the dashboard: it packs the
-room's information into one laptop screen that does not scroll, read at a
-glance. It uses the room's own forms, drawn as the room draws them
-(etaverse `scripts/audition/comp-room-drawing.js` and the room's
-`layout.json`): each site's and each Rucio's 12-hour trend panel (running
-as a green area, queued, finished/h and failed/h as lines, the scales in
-the top corners, "12 h ago" to "now"); the pillars as thin bars, the number
-over the word (running green with the failed share in red on top, queued
-mushroom, pilots waiting slate, slots/h light grey, the ready buffer and
-paused tasks as one piece per task, paused in gold); and the boards
-(epicprod-live, Tasks in flight) as the room draws them, a dark face,
-white title, muted column names, newest first, titles coloured by level.
-Text is labels and board lines only. Anything of low relevance at the
-moment, a queue that is off or a paused task, gets the space the room
-gives it, a mark and a number, never a panel of its own. Designs are
-checked against images of the room before they are shown.
+The room is graphical and so is the dashboard. It is the room's
+information design carried onto a flat page, not a copy of its 3D
+objects: dense, read at a glance, the whole of production on one laptop
+screen that does not scroll. Where the room stands a pillar, the page
+draws a compact histogram of the same quantity over the last 12 hours, so
+one small figure gives the level now and how it got there. The room's
+trend panels and boards carry over nearly as they are, since they are
+already flat. Its visual language carries over too: the colours that mean
+running, queued, finished, failed and paused, number over word, and a
+level mark rather than a sentence. Space follows relevance at the moment:
+what is wrong or busy is large, and an idle or closed queue or a paused
+task is a mark and a number. Designs are judged against images of the
+room before they are shown.
 
 ## What it answers
 
