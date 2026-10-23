@@ -47,15 +47,14 @@ logger = logging.getLogger(__name__)
 
 
 def exclusion_ranks():
-    """(queue, host) -> n for every excluded node: its place on its
-    queue's blacklist in the order the guard excluded them, so the
-    newest exclusion is the queue's count (node guard n on the queue)."""
+    """(queue, host) -> n in exclusion order within the execute site."""
     from canary.store import nodes as node_record
     per = {}
     for x in sorted(node_record.current_exclusion(),
-                    key=lambda x: (x['queue'], x['since'] or '')):
-        per.setdefault(x['queue'], []).append(x['host'])
-    return {(q, h): i + 1 for q, hosts in per.items() for i, h in enumerate(hosts)}
+                    key=lambda x: (x['since'] or '', x['queue'], x['host'])):
+        site = x.get('site') or x['queue']
+        per.setdefault(site, []).append((x['queue'], x['host']))
+    return {key: i + 1 for hosts in per.values() for i, key in enumerate(hosts)}
 
 
 STATE_KEY = 'node_guard_state'
@@ -420,7 +419,7 @@ def run_cycle(*, dry_run=False, created_by='node-guard'):
             state = RECORD_STATES.get(new, {}).get(mode, new)
             shown = by_key.get((queue, host))
             e = (shown or {}).get('evidence') or {}
-            rank = {'queue_rank': ranks[(queue, host)]} if (queue, host) in ranks else {}
+            rank = {'site_rank': ranks[(queue, host)]} if (queue, host) in ranks else {}
             log_id = _safe(f'{queue}/{host} record', lambda: log_epicprod_action(
                 'node-guard', 'node_guard_decision', subject_type='panda_node',
                 subject_key=f'{queue}/{host}', username=created_by, outcome=state,

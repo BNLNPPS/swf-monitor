@@ -914,6 +914,11 @@ def log_detail(request, log_id):
     action_desc = ''
     if log.app_name == EPICPROD_APP_NAME and isinstance(log.extra_data, dict):
         action_desc = action_description(log.extra_data.get('action', ''))
+        if log.extra_data.get('action') == 'node_guard_decision':
+            from .live_notices import node_guard_text, site_node_guard_fields
+            from .panda.node_guard import exclusion_ranks
+            log.extra_data = site_node_guard_fields(log.extra_data, exclusion_ranks())
+            log.message = node_guard_text(log.extra_data)
     # Action-stream instance names ('web', 'ops-agent', 'mcp') are component
     # labels, not registry names — only link to a real registered agent.
     agent_exists = SystemAgent.objects.filter(
@@ -990,6 +995,7 @@ def logs_datatable_ajax(request):
 
     # Format data for DataTables
     data = []
+    guard_ranks = None
     for log in logs:
         timestamp_str = format_datetime(log.timestamp)
         # Link timestamp to detail page
@@ -1007,8 +1013,14 @@ def logs_datatable_ajax(request):
         # Use plain text level (consistent with other views)
         level_text = log.levelname
 
-        # Truncate message if too long
-        message = log.message[:200] + '...' if len(log.message) > 200 else log.message
+        full_message = log.message
+        if isinstance(log.extra_data, dict) and log.extra_data.get('action') == 'node_guard_decision':
+            from .live_notices import node_guard_text, site_node_guard_fields
+            from .panda.node_guard import exclusion_ranks
+            if guard_ranks is None:
+                guard_ranks = exclusion_ranks()
+            full_message = node_guard_text(site_node_guard_fields(log.extra_data, guard_ranks))
+        message = full_message[:200] + '...' if len(full_message) > 200 else full_message
         func_display = f"{log.funcname}:{log.lineno}"
         extra = log.extra_data if isinstance(log.extra_data, dict) else {}
         sublevel_display = extra.get('sublevel', '')

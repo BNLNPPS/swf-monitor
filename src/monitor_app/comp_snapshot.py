@@ -1273,7 +1273,8 @@ def _live_records():
     later one on its subject supersedes or repeats (COMP_SNAPSHOT.md,
     Live)."""
     from monitor_app.epicprod_logging import EPICPROD_APP_NAME, live_stream_q
-    from monitor_app.live_notices import FAILURE_OUTCOMES, board_text, failure_key
+    from monitor_app.live_notices import (FAILURE_OUTCOMES, board_text, failure_key,
+                                         site_node_guard_fields)
     from monitor_app.models import AppLog
     cleared = set()
     for ids in (AppLog.objects
@@ -1312,7 +1313,7 @@ def _live_records():
         if _superseded(r['instance_name'], extra, r['timestamp']):
             continue
         shown.add(subject)
-        if extra.get('action') == 'node_guard_decision' and not extra.get('queue_rank'):
+        if extra.get('action') == 'node_guard_decision':
             if ranks is None:
                 from monitor_app.panda.node_guard import exclusion_ranks
                 try:
@@ -1320,16 +1321,15 @@ def _live_records():
                 except Exception:
                     logger.exception('live screen: node guard blacklist unreadable')
                     ranks = {}
-            rank = ranks.get((extra.get('queue'), extra.get('host')))
-            if rank:
-                extra = dict(extra, queue_rank=rank)
+            extra = site_node_guard_fields(extra, ranks)
         title, detail = board_text(r['message'], extra)
         items.append({'id': r['id'], 'at': r['timestamp'].isoformat(),
                       'level': r['levelname'], 'title': title, 'detail': detail,
                       'link': f"{PUBLIC}/logs/{r['id']}/"})
         if len(items) == LIVE_ITEMS:
             break
-    return {'link': f'{PUBLIC}/logs/?app_name=epicprod&live=1', 'items': items}
+    return {'link': f'{PUBLIC}/logs/?app_name=epicprod&live=1',
+            'numbering': 'site', 'items': items}
 
 
 def _coverage_gaps(scope, start):
@@ -1740,6 +1740,10 @@ def get_snapshot(refresh=False):
     from monitor_app.cached_product import get_product
     result = get_product(PRODUCT_KEY, build, TTL_SECONDS, refresh=refresh)
     value = dict(result.get('value') or {})
+    # Correct the old queue-wide labels immediately, without rebuilding
+    # the cached census, storage or histories.
+    if value.get('live') and value['live'].get('numbering') != 'site':
+        value['live'] = _live_records()
     # Labels follow the current shared vocabulary even while counts are cached.
     value['sites'] = [dict(site, execute_sites=[
         dict(item, short=short_name(item.get('name')))

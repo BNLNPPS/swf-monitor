@@ -93,14 +93,22 @@ def board_text(message, extra):
 
 def _node_guard_name(f):
     """'Fir node guard 6': the site's short name and the node's number on
-    its queue's blacklist, where known."""
+    that site's blacklist, where known."""
     site = short_name(f.get('site') or f.get('queue'))
     name = f'{site} node guard' if site else 'Node guard'
-    return f"{name} {f['queue_rank']}" if f.get('queue_rank') else name
+    return f"{name} {f['site_rank']}" if f.get('site_rank') else name
+
+
+def site_node_guard_fields(fields, ranks):
+    """Present existing queue-numbered records using site numbering."""
+    out = dict(fields)
+    out.pop('queue_rank', None)
+    out['site_rank'] = ranks.get((out.get('queue'), out.get('host'))) or out.get('site_rank')
+    return out
 
 
 def node_guard_text(f):
-    """A node guard decision, concisely: which guard on the queue, the node
+    """A node guard decision, concisely: which guard at the site, the node
     and its site, why, and the evidence. The decision record's message and
     the screen's detail.
 

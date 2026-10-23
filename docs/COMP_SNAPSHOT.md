@@ -397,8 +397,8 @@ carry no credential.
 The screen shows the title and gives the detail on hover. The title says
 what happened and where in a few words, names in their short form
 (`monitor_app/short_names.py`, the one filter for concise settings): for
-a node guard decision the execute site and the node's number on its
-queue's blacklist, in exclusion order (`Fir node guard 6`,
+a node guard decision the execute site and the node's number on that
+site's blacklist, in exclusion order (`Fir node guard 6`,
 `node_guard.exclusion_ranks`), so nodes at one site read apart; the task
 for a task operation (`Move · task 40857`), else the site, storage
 element, queue or configuration the record names. The detail is the
