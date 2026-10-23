@@ -139,12 +139,15 @@ document.querySelectorAll('.exec').forEach(executor=>{
   pillar.dataset.failureFraction=String(Number.isFinite(percent)?percent/100:0);
  }
  const fraction=Number(pillar.dataset.failureFraction)||0;
- pillar.style.setProperty('--fail',pillarRedHeight(count,height,fraction)+'px');
+ const extent=height*fraction;
+ const radius=Math.min(3,extent/2);
+ pillar.style.setProperty('--fail',Math.max(0,extent-radius)+'px');
+ pillar.style.setProperty('--red-radius',radius+'px');
  const red=pillar.querySelector('.failurecap');
- if(red){red.style.clipPath='inset(0)';red.style.display=fraction>0?'':'none';}
+ if(red){red.style.clipPath='none';red.style.borderRadius='0';red.style.display=fraction>0?'':'none';}
  pillar.style.height=height+'px';
  pillar.classList.remove('capped');
- setPillarOverflow(pillar,scaledHeight>execPillarMaxHeight);
+ setPillarOverflow(pillar,false);
 });
 document.querySelector('.executeplot').style.height='58px';
 }

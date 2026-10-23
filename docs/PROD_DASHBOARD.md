@@ -47,10 +47,11 @@ appear after a 150 ms pause. Daily assessment text is the record's
 narration, limited to two lines with the full text on hover; its title
 row carries verdict, finished-job count and creation time.
 
-A cut cylinder preserves the red segment's height from the complete
-cylinder; truncation does not rescale the hourly finish/fail ratio. Red
-caps are clipped to their segment so they cannot cover a small green
-remainder.
+Main-site cut cylinders preserve the complete red segment's height.
+The compressed execution-site cylinders have no slash marks: their
+visible red and green segments show the hourly fail/finish proportions.
+Their curved color boundary stays inside the measured red height,
+leaving a small green remainder visible.
 
 ## Live record and links
 
