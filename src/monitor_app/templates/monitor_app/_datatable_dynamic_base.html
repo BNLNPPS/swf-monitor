@@ -214,6 +214,11 @@ $(document).ready(function() {
         if (!queryCount.length) return;
 
         const label = '{{ query_count_label|default:"records"|escapejs }}';
+        const product = window.table && window.table.ajax.json();
+        if (product && product.product_refreshing && !product.product_built_at) {
+            queryCount.text('Loading ' + label + '…');
+            return;
+        }
         let text = `Query count: ${formatQueryCount(recordsDisplay)} ${label}`;
         if (recordsTotal !== recordsDisplay) {
             text += ` (${formatQueryCount(recordsTotal)} total in window)`;
@@ -291,19 +296,24 @@ $(document).ready(function() {
     // Cached-product freshness chip: shown when the server marks this
     // table as a cached product. Update rebuilds synchronously (the
     // user chose to wait); ordinary reloads never trigger a build.
+    let productFollowup;
     $('#main-table').on('xhr.dt', function (e, settings, json) {
-        if (!json || !json.product_built_at) return;
+        if (!json || !Object.prototype.hasOwnProperty.call(json, 'product_refreshing')) return;
         const chip = document.getElementById('dt-product-chip');
         chip.hidden = false;
         // The app presents time in Eastern everywhere, whatever the
         // viewer's browser timezone.
         document.getElementById('dt-product-built').textContent =
-            new Date(json.product_built_at).toLocaleString('en-CA',
+            json.product_built_at ? new Date(json.product_built_at).toLocaleString('en-CA',
                 {timeZone: 'America/New_York', hour12: false,
                  year: 'numeric', month: '2-digit', day: '2-digit',
-                 hour: '2-digit', minute: '2-digit'}) + ' ET';
+                 hour: '2-digit', minute: '2-digit'}) + ' ET' : 'Building…';
         document.getElementById('dt-product-refreshing').hidden =
             !json.product_refreshing;
+        clearTimeout(productFollowup);
+        if (json.product_refreshing) productFollowup = setTimeout(function () {
+            table.ajax.reload(null, false);
+        }, 3000);
     });
     document.getElementById('dt-product-update')
         .addEventListener('click', function () {

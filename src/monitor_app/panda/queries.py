@@ -4289,7 +4289,7 @@ def list_jobs_dt(days=7, status=None, username=None, site=None,
     return rows, total, filtered
 
 
-def build_tasks_window(days=7, cap=5000):
+def build_tasks_window(days=7, cap=5000, status=None):
     """Build the full tasks window for the cached tasks-list product.
 
     Every task in the days window (newest first, capped) with the batch
@@ -4306,9 +4306,13 @@ def build_tasks_window(days=7, cap=5000):
     cutoff = timezone.now() - timedelta(days=days)
     where = ['COALESCE("modificationtime", "creationdate") >= %s']
     params = [cutoff]
-    _stale = _stale_task_filter()
-    where.append(_stale['clause'])
-    params.extend(_stale['params'])
+    if status:
+        where.append('"status" = %s')
+        params.append(status)
+    else:
+        _stale = _stale_task_filter()
+        where.append(_stale['clause'])
+        params.extend(_stale['params'])
 
     field_list = ', '.join(f'"{f}"' for f in TASK_LIST_FIELDS)
     sql = f"""
@@ -4452,9 +4456,10 @@ def task_filter_counts(days=7, status=None, username=None,
     base_where = ['COALESCE("modificationtime", "creationdate") >= %s']
     base_params = [cutoff]
 
-    _stale = _stale_task_filter()
-    base_where.append(_stale['clause'])
-    base_params.extend(_stale['params'])
+    if not status:
+        _stale = _stale_task_filter()
+        base_where.append(_stale['clause'])
+        base_params.extend(_stale['params'])
 
     conn = connections['panda']
     result = {}

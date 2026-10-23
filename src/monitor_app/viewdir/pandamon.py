@@ -1137,12 +1137,12 @@ def _format_task_row(task, days, *, controls_operable):
     ]
 
 
-def _build_tasks_window_product(days):
+def _build_tasks_window_product(days, status=None):
     """Builder for the cached tasks-window product: the raw task record
     per row. Cells render at SERVE time in request context — a builder
     can run in a background thread with no script prefix, and rendered
     reverse() links stored from there are dead (CLAUDE.md)."""
-    window = build_tasks_window(days=days, cap=TASKS_WINDOW_CAP)
+    window = build_tasks_window(days=days, cap=TASKS_WINDOW_CAP, status=status)
     rows = [{'raw': task} for task in window['tasks']]
     return {'rows': rows, 'count': window['count'],
             'truncated': window['truncated'], 'days': days}
@@ -1163,10 +1163,10 @@ def panda_tasks_datatable_ajax(request):
     dt = DataTablesProcessor(request, TASK_FIELD_NAMES,
                              default_order_column=0, default_order_direction='desc')
     days = _get_days(request)
-
+    status = request.GET.get('status', '') or None
     product = get_product(
-        f'panda_tasks_window:v2:{days}',
-        lambda: _build_tasks_window_product(days),
+        f'panda_tasks_window:v3:{days}:{status or ""}',
+        lambda: _build_tasks_window_product(days, status=status),
         ttl_seconds=TASKS_WINDOW_TTL_SECONDS,
         refresh=request.GET.get('refresh') == '1',
     )
