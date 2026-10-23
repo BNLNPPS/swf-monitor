@@ -408,18 +408,47 @@ def _outputs_to_create(spec, args):
     return list(spec.get('outputs') or [])
 
 
+def _require_fresh_bnl_namespace(spec):
+    """Refuse PanDA output/log collections, including JEDI's generated suffixes."""
+    from rucio.client import Client
+    from rucio.common.exception import DataIdentifierNotFound
+    names = _load_sibling('evgen_dataset_names.py').panda_dataset_names(spec)
+    if not names:
+        return
+    op = _load_sibling('panda-task-operation.py')
+    client = Client(rucio_host=op.RUCIO_URL, auth_host=op.RUCIO_URL,
+                    account=op.RUCIO_ACCOUNT, auth_type='x509_proxy',
+                    creds={'client_proxy': op.X509_PROXY}, ca_cert=None, vo=op.RUCIO_VO)
+    for name in names:
+        # JEDI's template ends in '/', but its actual dataset has a numeric
+        # suffix. The template container need not exist in Rucio at all.
+        stem = name.rstrip('/')
+        for exact in (name, stem):
+            try:
+                client.get_did(op.RUCIO_SCOPE, exact)
+            except DataIdentifierNotFound:
+                continue
+            raise RuntimeError(f"BNL Rucio name already used: {op.RUCIO_SCOPE}:{exact}")
+        matches = client.list_dids(op.RUCIO_SCOPE, filters={'name': stem + '.*'},
+                                   did_type='collection')
+        first = next(iter(matches), None)
+        if first is not None:
+            raise RuntimeError(f"BNL Rucio name already used: {op.RUCIO_SCOPE}:{first}")
+    # A log file can outlive its dataset. Its serial LFN would still collide.
+    if not spec.get('noLog'):
+        matches = client.list_dids(op.RUCIO_SCOPE,
+                                   filters={'name': spec['outDS'] + '.*.log.tgz'}, did_type='file')
+        first = next(iter(matches), None)
+        if first is not None:
+            raise RuntimeError(f"BNL Rucio log name already used: {op.RUCIO_SCOPE}:{first}")
+
+
 def _precreate_outputs(spec, args):
-    """Create the submission's output datasets in JLab Rucio before the
-    task goes to PanDA (swf-epicprod docs/RUCIO_REGISTRATION_CONTRACT.md
-    § 2): each with one replication rule as the payload's upload made
-    it (the production account, one copy, the output RSE, DATASET
-    grouping, the run's lifetime where it has one) and its metadata. An
-    existing dataset is accepted: a missing rule is added, absent
-    metadata set, and metadata that differs from the task's stops the
-    submission, since the same output name would hold different
-    physics. Returns the record of what was done, one entry per
-    dataset, for the submission record; raises RuntimeError with the
-    reason when the submission must not proceed."""
+    """Refuse occupied namespaces before creating fresh JLab output datasets.
+
+    All metadata and both catalogs are checked before the first creation.
+    Catalog errors fail closed; existing datasets are never amended here.
+    """
     outputs = _outputs_to_create(spec, args)
     if not outputs:
         raise RuntimeError("the spec names no output dataset to create")
@@ -429,67 +458,32 @@ def _precreate_outputs(spec, args):
     scope = evgen.RUCIO_SCOPE
     rse = str((spec.get('env') or {}).get('OUT_RSE') or 'EIC-XRD')
     lifetime = _output_lifetime_s(spec, args)
-    try:
-        client = evgen.rucio_client(args.proxy)
-    except Exception as e:                                    # noqa: BLE001
-        raise RuntimeError(f"JLab Rucio not reachable for the output datasets: {e}")
+    client = evgen.rucio_client(args.proxy)
+    _require_fresh_bnl_namespace(spec)
+    for out in outputs:
+        if out.get('metadata'):
+            validate_metadata(out['metadata'])
+        name = str(out['dataset'])
+        try:
+            client.get_did(scope, name)
+        except DataIdentifierNotFound:
+            continue
+        raise RuntimeError(f"JLab Rucio name already used: {scope}:{name}")
     record = []
     for out in outputs:
         name = str(out['dataset'])
         meta = out.get('metadata') or None
-        if meta:
-            validate_metadata(meta)
         rule = {'account': client.account, 'copies': 1, 'rse_expression': rse,
                 'grouping': 'DATASET', 'lifetime': lifetime}
-        entry = {'dataset': f"{scope}:{name}", 'level': out.get('level'), 'rse': rse}
         try:
-            # Existence is read first: the JLab server applies the metadata
-            # of an add_dataset call to a dataset that already exists before
-            # it answers that it exists, so creation is attempted only on a
-            # dataset that is not there.
-            try:
-                existing = client.get_metadata(scope, name, plugin='ALL')
-            except DataIdentifierNotFound:
-                existing = None
-            if existing is None:
-                client.add_dataset(scope=scope, name=name, meta=meta, rules=[rule], lifetime=lifetime)
-                entry.update(created=True, rule='added', metadata='set' if meta else 'none')
-                _log(f"output dataset {entry['dataset']}: created, rule added, "
-                     f"metadata {entry['metadata']}" + (f", lifetime {lifetime}s" if lifetime else ""))
-                record.append(entry)
-                continue
-            entry['created'] = False
-            rules = [r for r in client.list_did_rules(scope, name)
-                     if r.get('rse_expression') == rse]
-            if rules:
-                entry['rule'] = 'present'
-            else:
-                client.add_replication_rule([{'scope': scope, 'name': name}], copies=1,
-                                            rse_expression=rse, lifetime=lifetime,
-                                            grouping='DATASET')
-                entry['rule'] = 'added'
-            if meta:
-                absent = [k for k in meta if existing.get(k) is None]
-                differ = {k: (existing.get(k), v) for k, v in meta.items()
-                          if existing.get(k) is not None and existing.get(k) != v}
-                if differ:
-                    raise RuntimeError(
-                        f"output dataset {scope}:{name} exists with different metadata "
-                        f"than this task declares: " +
-                        ", ".join(f"{k}: dataset {a!r}, task {b!r}" for k, (a, b) in differ.items()))
-                for k in absent:
-                    client.set_metadata(scope, name, k, meta[k])
-                entry['metadata'] = f"filled:{','.join(absent)}" if absent else 'present'
-            else:
-                entry['metadata'] = 'none'
-        except RuntimeError:
-            raise
-        except Exception as e:                                # noqa: BLE001
-            raise RuntimeError(f"could not create output dataset {scope}:{name}: {e}")
-        _log(f"output dataset {entry['dataset']}: "
-             f"{'created' if entry['created'] else 'exists'}, rule {entry['rule']}, "
-             f"metadata {entry['metadata']}" + (f", lifetime {lifetime}s" if lifetime else ""))
+            client.add_dataset(scope=scope, name=name, meta=meta, rules=[rule], lifetime=lifetime)
+        except Exception as exc:
+            raise RuntimeError(f"could not create output dataset {scope}:{name}: {exc}") from exc
+        entry = dict(dataset=f"{scope}:{name}", level=out.get('level'), rse=rse,
+                     created=True, rule='added', metadata='set' if meta else 'none')
         record.append(entry)
+        _log(f"output dataset {entry['dataset']}: created, rule added, "
+             f"metadata {entry['metadata']}" + (f", lifetime {lifetime}s" if lifetime else ""))
     return record
 
 

@@ -29,6 +29,8 @@ import tarfile
 import tempfile
 import uuid
 
+from evgen_dataset_names import output_dataset_name
+
 from pandaclient import panda_api
 from pandaclient import Client
 
@@ -156,7 +158,7 @@ def build_task_params(spec, archive_name):
             # earlier got its task id substituted from this same template. The
             # log dataset is per-task, so the serial alone names the file.
             'value': f"{spec['outDS']}.${{SN}}.log.tgz",
-            'dataset': spec['outDS'] + '_log/',
+            'dataset': output_dataset_name(spec, 'log'),
             'hidden': True,
             # A log the pilot could not stage out but held in the stage-out
             # bucket (swf-epicprod docs/LOG_STAGEOUT_FALLBACK.md) is absent
@@ -252,7 +254,7 @@ def build_task_params(spec, archive_name):
             params['jobParameters'].append({
                 'type': 'template', 'param_type': 'output',
                 'value': f"{spec['outDS']}.{name}",
-                'dataset': f"{spec['outDS']}_{name.split('.')[0]}/",
+                'dataset': output_dataset_name(spec, name.split('.')[0]),
                 'hidden': True,
             })
 
