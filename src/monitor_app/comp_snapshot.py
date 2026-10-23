@@ -406,6 +406,45 @@ class _Build:
         return {'link': f'{PUBLIC}/panda/tasks/?processingtype=epicproduction',
                 'items': items}
 
+    def paused_tasks(self, site_name):
+        """The paused pillar (COMP_SNAPSHOT.md, Paused): every production
+        task paused in PanDA, wherever it is placed, oldest pause first.
+        The pause time is the task's last state change."""
+        sql = f'''SELECT t.jeditaskid, t.taskname, t.site,
+                         COALESCE(t.statechangetime, t.modificationtime),
+                         SUM(d.nfiles), SUM(d.nfilesfinished), SUM(d.nfilesfailed)
+                  FROM "{self.S}"."jedi_tasks" t
+                  LEFT JOIN "{self.S}"."jedi_datasets" d ON d.jeditaskid = t.jeditaskid
+                       AND d.masterid IS NULL AND d.type IN ('input', 'pseudo_input')
+                  WHERE t.status = 'paused' AND t.processingtype = 'epicproduction'
+                  GROUP BY 1, 2, 3, 4 ORDER BY 4, 1'''
+        items, oldest = [], None
+        for tid, name, queue, since, n, done, lost in _rows(sql, ()):
+            if since is not None and since.tzinfo is None:
+                since = since.replace(tzinfo=dt_timezone.utc)  # PanDA stores UTC
+            oldest = oldest or since
+            local = since.astimezone(ZoneInfo('America/New_York')) if since else None
+            n, done, lost = int(n or 0), int(done or 0), int(lost or 0)
+            where = site_name.get(queue, queue) or 'no queue'
+            items.append({
+                'id': int(tid), 'name': name, 'queue': queue or '',
+                'since': since.isoformat() if since else None,
+                'link': f'{PUBLIC}/panda/tasks/{int(tid)}/',
+                'detail': (f"{int(tid)} paused on {where} ({queue})"
+                           + (f" since {local:%m-%d %H:%M} ET" if local else '')
+                           + f"; {done:,} of {n:,} files done, {lost:,} lost. {name}")})
+        # The task list's window reaches back to the oldest pause.
+        days = max(7, (self.now - oldest).days + 1) if oldest else 7
+        listed = ', '.join(f"{i['id']} on {site_name.get(i['queue'], i['queue'])}"
+                           + (f" since {datetime.fromisoformat(i['since']).astimezone(ZoneInfo('America/New_York')):%m-%d %H:%M} ET"
+                              if i['since'] else '')
+                           for i in items)
+        return {'tasks': len(items),
+                'link': f'{PUBLIC}/panda/tasks/?status=paused&processingtype=epicproduction&days={days}',
+                'detail': (f"{len(items)} task{'s' if len(items) != 1 else ''} paused: {listed}"
+                           if items else 'no production task is paused'),
+                'items': items}
+
     def opened(self):
         """Harvester workers per queue in the last hour: started (a slot
         opened: the pilot got a slot at the site) and submitted (sent to
@@ -1041,6 +1080,7 @@ def build():
                    'assessment': b.part('daily_assessment', _latest_daily_assessment, None)},
         'live': b.part('live', _live_records, None),
         'tasks': b.part('tasks', lambda: b.floor_tasks(site_name, alarms, site_of), None),
+        'paused': b.part('paused', lambda: b.paused_tasks(site_name), None),
         'trends': b.part('trends', lambda: _trends(trend), None),
         'errors': b.errors,
     }

@@ -477,6 +477,24 @@ Both are sorted lists, one entry for a task at one site. Each site disc
 writes the ids of the tasks whose `sites` hold it (Torre Wenaus,
 2026-10-22: "Tasks: n1 n2 n3", nothing written when there are none).
 
+### Paused
+
+`paused` is the epicprod disc's paused pillar (Torre Wenaus,
+2026-10-23): every production task (`processingtype` `epicproduction`)
+whose PanDA status is `paused`, wherever it is placed, a retired queue
+included.
+
+- `tasks`: the count; `link`: the task list narrowed to paused
+  production tasks, its window reaching back to the oldest pause;
+  `detail`: one line naming each task, its site and since when.
+- `items`, oldest pause first, each with `id`, `name`, `queue`, `since`
+  (ISO, the task's last state change, which for a paused task is its
+  pause), `link` (the task's page) and `detail`: the site and queue,
+  since when, and the input files done and lost.
+
+PanDA records no reason for a pause; the task's page and the action
+stream carry who paused it when it was paused through our tools.
+
 ### Trends
 
 The floor's trend plots (Torre Wenaus, 2026-10-22): utilization in the
