@@ -430,7 +430,8 @@ class _Build:
                 'id': int(tid), 'name': name, 'queue': queue or '',
                 'since': since.isoformat() if since else None,
                 'link': f'{PUBLIC}/panda/tasks/{int(tid)}/',
-                'detail': (f"{int(tid)} paused on {where} ({queue})"
+                'detail': (f"{int(tid)} paused on {where}"
+                           + (f" ({queue})" if queue and queue != where else '')
                            + (f" since {local:%m-%d %H:%M} ET" if local else '')
                            + f"; {done:,} of {n:,} files done, {lost:,} lost. {name}")})
         # The task list's window reaches back to the oldest pause.
