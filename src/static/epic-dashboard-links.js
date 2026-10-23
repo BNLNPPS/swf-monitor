@@ -169,7 +169,7 @@ function linkDashboard() {
       'Jobs finished in the last hour with data registration pending or unfinished');
     link(labels[1], url('panda/storage-doors/'), 'BNL Rucio storage services');
     link(data.querySelector('.logs b'), () => ended('', ''), 'Jobs ending in the last hour');
-    link(data.querySelector('.logs .small.green'), url('snapper/epicprod/errors/', {window: '12h', lens: 'component'}),
+    link(data.querySelector('.log-stageout-failures'), url('snapper/epicprod/errors/', {window: '12h', lens: 'component'}),
       'Data management and log stage-out errors');
     link(data.querySelector(':scope > .small.muted'), url('pcs/stash/'), 'Science data failover stash and drain status');
   }

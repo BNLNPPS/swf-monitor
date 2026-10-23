@@ -113,7 +113,7 @@ JOB_COLUMNS = [
     {'name': 'jeditaskid', 'title': 'Task ID', 'orderable': True},
     {'name': 'produsername', 'title': 'User', 'orderable': True},
     {'name': 'jobstatus', 'title': 'Status', 'orderable': True},
-    {'name': 'computingsite', 'title': 'Site', 'orderable': True},
+    {'name': 'computingsite', 'title': 'Queue', 'orderable': True},
     {'name': 'transformation', 'title': 'Transformation', 'orderable': True},
     {'name': 'creationtime', 'title': 'Created', 'orderable': True},
     {'name': 'endtime', 'title': 'Ended', 'orderable': True},
@@ -126,7 +126,11 @@ JOB_FIELD_NAMES = [c['name'] for c in JOB_COLUMNS]
 # Map DataTables column index to SQL ORDER BY expression
 JOB_ORDER_MAP = {
     0: '"pandaid"', 1: '"jeditaskid"', 2: '"produsername"',
-    3: '"jobstatus"', 4: '"computingsite"', 5: '"transformation"',
+    3: '"jobstatus"',
+    4: ('CASE WHEN "computingsite" IN (\'BNL_OSG_PanDA_1\', \'BNL_OSG_EPIC_PROD_1\') '
+        'THEN COALESCE("destinationsite", \'\') '
+        'ELSE "computingsite" END'),
+    5: '"transformation"',
     6: '"creationtime"', 7: '"endtime"', 9: '"corecount"',
 }
 
@@ -831,12 +835,11 @@ def panda_jobs_list(request):
     # queues together (Torre Wenaus, 2026-10-22).
     site_queues = [q.strip() for q in selected_site.split(',') if q.strip()]
     if site_queues:
-        description += '<br>Site info for ' + ', '.join(
+        description += '<br>PanDA queue: ' + ', '.join(
             f'<a href="{reverse("monitor_app:epic_queue_detail", args=[q])}">'
             f'<strong>{escape(q)}</strong></a>' for q in site_queues)
     if selected_execsite:
-        description += (f'<br>Execute site <strong>{escape(selected_execsite)}</strong>, '
-                        f'the site its pilot reported')
+        description += f'<br>Execution queue: <strong>{escape(selected_execsite)}</strong>'
     if request.GET.get('status') == 'queued':
         description += '<br>Queued: defined, waiting, assigned, activated and sent jobs'
     if selected_registration:
@@ -887,7 +890,7 @@ def panda_jobs_list(request):
         'filter_fields': [
             {'name': 'status', 'label': 'Status', 'type': 'select'},
             {'name': 'username', 'label': 'User', 'type': 'select'},
-            {'name': 'site', 'label': 'Site', 'type': 'select'},
+            {'name': 'site', 'label': 'PanDA queue', 'type': 'select'},
             # The floor's site name opens this list; a task narrows it
             # (Torre Wenaus, 2026-10-22).
             {'name': 'taskid', 'label': 'Task', 'type': 'select'},
@@ -939,6 +942,9 @@ def panda_jobs_datatable_ajax(request):
     )
 
     window_params = {'days': days}
+    for key in ('status', 'username', 'site', 'taskid', 'execsite', 'registration'):
+        if request.GET.get(key):
+            window_params[key] = request.GET[key]
     if ended_after is not None:
         window_params.update({
             'ended_after': ended_after.isoformat(),
@@ -953,9 +959,14 @@ def panda_jobs_datatable_ajax(request):
             'monitor_app:panda_jobs_list',
             **{**window_params, 'username': job['produsername']}
         ) if job.get('produsername') else None
+        is_pool = job.get('computingsite') in ('BNL_OSG_PanDA_1', 'BNL_OSG_EPIC_PROD_1')
+        queue_name = (job.get('destinationsite') or '—') if is_pool else job.get('computingsite') or ''
+        queue_params = {**window_params, 'site': job.get('computingsite')}
+        if job.get('destinationsite') and is_pool:
+            queue_params['execsite'] = job['destinationsite']
         jobs_by_site_url = _url_with_query(
             'monitor_app:panda_jobs_list',
-            **{**window_params, 'site': job['computingsite']}
+            **queue_params
         ) if job.get('computingsite') else None
         jobs_by_status_url = _url_with_query(
             'monitor_app:panda_jobs_list',
@@ -967,7 +978,7 @@ def panda_jobs_datatable_ajax(request):
             f'<a href="{task_url}">{job["jeditaskid"]}</a>' if task_url else str(job.get('jeditaskid', '')),
             f'<a href="{jobs_by_user_url}">{job["produsername"]}</a>' if jobs_by_user_url else '',
             _fill_cell(job['jobstatus'], job['jobstatus'], jobs_by_status_url) if job.get('jobstatus') else '',
-            f'<a href="{jobs_by_site_url}">{job["computingsite"]}</a>' if jobs_by_site_url else '',
+            f'<a href="{jobs_by_site_url}" title="PanDA queue: {escape(job["computingsite"])}">{escape(queue_name)}</a>' if jobs_by_site_url else '',
             _linkify(job.get('transformation', '') or ''),
             _fmt_dt(job.get('creationtime')),
             _fmt_dt(job.get('endtime')),

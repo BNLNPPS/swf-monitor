@@ -5807,9 +5807,11 @@ def _series_cache(key, builder, refresh=False):
     # day-granular focus backstop.
     # The Platform focus (param 'platform') likewise plots components
     # that advance every refresh cycle, and the Storage focus (param
-    # 'rse') a record that advances with every storage pass.
+    # 'rse') a record that advances with every storage pass. Site job
+    # histories are live too, rather than day-granular focus products.
     if (':focus:task:' in key or ':focus:platform:' in key
-            or ':focus:rse:' in key or ':focus:catalog:' in key):
+            or ':focus:rse:' in key or ':focus:catalog:' in key
+            or ':focus:site:' in key):
         ttl_seconds = 90
     else:
         ttl_seconds = 6 * 3600 if ':focus:' in key else 90

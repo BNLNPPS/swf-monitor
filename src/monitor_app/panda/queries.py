@@ -4106,7 +4106,7 @@ TASK_ORDER_COLUMNS = {f: f'"{f}"' for f in TASK_LIST_FIELDS}
 
 # Searchable columns for DataTables global search
 JOB_SEARCH_FIELDS = ['pandaid', 'jeditaskid', 'produsername', 'jobstatus',
-                     'computingsite', 'transformation']
+                     'computingsite', 'destinationsite', 'transformation']
 INCOMPLETE_REGISTRATION_OUTCOMES = ('pending', 'unfinished')
 TASK_SEARCH_FIELDS = ['jeditaskid', 'taskname', 'status', 'username',
                       'processingtype', 'workinggroup', 'transpath']

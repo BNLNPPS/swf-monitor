@@ -147,7 +147,7 @@ document.querySelectorAll('.exec').forEach(executor=>{
  if(red){red.style.clipPath='none';red.style.borderRadius='0';red.style.display=fraction>0?'':'none';}
  pillar.style.height=height+'px';
  pillar.classList.remove('capped');
- setPillarOverflow(pillar,false);
+ setPillarOverflow(pillar,scaledHeight>execPillarMaxHeight);
 });
 document.querySelector('.executeplot').style.height='58px';
 }

@@ -3,6 +3,8 @@
   const number = value => value == null ? '—' : Math.round(value).toLocaleString('en-US');
   const color = level => ({green: 'green', amber: 'gold', red: 'red', grey: 'muted', warning: 'gold', error: 'red', critical: 'red'}[String(level).toLowerCase()] || 'muted');
   const list = value => Array.isArray(value) ? value : value && value.items || [];
+  const sumKnown = (rows, key) => !rows.length || rows.some(row => row[key] == null)
+    ? null : rows.reduce((total, row) => total + row[key], 0);
   const et = (value, date = false) => {
     if (!value) return '';
     return new Intl.DateTimeFormat('en-US', {timeZone: 'America/New_York',
@@ -32,15 +34,20 @@
   const aliases = {osg: 'OSG', grex: 'GREX', nersc: 'Perlmutter', google: 'Google',
     'compute-canada': 'Compute Canada', jlab: 'JLab'};
   const executorModel = document.querySelector('.exec').cloneNode(true);
-  const chartPalette = new WeakMap();
 
   function plot(container, columns, times) {
-    if (!container || !times || !times.length) return;
+    if (!container) return;
     const svg = container.querySelector('svg');
     if (!svg) return;
-    if (!chartPalette.has(svg)) chartPalette.set(svg,
-      Array.from(svg.querySelectorAll('polyline')).map(line => line.getAttribute('stroke')));
-    const palette = chartPalette.get(svg);
+    if (!times || !times.length) {
+      svg.querySelectorAll('polyline,polygon').forEach(node => node.remove());
+      text(container.querySelector('.chart-y-label'), '—');
+      text(container.querySelector('.axis span:last-child'), '—');
+      return;
+    }
+    const palette = container.closest('.site')
+      ? ['#edf2f1', '#c4b6a2', '#7fce95', '#f47c70']
+      : ['#7fce95'];
     const view = svg.viewBox.baseVal;
     const width = view.width, bottom = view.height - 4, height = view.height - 10;
     const peak = Math.max(1, ...columns.flat().filter(value => value != null));
@@ -61,7 +68,7 @@
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
         line.setAttribute('points', segment.map(p => p.join(',')).join(' '));
         line.setAttribute('fill', 'none');
-        line.setAttribute('stroke', palette[index] || ['#45b975', '#8a8178', '#7fce95', '#f47c70'][index]);
+        line.setAttribute('stroke', palette[index]);
         line.setAttribute('stroke-width', '1.7');
         line.setAttribute('vector-effect', 'non-scaling-stroke');
         svg.appendChild(line); segment = [];
@@ -80,7 +87,7 @@
     const panel = panels.get(aliases[site.id] || site.name);
     if (!panel) return;
     const queues = site.queues || [];
-    const sum = key => queues.reduce((n, queue) => n + (queue[key] || 0), 0);
+    const sum = key => sumKnown(queues, key);
     const pilots = queues.map(queue => queue.pilots && queue.pilots.waiting);
     const waiting = pilots.some(value => value != null) ? pilots.reduce((n, value) => n + (value || 0), 0) : null;
     const values = [sum('running'), sum('finished_1h'), sum('failed_1h'), sum('queued'),
@@ -95,6 +102,7 @@
     pillars.forEach((node, i) => {
       node.title = titles[i];
       node.dataset.value = String([values[0], values[3], waiting, values[5]][i] || 0);
+      node.style.visibility = [values[0], values[3], waiting, values[5]][i] == null ? 'hidden' : '';
       if (i === 0) {
         node.dataset.finished = String(values[1]);
         node.dataset.failed = String(values[2]);
@@ -104,6 +112,7 @@
     if (trend) plot(panel.querySelector('.plot'), [trend.running, trend.queued,
       trend.finished.map(n => n == null ? null : n * 4),
       trend.failed.map(n => n == null ? null : n * 4)], current.trends.t);
+    else plot(panel.querySelector('.plot'), [], []);
   }
 
   function renderExecutors(sites) {
@@ -183,8 +192,8 @@
   }
 
   function renderStorage(record) {
-    const science = (record.storage || []).find(row => row.id === 'jlab-rucio');
-    const logs = (record.storage || []).find(row => row.id === 'bnl-rucio');
+    const science = (record.storage || []).find(row => row.id === 'jlab-rucio') || {};
+    const logs = (record.storage || []).find(row => row.id === 'bnl-rucio') || {};
     const left = document.querySelector('#storage .storagemain > div:first-child');
     if (science) {
       const count = left.querySelector(':scope > b');
@@ -201,21 +210,30 @@
       text(incomplete, number(science.failed_1h) + ' incomplete');
       if (science.flow) plot(document.querySelector('#storage .plot'),
         [science.flow.files.map(n => n == null ? null : n * 4)], record.trends && record.trends.t);
+      else plot(document.querySelector('#storage .plot'), [], []);
       const capacity = science.capacity;
       if (capacity) {
         const detail = document.querySelector('.science-storage .small');
-        const used = element('b', '', number(capacity.used_bytes / 1e12));
-        detail.replaceChildren(used, document.createTextNode(' / ' + number(capacity.limit_bytes / 1e12) +
-          ' TB · ' + number(capacity.fraction * 100) + '%'));
+        const used = element('b', '', number(capacity.used_bytes == null ? null : capacity.used_bytes / 1e12));
+        detail.replaceChildren(used, document.createTextNode(' / ' + number(capacity.limit_bytes == null ? null : capacity.limit_bytes / 1e12) +
+          ' TB · ' + number(capacity.fraction == null ? null : capacity.fraction * 100) + '%'));
+        const fill = document.querySelector('.science-storage .storefill i');
+        fill.style.visibility = capacity.fraction == null ? 'hidden' : '';
         document.querySelector('.science-storage .storefill i').style.width =
           Math.min(100, Math.max(0, capacity.fraction * 100)) + '%';
+      } else {
+        text(document.querySelector('.science-storage .small'), '—');
+        document.querySelector('.science-storage .storefill i').style.visibility = 'hidden';
       }
     }
     if (logs) {
       const count = left.querySelector('.logs b');
       text(count, number(logs.arrived_1h));
       count.className = color(logs.health && logs.health.level);
-      text(left.querySelector('.logs .small.green'), number(logs.failed_1h) + ' stage-out failures');
+      const failures = left.querySelector('.log-stageout-failures');
+      failures.className = 'small log-stageout-failures ' +
+        (logs.failed_1h == null ? 'muted' : logs.failed_1h > 0 ? 'gold' : 'green');
+      text(failures, number(logs.failed_1h) + ' stage-out failures');
     }
   }
 
@@ -245,6 +263,11 @@
       text(fields[3], et(assessment.at, true));
       const link = anchor(assessment.link, '', assessment.narration || '', assessment.narration);
       document.querySelector('#daily-assessment .assessment-text').replaceChildren(link);
+    } else {
+      const fields = document.querySelectorAll('#daily-assessment .assessment-title > span');
+      text(fields[1], 'Unavailable'); fields[1].className = 'muted';
+      [fields[2], fields[3], document.querySelector('#daily-assessment .assessment-text')]
+        .forEach(node => text(node, ''));
     }
   }
 
@@ -253,7 +276,7 @@
     if (!record || record.error) throw new Error(record && record.error || 'Production record missing');
     current = record;
     const sites = record.sites || [];
-    const sum = key => sites.reduce((n, site) => n + (site.queues || []).reduce((m, queue) => m + (queue[key] || 0), 0), 0);
+    const sum = key => sumKnown(sites.flatMap(site => site.queues || []), key);
     const storage = (record.storage || []).find(row => row.id === 'jlab-rucio') || {};
     const front = record.pressure_front || {};
     const values = [[front.ready_tasks, front.released_1h], [sum('running'), sum('finished_1h')],
@@ -262,6 +285,10 @@
       if (values[i]) cell.querySelectorAll('.flowrow b').forEach((node, j) => text(node, number(values[i][j])));
     });
     sites.forEach(site => renderSite(site, record.trends && record.trends.sites.find(row => row.id === site.id)));
+    panels.forEach((panel, name) => {
+      if (panel.querySelector('.metric') && !sites.some(site => (aliases[site.id] || site.name) === name))
+        renderSite({name, queues: [], health: {level: 'grey'}}, null);
+    });
     renderSitePillars();
     renderExecutors(sites); renderTasks(record); renderStorage(record); renderReports(record);
     text(document.getElementById('stamp'), et(record.observed_at, true));

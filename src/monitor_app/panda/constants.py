@@ -14,7 +14,7 @@ LIST_FIELDS = [
     'computingsite', 'transformation', 'processingtype',
     'creationtime', 'starttime', 'endtime', 'modificationtime',
     'corecount', 'nevents',
-    'noutputdatafiles', 'outputfilebytes',
+    'noutputdatafiles', 'outputfilebytes', 'destinationsite',
 ]
 
 ERROR_FIELDS = [

@@ -94,3 +94,9 @@ The standalone route is a read-only `panda/` page, covered by
 swf-remote's existing catch-all. Deployment uses
 `deploy-lightweight-ui-mcp.sh --ui --static`
 ([PRODUCTION_DEPLOYMENT.md](PRODUCTION_DEPLOYMENT.md)).
+
+Plot colors are fixed by metric: running white, queued brown, finished
+green, failed red. Gaps split a curve into segments without changing
+its color. The hourly outcome curves are rates from fifteen-minute
+bins. Site histories use the live 90-second series cache. Missing data
+is shown as unavailable rather than retaining captured design values.
