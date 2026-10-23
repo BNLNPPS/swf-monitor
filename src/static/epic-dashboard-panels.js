@@ -80,9 +80,10 @@ document.querySelectorAll('#site-controls [data-site-action]').forEach(link=>{
 });
 
 const sitePillarScale=2500;
+function renderSitePillars(){
 document.querySelectorAll('.site .queuepillar.svgcolumn').forEach(pillar=>{
  const numbers=Array.from(pillar.title.matchAll(/\d[\d,]*/g),match=>Number(match[0].replaceAll(',','')));
- const value=numbers[0]||0;
+ const value=pillar.dataset.value===undefined?(numbers[0]||0):Number(pillar.dataset.value);
  const svg=pillar.querySelector('svg');
  const color=svg.querySelector('path').getAttribute('fill');
  const defs=svg.querySelector('defs').outerHTML;
@@ -91,9 +92,12 @@ document.querySelectorAll('.site .queuepillar.svgcolumn').forEach(pillar=>{
  const body='M0 3H18V'+(height-3)+'Q9 '+(height+3)+' 0 '+(height-3)+'Z';
  let red='';
  let top=color;
- if(pillar.title.includes('finished')&&numbers[2]>0){
-  const failed=(height-6)*numbers[2]/(numbers[1]+numbers[2]);
-  red='<rect x="0" y="3" width="18" height="'+failed+'" fill="#f47c70"/><ellipse cx="9" cy="'+(3+failed)+'" rx="9" ry="3" fill="#f47c70"/>';
+ const finished=pillar.dataset.finished===undefined?(numbers[1]||0):Number(pillar.dataset.finished);
+ const failures=pillar.dataset.failed===undefined?(numbers[2]||0):Number(pillar.dataset.failed);
+ if((pillar.dataset.failed!==undefined||pillar.title.includes('finished'))&&failures>0){
+  const failed=pillarRedHeight(value,height,failures/(finished+failures),6);
+  const clip=shade+'-red';
+  red='<defs><clipPath id="'+clip+'"><rect x="0" y="3" width="18" height="'+failed+'"/></clipPath></defs><g clip-path="url(#'+clip+')"><rect x="0" y="3" width="18" height="'+failed+'" fill="#f47c70"/><ellipse cx="9" cy="'+(3+failed)+'" rx="9" ry="3" fill="#f47c70"/></g>';
   top='#f47c70';
  }
  setPillarOverflow(pillar,value>sitePillarScale);
@@ -104,26 +108,47 @@ document.querySelectorAll('.site .queuepillar.svgcolumn').forEach(pillar=>{
  svg.innerHTML=defs+'<path d="'+body+'" fill="'+color+'"/>'+red+'<path d="'+body+'" fill="url(#'+shade+')"/><ellipse cx="9" cy="3" rx="9" ry="3" fill="'+top+'"/>';
 });
 
+}
+renderSitePillars();
+
 function setPillarOverflow(pillar,overflow){
  pillar.classList.toggle('pillar-break',overflow);
 }
 document.querySelectorAll('.cylinder.capped').forEach(pillar=>setPillarOverflow(pillar,true));
 
 function sitePillarHeight(value){
- return Math.max(8,6+110*Math.min(value/sitePillarScale,1));
+ return Math.min(116,fullPillarHeight(value));
+}
+function fullPillarHeight(value){
+ return Math.max(8,6+110*Math.max(0,value)/sitePillarScale);
+}
+function pillarRedHeight(value,height,fraction,ends=0){
+ // Cut away excess green height without rescaling the complete red segment.
+ return Math.min(Math.max(0,height-ends),Math.max(0,fullPillarHeight(value)-ends)*fraction);
 }
 const execPillarMaxHeight=27;
+function renderExecPillars(){
 document.querySelectorAll('.exec').forEach(executor=>{
  const pillar=executor.querySelector('.cylinder');
  if(!pillar)return;
  const count=Number(executor.querySelector('.count').textContent.replaceAll(',',''));
  const scaledHeight=sitePillarHeight(count);
  const height=Math.min(execPillarMaxHeight,scaledHeight);
+ if(pillar.dataset.failureFraction===undefined){
+  const percent=parseFloat(pillar.style.getPropertyValue('--fail'));
+  pillar.dataset.failureFraction=String(Number.isFinite(percent)?percent/100:0);
+ }
+ const fraction=Number(pillar.dataset.failureFraction)||0;
+ pillar.style.setProperty('--fail',pillarRedHeight(count,height,fraction)+'px');
+ const red=pillar.querySelector('.failurecap');
+ if(red){red.style.clipPath='inset(0)';red.style.display=fraction>0?'':'none';}
  pillar.style.height=height+'px';
  pillar.classList.remove('capped');
  setPillarOverflow(pillar,scaledHeight>execPillarMaxHeight);
 });
 document.querySelector('.executeplot').style.height='58px';
+}
+renderExecPillars();
 
 rightColumn.insertBefore(document.getElementById('report'),document.getElementById('storage'));
 

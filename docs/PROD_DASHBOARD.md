@@ -47,6 +47,11 @@ appear after a 150 ms pause. Daily assessment text is the record's
 narration, limited to two lines with the full text on hover; its title
 row carries verdict, finished-job count and creation time.
 
+A cut cylinder preserves the red segment's height from the complete
+cylinder; truncation does not rescale the hourly finish/fail ratio. Red
+caps are clipped to their segment so they cannot cover a small green
+remainder.
+
 ## Live record and links
 
 The dashboard reads the shared comp snapshot, `comp_snapshot:v1`,

@@ -149,7 +149,7 @@
       text(node.querySelector('.ename'), item.short || item.name);
       const total = item.finished_1h + item.failed_1h;
       const pillar = node.querySelector('.cylinder');
-      pillar.style.setProperty('--fail', (total ? 100 * item.failed_1h / total : 0) + '%');
+      pillar.dataset.failureFraction = String(total ? item.failed_1h / total : 0);
       pillar.style.setProperty('--top', item.failed_1h > 0 ? '#f47c70' : '#45b975');
       pillar.querySelector('.failurecap').style.display = item.failed_1h > 0 ? '' : 'none';
       return node;
