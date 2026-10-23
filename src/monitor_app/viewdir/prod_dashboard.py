@@ -21,7 +21,7 @@ def dashboard_document(request):
         record = {'error': 'The production record is temporarily unavailable.'}
     config = {
         'snapshotUrl': reverse('monitor_app:comp_snapshot_json'),
-        'historyUrl': reverse('monitor_app:snapper-series', kwargs={'scope': 'epicprod'}),
+        'historyUrl': reverse('monitor_app:prod_dashboard_history'),
         'breakoutUrl': reverse('monitor_app:prod_dashboard'),
         'weeklyUrl': static('monitor_app/prod_dashboard/weekly-cores.json'),
     }
