@@ -13,9 +13,17 @@ Serves two things from the uvicorn process on 127.0.0.1:8001:
 
 MCPRequestGuard wraps the MCP Starlette app and enforces:
 - /health returns {"status": "ok"} with no auth, for the watchdog
-- Only POST is accepted (405 otherwise) — no server-pushed SSE, no GET
+- GET on the endpoint root returns the setup page for people and their
+  assistants (how to connect on this face, and the external page for
+  those outside BNL); every other non-POST is 405 — no server-pushed SSE
 - Authorization: Bearer <settings.MCP_BEARER_TOKEN> on every non-health
-  request (401 missing, 403 wrong, 503 not configured)
+  request (401 missing, 403 wrong, 503 not configured), OR the proxied
+  identity: a request from the localhost hop (the swf-remote SSH tunnel,
+  as Apache reports the client) carrying X-Remote-User is accepted as
+  that user without a token, the same trust the REST tier gives the
+  tunnel (EXTERNAL_ACCESS.md). The identity is published to the tools
+  through ``monitor_app.mcp.common.CALLER`` so a tool that takes a
+  username defaults to it.
 - Path normalization so /swf-monitor/mcp[/...], /mcp[/...], and / all
   reach the FastMCP app cleanly, regardless of what Apache strips
 
@@ -41,6 +49,23 @@ django.setup()
 from django.conf import settings  # noqa: E402
 
 from monitor_app.mcp import mcp  # noqa: E402
+from monitor_app.mcp.common import CALLER  # noqa: E402
+
+_teamcomms_application = None
+_teamcomms_auth = None
+_teamcomms_proxy = None
+if settings.SWF_TEAMCOMMS_ENABLED:
+    from teamcomms.service.asgi import create_app
+    from monitor_app.teamcomms_auth import PUBLIC_PREFIX, RemoteAuthentication, TrustedProxy
+
+    _teamcomms_auth = RemoteAuthentication()
+    _teamcomms_application = create_app(
+        host_auth=_teamcomms_auth, mount_path=PUBLIC_PREFIX,
+        browser_csrf_url=PUBLIC_PREFIX + "/browser-csrf",
+    )
+    _teamcomms_proxy = TrustedProxy(_teamcomms_application)
+
+_LOCALHOST = ("127.0.0.1", "::1")
 
 
 def _json_body(value: dict[str, Any]) -> bytes:
@@ -63,6 +88,49 @@ async def _send_json(send, status: int, value: dict[str, Any], headers=None) -> 
     await send({"type": "http.response.body", "body": body})
 
 
+_SETUP_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>swf-monitor MCP</title>
+<style>
+body { font: 17px/1.5 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; color: #222; background: #fff; max-width: 60em; margin: 2em auto; padding: 0 1em; }
+h1 { font-size: 1.6em; } h2 { font-size: 1.2em; margin-top: 1.6em; }
+code, pre { font-size: 0.95em; background: #f3f3f3; border-radius: 4px; }
+code { padding: 1px 5px; } pre { padding: 10px 14px; overflow-x: auto; }
+</style></head><body>
+<h1>swf-monitor MCP</h1>
+<p>This endpoint serves the ePIC production monitor's MCP toolset: PanDA
+tasks and jobs, queues, the production catalog, canary probes, alarms and
+pings, AI proposals, Rucio, and the testbed. An AI assistant connected to
+it can answer questions about the system and propose actions for a person
+to accept.</p>
+<h2>Outside BNL</h2>
+<p>Use the external face: <a href="https://epic-devcloud.org/prod/mcp/">https://epic-devcloud.org/prod/mcp/</a>,
+which explains how to sign in, create a token, and connect. The tools run
+there as the signed-in person.</p>
+<h2>On the BNL network</h2>
+<p>Connect to this endpoint with the shared bearer token, kept in the
+monitor's environment as <code>SWF_MONITOR_MCP_TOKEN</code>:</p>
+<pre>claude mcp add --transport http swf-testbed https://pandaserver02.sdcc.bnl.gov/swf-monitor/mcp/ \\
+  --header "Authorization: Bearer $SWF_MONITOR_MCP_TOKEN"</pre>
+<p>Tools that take a <code>username</code> need it on this face; through the
+external face it is filled in from the sign-in. Details: the repository's
+<code>docs/MCP_CLIENTS.md</code> and <code>docs/MCP.md</code>.</p>
+</body></html>
+"""
+
+
+async def _send_setup_page(send) -> None:
+    body = _SETUP_PAGE.encode("utf-8")
+    await send({
+        "type": "http.response.start",
+        "status": 200,
+        "headers": [
+            (b"content-type", b"text/html; charset=utf-8"),
+            (b"content-length", str(len(body)).encode("ascii")),
+        ],
+    })
+    await send({"type": "http.response.body", "body": body})
+
+
 class MCPRequestGuard:
     """Enforce auth and finite POST JSON-RPC before FastMCP sees a request."""
 
@@ -81,6 +149,9 @@ class MCPRequestGuard:
 
         scope = self._normalize_mcp_path(scope)
         method = scope.get("method", "").upper()
+        if method == "GET" and scope.get("path", "/") in ("", "/"):
+            await _send_setup_page(send)
+            return
         if method != "POST":
             await _send_json(
                 send,
@@ -95,7 +166,20 @@ class MCPRequestGuard:
 
         headers = self._headers(scope)
         auth_header = headers.get("authorization", "")
+        client_host = (scope.get("client") or ("", 0))[0]
+        remote_user = headers.get("x-remote-user", "").strip()
         if not auth_header.startswith("Bearer "):
+            # The swf-remote tunnel arrives from localhost with the signed-in
+            # user's name; uvicorn takes the client address from Apache's
+            # X-Forwarded-For (--proxy-headers), so a direct client is never
+            # seen as localhost.
+            if client_host in _LOCALHOST and remote_user:
+                token = CALLER.set(remote_user)
+                try:
+                    await self.app(scope, receive, send)
+                finally:
+                    CALLER.reset(token)
+                return
             await _send_json(send, 401, {"error": "Authorization required"})
             return
 
@@ -108,7 +192,11 @@ class MCPRequestGuard:
             await _send_json(send, 403, {"error": "Invalid token"})
             return
 
-        await self.app(scope, receive, send)
+        token = CALLER.set("")
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            CALLER.reset(token)
 
     def _normalize_mcp_path(self, scope):
         """Accept common proxy forms: /, /mcp[/...], or /swf-monitor/mcp[/...]."""
@@ -131,7 +219,13 @@ class MCPRequestGuard:
 
 @contextlib.asynccontextmanager
 async def lifespan(app: Starlette):
-    async with mcp.session_manager.run():
+    async with contextlib.AsyncExitStack() as stack:
+        if _teamcomms_auth is not None:
+            stack.push_async_callback(_teamcomms_auth.client.aclose)
+        await stack.enter_async_context(mcp.session_manager.run())
+        if _teamcomms_application is not None:
+            await stack.enter_async_context(
+                _teamcomms_application.router.lifespan_context(_teamcomms_application))
         yield
 
 
@@ -153,14 +247,21 @@ _SSE_STREAM_PATHS = (
 
 
 class StreamRouter:
-    """Route the SSE stream to the Django ASGI app; everything else —
-    including lifespan, which FastMCP owns — to the MCP app."""
+    """Route embedded TC and Django SSE, with a shared process lifespan."""
 
     def __init__(self, django_app, mcp_app):
         self.django_app = django_app
         self.mcp_app = mcp_app
 
     async def __call__(self, scope, receive, send):
+        path = scope.get("path", "")
+        if scope.get("type") == "http" and (
+                path == "/swf-monitor/teamcomms" or path.startswith("/swf-monitor/teamcomms/")):
+            if _teamcomms_proxy is None:
+                await _send_json(send, 503, {"error": "TeamComms is not enabled"})
+            else:
+                await _teamcomms_proxy(scope, receive, send)
+            return
         if scope.get("type") == "http" and scope.get("path", "") in _SSE_STREAM_PATHS:
             await self.django_app(scope, receive, send)
             return

@@ -23,11 +23,17 @@ from urllib.parse import urlencode
 
 from django.http import JsonResponse
 from django.utils import timezone
-from rest_framework.authentication import TokenAuthentication
+from rest_framework import viewsets
+from rest_framework.authentication import (SessionAuthentication,
+                                           TokenAuthentication)
 from rest_framework.decorators import (api_view, authentication_classes,
                                        permission_classes)
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import (IsAuthenticated,
+                                        IsAuthenticatedOrReadOnly)
 from rest_framework.response import Response
+
+from ..models import NoticeSubscription
+from ..serializers import NoticeSubscriptionSerializer
 
 logger = logging.getLogger(__name__)
 
@@ -284,7 +290,7 @@ def capcom_state(request):
             if row['status'] == 'running')
         finished = 0
         failed = 0
-        for _site, status, _cls, count in _terminal_outcome_rows(
+        for _site, status, _cls, count, _held in _terminal_outcome_rows(
                 now - timedelta(hours=12), now):
             if status == 'finished':
                 finished += int(count or 0)
@@ -322,22 +328,36 @@ def capcom_state(request):
         detail['panda'] = {'error_text': str(exc)}
 
     try:
-        from ..alarms_data import active_event_count, alarm_configs
+        from ..alarms_data import active_event_rows, alarm_configs
 
+        # Pings (docs/PINGS.md) are reminders, not outages: counted apart,
+        # shown amber, and never paint the tile red on their own.
         counts = {}
+        pings = 0
         for cfg in alarm_configs():
             entry_id = cfg.get('entry_id') or ''
-            if entry_id:
-                counts[cfg.get('name') or entry_id] = (
-                    active_event_count(entry_id))
+            if not entry_id:
+                continue
+            n = 0
+            for ev in active_event_rows(entry_id):
+                if (ev.data or {}).get('severity') == 'ping':
+                    pings += 1
+                else:
+                    n += 1
+            counts[cfg.get('name') or entry_id] = n
         active = sum(counts.values())
+        parts = []
+        if active:
+            parts.append(f'{active} active')
+        if pings:
+            parts.append(f'{pings} ping{"s" if pings != 1 else ""}')
         states.append({
             'source': 'swf-alarms',
-            'value': f'{active} active' if active else 'OK',
-            'color': 'red' if active else 'green',
+            'value': ', '.join(parts) if parts else 'OK',
+            'color': 'red' if active else ('amber' if pings else 'green'),
             'url': f'{REMOTE_FACE}/alarms/'})
         detail['alarms'] = {
-            'active': active,
+            'active': active, 'pings': pings,
             'by_alarm': {name: n for name, n in counts.items() if n}}
     except Exception as exc:
         logger.error('capcom state: alarm counts failed: %s', exc)
@@ -388,6 +408,9 @@ def capcom_notices(request):
         since (ISO-8601 timestamp, optional) — return notices created
         strictly after this instant; a naive value is read as UTC.
         Default: the trailing 24 hours.
+        subscriber (optional) — the per-subscriber buffer to drain
+        (docs/NOTICE_ROUTING.md); default 'capcom', the original
+        single consumer.
 
     Rows come back oldest-first so the consumer's next cursor is the last
     row's created_at; 'more' is true when the page cap truncated the
@@ -408,7 +431,9 @@ def capcom_notices(request):
     else:
         since = now - timedelta(hours=24)
 
-    rows = list(CapcomNotice.objects.filter(created_at__gt=since)
+    subscriber = (request.GET.get('subscriber') or 'capcom').strip()[:100]
+    rows = list(CapcomNotice.objects.filter(created_at__gt=since,
+                                            subscriber=subscriber)
                 .order_by('created_at')[:NOTICE_PAGE_MAX + 1])
     more = len(rows) > NOTICE_PAGE_MAX
     rows = rows[:NOTICE_PAGE_MAX]
@@ -504,3 +529,41 @@ def capcom_user_state(request):
         'states': [entry],
         'detail': detail,
     })
+
+
+class NoticeSubscriptionViewSet(viewsets.ModelViewSet):
+    """Consumer-registered notice subscriptions (docs/NOTICE_ROUTING.md).
+
+    Read open; writes token-authenticated. A consumer registers and
+    maintains its own subscriptions without swf code changes; every
+    change is a logged action.
+    """
+    queryset = NoticeSubscription.objects.all()
+    serializer_class = NoticeSubscriptionSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    filterset_fields = ['subscriber', 'event', 'enabled']
+
+    def perform_create(self, serializer):
+        obj = serializer.save(
+            created_by=getattr(self.request.user, 'username', '') or '')
+        self._log('created', obj)
+
+    def perform_update(self, serializer):
+        obj = serializer.save()
+        self._log('updated', obj)
+
+    def perform_destroy(self, instance):
+        self._log('removed', instance)
+        instance.delete()
+
+    def _log(self, change, obj):
+        from ..epicprod_logging import log_epicprod_action
+        log_epicprod_action(
+            'web', 'notice_subscription_edit',
+            subject_type='notice_subscription',
+            subject_key=f'{obj.subscriber}:{obj.event}',
+            username=getattr(self.request.user, 'username', '') or '',
+            sublevel='normal', live_default=False,
+            summary=f'{change}: {obj.subscriber} subscribes to {obj.event}',
+            change=change, delivery=obj.delivery, enabled=obj.enabled)

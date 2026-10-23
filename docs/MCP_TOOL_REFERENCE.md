@@ -31,7 +31,7 @@ and `monitor_urls` when web UI links are available.
 **Returns:**
 - `timestamp`: Current server time
 - `user_context`: namespace, workflow defaults from user's testbed.toml
-- `agent_manager`: Status of user's agent manager daemon (healthy/unhealthy/missing/exited)
+- `agent_manager`: Status of user's agent manager daemon (healthy/unhealthy/missing/exited) and its `mq_connected` report; a manager heartbeating while disconnected from ActiveMQ is unhealthy
 - `workflow_runner`: Status of healthy DAQ_Simulator that can accept swf_start_workflow
 - `ready_to_run`: Boolean - True if workflow_runner is healthy and can accept commands
 - `last_execution`: Most recent workflow execution for user's namespace
@@ -344,7 +344,9 @@ The User Agent Manager is a per-user daemon that enables MCP-driven testbed cont
 | `swf_stop_user_testbed` | `username` | Stop a user's testbed via their agent manager. |
 
 **`swf_check_agent_manager` returns:**
-- `alive`: True if agent manager has recent heartbeat (within 5 minutes)
+- `alive`: True if agent manager has recent heartbeat (within 5 minutes) and does not report itself disconnected from ActiveMQ. A manager that has lost the broker keeps heartbeating over REST but receives no commands, so it is not alive.
+- `mq_connected`: The manager's own report of its ActiveMQ connection; `null` from managers that predate the report
+- `error`: Why a heartbeating manager is not alive; `swf_start_user_testbed` and `swf_stop_user_testbed` return it and send nothing
 - `username`: The user being checked
 - `instance_name`: The agent manager's instance name (e.g., 'agent-manager-wenauseic')
 - `last_heartbeat`: When it last checked in
@@ -354,7 +356,7 @@ The User Agent Manager is a per-user daemon that enables MCP-driven testbed cont
 - `how_to_start`: Instructions if not alive
 
 **`swf_get_testbed_status` returns:**
-- `agent_manager`: alive, namespace, operational_state, status, last_heartbeat
+- `agent_manager`: alive, namespace, operational_state, status, last_heartbeat, mq_connected
 - `agents`: List of workflow agents with running/stopped status
 - `summary`: Running and stopped agent counts
 - `running_workflows`: Count of currently executing workflows
@@ -413,6 +415,7 @@ This tool aggregates information from workflow messages and logs, providing a si
 | `epic_register_ai_assessment` | `subject_type`, `subject_key`, `assessment`, `username`, `ai`, `subject_label`, `subject_url`, `data` | Register append-only AI assessment content as a corun-ai Page and link it from the target object JSON when the subject is known locally. |
 | `epic_get_ai_content` | `ids`, `corun_page_group_ids` | Retrieve append-only AI assessment content by corun-ai Page group ids and/or legacy AIContent ids. Use the arguments supplied in a detail payload's `ai_content.retrieval.arguments`. |
 | `epicprod_list_actions` | `action`, `instance`, `subject_type`, `subject_key`, `username`, `outcome`, `start_time`, `end_time`, `min_sublevel`, `summarize`, `limit`, `offset` | Query the epicprod action stream (structured production-action records with outcome and duration). Prefer `summarize=True` for reporting: counts by action with ok/error split and duration statistics. Raw listings default to an importance floor of `normal` (excluded records counted in `excluded_below_floor`; floor lifts for action/subject/outcome drill-downs and summaries); `min_sublevel` sets it explicitly. See [ACTION_STREAM.md](ACTION_STREAM.md). |
+| `epicprod_storage` | `listing`, `rse`, `campaign`, `state`, `limit`, `offset` | Exception listings from the production storage record's store: `ghosts` (registered files with no available replica on any RSE, each with its holding replicas by state; the envelope carries `by_rse`, the account of the filtered population by holding RSE with files, bytes, states, campaigns and the oldest entry), `stuck_rules`, `stalled_datasets`. Filter by `rse` (`none` for ghosts with no replica row), `campaign` family and `state`; paged oldest first; `as_of` names the last completed pass and any pass in progress. REST counterpart `pcs/api/storage/<listing>/`. See swf-epicprod STORAGE.md. |
 
 **Known subject types:**
 - `campaign_task`: campaign/production task, keyed by composed task name.
@@ -473,12 +476,17 @@ Tools for querying the ePIC PanDA production database (`doma_panda` schema). Rea
 | `panda_list_jobs` | `days`, `status`, `username`, `site`, `taskid`, `reqid`, `limit`, `before_id` | List PanDA jobs with summary stats (default 200 jobs, 14 fields). Cursor-based pagination via before_id. |
 | `panda_diagnose_jobs` | `days`, `username`, `site`, `taskid`, `reqid`, `error_component`, `limit`, `before_id` | Diagnose failed/faulty PanDA jobs with full error details (7 error components). Cursor-based pagination via before_id. |
 | `panda_list_tasks` | `days`, `status`, `username`, `taskname`, `reqid`, `workinggroup`, `taskid`, `processingtype`, `limit`, `before_id` | List JEDI tasks with summary stats (default 500 tasks). Cursor-based pagination via before_id. |
-| `panda_error_summary` | `days`, `username`, `site`, `taskid`, `error_source`, `limit` | Aggregate error summary across failed jobs, ranked by frequency. |
+| `panda_error_summary` | `days`, `ended_after`, `ended_before`, `username`, `site`, `destinationse`, `taskid`, `error_source`, `status`, `limit` | Aggregate error summary across failed jobs, ranked by frequency; an exact end-time window when both `ended_after` and `ended_before` are given. |
 | `panda_study_job` | `pandaid` | Deep study of a single job — full record, files, errors, log URLs, harvester info, parent task. |
 | `panda_list_queues` | `vo`, `status`, `state`, `search` | List EIC PanDA queues from live schedconfig — site, status, corecount, resource type, capability flags. |
 | `panda_get_queue` | `panda_queue` (required) | Full detail for a single PanDA queue. |
 | `panda_resource_usage` | `days`, `site`, `username`, `taskid`, `start_time`, `end_time`, `bucket` | Allocated vs used core-hours by site for an exact time window, with optional daily or weekly site series. |
-| `panda_harvester_workers` | `site`, `hours` | Live Harvester pilot/worker counts (via bamboo `askpanda_atlas`) — totals + breakdown by status, site, and resourcetype. |
+| `panda_harvester_workers` | `site`, `hours` | Harvester workers read directly from PanDA's `harvester_workers` table, in two separate readings: the workers existing now (waiting to start, running) and those submitted, started and ended in the window, by queue and resource type. A finished worker is a batch job that ended, not a finished PanDA job. |
+| `panda_segfault_catalog` | `status`, `class_hint`, `limit` | The segfault catalog: payload crash signatures (exit 139/134/135/136, grouped by exit code and PanDA task) with class (storm, configuration_dead, sparse, abort, mixed), crashes, rate, time to death, sites, loss and status. From the monitor's record; no PanDA query. |
+| `panda_segfault_signature` | `key` (required), `jobs_limit` | One crash signature in full: tasks, configuration, sites, loss, trace, reproductions, verdict, and the crashed jobs behind it. |
+| `panda_segfault_findings` | | The segfault findings: the curated reading of the catalog, one entry per crashing frame with its permanent id (f-8), joined live to the catalog counts. |
+| `panda_segfault_finding_set` | `name` (required), `title`, `what`, `date`, `frame`, `stage`, `class_hint`, `action`, `standing`, `fix`, `notes`, `sources`, `signatures`, `model_reading`, `changed_by` | Create or update a segfault finding; versioned, stamped; under the authority gate. |
+| `panda_segfault_reproduce` | `key` (required), `pandaid`, `queues`, `requested_by` | Request a signature's reproduction: the crashed row as one payload canary on the production queue and the reference queue, recorded on the signature; the claim the nightly notice asks for; under the authority gate. |
 
 **`panda_get_activity`** — Pre-digested overview, no individual records:
 - `days`: Time window in days (default 1)
@@ -493,7 +501,7 @@ Returns:
 Use cases:
 - What's PanDA doing right now? `panda_get_activity()`
 - EIC activity this week? `panda_get_activity(days=7, workinggroup='EIC')`
-- Activity for a user? `panda_get_activity(username='Dmitrii Kalinkin')`
+- Activity for a user? `panda_get_activity(username='<full name as PanDA records it>')`
 
 **`panda_list_tasks` filters:**
 - `days`: Time window in days (default 7)
@@ -522,12 +530,13 @@ Use cases:
 **Diagnostic use cases:**
 - Task overview: `panda_list_tasks(days=7)`
 - Failed tasks: `panda_list_tasks(status='failed')`
-- Tasks for a user: `panda_list_tasks(username='Dmitrii Kalinkin')`
+- Tasks for a user: `panda_list_tasks(username='<full name as PanDA records it>')`
 - EIC experiment tasks: `panda_list_tasks(workinggroup='EIC')`
 - Search by name pattern: `panda_list_tasks(taskname='%workflow%')`
 
 **`panda_error_summary` filters:**
-- `days`: Time window in days (default 10)
+- `days`: Time window in days (default 10), by modification time; ignored when the exact window below is given
+- `ended_after`, `ended_before`: An exact window on job end time, both required together, ISO-8601; a time without an offset is Eastern Time
 - `username`: Filter by job owner (supports SQL LIKE with %)
 - `site`: Filter by computing site (supports SQL LIKE with %)
 - `taskid`: Filter by JEDI task ID
@@ -545,7 +554,8 @@ Use cases:
 
 **Diagnostic use cases:**
 - Top errors this week: `panda_error_summary(days=7)`
-- Errors for a specific user: `panda_error_summary(username='Dmitrii Kalinkin')`
+- Errors in an incident window bounded from the Snapper errors series: `panda_error_summary(ended_after='2026-09-05T03:10', ended_before='2026-09-05T03:40')`
+- Errors for a specific user: `panda_error_summary(username='<full name as PanDA records it>')`
 - Pilot errors only: `panda_error_summary(error_source='pilot')`
 - Errors for a specific task: `panda_error_summary(taskid=33824)`
 
@@ -558,7 +568,8 @@ Returns:
 - `log_urls`: Harvester log URLs — `pilot_stdout`, `pilot_stderr`, `batch_log` (require CILogon auth)
 - `log_file`: Log tarball metadata if registered (lfn, guid, scope for future rucio retrieval)
 - `harvester`: Condor worker details (workerid, status, error info)
-- `task`: Parent JEDI task context (name, status, error dialog)
+- `task`: Parent JEDI task context (name, status, error dialog, eventservice, splitrule)
+- `event_service`: Event Service jobs only — flavor, events per range, the job's ranges from `jedi_events` (counts by range status with attempts left, distinct ranges and events done against requested, rows under a cap with the pilot-form range id) and the server's verdict (es_* substatus, taskbuffer code 111–126 with its meaning). The same facts are on the job and task pages; the ePIC queues page shows each queue's `jobseed`.
 - `monitor_url`: Link to PanDA monitoring page
 - `ai_content`: Availability flag and exact retrieval tool/arguments for linked AI assessments
 
@@ -584,12 +595,13 @@ catalogs. Credentials and the BNL X509 proxy remain on swf-testbed.
   `group.EIC`; use it for output and log registration, rules, locks, replicas,
   and RSE diagnostics.
 
-Each prefix exposes the complete 13-tool surface below:
+Each prefix exposes the complete 14-tool surface below:
 
 | Suffix | Parameters | Purpose |
 |---|---|---|
 | `list_scopes` | - | Discover scopes available in that catalog. |
 | `list_dids` | `scope`, `name`, `type`, `filters`, `long`, `page`, `limit` | Search datasets, containers, or files by wildcard name and metadata. |
+| `summarize_datasets` | `scope`, `name`, `filters`, `order`, `page`, `limit` | Per-dataset file counts, sizes, and created/updated times plus totals for every dataset matching a pattern, in one call; `order='updated'` puts the latest first. |
 | `list_files` | `scope`, `name`, `page`, `limit` | Recursively list files in a dataset or container. |
 | `list_content` | `scope`, `name`, `page`, `limit` | List immediate child DIDs. |
 | `get_did_metadata` | `scope`, `name`, `plugin` | Retrieve system and custom physics metadata. |
@@ -615,6 +627,29 @@ not an immediate conclusion that data is absent.
 
 ---
 
+### Snapper State History
+
+Snapper (the snapper-ai package, [SNAPPER.md](SNAPPER.md)) records
+coherent snapshots of a scope's state — `epicprod` or `testbed` — at
+aligned 30-second opportunities whenever a component changed. Every
+result carries the actual snap time, schema and policy versions,
+provenance, and observer coverage (`covered`, `gap`, `unknown`); a gap
+is never bridged by carrying state across it.
+
+| Tool | Parameters | Purpose |
+|---|---|---|
+| `snapper_latest` | `scope` | The latest recorded state of every component. |
+| `snapper_state_at` | `scope`, `time` | The state at an instant: the latest eligible snap and its actual time. |
+| `snapper_component_history` | `scope`, `component`, `start`, `end`, `include_unchanged` | One component's recorded evolution, beginning with its state at the interval start. |
+| `snapper_changes_between` | `scope`, `start`, `end` | Component values that changed between two instants, with previous and current documents. |
+| `snapper_context_around` | `scope`, `time`, `window_seconds` | State at the instant, changes in the surrounding window, and resolvable event references. |
+| `snapper_series` | `scope`, `focus`, `window`, `selection`, `selectors` | A focus view's series product as data — the curves the page plots (`platform`, `site`, `errors`, `campaign`) over `6h` … `30d`, including derived curves such as the 60-minute heartbeat yield. |
+| `snapper_cut_summary` | `scope`, `focus`, `time`, `since` | The summary at a time cut: every metric the view plots with its value, delta, and min/mean/max since the basis. Registered for the Platform view. |
+
+The series and cut-summary products are the same objects the report
+pages render, built by the same assembly and cache, so an AI reading
+them and a person reading the page see one history.
+
 ## Tool Summary
 
 | Category | Tools | Count |
@@ -639,12 +674,14 @@ not an immediate conclusion that data is absent.
 | AI Proposals | `ai_list_proposals`, `ai_decide_proposal` | 2 |
 | Campaign Status | `epicprod_campaign_status` | 1 |
 | Action Stream | `epicprod_list_actions` | 1 |
+| Storage Record | `epicprod_storage` | 1 |
+| Snapper State History | `snapper_latest`, `snapper_state_at`, `snapper_component_history`, `snapper_changes_between`, `snapper_context_around`, `snapper_series`, `snapper_cut_summary` | 7 |
 | PCS Tags | `pcs_list_tags`, `pcs_get_tag`, `pcs_search_tags` | 3 |
-| PCS Datasets and Prod Tasks | `pcs_dataset_list`, `pcs_dataset_get`, `pcs_dataset_intake`, `pcs_prodtask_list`, `pcs_prodtask_get`, `pcs_prodtask_artifact`, `pcs_prodtask_intake`, `pcs_prodtask_link_input`, `pcs_prodtask_set_status` | 9 |
-| PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers` | 10 |
-| JLab Rucio | `jlab_rucio_*` | 13 |
-| BNL Rucio | `bnl_rucio_*` | 13 |
-| **Total** | | **86** |
+| PCS Datasets and Prod Tasks | `pcs_dataset_list`, `pcs_dataset_get`, `pcs_data_provenance`, `pcs_dataset_intake`, `pcs_prodtask_list`, `pcs_prodtask_get`, `pcs_prodtask_artifact`, `pcs_prodtask_intake`, `pcs_prodtask_link_input`, `pcs_prodtask_set_status` | 10 |
+| PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers`, `panda_segfault_catalog`, `panda_segfault_signature`, `panda_segfault_findings`, `panda_segfault_finding_set`, `panda_segfault_reproduce` | 12 |
+| JLab Rucio | `jlab_rucio_*` | 14 |
+| BNL Rucio | `bnl_rucio_*` | 14 |
+| **Total** | | **97** |
 
 ---
 

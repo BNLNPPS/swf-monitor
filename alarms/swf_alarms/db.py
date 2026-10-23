@@ -289,3 +289,37 @@ def finish_engine_run(conn, run_uuid: str, *, alarms_run: int,
                WHERE id = %s""",
             (json.dumps(update, default=str), now, run_uuid),
         )
+
+
+# ── pings (docs/PINGS.md) ──────────────────────────────────────────────────
+
+def list_open_pings(conn) -> list[dict]:
+    """Open ping entries (kind='ping', data.status='open') in the
+    swf-alarms context, ordered by due date."""
+    q = """
+        SELECT e.*
+        FROM entry e
+        WHERE e.context_id = %s
+          AND e.kind = 'ping'
+          AND e.archived = FALSE
+          AND e.deleted_at IS NULL
+          AND e.data->>'status' = 'open'
+        ORDER BY e.data->>'due', e.timestamp_created
+    """
+    with conn.cursor() as cur:
+        cur.execute(q, (CONTEXT_NAME,))
+        return cur.fetchall()
+
+
+def update_event_severity(conn, event_uuid: str, severity: str) -> None:
+    """Set data.severity on an active event: a detection whose severity
+    changed while the event stayed active (a ping past its due date)."""
+    now = now_ts()
+    with conn.cursor() as cur:
+        cur.execute(
+            """UPDATE entry
+               SET data = jsonb_set(data, '{severity}', to_jsonb(%s::text), true),
+                   timestamp_modified = %s
+               WHERE id = %s""",
+            (severity, now, event_uuid),
+        )

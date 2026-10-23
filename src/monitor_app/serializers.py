@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, FastMonFile, TFSlice, Worker, RunState, SystemStateEvent
+from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, FastMonFile, TFSlice, Worker, RunState, SystemStateEvent, NoticeSubscription
 from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, WorkflowDefinition, WorkflowExecution
 
 class SystemAgentSerializer(serializers.ModelSerializer):
@@ -105,3 +105,11 @@ class SystemStateEventSerializer(serializers.ModelSerializer):
     class Meta:
         model = SystemStateEvent
         fields = '__all__'
+
+
+class NoticeSubscriptionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NoticeSubscription
+        fields = ['id', 'subscriber', 'event', 'filters', 'delivery',
+                  'enabled', 'created_by', 'created_at', 'updated_at']
+        read_only_fields = ['created_by', 'created_at', 'updated_at']

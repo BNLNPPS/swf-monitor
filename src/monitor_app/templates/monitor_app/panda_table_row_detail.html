@@ -11,8 +11,7 @@
         <a href="{% url 'monitor_app:panda_database_table_list' table_name %}" class="btn btn-secondary">← Back to {{ table_name }}</a>
     </div>
     
-    <div class="table-responsive">
-        <table class="table table-striped table-bordered">
+        <table class="table table-striped table-bordered swf-latch-head">
             <thead class="thead-dark">
                 <tr>
                     <th>Field Name</th>
@@ -34,6 +33,5 @@
                 {% endfor %}
             </tbody>
         </table>
-    </div>
 </div>
 {% endblock %}

@@ -9,6 +9,7 @@ from asgiref.sync import sync_to_async
 from ai.assessments import ai_content_retrieval_guidance
 from monitor_app.epicprod_inventory import diagnosis_for_study_data
 from monitor_app.mcp import mcp
+from monitor_app.mcp.common import requires_authority
 from monitor_app.panda import queries
 
 
@@ -42,7 +43,12 @@ def _get_queue_sync(panda_queue):
 
 
 def _study_job_sync(pandaid):
-    result = queries.study_job(pandaid=pandaid)
+    # Batch-layer reasons are stored cut to a length, so this surface —
+    # the one used to assess a failure — reads the condor event log and
+    # reports them whole (queries.condor_log_events).
+    result = queries.study_job(pandaid=pandaid, include_batch_reason='fetch')
+    # 'fetch' rather than True: a tool call may reach the harvester's log
+    # host for a job captured before the store existed. A page may not.
     if result.get('error'):
         return result
     from monitor_app.models import EpicProdJob
@@ -208,28 +214,57 @@ async def panda_list_tasks(
     )
 
 
+def _window_time(text):
+    """An ISO-8601 window bound as an aware datetime; a time without an
+    offset is Eastern Time, the time the assessment prompt cites."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    if not text:
+        return None
+    value = datetime.fromisoformat(str(text).strip().replace('Z', '+00:00'))
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=ZoneInfo('America/New_York'))
+    return value
+
+
 @mcp.tool()
 async def panda_error_summary(
     days: int = 10,
+    ended_after: str = None,
+    ended_before: str = None,
     username: str = None,
     site: str = None,
     destinationse: str = None,
     taskid: int = None,
     error_source: str = None,
+    status: str = 'failed,cancelled',
     limit: int = 20,
 ) -> dict:
     """
     Aggregate error summary across failed PanDA jobs, ranked by frequency.
 
     Extracts non-zero errors from all 7 error components (pilot, executor, DDM,
-    brokerage, dispatcher, supervisor, taskbuffer) across failed/cancelled/closed
-    jobs, groups by (component, code, diagnostic), and ranks by occurrence count.
+    brokerage, dispatcher, supervisor, taskbuffer) across faulty jobs,
+    groups by (component, code, diagnostic), and ranks by occurrence count.
+
+    By default the summary covers failed and cancelled jobs and EXCLUDES
+    closed jobs: closed marks jobs the PanDA server disposed of for its own
+    workflow reasons (pending expiry, rebrokerage, task-done kills) — by
+    design not actual errors. The excluded population stays visible in
+    status_counts; pass status='failed,cancelled,closed' to include it,
+    or status='closed' to study a disposal storm by itself.
 
     Unlike panda_diagnose_jobs (per-job detail), this tool gives the big picture:
     "What are the most common errors and who do they affect?"
 
     Args:
-        days: Time window in days (default 10).
+        days: Time window in days by modification time (default 10). Ignored
+            when the exact window below is given.
+        ended_after: With ended_before, an exact window on job end time:
+            jobs that ended after this instant. ISO-8601; a time without an
+            offset is Eastern Time. Bound an incident from the Snapper
+            errors series, then aggregate exactly that window here.
+        ended_before: The window's end, inclusive; required with ended_after.
         username: Filter by job owner (produsername). Supports SQL LIKE with %.
         site: Filter by computing site (computingsite). Supports SQL LIKE with %.
         destinationse: Filter by destination storage element — the Rucio SE where
@@ -237,10 +272,15 @@ async def panda_error_summary(
         taskid: Filter by JEDI task ID.
         error_source: Filter to errors from one component
                       (pilot, executor, ddm, brokerage, dispatcher, supervisor, taskbuffer).
+        status: Terminal state(s) to include, one of failed/cancelled/closed
+            or a CSV of them (default 'failed,cancelled').
         limit: Maximum error patterns to return (default 20).
 
     Returns:
         total_errors: Total error occurrences across all components.
+        status_counts: Per terminal state, the window's totals with NO
+            status restriction applied — closed disposal storms show
+            here even when the status filter excludes them.
         errors: Ranked list of error patterns, each with:
             error_source, error_code, error_diag, count,
             task_count, users, sites, destination_sites, site_counts,
@@ -250,10 +290,16 @@ async def panda_error_summary(
             exact pattern with panda_study_job and use its structured
             epicprod_diagnosis.
     """
+    if bool(ended_after) != bool(ended_before):
+        return {'error': 'ended_after and ended_before are given together; '
+                         'use days for a window ending now'}
     return await sync_to_async(queries.error_summary)(
         days=days, username=username, site=site,
         destinationse=destinationse,
-        taskid=taskid, error_source=error_source, limit=limit,
+        taskid=taskid, error_source=error_source, status=status,
+        limit=limit,
+        ended_after=_window_time(ended_after),
+        ended_before=_window_time(ended_before),
     )
 
 
@@ -277,7 +323,11 @@ async def panda_get_activity(
         workinggroup: Filter tasks by working group (e.g. 'EIC').
 
     Returns:
-        jobs: {total, by_status, by_user, by_site} — aggregate counts only.
+        jobs: {total, by_status, by_user, by_site, closed_not_counted} —
+            aggregate counts only. Closed jobs (never run; disposed of by
+            JEDI when a task was reassigned or its unstarted jobs
+            regenerated) are in none of the counts; their number is
+            closed_not_counted. Ask panda_list_jobs(status='closed') for them.
         tasks: {total, by_status, by_user} — aggregate counts only.
         filters: Applied filter values.
     """
@@ -347,19 +397,21 @@ async def panda_resource_usage(
     start_time: str = None,
     end_time: str = None,
     bucket: str = None,
+    execute_sites: bool = False,
 ) -> dict:
     """
     Aggregate resource usage (core-hours) for finished PanDA jobs.
 
-    Reports two core-hour metrics:
-    - allocated_core_hours: cores allocated × wall time
-    - used_core_hours: CPU time actually consumed by the job
+    Core-hour metrics:
+    - allocated_core_hours: cores × wall time of every job that ran, finished
+      or failed; a failed job holds its allocation like any other.
+    - used_core_hours: CPU consumed by finished jobs, the CPU that produced
+      results. Efficiency is used over allocated, so failures count against it.
+    - failed_core_hours: the allocation held by failed jobs (wasted).
 
-    The gap between allocated and used reflects efficiency — e.g. a job that
-    requests 1 core but gets 2 allocated uses ~50% of its allocation.
-
-    Only counts finished jobs with actual runtime (starttime and endtime set).
-    Jobs are attributed by endtime; queue/waiting time is excluded.
+    job_count counts finished jobs; failed_count counts jobs ending 'failed'
+    in the window by endtime (a failed job that never started holds no
+    allocation). Queue/waiting time is excluded throughout.
 
     Args:
         days: Time window in days ending at end_time (default 30). Used when
@@ -371,17 +423,28 @@ async def panda_resource_usage(
         start_time: Optional ISO-8601 start timestamp, inclusive.
         end_time: Optional ISO-8601 end timestamp, exclusive. Defaults to now.
         bucket: Optional time-series bin: 'day' or 'week'.
+        execute_sites: With bucket, also split the OSG pool queue(s) (CRIC
+              catchall osgpool=true) by execute site: the glidein site the
+              pilot reports on each job record (destinationsite), or the
+              worker-node host's site for older records. The OSG pool is
+              one PanDA queue spanning many sites; no other queue gets a
+              breakdown.
 
     Returns:
-        totals: {job_count, allocated_core_hours, used_core_hours, wall_hours}
+        totals: {job_count, allocated_core_hours, used_core_hours, wall_hours,
+                 failed_count, failed_core_hours}
         by_site: Breakdown by computing site, sorted by allocated_core_hours.
         by_user: Breakdown by job owner, sorted by allocated_core_hours.
         series: Site breakdown per day/week when bucket is supplied.
+        execute_series: Per-bucket metrics per (computing site, execute site)
+                 when execute_sites is set; execute_sites maps each such
+                 computing site to its execute sites, largest first.
         window: Exact start, end, bucket, and time field used.
     """
     return await sync_to_async(queries.resource_usage)(
         days=days, site=site, username=username, taskid=taskid,
         start_time=start_time, end_time=end_time, bucket=bucket,
+        execute_sites=bool(execute_sites),
     )
 
 
@@ -420,7 +483,30 @@ async def panda_study_job(
         log_urls: URLs for pilot stdout, stderr, batch log (require CILogon auth).
         log_file: Log tarball metadata if registered (lfn, guid, scope for rucio retrieval).
         harvester: Condor worker details if available.
-        task: Parent JEDI task context.
+        batch_record: {source, events} — the batch system's own account,
+            read from the harvester's condor event log, every event that
+            carries detail, in order, with its text as written. Every
+            reason PanDA stores is cut to a column width (harvester to
+            256, superrordiag 250, taskbuffererrordiag 300) and the cut
+            falls at a character count, so what is lost is the end of
+            the message, which is where batch systems put the error.
+            Prefer this over the diag fields for any batch-layer claim,
+            and compare the two before concluding. An `error` here means
+            the log could not be read, so the stored diag is all there
+            is and is known to be incomplete.
+        task: Parent JEDI task context, with eventservice and splitrule.
+        event_service: Only for an Event Service job (eventservice flag
+            set). flavor_name (consumer, merge, cloned consumer, ...);
+            events_per_range from the task's split rule; ranges — the
+            job's jedi_events rows keyed by task and jobset: total rows,
+            distinct ranges, consumers, events_requested, events_done,
+            counts by range status (ready, sent, running, finished,
+            cancelled, discarded, done, failed, fatal, merged, ...) with
+            attempts left, and the rows under a cap, each with the
+            pilot-form range id task-jobset-file-process-attempt; verdict
+            — the es_* substatus and the taskbuffer code 111-126 with its
+            meaning, e.g. 125 no ES queues available for new consumers
+            (a std jobseed queue never receives a new consumer).
         monitor_url: Link to PanDA monitoring page.
         epicprod_diagnosis: {available, phase, failure_summary, timeline,
             last_refreshed_at, guidance}. Use this for the production-facing
@@ -437,42 +523,307 @@ async def panda_harvester_workers(
     hours: int = 1,
 ) -> dict:
     """
-    Live Harvester pilot/worker counts across EIC compute queues.
+    Harvester workers (pilots) at the ePIC queues, read directly from
+    PanDA's harvester_workers table.
 
-    Shows how many pilots are running, submitted, finished, etc. at each site.
-    Useful for checking if Perlmutter or other sites are actively processing.
+    Two separate readings; never add one to the other:
+    - now: the workers that exist at this moment. A 'submitted' worker is
+      waiting in the batch system and runs nothing yet; a 'running' one
+      runs. At a push-mode queue each submitted worker holds a PanDA job
+      bound to it, which PanDA shows as 'starting'.
+    - window: the last `hours`: workers submitted, started and ended, the
+      ended ones by final state. A 'finished' worker is a batch job that
+      ended normally; it is not a finished PanDA job, and says nothing
+      about whether its jobs succeeded. jobs_bound_to_ended is the number
+      of PanDA jobs those workers carried.
 
     Args:
-        site: Filter to a specific queue (e.g. 'NERSC_Perlmutter_epic'). Default: all sites.
-        hours: Time window in hours to look back (default 1).
+        site: A queue (computingsite), e.g. 'UM_GREX_PanDA_1'; SQL LIKE
+            with %. Default: every queue.
+        hours: The window in hours (default 1, at most 168).
 
     Returns:
-        nworkers_total: Grand total across all statuses.
-        nworkers_by_status: Counts by worker status (running, submitted, finished, etc.).
-        nworkers_by_site: Counts by computing site.
-        pivot: Breakdown by status × jobtype × resourcetype.
+        summary: One line stating both readings.
+        now: workers, by_status, cores_by_status, by_site (status counts
+            per queue), by_resourcetype.
+        window: hours, from, to, submitted, started, ended,
+            ended_by_status, jobs_bound_to_ended, by_site (submitted,
+            started, ended by status per queue), ended_by_resourcetype.
+        source: Where the counts come from.
     """
-    from datetime import datetime, timedelta, timezone
-    from askpanda_atlas.harvester_worker_impl import fetch_worker_stats
-    from decouple import config
+    from monitor_app.workers import worker_counts
 
-    base_url = config('PANDA_BASE_URL', default='https://pandamon01.sdcc.bnl.gov')
-    now = datetime.now(timezone.utc)
-    from_dt = (now - timedelta(hours=hours)).isoformat()
-    to_dt = now.isoformat()
-    raw = await sync_to_async(fetch_worker_stats)(
-        base_url, from_dt, to_dt, site=site,
-    )
-    if raw.get('error'):
-        return {"error": raw['error']}
+    try:
+        counts = await sync_to_async(worker_counts)(site=site, hours=hours)
+    except Exception as e:
+        return {"error": f"PanDA harvester_workers read failed: {e}"}
+    now, window = counts['now'], counts['window']
+    where = f" at {site}" if site else " across the ePIC queues"
+    ended = ', '.join(f"{n} {s}" for s, n in sorted(window['ended_by_status'].items()))
     return {
         "summary": (
-            f"{raw.get('nworkers_total', 0)} pilots total"
-            + (f" at {site}" if site else " across all EIC sites")
-            + f" (last {hours}h)"
+            f"Now{where}: {now['by_status'].get('submitted', 0)} workers waiting "
+            f"to start, {now['by_status'].get('running', 0)} running "
+            f"({now['workers']} in all). Last {window['hours']}h: "
+            f"{window['submitted']} submitted, {window['started']} started, "
+            f"{window['ended']} ended" + (f" ({ended})" if ended else "") + "."
         ),
-        "by_status": raw.get('nworkers_by_status', {}),
-        "by_site": raw.get('nworkers_by_site', {}),
-        "by_resourcetype": raw.get('nworkers_by_resourcetype', {}),
-        "time_window": {"from": from_dt, "to": to_dt},
+        "now": now,
+        "window": window,
+        "source": "PanDA database, harvester_workers (direct read)",
     }
+
+
+@mcp.tool()
+async def panda_segfault_catalog(
+    status: str = None,
+    class_hint: str = None,
+    limit: int = 50,
+) -> dict:
+    """
+    The segfault catalog: payload crash signatures in ePIC production
+    (swf-epicprod docs/SEGFAULT_DIAGNOSIS.md), as the catalog page shows
+    them, from the monitor's own record (no PanDA query).
+
+    When Torre asks for segfault status or what to do: answer with clear
+    statements (what is established, what was decided, what was done) and
+    action proposals as questions, each with a recommended answer that a
+    yes settles; do what needs no decision of his without asking; never
+    make him ask where things stand (SEGFAULT_DIAGNOSIS.md, Production
+    disposition).
+
+    A crash signature groups the failed jobs whose payload died on a signal
+    (transexitcode 139 SIGSEGV, 134 SIGABRT, 135 SIGBUS, 136 SIGFPE) by
+    exit code and PanDA task, promoted to trace level when the crashing
+    frame is known. The class is read from the record: storm (a fixed time
+    to death across many nodes, one deterministic cause), configuration_dead
+    (every job crashes), sparse (a few crashes at varying times, where
+    event-dependent crashes live), abort (exit 134), mixed (look closer).
+    Rebuilt nightly by the catalog sync from the crash inventory.
+
+    Args:
+        status: Filter by signature status (new, digging, traced,
+            reproducing, reproduced, not_reproduced, diagnosed, handed_off,
+            fixed, accepted).
+        class_hint: Filter by class (storm, configuration_dead, sparse,
+            abort, mixed).
+        limit: Maximum signatures, crashes descending (default 50).
+
+    Returns:
+        class_counts: Signatures per class over the whole catalog.
+        total_count: Signatures matching the filters.
+        signatures: Each with key, class, exit_code, signal_name, task_ids,
+            task_names, configuration (PCS task, campaign, container image,
+            detector and payload version), crashes, rate (crashes over the
+            task's finished plus failed jobs), minutes_p10/minutes_p50 (time
+            to death), sites, hosts, rows_lost/events_lost (crashed rows
+            with no delivered output, when known), stages, status,
+            trace_status, first_seen, last_seen. Detail and the crashed
+            jobs: panda_segfault_signature(key).
+        monitor_url: The catalog page.
+    """
+    from monitor_app.segfaults import catalog
+
+    def _work():
+        rows, counts = catalog(status=status, class_hint=class_hint, limit=limit)
+        return {
+            'class_counts': counts,
+            'total_count': len(rows),
+            'signatures': rows,
+            'monitor_url': '/swf-monitor/panda/segfaults/',
+        }
+    return await sync_to_async(_work)()
+
+
+@mcp.tool()
+async def panda_segfault_signature(key: str, jobs_limit: int = 50) -> dict:
+    """
+    One crash signature of the segfault catalog with its tasks,
+    configuration, sites, loss, trace, reproductions, verdict and the
+    crashed jobs behind it (swf-epicprod docs/SEGFAULT_DIAGNOSIS.md).
+
+    Args:
+        key: The signature key from panda_segfault_catalog, e.g.
+            'exit139:task38661'.
+        jobs_limit: Crashed jobs to include, latest first (default 50).
+
+    Returns:
+        The signature's fields as on its detail page, plus tasks_detail
+        (per task: crashes, finished, failed, first and last seen), trace
+        (program, stage, frames, source job, trace_status), reproduction
+        runs, verdict, assessment_ids, package, jobs_total and jobs (each
+        with pandaid, jeditaskid, seq, row, site, host, minutes, maxrss_mb,
+        stage, endtime; study one with panda_study_job). Or {'error': ...}
+        when the key is unknown.
+    """
+    from monitor_app.segfaults import signature_detail
+
+    def _work():
+        detail = signature_detail(key, jobs_limit=jobs_limit)
+        if detail is None:
+            return {'error': f'no crash signature {key}'}
+        detail['monitor_url'] = f'/swf-monitor/panda/segfaults/{key}/'
+        return detail
+    return await sync_to_async(_work)()
+
+
+@mcp.tool()
+async def panda_segfault_findings() -> dict:
+    """
+    The segfault findings: the curated reading of the segfault catalog, one
+    entry per crashing frame (swf-epicprod docs/SEGFAULT_DIAGNOSIS.md,
+    Findings), joined live to the catalog for the crashes, tasks and loss.
+
+    Returns:
+        findings: Each with fid (the permanent id, f-8, drawn once when
+            the finding is written; the list is newest first by it),
+            name (the frame's catalog key), date, frame,
+            stage, title, what (the reading, with its sources), sources
+            (label, url), class, action (what production does), standing
+            (open, fix named, fixed, accepted), fix, notes, model_reading
+            (true when the entry is an LLM study's reading not yet checked
+            against its source), updated_by, updated_at, signatures (the
+            catalog entries with their counts), crashes, tasks, rows_lost,
+            events_lost.
+        monitor_url: The findings page.
+    """
+    from monitor_app.segfaults import findings
+
+    def _work():
+        entries, error = findings()
+        return {'findings': entries, 'error': error or None,
+                'monitor_url': '/swf-monitor/panda/segfaults/findings/'}
+    return await sync_to_async(_work)()
+
+
+@mcp.tool()
+@requires_authority
+async def panda_segfault_finding_set(
+    name: str,
+    title: str = None,
+    what: str = None,
+    date: str = None,
+    frame: str = None,
+    stage: str = None,
+    class_hint: str = None,
+    action: str = None,
+    standing: str = None,
+    fix: str = None,
+    notes: str = None,
+    sources: list = None,
+    signatures: list = None,
+    model_reading: bool = None,
+    changed_by: str = 'mcp',
+) -> dict:
+    """
+    Create or update a segfault finding: the curated reading of one
+    crashing frame (swf-epicprod docs/SEGFAULT_DIAGNOSIS.md, Findings).
+    The store is versioned: every substantive change keeps the previous
+    version stamped with changed_by, and each write is a
+    segfault_finding_set action.
+
+    Args:
+        name: The frame's catalog key, the trace-level entry's where one
+            exists (e.g. 'exit139:frame:0bb3bb652dac'); the finding's identity.
+        title: One line naming the crash.
+        what: The reading: what the crash is and its cause, citing sources.
+        date: The finding's date (YYYY-MM-DD).
+        frame: The crashing frame as the trace names it.
+        stage: simu or reco.
+        class_hint: The class as read (e.g. 'software defect, event-shaped in effect').
+        action: What production does about it.
+        standing: open | fix named | fixed | accepted.
+        fix: The image, release or commit that fixes it.
+        notes: Anything else, e.g. the study and its check.
+        sources: [{label, url}] the claims trace to.
+        signatures: The catalog keys the finding explains (default: name).
+        model_reading: True when the entry is an LLM study's reading not
+            yet checked against its source; cleared by whoever checks it.
+        changed_by: Who writes (the version stamp).
+
+    Returns:
+        name, created, version count, and the finding as stored.
+    """
+    from monitor_app.segfaults import set_finding
+
+    def _work():
+        fields = {}
+        for key, value in (('title', title), ('what', what), ('date', date), ('frame', frame),
+                           ('stage', stage), ('class', class_hint), ('action', action),
+                           ('standing', standing), ('fix', fix), ('notes', notes),
+                           ('sources', sources), ('signatures', signatures),
+                           ('model_reading', model_reading)):
+            if value is not None:
+                fields[key] = value
+        if not fields:
+            return {'error': 'nothing to set'}
+        entry, created = set_finding(name, fields, changed_by)
+        return {'name': name, 'created': created, 'versions': entry.versions.count(),
+                'title': entry.title, 'standing': entry.status, 'data': entry.data}
+    return await sync_to_async(_work)()
+
+
+@mcp.tool()
+@requires_authority
+async def panda_segfault_reproduce(
+    key: str,
+    pandaid: int = None,
+    queues: list = None,
+    requested_by: str = 'mcp',
+) -> dict:
+    """
+    Request the reproduction of a crash signature: the crashed row run
+    again as one payload canary per queue, the production queue where the
+    crash happened and a second production-class queue (UM_GREX_PanDA_1,
+    or BNL_OSG_EPIC_PROD_1 for a crash at GREX), which together settle the
+    outcome (swf-epicprod docs/SEGFAULT_DIAGNOSIS.md, Reproduction). The
+    reference queue BNL_NPPS_GPU, one slot with known conditions, is named
+    in ``queues`` only when the reading needs the host (a memory ceiling, a
+    core dump, a stall watched live); it then carries the production
+    queue's memory limit. The request is recorded on the signature as it
+    is sent and appears on the runs page (/panda/segfaults/reproductions/)
+    within a minute, which is how a session that takes an item from the
+    nightly notice claims it: check the signature's attempts
+    (panda_segfault_signature) before requesting, so two sessions never
+    submit the same row.
+
+    Args:
+        key: The signature key, e.g. 'exit139:task38971'.
+        pandaid: The crashed job to rerun (default: the representative
+            with a resolved row).
+        queues: The queues to run on (default: the production queue and
+            the second queue; add 'BNL_NPPS_GPU' for the reference run).
+        requested_by: Who requests (recorded on the signature and the
+            action stream).
+
+    Returns:
+        key, the plan (job, row, task, queues) and the request entries
+        recorded, or {'error': ...} when the run cannot be formed.
+    """
+    from monitor_app.epicprod_logging import log_epicprod_action
+    from monitor_app.models import CrashSignature
+    from monitor_app.segfaults import REFERENCE_QUEUE, reproduce, reproduction_plan
+
+    def _work():
+        sig = CrashSignature.objects.filter(key=key).first()
+        if sig is None:
+            return {'error': f'no crash signature {key}'}
+        try:
+            plan = reproduction_plan(sig, pandaid)
+        except ValueError as e:
+            return {'error': str(e)}
+        chosen = [q for q in (queues or []) if q] or [
+            q for q in (plan['production_queue'], plan['elsewhere_queue']) if q]
+        chosen = list(dict.fromkeys(chosen))
+        mem_limits = {q: (plan['maxrss_mb'] if q == REFERENCE_QUEUE else None) for q in chosen}
+        try:
+            entries = reproduce(sig, plan['pandaid'], chosen, mem_limits, requested_by)
+        except (ValueError, RuntimeError) as e:
+            return {'error': str(e), 'plan': plan}
+        log_epicprod_action('mcp', 'segfault_reproduce', subject_type='crash_signature',
+                            subject_key=key, username=requested_by, sublevel='normal',
+                            live_default=True,
+                            message=f"segfault_reproduce {key}: job {plan['pandaid']} on "
+                                    f"{', '.join(chosen)}"[:300], queues=len(chosen))
+        return {'key': key, 'plan': plan, 'queues': chosen, 'requests': entries}
+    return await sync_to_async(_work)()

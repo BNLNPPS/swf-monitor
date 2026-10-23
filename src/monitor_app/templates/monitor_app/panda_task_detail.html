@@ -36,6 +36,94 @@
     <div class="alert alert-danger">{{ error }}</div>
     {% else %}
 
+    {% if pcs_adopt and pcs_adopt.applicable %}
+    <!-- A task submitted outside PCS, linked to its PCS task by name only, is moved into PCS here, first thing on the page (swf-epicprod docs/JEDI_INTEGRATION.md, Residual rerun). -->
+    <div class="card mb-3" id="pcs-adopt-card">
+        <div class="card-header"><strong>Move this task to PCS</strong></div>
+        <div class="card-body">
+            <p class="mb-2">This task was submitted outside PCS and is linked to its PCS task by name only, so the PCS retry and rerun operations do not apply to it yet. Moving it records PanDA task {{ pcs_adopt.jedi_task_id }} as the PCS task's submission{% if pcs_adopt.config %} and binds {{ pcs_adopt.config }}{% endif %}; the PanDA operations on the PCS task page, Rerun Residual included, then apply. Nothing is submitted by the move.</p>
+            {% if pcs_adopt.eligible %}
+            <form id="pcs-adopt-form" class="d-flex align-items-center gap-2 mb-0">{% csrf_token %}
+                <button type="button" class="btn btn-success btn-sm" id="pcs-adopt-btn" {% if not request.user.is_authenticated %}disabled title="Sign in to move it"{% endif %}>Move this task to PCS</button>
+                <span id="pcs-adopt-status"></span>
+            </form>
+            {% else %}
+            <div class="alert alert-warning py-2 px-3 mb-0"><strong>Blocked</strong> {{ pcs_adopt.blocked }} <a href="{% url 'pcs:evgen_inputs' %}?view=coverage">Open the Registration view.</a></div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if event_service %}
+    <!-- Event Service mode line and the task's range accounting, from
+         jedi_events (swf-epicprod NODE_EVENT_DISPATCHER.md). -->
+    <div class="mb-3 fs-6">
+        <strong>Event Service task</strong>{% if event_service.events_per_range %}, ranges of {{ event_service.events_per_range }} event{{ event_service.events_per_range|pluralize }}{% endif %}:
+        {% with r=event_service.ranges %}
+        {% if r.error %}<span class="text-danger">range record unavailable: {{ r.error }}</span>
+        {% else %}
+        {{ r.events_done }} of {{ r.events_requested }} event{{ r.events_requested|pluralize }} done in {{ r.ranges }} range{{ r.ranges|pluralize }}, {{ r.consumers }} consumer{{ r.consumers|pluralize }}.
+        {% if r.range_counts %}Ranges: {% for c in r.range_counts %}{{ c.n }} {{ c.label }}{% if c.attempts_max is not None %} ({{ c.attempts_max }} attempt{{ c.attempts_max|pluralize }} left){% endif %}{% if not forloop.last %}, {% endif %}{% endfor %}.{% endif %}
+        {% if r.attempt_counts %}Consumer attempts: {% for c in r.attempt_counts %}{{ c.n }} {{ c.label }}{% if c.error_code %} (error {{ c.error_code }}){% endif %}{% if not forloop.last %}, {% endif %}{% endfor %}.{% endif %}
+        {% if not r.total %}No range rows recorded.{% endif %}
+        {% endif %}
+        {% endwith %}
+    </div>
+    {% if event_service.harness %}
+    {% with h=event_service.harness %}
+    <!-- The node harness across the task's jobs, from their job reports
+         (swf-epicprod NODE_EVENT_DISPATCHER.md, The record). -->
+    <div class="card mb-3">
+        <div class="card-header"><strong>Event Service Units</strong>
+            <span class="text-muted ms-2">{{ h.jobs }} job{{ h.jobs|pluralize }} with a harness report{% if h.capped %} (the first 2000){% endif %}{% if h.slots_min %}, {% if h.slots_min == h.slots_max %}{{ h.slots_min }}{% else %}{{ h.slots_min }} to {{ h.slots_max }}{% endif %} core{{ h.slots_max|pluralize }} a job{% endif %}</span>
+            {% if h.deadline_marks %}<span class="ms-2 badge bg-warning text-dark">{{ h.deadline_marks }} job{{ h.deadline_marks|pluralize }} stopped taking ranges at the deadline</span>{% endif %}
+        </div>
+        <div class="card-body">
+            <table class="table table-striped table-bordered table-sm align-middle w-auto mb-0">
+                <tr><td><strong>Units</strong></td><td>{{ h.units_done }} done{% if h.units_failed %}, <span class="text-danger">{{ h.units_failed }} failed</span>{% endif %}; {{ h.events_done }} events reconstructed{% if h.unit_events_median %}; {{ h.unit_events_median }} events a unit (median){% endif %}</td></tr>
+                <tr><td><strong>Unit wall</strong></td><td>{% if h.unit_wall_median_s is not None %}median {{ h.unit_wall_median_s }} s, 90th percentile {{ h.unit_wall_p90_s }} s{% if h.s_per_event_median %}; {{ h.s_per_event_median }} s an event{% endif %}{% endif %}</td></tr>
+                <tr><td><strong>Closes</strong></td><td>{% if h.closes %}{{ h.closes }} close{{ h.closes|pluralize }}, {{ h.close_events }} events registered{% if h.closes_failed %}, <span class="text-danger">{{ h.closes_failed }} failed</span>{% endif %}{% if h.close_wall_median_s is not None %}; median {{ h.close_wall_median_s }} s a close{% endif %}{% else %}none: each unit registered its own file{% endif %}</td></tr>
+                {% if h.busy_fraction is not None %}
+                <tr><td><strong>Core occupancy</strong></td><td>{{ h.busy_s|fmt_duration }} core-time busy of {{ h.allocated_s|fmt_duration }} allocated over the jobs: <strong>{% widthratio h.busy_fraction 1 100 %}%</strong>{% if h.head_idle_median_s is not None %}; a job's first unit {{ h.head_idle_median_s|fmt_duration }} in and its last unit ended {{ h.tail_idle_median_s|fmt_duration }} before its end (medians){% endif %}</td></tr>
+                {% endif %}
+            </table>
+            {% if h.plots %}
+            <!-- Each job's cores through its life: a lane per core, the units
+                 as bars, the closes; bare lane is an idle core. -->
+            <div class="mt-3">
+            {% for pl in h.plots %}
+                <p class="mb-1 mt-2"><a href="{% url 'monitor_app:panda_job_detail' pandaid=pl.pandaid %}">Job {{ pl.pandaid }}</a>: {{ pl.timeline.slots }} core{{ pl.timeline.slots|pluralize }}, {{ pl.timeline.wall_s|fmt_duration }} of job wall, {% widthratio pl.timeline.busy_fraction 1 100 %}% of core-time busy; first unit {{ pl.timeline.head_idle_s|fmt_duration }} in, last unit ended {{ pl.timeline.tail_idle_s|fmt_duration }} before the end</p>
+                {{ pl.svg }}
+            {% endfor %}
+            {% if h.jobs > 8 %}<p class="text-muted mt-2">The newest 8 of {{ h.jobs }} jobs are drawn.</p>{% endif %}
+            {% if h.plots %}<div class="mt-2">{% include "monitor_app/_es_plot_legend.html" %}</div>{% endif %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endwith %}
+    {% endif %}
+    {% if event_service.ranges.range_counts or event_service.ranges.attempt_counts %}
+    <div class="card mb-3">
+        <div class="card-header"><strong>Event Ranges</strong> <span class="text-muted ms-2">{{ event_service.ranges.total }} row{{ event_service.ranges.total|pluralize }} in the range record across the task</span></div>
+        <div class="card-body">
+            <p class="mb-2 text-muted">Each range has a row keyed by its jobset, the server's bookkeeping with the attempts left, and a row keyed by each consumer that took it, that attempt's outcome.</p>
+            <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable mb-0">
+                <thead><tr><th>Keyed by</th><th>Status</th><th>Ranges</th><th>Attempts left</th><th>Error</th></tr></thead>
+                <tbody>
+                {% for c in event_service.ranges.range_counts %}
+                <tr><td>jobset</td><td class="{{ c.label|state_class }}">{{ c.label }}</td><td>{{ c.n }}</td><td>{% if c.attempts_min == c.attempts_max %}{{ c.attempts_min|default_if_none:"" }}{% else %}{{ c.attempts_min }} to {{ c.attempts_max }}{% endif %}</td><td></td></tr>
+                {% endfor %}
+                {% for c in event_service.ranges.attempt_counts %}
+                <tr><td>consumers</td><td class="{{ c.label|state_class }}">{{ c.label }}</td><td>{{ c.n }}</td><td>{% if c.attempts_min == c.attempts_max %}{{ c.attempts_min|default_if_none:"" }}{% else %}{{ c.attempts_min }} to {{ c.attempts_max }}{% endif %}</td><td>{{ c.error_code|default_if_none:"" }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+    {% endif %}
+
     <div class="row">
         <!-- Task Info -->
         <div class="col-md-6 mb-3">
@@ -76,7 +164,7 @@
                         <tr><td><strong>Finished Jobs</strong></td><td{% if task.nfinished %} class="finished_fill"{% endif %}>{{ task.nfinished|default:0|intcomma }}</td></tr>
                         <tr><td><strong>Failed Jobs</strong></td><td{% if task.nfailed %} class="failed_fill"{% endif %}>{{ task.nfailed|default:0|intcomma }}</td></tr>
                         <tr><td><strong>Running Jobs</strong></td><td{% if task.nrunning %} class="running_fill"{% endif %}>{{ task.nrunning|default:0|intcomma }}</td></tr>
-                        <tr><td><strong>Retries</strong></td><td>{{ task.nretries|default:0|intcomma }} <span class="text-muted">(jobs with attemptnr&nbsp;&gt;&nbsp;1)</span></td></tr>
+                        <tr><td><strong>Retries</strong></td><td>{{ task.nretries|default:0|intcomma }} <span class="text-muted">(attempts that followed a failure; a job reissued after waiting unrun is not a retry)</span></td></tr>
                         {% if task.avg_retries_success is not None %}<tr><td><strong>Avg Retries</strong></td><td>{{ task.avg_retries_success|floatformat:2 }} <span class="text-muted">(per finished job; 0&nbsp;=&nbsp;first-attempt pass)</span></td></tr>{% endif %}
                         <tr><td><strong>Final Failed Files</strong></td><td{% if task.nfinalfailed %} class="failed_fill"{% endif %}>{{ task.nfinalfailed|default:0|intcomma }} <span class="text-muted">(input files that exhausted all retries; JEDI file-level accounting)</span></td></tr>
                         {% if task.computed_failurerate is not None %}<tr><td><strong>Failure Rate</strong></td><td>{{ task.computed_failurerate|floatformat:3 }} <span class="text-muted">(from job counts, retries included; cancelled excluded)</span></td></tr>{% endif %}
@@ -98,7 +186,7 @@
     <div class="card mb-3">
         <div class="card-header" style="background:#f8d7da;"><strong>Logged status</strong></div>
         <div class="card-body">
-            <div style="white-space:pre-wrap;overflow-wrap:anywhere;">{{ task.errordialog }}</div>
+            <div style="white-space:pre-wrap;overflow-wrap:anywhere;">{{ errordialog_display }}</div>
         </div>
     </div>
     {% endif %}
@@ -135,8 +223,7 @@
     <div class="card mb-3">
         <div class="card-header"><strong>Dataset processing information</strong></div>
         <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-sm table-bordered table-striped mb-0">
+                <table class="table table-sm table-bordered table-striped mb-0 swf-sortable">
                     <thead>
                         <tr>
                             <th>Dataset / container</th>
@@ -168,7 +255,6 @@
                     {% endfor %}
                     </tbody>
                 </table>
-            </div>
         </div>
     </div>
     {% endif %}
@@ -200,6 +286,54 @@
     </div>
     {% endif %}
 
+    <!-- What the payload reported across this task's jobs. One job's report
+         says what that job did; the task's say what the work costs and how
+         much it varies (swf-epicprod EPICPROD_PAYLOAD.md). Only finished
+         jobs carry a report, so the contributing count is stated. -->
+    {% if payload_rollup %}
+    <div class="card mb-3">
+        <div class="card-header"><strong>Payload Report across jobs</strong>
+            <span class="text-muted ms-2">{{ payload_rollup.jobs }} job{{ payload_rollup.jobs|pluralize }} reporting{% if payload_rollup.swept_jobs %}, {{ payload_rollup.swept_jobs }} of them failed and swept from the store{% endif %}</span>
+            {% if payload_rollup.events_total %}<span class="ms-2">{{ payload_rollup.events_total }} events reconstructed</span>{% endif %}
+            {% if payload_rollup.limited %}<span class="text-muted ms-2">(first reports only)</span>{% endif %}
+        </div>
+        <div class="card-body">
+            <table class="table table-striped table-bordered table-sm align-middle w-auto">
+                <thead>
+                    <tr>
+                        <th>Stage</th><th>Jobs</th><th>Failed</th>
+                        <th>Wall, median</th><th>Wall, 90th</th>
+                        <th>CPU, median</th><th>CPU efficiency, median</th><th>Peak memory, median</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for stage in payload_rollup.stages %}
+                    <tr>
+                        <td>{{ stage.name }}</td>
+                        <td>{{ stage.jobs }}</td>
+                        <td>{% if stage.failed %}<span class="text-danger">{{ stage.failed }}</span>{% endif %}</td>
+                        <td>{% if stage.wall_median is not None %}{{ stage.wall_median }} s{% endif %}</td>
+                        <td>{% if stage.wall_p90 is not None %}{{ stage.wall_p90 }} s{% endif %}</td>
+                        <td>{% if stage.cpu_median %}{{ stage.cpu_median }} s{% endif %}</td>
+                        <td>{% if stage.efficiency_median is not None %}{{ stage.efficiency_median }}{% endif %}</td>
+                        <td>{% if stage.memory_median_kb %}{{ stage.memory_median_kb }} KB{% endif %}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            <table class="table table-striped table-bordered table-sm align-middle w-auto">
+                {% if payload_rollup.events_median %}
+                <tr><td><strong>Events per job, median</strong></td><td>{{ payload_rollup.events_median }}</td></tr>
+                {% endif %}
+                <tr><td><strong>Registration</strong></td>
+                    <td>{% for outcome, count in payload_rollup.registrations %}{{ outcome }}: {{ count }}{% if not forloop.last %} · {% endif %}{% endfor %}</td></tr>
+                <tr><td><strong>Payload version</strong></td>
+                    <td>{% for version, count in payload_rollup.versions %}{{ version }}: {{ count }}{% if not forloop.last %} · {% endif %}{% endfor %}</td></tr>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Jobs for this task -->
     <div class="card mb-3">
         <div class="card-header">
@@ -214,8 +348,7 @@
         </div>
         <div class="card-body">
             {% if jobs %}
-            <div class="table-responsive">
-                <table class="table table-sm table-bordered table-striped mb-0">
+                <table class="table table-sm table-bordered table-striped mb-0 swf-sortable">
                     <thead>
                         <tr>
                             <th>PanDA ID</th>
@@ -238,7 +371,7 @@
                                 <div><strong>ePIC {{ job.epicprod_phase|default:"diagnosis" }}</strong>: {{ job.epicprod_failure_summary|truncatechars:180 }}</div>
                             {% elif job.errors %}
                                 {% for err in job.errors %}
-                                <div><strong>{{ err.component }}</strong>:{{ err.code }}{% if err.diag %} {{ err.diag|truncatechars:120 }}{% endif %}</div>
+                                <div><strong>{{ err.component }}</strong>:{{ err.code }}{% if err.correction %} {{ err.correction.label }}{% elif err.diag %} {{ err.diag|truncatechars:120 }}{% endif %}</div>
                                 {% endfor %}
                             {% else %}
                                 <span class="text-muted">-</span>
@@ -259,7 +392,6 @@
                     {% endfor %}
                     </tbody>
                 </table>
-            </div>
             {% if job_count >= 200 %}
             <p class="mt-2 text-muted">Showing first 200 jobs. <a href="{% url 'monitor_app:panda_jobs_list' %}?taskid={{ jeditaskid }}&days=90">View all in job list</a></p>
             {% endif %}
@@ -303,10 +435,47 @@
     <div class="mb-3">
         <a href="https://pandamon01.sdcc.bnl.gov/task/{{ jeditaskid }}/" target="_blank" rel="noopener" class="btn btn-outline-primary btn-sm">View in PanDA Monitor</a>
         <a href="{% url 'monitor_app:panda_jobs_list' %}?taskid={{ jeditaskid }}&days=90" class="btn btn-outline-secondary btn-sm">All Jobs for Task</a>
+        <a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='errors' %}?task={{ jeditaskid }}" class="btn btn-outline-secondary btn-sm">Error History</a>
     </div>
 
     {% endif %}
 </div>
+
+{% if pcs_adopt and pcs_adopt.applicable and pcs_adopt.eligible and request.user.is_authenticated %}
+<script>
+(function () {
+    const btn = document.getElementById('pcs-adopt-btn');
+    const status = document.getElementById('pcs-adopt-status');
+    const form = document.getElementById('pcs-adopt-form');
+    const url = "{{ request.META.SCRIPT_NAME }}/pcs/api/prod-tasks/{{ pcs_task.composed_name|urlencode }}/adopt/";
+    btn.addEventListener('click', async () => {
+        if (!confirm("Move {{ pcs_task.composed_name|escapejs }} into PCS? PanDA task {{ pcs_adopt.jedi_task_id }} becomes its recorded submission and {{ pcs_adopt.config|escapejs }} is bound. Nothing is submitted.")) return;
+        btn.disabled = true;
+        status.textContent = 'Moving...';
+        let resp, data = null;
+        try {
+            resp = await fetch(url, {
+                method: 'POST', credentials: 'same-origin',
+                headers: {'Content-Type': 'application/json',
+                          'X-CSRFToken': form.querySelector('[name=csrfmiddlewaretoken]').value},
+                body: '{}',
+            });
+            data = await resp.json().catch(() => null);
+        } catch (e) {
+            btn.disabled = false;
+            status.textContent = 'Move failed: ' + e;
+            return;
+        }
+        if (!resp.ok) {
+            btn.disabled = false;
+            status.textContent = 'Refused: ' + ((data && data.detail) || resp.status);
+            return;
+        }
+        status.innerHTML = 'Moved. <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ pcs_task.composed_name|urlencode }}">Open the PCS task</a> for the PanDA operations.';
+    });
+})();
+</script>
+{% endif %}
 
 {% if task_operation_controls.visible and request.user.is_authenticated and not is_tunnel %}
 <script>

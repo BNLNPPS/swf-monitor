@@ -118,15 +118,32 @@ INSTALLED_APPS = [
     "pcs",  # Physics Configuration System
     "ai",  # AI proposals and human-in-the-loop automation
     "monitor_app",  # Changed from "swf_monitor_project.monitor_app"
+    "teamcomms.service.apps.ServiceConfig",
+    "teamcomms.entries.apps.EntriesConfig",
+    "teamcomms.comms.apps.CommsConfig",
+    "teamcomms.dialog.apps.DialogConfig",
+    "teamcomms.pouch.apps.PouchConfig",
+    "teamcomms.inflight.apps.InflightConfig",
+    "teamcomms.capcom.apps.CapcomConfig",
     "django_dbml",  # For schema diagram generation
     # Third-party apps
     "rest_framework",
     "drf_spectacular",
+    "drf_spectacular_sidecar",  # self-hosted Swagger UI / Redoc assets
     "rest_framework.authtoken",
     "django_filters",  # DRF filter backend for filterset_fields
     "django_seed",
     "django_extensions",
 ]
+
+# Embedded TeamComms shares this database; devcloud remains its authentication
+# authority. The route is enabled only in installations with the proxy configured.
+SWF_TEAMCOMMS_ENABLED = config("SWF_TEAMCOMMS_ENABLED", default=False, cast=bool)
+SWF_TEAMCOMMS_PUBLIC_HOST = config("SWF_TEAMCOMMS_PUBLIC_HOST", default="epic-devcloud.org")
+SWF_TEAMCOMMS_INTROSPECTION_URL = config("SWF_TEAMCOMMS_INTROSPECTION_URL", default="")
+SWF_TEAMCOMMS_SERVICE_TOKEN_FILE = config("SWF_TEAMCOMMS_SERVICE_TOKEN_FILE", default="")
+if SWF_TEAMCOMMS_ENABLED and SWF_TEAMCOMMS_PUBLIC_HOST not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(SWF_TEAMCOMMS_PUBLIC_HOST)
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -137,6 +154,7 @@ MIDDLEWARE = [
     "monitor_app.middleware.MCPAuthMiddleware",  # Auth0 OAuth for MCP
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "monitor_app.middleware.TunnelAuthMiddleware",
+    "monitor_app.middleware.AuthorityGateMiddleware",  # a person who writes must hold authority (docs/AUTHORITY.md)
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -260,6 +278,12 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 # WhiteNoise configuration
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
+# Messages ride the session, never a cookie of their own: the external
+# proxy forwards only the renamed session and CSRF cookies, so
+# cookie-based message storage is silently dropped on the
+# epic-devcloud face and every action acknowledgment with it.
+MESSAGE_STORAGE = "django.contrib.messages.storage.session.SessionStorage"
+
 LOGIN_URL = 'login'
 
 
@@ -290,11 +314,25 @@ REST_FRAMEWORK = {
 }
 
 SPECTACULAR_SETTINGS = {
-    "TITLE": "SWF Monitor API",
-    "DESCRIPTION": "API for the ePIC Streaming Workflow Testbed Monitor",
+    "TITLE": "ePIC SWF REST APIs",
+    "DESCRIPTION": (
+        "REST interfaces of the ePIC SWF platform: production (PCS, the "
+        "validation interface v1), PanDA views, and the testbed monitor. "
+        "Interface design documents live in the swf-epicprod and "
+        "swf-monitor repositories; this schema is the single source of "
+        "endpoint detail."
+    ),
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
-    # OTHER SETTINGS
+    # Relative server base so Swagger UI's try-it-out joins endpoint paths
+    # onto the application mount rather than the host root. The swf-remote
+    # proxy rewrites it to the /prod mount, so one setting serves both faces.
+    "SERVERS": [{"url": "/swf-monitor/"}],
+    # Serve Swagger UI / Redoc assets from the sidecar package rather than
+    # a public CDN, so the pages work without external asset loads.
+    "SWAGGER_UI_DIST": "SIDECAR",
+    "SWAGGER_UI_FAVICON_HREF": "SIDECAR",
+    "REDOC_DIST": "SIDECAR",
 }
 
 # OAuth2 Provider settings for MCP authentication
@@ -344,19 +382,27 @@ COMMON QUERIES:
 - EIC experiment tasks? → panda_list_tasks(workinggroup='EIC')
 - Production tasks? → panda_list_tasks(processingtype='epicproduction')
 - Top errors? → panda_error_summary(days=7)
+- Errors in an exact window? → panda_error_summary(ended_after='2026-09-05T03:10', ended_before='2026-09-05T03:40') — job end time, ET unless an offset is given
 - Errors for a user? → panda_error_summary(username='someone')
+- Payload crashes (segfaults) by signature? → panda_segfault_catalog(class_hint='storm')
+- One crash signature and its jobs? → panda_segfault_signature(key='exit139:task38661')
+- The readings of the crashes? → panda_segfault_findings(); write one → panda_segfault_finding_set(name=...)
+- Reproduce a crash named by the nightly notice? → panda_segfault_reproduce(key='exit139:task38971')
 - Deep dive on a failed job? → panda_study_job(pandaid=130497)
 - EIC queues? → panda_list_queues(vo='eic')
 - Queue config? → panda_get_queue(panda_queue='NERSC_Perlmutter_epic')
 - Core-hours this month? → panda_resource_usage(days=30)
 - Core-hours on Perlmutter? → panda_resource_usage(days=30, site='NERSC_Perlmutter%')
 - Find JLab science data for a campaign? → jlab_rucio_list_dids(scope='epic', name='*26.06.0*', type='DATASET')
+- How many files / how big are the datasets matching a pattern? → jlab_rucio_summarize_datasets(scope='epic', name='/EVGEN/*') — ONE call for counts, sizes, and totals; never loop get_did_metadata per dataset
+- Latest added or updated datasets? → jlab_rucio_summarize_datasets(scope='epic', name='/EVGEN/*', order='updated')
 - Inspect a JLab science dataset? → jlab_rucio_get_did_metadata(scope='epic', name='/RECO/...') then jlab_rucio_list_files(...)
 - Find BNL PanDA output or log datasets? → bnl_rucio_list_dids(scope='group.EIC', name='*26.06.0*', type='DATASET')
 - Diagnose BNL registration or replication? → bnl_rucio_get_did_metadata(...), bnl_rucio_list_rules(...), then bnl_rucio_get_rule_locks(...)
 - What is PCS? → PCS = Physics Configuration System, manages configuration of production tasks based on physics inputs
 - List physics tags? → pcs_list_tags(tag_type='p')
 - What is tag p1001? → pcs_get_tag(tag_label='p1001')
+- Ghost DIDs by RSE, stuck rules, stalled datasets? → epicprod_storage(listing='ghosts', rse='ASGC-XRD') — the storage record's store; never scan Rucio for these
 - Reco tags? → pcs_list_tags(tag_type='r')
 - Photoproduction tags? → pcs_search_tags(query='photoproduction')
 - DIS tags? → pcs_list_tags(tag_type='p', category='DIS')
@@ -411,6 +457,17 @@ RUCIO CATALOGS:
   or counts to agree, and do not treat one empty query as proof of absence.
 - All exposed Rucio operations are read-only. Credentials and the BNL proxy
   remain on swf-testbed and are never returned to MCP clients.
+
+SNAPPER STATE HISTORY (snapper_* tools):
+- Coherent snapshots of system state, captured every 30 s when anything
+  changed: snapper_latest, snapper_state_at(time), snapper_changes_between,
+  snapper_component_history, snapper_context_around. Every answer carries
+  the ACTUAL snap time and observer coverage; never infer state across a gap.
+- The views' own products, as data: snapper_series(scope, focus, window) —
+  the curves a focus view plots (platform, site, errors, campaign), and
+  snapper_cut_summary(scope, focus, time) — every plotted metric at an
+  instant with delta and window min/mean/max. Reach for these before walking
+  component history when the question is about time histories.
 
 AFTER swf_start_workflow — ACTIVELY POLL, DO NOT SLEEP:
 Poll swf_get_workflow_monitor(execution_id) every 10-15s until completion.

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Action withheld{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-3">
+  <h2>Action withheld</h2>
+  <p style="max-width: 60em;">{{ refusal|urlize }}</p>
+  <p>Reading the monitor is unaffected. Your standing is shown on your
+    <a href="{% url 'monitor_app:account' %}?tab=account">account page</a>.</p>
+</div>
+{% endblock %}

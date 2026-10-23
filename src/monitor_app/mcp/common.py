@@ -2,6 +2,7 @@
 Common utilities and tool discovery for MCP tools.
 """
 
+import contextvars
 import logging
 from datetime import timedelta, timezone as dt_timezone
 from django.utils import timezone
@@ -34,17 +35,86 @@ def _default_start_time(hours=24):
     return timezone.now() - timedelta(hours=hours)
 
 
+# The identity the MCP guard established for the current request: the
+# signed-in user forwarded by the swf-remote tunnel, or '' for a bearer
+# token caller (swf_monitor_project/mcp_asgi.py). Tools read it through
+# _get_username, so a proxied caller need not, and cannot usefully,
+# declare a different name.
+CALLER: contextvars.ContextVar = contextvars.ContextVar('mcp_caller', default='')
+
+
+#: Every tool that changes the system. Each carries ``@requires_authority``
+#: under its ``@mcp.tool()``; tests/test_authority.py asserts the two sets
+#: match, so a write tool cannot be added without declaring it here and a
+#: declared name cannot go stale.
+AUTHORITY_GUARDED_TOOLS = frozenset({
+    'ai_decide_proposal', 'ai_propose_ping', 'epic_register_ai_assessment',
+    'pcs_dataset_intake', 'pcs_prodtask_intake', 'pcs_prodtask_link_input',
+    'panda_segfault_finding_set', 'panda_segfault_reproduce', 'pcs_prodtask_set_status', 'swf_kill_agent',
+    'swf_record_ai_memory',
+    'swf_send_message', 'swf_start_user_testbed', 'swf_start_workflow',
+    'swf_stop_user_testbed', 'swf_stop_workflow',
+})
+
+
+def requires_authority(fn):
+    """The one rule, on the MCP face: a person who writes must hold authority.
+
+    A tunnel caller is a person (``CALLER`` is their name) and must
+    ``may_act``; a bearer-token caller carries no person and passes, as on
+    the REST face. While ``authority_enforce`` is false the guard observes
+    and logs instead of refusing. Place it under ``@mcp.tool()`` so the
+    registered tool is the guarded one. docs/AUTHORITY.md.
+    """
+    import functools
+    import logging
+
+    from asgiref.sync import sync_to_async
+
+    log = logging.getLogger(__name__)
+
+    @functools.wraps(fn)
+    async def guarded(*args, **kwargs):
+        caller = CALLER.get()
+        if caller:
+            from monitor_app.authority import (enforcing, may_act,
+                                               refusal_text)
+            if not await sync_to_async(may_act)(caller):
+                text = await sync_to_async(refusal_text)(caller)
+                if await sync_to_async(enforcing)():
+                    log.info('authority: refused MCP %s by %s',
+                             fn.__name__, caller)
+                    return {'error': text, 'authority': 'refused'}
+                log.warning('authority (observing, not enforced): would '
+                            'refuse MCP %s by %s', fn.__name__, caller)
+        return await fn(*args, **kwargs)
+
+    guarded.__authority_guarded__ = True
+    return guarded
+
+
 def _get_username(username: str = None) -> str:
-    """Validate and return the username. Must be provided by the caller."""
+    """The username a tool acts as: the proxied caller's identity when
+    the request came through the tunnel, else the username the caller
+    supplied. A bearer-token caller must supply one."""
+    caller = CALLER.get()
+    if caller:
+        return caller
     if not username:
         raise RuntimeError("username parameter is required")
     return username
 
 
 def _monitor_url(path: str) -> str:
-    """Build a full monitor URL from a path."""
+    """Build a full monitor URL from a path: the external face for a
+    caller that arrived through the swf-remote proxy (the internal name
+    is unreachable from where they are), else the monitor's own base."""
     import os
-    base = os.getenv('SWF_MONITOR_HTTP_URL', 'http://localhost:8000/swf-monitor')
+    if CALLER.get():
+        from monitor_app.models import external_face_base_url
+        base = f"{external_face_base_url().rstrip('/')}/prod"
+    else:
+        base = os.getenv('SWF_MONITOR_HTTP_URL', 'http://localhost:8000/swf-monitor')
     return f"{base.rstrip('/')}/{path.lstrip('/')}"
 
 
@@ -265,6 +335,11 @@ def get_available_tools_list() -> list:
             "parameters": ["campaign", "window_days", "targets_only"],
         },
         {
+            "name": "epicprod_storage",
+            "description": "Storage record exception listings from the storage pass's store: ghosts (registered files with no available replica, with the by-RSE account), stuck rules, stalled datasets; filtered by RSE and campaign, paged, with the pass the record reaches.",
+            "parameters": ["listing", "rse", "campaign", "state", "limit", "offset"],
+        },
+        {
             "name": "ai_list_proposals",
             "description": "List AI proposals awaiting human decision (default) or by status. Show the returned display text to the human verbatim; each line starts with the proposal ref (e.g. cp-12).",
             "parameters": ["status", "limit"],
@@ -327,8 +402,69 @@ def get_available_tools_list() -> list:
         },
         {
             "name": "panda_harvester_workers",
-            "description": "Live Harvester pilot/worker counts across EIC queues — running, submitted, finished by site.",
+            "description": "Harvester workers (pilots) from PanDA's harvester_workers table: those existing now (waiting, running) and those submitted, started and ended in the window, by queue.",
             "parameters": ["site", "hours"],
+        },
+        {
+            "name": "panda_segfault_catalog",
+            "description": "The segfault catalog: payload crash signatures (exit 139/134/135/136) by class (storm, configuration_dead, sparse, abort, mixed) with crashes, rate, time to death, sites, loss and status; from the monitor's record.",
+            "parameters": ["status", "class_hint", "limit"],
+        },
+        {
+            "name": "panda_segfault_signature",
+            "description": "One crash signature in full: tasks, configuration, sites, loss, trace, reproductions, verdict and the crashed jobs behind it.",
+            "parameters": ["key", "jobs_limit"],
+        },
+        {
+            "name": "panda_segfault_findings",
+            "description": "The segfault findings: the curated reading of the catalog, one entry per crashing frame, joined live to the catalog counts.",
+            "parameters": [],
+        },
+        {
+            "name": "panda_segfault_finding_set",
+            "description": "Create or update a segfault finding (versioned, stamped): the curated reading of one crashing frame.",
+            "parameters": ["name", "title", "what", "date", "frame", "stage", "class_hint", "action", "standing", "fix", "notes", "sources", "signatures", "model_reading", "changed_by"],
+        },
+        {
+            "name": "panda_segfault_reproduce",
+            "description": "Request a crash signature's reproduction: the crashed row as one payload canary on the production queue and the reference queue, recorded on the signature (the claim the nightly notice asks for).",
+            "parameters": ["key", "pandaid", "queues", "requested_by"],
+        },
+        # Snapper state history (snapper-ai): coherent snapshots and the view products
+        {
+            "name": "snapper_latest",
+            "description": "Latest recorded system state for a Snapper scope (epicprod, testbed): every component with its actual snap time and coverage.",
+            "parameters": ["scope"],
+        },
+        {
+            "name": "snapper_state_at",
+            "description": "System state at an instant: the latest eligible snap and its ACTUAL time, with observer coverage (covered, gap, unknown).",
+            "parameters": ["scope", "time"],
+        },
+        {
+            "name": "snapper_component_history",
+            "description": "One component's recorded evolution over an interval, beginning with its state at the start; unchanged baselines suppressed unless asked.",
+            "parameters": ["scope", "component", "start", "end", "include_unchanged"],
+        },
+        {
+            "name": "snapper_changes_between",
+            "description": "Component values that changed between two instants, with previous and current documents and coverage at both ends.",
+            "parameters": ["scope", "start", "end"],
+        },
+        {
+            "name": "snapper_context_around",
+            "description": "State at an instant plus changes in the surrounding window and resolvable event references (action stream, PanDA records).",
+            "parameters": ["scope", "time", "window_seconds"],
+        },
+        {
+            "name": "snapper_series",
+            "description": "A focus view's series product as data — the curves the page plots (platform, site, errors, campaign) over a named window, derived curves included. Use before walking component history for time-history questions.",
+            "parameters": ["scope", "focus", "window", "selection", "selectors"],
+        },
+        {
+            "name": "snapper_cut_summary",
+            "description": "The summary at a time cut of a focus view: every plotted metric with its value, delta, and min/mean/max since the basis, in the evidence envelope (Platform view today).",
+            "parameters": ["scope", "focus", "time", "since"],
         },
         # PCS (Physics Configuration System) tools
         {

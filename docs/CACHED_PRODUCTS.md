@@ -14,7 +14,12 @@ variant.
 - **Staleness rebuilds behind the response.** A request that finds the
   product older than its TTL returns it anyway and triggers one
   background rebuild; `building_since` on the store row is the
-  cross-worker lock, so concurrent requests never stampede.
+  cross-worker lock, so concurrent requests never stampede. A lock
+  older than `BUILD_LOCK_TIMEOUT_SECONDS` (600 s) is abandoned — its
+  worker died mid-build, as a process recycle at deploy does to a
+  background thread — and every reader treats it as absent: the next
+  request reclaims it and rebuilds. No product stays stale behind a
+  dead lock.
 - **Explicit update rebuilds synchronously.** The uniform Update button
   passes `refresh=1`; the user chose to wait, and gets fresh data back.
 - **The first-ever fill builds synchronously** — there is nothing to
@@ -46,6 +51,20 @@ variant.
 | `panda_errors:v2:<days>:<user>:<site>:<source>` | PanDA error summary aggregation | 300 s |
 | `panda_tasks_window:<days>` | PanDA tasks list full-window aggregation | 120 s |
 | `prod_hub_corun_counts` | corun-ai assessment/narrative counts | 600 s |
+| `evgen_convention:v2` | EVGEN paths implied by recorded produced outputs (`pcs.services.evgen_convention_paths_cached`) | 26 h; refreshed by the EVGEN sweep |
+| `evgen_coverage:v2` | EVGEN registration worklist (`pcs.services.build_evgen_coverage`) | 26 h; refreshed by the EVGEN sweep |
+| `harvester_workers:v1:<queue>` | the queue's harvester workers reading (`monitor_app/workers.py`), the Workers card of the queue detail page | 300 s |
+| `es_reading:v1:<queue>` | the node harness across the queue's Event Service jobs of the last 7 days, from the job reports (`monitor_app/es_reading.py`), the Event Service card of the queue detail page | 300 s |
+| `allocation:v1:<harvester>:<worker>` | one batch allocation's pilot occupancy timeline (`workers.allocation_product` over `panda.queries.allocation_timeline`), the allocation page | 120 s while the slot runs; kept without rebuilding once it has ended, since PanDA drops the worker record after three months, and never replaced by a build that has lost it |
+| `storage_ghosts:v1` | the storage record's ghost population with holders (`swf_epicprod.analytics.storage_listings.build_ghost_population`), behind the Storage exceptions page, the `epicprod_storage` tool and the REST listing | 90 min; refreshed by the storage sweep as its last step (`refresh_ghost_product`) |
+
+A producer that changes a product's input refreshes the product as its
+last step, synchronously, so the page serves the new product at once.
+The EVGEN sweep (nightly and the Update button) rebuilds the two EVGEN
+products above this way; the TTL is only the safety net for a missed
+sweep. A builder that cannot see its own input raises rather than
+returning an empty result, so an empty product is never stored in place
+of a missing one.
 
 ## Migration targets
 

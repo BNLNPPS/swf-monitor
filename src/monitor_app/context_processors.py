@@ -1,5 +1,7 @@
 """Global template context for lightweight monitor state."""
 
+from django.conf import settings
+
 from .models import external_face_base_url
 from .system_status import status_summary
 
@@ -191,8 +193,17 @@ def _active_nav(request):
         'pcs_reco_tags': namespace == 'pcs' and url_name in pcs_tag_names and tag_type == 'r',
         'pcs_background_tags': namespace == 'pcs' and url_name in pcs_tag_names and tag_type == 'k',
         'pcs_datasets': namespace == 'pcs' and url_name in pcs_dataset_names,
+        'pcs_evgen_inputs': namespace == 'pcs' and url_name in (
+            'evgen_inputs', 'evgen_inputs_update'),
+        'pcs_storage': namespace == 'pcs' and url_name in (
+            'storage_listings', 'storage_listings_home'),
+        'snapper_storage': (namespace == 'snapper_ai'
+                            and url_name == 'snapper_focus'
+                            and kwargs.get('focus_slug') == 'storage'),
+        'pcs_ingest': namespace == 'pcs' and url_name == 'pc_ingest',
         'pcs_configs': namespace == 'pcs' and url_name in pcs_config_names,
         'pcs_tasks': namespace == 'pcs' and url_name in pcs_task_names,
+        'pcs_trials': namespace == 'pcs' and url_name in ('trials_list', 'trial_detail'),
         'campaigns': namespace == 'pcs' and url_name in pcs_catalog_names,
         'workflows': namespace == 'monitor_app' and url_name in workflow_names,
         'files': namespace == 'monitor_app' and url_name in file_names,
@@ -238,6 +249,15 @@ def _active_nav(request):
             'panda_errors_list',
             'panda_errors_datatable_ajax',
         },
+        'panda_segfaults': namespace == 'monitor_app' and url_name in {
+            'panda_segfaults',
+            'panda_segfault_findings',
+            'panda_segfault_detail',
+            'panda_segfault_dig',
+            'panda_segfault_reproduce',
+            'panda_segfault_package',
+            'panda_segfault_diagnose',
+        },
         'panda_diagnostics': namespace == 'monitor_app' and url_name in {
             'panda_diagnostics_list',
             'panda_diagnostics_datatable_ajax',
@@ -270,15 +290,59 @@ def _active_nav(request):
         'canary': namespace == 'canary',
         'about': namespace == 'monitor_app' and url_name == 'about',
         'account': namespace == 'monitor_app' and url_name == 'account',
+        'user_admin': namespace == 'monitor_app' and url_name == 'user_admin',
     }
 
 
+def _user_view(request):
+    """The universal user-view parameter. ``?user_view=1`` renders a
+    page in the user view (the reduced epicprod face: its own nav, and
+    less on each page); ``?user_view=0`` leaves it. Returns ``'1'``,
+    ``'0'`` or ``''`` when the request does not say. The view follows the
+    parameter alone; nothing is remembered in the browser. A trailing
+    non-alphanumeric character is ignored: a URL clicked out of a
+    terminal or a chat arrives with the marker glyph beside it swept in
+    (``user_view=1✻``), and that click must still work."""
+    value = (getattr(request, 'GET', None) or {}).get('user_view', '')
+    value = str(value or '').strip().lower()
+    value = ''.join(ch for ch in value if ch.isalnum())
+    if value in ('1', 'true', 'yes', 'on'):
+        return '1'
+    if value in ('0', 'false', 'no', 'off'):
+        return '0'
+    return ''
+
+
 def system_status_nav(request):
+    from .viewdir.user_admin import may_administer
+
     summary = status_summary()
+    user_view_param = _user_view(request)
     return {
         'active_nav': _active_nav(request),
+        'user_view': user_view_param == '1',
+        'user_view_param': user_view_param,
         'system_status_overall': summary.get('overall_status', 'unknown'),
         'system_status_reason': summary.get('overall_reason', ''),
         'system_status_latest_checked_at': summary.get('latest_checked_at'),
         'external_face_base_url': external_face_base_url(),
+        'teamcomms_url': (
+            f'https://{settings.SWF_TEAMCOMMS_PUBLIC_HOST}/prod/teamcomms/'
+            if settings.SWF_TEAMCOMMS_ENABLED else ''
+        ),
+        # The User admin entry appears only for those who may use it
+        # (docs/AUTHORITY.md).
+        'may_administer_users': may_administer(getattr(request, 'user', None)),
+        # Priority controls render only for PACs and operations accounts
+        # (docs/AUTHORITY.md, The PAC role); the endpoints refuse the rest.
+        'may_set_priority': _may_set_priority(request),
     }
+
+
+def _may_set_priority(request):
+    from .authority import may_set_priority
+
+    user = getattr(request, 'user', None)
+    if not user or not user.is_authenticated:
+        return False
+    return may_set_priority(user.username)

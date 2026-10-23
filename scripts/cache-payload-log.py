@@ -29,6 +29,9 @@ RUCIO_URL = os.environ.get("RUCIO_URL", "https://nprucio01.sdcc.bnl.gov:443")
 RUCIO_ACCOUNT = os.environ.get("RUCIO_ACCOUNT", "panda")
 RUCIO_VO = os.environ.get("RUCIO_VO", "eic")
 X509_PROXY = os.environ.get("X509_USER_PROXY", "/data/wenauseic/longproxy-for-rucio")
+# The JLab production proxy the agent holds for the JLab catalog and its
+# doors (EPICPROD_OPS_AGENT.md); the JLab log door admits it, not the BNL proxy.
+JLAB_X509_PROXY = os.environ.get("EVGEN_X509_PROXY", "")
 CA_BUNDLE = os.environ.get("REQUESTS_CA_BUNDLE") or os.environ.get("SSL_CERT_FILE") or True
 SWF_TMP_DIR = os.environ.get("SWF_TMP_DIR", "/data/swf-tmp")
 XRDCP_TIMEOUT = int(os.environ.get("XRDCP_TIMEOUT", "120"))
@@ -39,6 +42,9 @@ KEEP = {"payload.stdout", "payload.stderr", "pilotlog.txt", "pandatracerlog.txt"
 # Success sentinel written last, inside the cache dir. Hit/skip checks key on
 # this — NOT on any single member (a log may legitimately lack payload.stdout).
 DONE_MARKER = ".done"
+
+
+GHOST = False  # the replica record is PanDA's empty log entry
 
 
 def log(msg):
@@ -81,6 +87,11 @@ def resolve_pfn(scope, name):
         if not line:
             continue
         rec = json.loads(line)
+        # PanDA registers a failed job's log AVAILABLE with zero bytes and no
+        # checksum whether or not a file was written (LOG_STAGEOUT_FALLBACK.md);
+        # a rescued log keeps that entry, so the copy is still tried.
+        global GHOST
+        GHOST = not rec.get("bytes") and not rec.get("adler32")
         pfns = rec.get("pfns") or {}
         for url in pfns:                       # prefer the xrootd door
             if url.startswith("root://"):
@@ -96,8 +107,26 @@ def resolve_pfn(scope, name):
     return pfn
 
 
+def route(pfn):
+    """(url, proxy) for the copy. A JLab log replica is catalogued by its
+    WebDAV door (davs://dtn-rucio.jlab.org:1094/...), which xrdcp cannot
+    read; the same door serves xrootd on the same port, and it admits the
+    JLab production proxy (EVGEN_X509_PROXY), not the BNL one. Every
+    other PFN is copied as catalogued with the BNL proxy."""
+    if pfn.startswith(("davs://", "https://")) and ".jlab.org" in pfn.split("/")[2]:
+        if not JLAB_X509_PROXY:
+            fail("EVGEN_X509_PROXY is not set; the JLab door needs the JLab proxy")
+        url = "root://" + pfn.split("://", 1)[1]
+        log(f"JLab door: {pfn} read as {url}")
+        return url, JLAB_X509_PROXY
+    return pfn, X509_PROXY
+
+
 def xrdcp(pfn, dest):
-    env = dict(os.environ, X509_USER_PROXY=X509_PROXY)
+    pfn, proxy = route(pfn)
+    if not os.path.exists(proxy):
+        fail(f"x509 proxy not found: {proxy}")
+    env = dict(os.environ, X509_USER_PROXY=proxy)
     log(f"xrdcp -> {dest}")
     try:
         p = subprocess.run(["xrdcp", "-f", "--nopbar", pfn, dest],
@@ -105,6 +134,10 @@ def xrdcp(pfn, dest):
                            timeout=XRDCP_TIMEOUT)
     except subprocess.TimeoutExpired:
         fail(f"xrdcp timed out after {XRDCP_TIMEOUT}s")
+    if p.returncode != 0 and GHOST:
+        fail("no log was written for this job: the catalog holds an empty entry "
+             "(0 B, no checksum) with no file behind it. A log held in the stage-out "
+             "bucket is moved there by the hourly log rescue.")
     if p.returncode != 0:
         fail(f"xrdcp failed (rc={p.returncode}): {p.stderr.strip()}")
 

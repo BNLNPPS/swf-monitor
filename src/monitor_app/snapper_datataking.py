@@ -23,7 +23,6 @@ PUBLISHER_IDENTITY = "swf-monitor:run-state"
 ASSESSMENT_POLICY_VERSION = "swf-datataking-state-v1"
 EVENT_RESOLVER = "swf-testbed-system-state-events"
 MAX_NAMESPACES = 128
-MAX_SERIALIZED_BYTES = 64 * 1024
 
 DATATAKING_REGISTRATION = {
     "title": "Testbed datataking state by namespace",
@@ -34,7 +33,6 @@ DATATAKING_REGISTRATION = {
     "visibility": "public",
     "owning_subsystem": "SWF testbed datataking state",
     "assessment_policy": ASSESSMENT_POLICY_VERSION,
-    "max_serialized_bytes": MAX_SERIALIZED_BYTES,
     "quantities": {
         "namespaces": {
             "path": "namespaces",

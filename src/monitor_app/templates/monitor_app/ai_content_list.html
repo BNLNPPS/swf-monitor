@@ -65,27 +65,7 @@
                 <a href="{{ row.url }}" class="filter-link {% if selected_ai == row.ai %}filter-active{% endif %}">{{ row.ai }} ({{ row.count }})</a>
                 {% endfor %}
             </div>
-            {% if selected_subject_type or selected_quality or selected_username or selected_ai %}
-            <div class="small">
-                <strong>Active filters:</strong>
-                {% if selected_subject_type %}
-                <span class="badge bg-info me-1">Subject: {{ selected_subject_type }}</span>
-                <a href="{{ clear_subject_url }}" class="btn btn-link btn-sm p-0 me-2">clear subject</a>
-                {% endif %}
-                {% if selected_quality %}
-                <span class="badge bg-info me-1">Quality: {{ selected_quality }}</span>
-                <a href="{{ clear_quality_url }}" class="btn btn-link btn-sm p-0 me-2">clear quality</a>
-                {% endif %}
-                {% if selected_username %}
-                <span class="badge bg-info me-1">User: {{ selected_username }}</span>
-                <a href="{{ clear_username_url }}" class="btn btn-link btn-sm p-0 me-2">clear user</a>
-                {% endif %}
-                {% if selected_ai %}
-                <span class="badge bg-info me-1">AI: {{ selected_ai }}</span>
-                <a href="{{ clear_ai_url }}" class="btn btn-link btn-sm p-0 me-2">clear AI</a>
-                {% endif %}
-            </div>
-            {% endif %}
+            {% include "monitor_app/_active_filters.html" with active_filters=active_filters clear_all_url=clear_all_url %}
         </div>
     </div>
 

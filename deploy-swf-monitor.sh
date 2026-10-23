@@ -60,6 +60,27 @@ case "$REF_TYPE" in
         ;;
 esac
 
+# Never during the nightly catalog_sync chain. The deploy restarts the
+# prod-ops agent, which ends the chain mid-step, and the chain does not
+# resume: on 2026-10-01 a 03:10 deploy killed file_events_measure and the
+# delivery rebuild, and the campaign plan stayed a day stale. The agent keeps
+# CHAIN_MARKER while the chain runs (pid, start, current step); a marker whose
+# pid is the running agent refuses the deploy before anything is built. A
+# marker left by a dead agent is ignored. SWF_DEPLOY_DURING_CHAIN=1 overrides:
+# the chain is lost and reruns at its next schedule.
+CHAIN_MARKER="$DEPLOY_ROOT/shared/run/catalog-sync.running"
+if [ -f "$CHAIN_MARKER" ] && [ "${SWF_DEPLOY_DURING_CHAIN:-0}" != "1" ]; then
+    MARK_PID=$(sed -n 's/^pid=//p' "$CHAIN_MARKER" | head -1)
+    AGENT_PID=$(systemctl show -p MainPID --value epicprod-ops-agent.service 2>/dev/null || echo 0)
+    if [ -n "$MARK_PID" ] && [ "$MARK_PID" = "$AGENT_PID" ] && kill -0 "$MARK_PID" 2>/dev/null; then
+        echo "REFUSED: the nightly catalog_sync chain is running in the prod-ops agent"
+        echo "  (started $(sed -n 's/^started=//p' "$CHAIN_MARKER"), step $(sed -n 's/^step=//p' "$CHAIN_MARKER"))."
+        echo "  A deploy restarts the agent and loses the chain. Deploy after it ends, or"
+        echo "  set SWF_DEPLOY_DURING_CHAIN=1 to deploy anyway (the chain reruns at its next schedule)."
+        exit 3
+    fi
+fi
+
 # Unique staging directory per deploy: the release 'current' serves is
 # never deleted or rebuilt in place. The whole build happens here while
 # the old release keeps serving; the current symlink flips to the fully
@@ -118,6 +139,17 @@ log "Copying development virtual environment..."
 cp -r /eic/u/wenauseic/github/swf-testbed/.venv .venv
 source .venv/bin/activate
 
+# The copied venv carries the dev venv's editable install of swf_monitor,
+# whose path file points at the development tree: from any directory that
+# does not put this release's src first, the deployed python would import
+# monitor_app from the dev tree. Point the path file at this release's src
+# so every process in this venv resolves the release, whatever its cwd.
+for pth in .venv/lib/python3*/site-packages/__editable__.swf_monitor-*.pth; do
+    [ -f "$pth" ] || continue
+    echo "$(pwd)/src" > "$pth"
+    log "Editable swf_monitor path file -> $(pwd)/src"
+done
+
 # Freeze swf-epicprod into the deployed venv. The shared dev venv carries it
 # as an editable install (dev ergonomics); shipped verbatim, the deployed venv
 # would import the dev working tree live. Reinstalling non-editable here
@@ -146,6 +178,11 @@ fi
 if .venv/bin/python -m pip show site-canary >/dev/null 2>&1; then
     log "Freezing site-canary into the deployed venv (non-editable)..."
     .venv/bin/python -m pip install --quiet --force-reinstall --no-deps /data/wenauseic/github/site-canary
+    # The probe sandbox vendors the canary package from this wheel, so a
+    # probe ships exactly what this release deployed, never the checkout.
+    log "Building the site-canary wheel beside the release for probe sandboxes..."
+    mkdir -p wheels
+    .venv/bin/python -m pip wheel --quiet --no-deps -w wheels /data/wenauseic/github/site-canary
     rm -rf /data/wenauseic/github/site-canary/build
 fi
 # swf-common-lib likewise: the copied venv carries its dev editable, which
@@ -227,7 +264,7 @@ rsync -a --delete "$RELEASE_DIR/src/staticfiles/" "$DEPLOY_ROOT/shared/static/"
 
 # Run database migrations
 log "Running database migrations..."
-python manage.py migrate --settings=swf_monitor_project.settings
+python "$RELEASE_DIR/scripts/migrate-swfdb.py" --settings=swf_monitor_project.settings
 
 # Set ownership
 log "Setting ownership..."
@@ -280,12 +317,66 @@ if systemctl is-enabled swf-monitor-mcp-asgi.service >/dev/null 2>&1; then
     systemctl restart swf-monitor-mcp-asgi.service
 fi
 
-# Prod-ops agent launches doer subprocesses from the release tree. Restart every
-# deploy so it does not keep a deleted release as cwd or write through stale env.
+# Prod-ops agent launches doer subprocesses from the release tree, so it moves to
+# the new release on every deploy, always through a systemd restart: the stop
+# job carries the unit's stop timeout, and BaseAgent's stop is bounded (it stops
+# consuming, drains up to its limit, ends the doers still running, exits). A
+# working agent loses the doer pass in flight, which reruns on its own schedule;
+# the agent's state is logged so the loss is visible. Signalling the process
+# directly (systemctl kill) is never used: it leaves no stop job and therefore no
+# timeout, and on 2026-09-07 that left the agent wedged in a drain with no bound
+# at all. The previous release stays on disk meanwhile (the last five are kept).
+AGENTS_RESTARTED_AT=$(date '+%Y-%m-%d %H:%M:%S')
 if systemctl is-enabled epicprod-ops-agent.service >/dev/null 2>&1; then
-    log "Restarting prod-ops agent (epicprod-ops-agent) to pick up new code/env..."
+    OPS_PID=$(systemctl show -p MainPID --value epicprod-ops-agent.service 2>/dev/null || echo 0)
+    OPS_STATE=$(curl -k -s "https://localhost/swf-monitor/api/systemagents/" \
+        | "$RELEASE_DIR/.venv/bin/python" -c "import sys, json
+d = json.load(sys.stdin)
+items = d.get('results', d) if isinstance(d, dict) else d
+print(next((a.get('operational_state') or 'UNKNOWN' for a in items
+            if a.get('agent_type') == 'PRODOPS' and str(a.get('pid')) == '$OPS_PID'),
+           'UNKNOWN'))" 2>/dev/null || echo UNKNOWN)
+    if [ "$OPS_PID" = "0" ] || [ "$OPS_STATE" = "READY" ]; then
+        log "Restarting prod-ops agent (epicprod-ops-agent, $OPS_STATE) to pick up new code/env..."
+    else
+        log "Restarting prod-ops agent (epicprod-ops-agent, $OPS_STATE, pid $OPS_PID): its work in flight is ended by the bounded stop and reruns on its schedule"
+    fi
     systemctl restart epicprod-ops-agent.service
 fi
+
+# The canary agent runs its doers from the release tree the same way; a deploy
+# that left it running kept a deleted release as cwd and every probe died at
+# shell start (2026-09-01). Restart it every deploy like the prod-ops agent.
+if systemctl is-enabled canary-agent.service >/dev/null 2>&1; then
+    log "Restarting canary agent (canary-agent) to pick up new code/env..."
+    systemctl restart canary-agent.service
+fi
+
+# A restarted agent must reach READY. On 2026-10-02 the prod-ops agent could
+# not reach the monitor over TLS after a deploy, restart-looped for 19
+# minutes, and an operator's pause batch was lost, while the deploy reported
+# success on the web health check alone. Wait up to two minutes for each
+# restarted agent's "state -> READY" line; fail the deploy loudly otherwise.
+AGENT_FAILURES=""
+for unit in epicprod-ops-agent canary-agent; do
+    systemctl is-enabled "$unit.service" >/dev/null 2>&1 || continue
+    ready=false
+    for _ in $(seq 1 24); do
+        if journalctl -u "$unit.service" --since "$AGENTS_RESTARTED_AT" --no-pager 2>/dev/null \
+                | grep -q "state -> READY"; then
+            ready=true
+            break
+        fi
+        sleep 5
+    done
+    if $ready; then
+        log "✅ $unit reached READY"
+    else
+        tls=$(journalctl -u "$unit.service" --since "$AGENTS_RESTARTED_AT" --no-pager 2>/dev/null | grep -c SSLError || true)
+        log "❌ ERROR: $unit did not reach READY within two minutes (SSLError lines: $tls); see journalctl -u $unit"
+        AGENT_FAILURES="$AGENT_FAILURES $unit"
+    fi
+done
 
 # Detect bot code changes before health check (bots restart after)
 PREV_RELEASE=$(ls -1t "$DEPLOY_ROOT/releases" | sed -n '2p')
@@ -318,15 +409,15 @@ if systemctl is-enabled swf-testbed-bot.service >/dev/null 2>&1; then
 fi
 
 if systemctl is-enabled swf-epicprod-live.service >/dev/null 2>&1; then
-    if [ -z "$PREV_RELEASE" ]; then
-        LIVE_PUBLISHER_CHANGED=true
-    elif ! diff -q "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/management/commands/publish_epicprod_live.py" \
-                    "$RELEASE_DIR/src/monitor_app/management/commands/publish_epicprod_live.py" >/dev/null 2>&1; then
-        LIVE_PUBLISHER_CHANGED=true
-    elif ! diff -q "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/epicprod_logging.py" \
-                    "$RELEASE_DIR/src/monitor_app/epicprod_logging.py" >/dev/null 2>&1; then
-        LIVE_PUBLISHER_CHANGED=true
-    fi
+    for publisher_path in management/commands/publish_epicprod_live.py \
+            epicprod_logging.py notice_router.py notice_plugins.py live_notices.py; do
+        if [ -z "$PREV_RELEASE" ] || \
+                ! diff -q "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/$publisher_path" \
+                          "$RELEASE_DIR/src/monitor_app/$publisher_path" >/dev/null 2>&1; then
+            LIVE_PUBLISHER_CHANGED=true
+            break
+        fi
+    done
 fi
 
 # Health check — confirm Apache is serving before restarting bots
@@ -369,6 +460,11 @@ log "Cleaning up old releases..."
 cd "$DEPLOY_ROOT/releases"
 ls -1t | tail -n +6 | xargs rm -rf 2>/dev/null || true
 
+if [ -n "$AGENT_FAILURES" ]; then
+    log "❌ DEPLOYMENT INCOMPLETE: agents not running:$AGENT_FAILURES"
+    log "Active release: $(basename "$RELEASE_DIR")"
+    exit 2
+fi
 log "Deployment completed successfully!"
 log "Active release: $(basename "$RELEASE_DIR")"
 log "Git commit: $(cd $RELEASE_DIR && git rev-parse --short HEAD)"

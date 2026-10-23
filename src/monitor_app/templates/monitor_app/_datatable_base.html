@@ -226,6 +226,20 @@ $(document).ready(function() {
         }
     });
 
+    // Days links navigate with the LIVE filter state; their hrefs
+    // carry only render-time values and go stale once a filter
+    // changes client-side.
+    $(document).on('click', 'a.swf-days-link', function (e) {
+        e.preventDefault();
+        const params = new URLSearchParams();
+        Object.keys(currentFilters).forEach(function (key) {
+            if (currentFilters[key]) params.set(key, currentFilters[key]);
+        });
+        params.set('days', this.getAttribute('data-days'));
+        window.location.href =
+            window.location.pathname + '?' + params.toString();
+    });
+
     // URL and filter management functions
     function updateUrlAndFilters() {
         // Update URL with current filters

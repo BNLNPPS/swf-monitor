@@ -8,7 +8,7 @@ The service is the Echelon 1 anchor of the MCP-based AI backplane spanning
 the machine, the DAQ, and global computing — the E0 side per the DAQ
 AI-readiness plan (J. Landgraf, July 2026). The figure is maintained here;
 the source extracts behind it are in the swf-testbed
-[E0-E1 interface source notes](https://github.com/BNLNPPS/swf-testbed/blob/infra/baseline-v39/docs/e0-e1-interface-source-notes.md):
+[E0-E1 interface source notes](https://github.com/BNLNPPS/swf-testbed/blob/main/docs/e0-e1-interface-source-notes.md):
 
 [![The MCP-based AI backplane](mcp-ai-backplane-v1.svg)](mcp-ai-backplane-v1.svg)
 
@@ -41,7 +41,9 @@ The ASGI worker runs separately from the mod_wsgi Django site. This isolates MCP
 failures from the browser UI and REST API. `MCPRequestGuard` in
 `mcp_asgi.py` handles the transport and bearer-token gate: `/health` is open for
 the watchdog; other requests require POST plus `Authorization: Bearer
-<MCP_BEARER_TOKEN>`.
+<MCP_BEARER_TOKEN>`, or, for the swf-remote tunnel, the localhost hop with
+`X-Remote-User`, which the guard accepts as that user and publishes to the
+tools as the caller (EXTERNAL_ACCESS.md, MCP through the proxy).
 
 JLab and BNL Rucio are credentialed locally on swf-testbed and exposed as
 prefixed read-only tools on this same authenticated endpoint. Remote clients do
@@ -113,12 +115,14 @@ The full tool catalog is in [MCP tool reference](MCP_TOOL_REFERENCE.md).
 | AI Proposals | `ai_list_proposals`, `ai_decide_proposal` | 2 |
 | Campaign Status | `epicprod_campaign_status` | 1 |
 | Action Stream | `epicprod_list_actions` | 1 |
+| Storage Record | `epicprod_storage` | 1 |
+| Snapper State History | `snapper_latest`, `snapper_state_at`, `snapper_component_history`, `snapper_changes_between`, `snapper_context_around`, `snapper_series`, `snapper_cut_summary` | 7 |
 | PCS Tags | `pcs_list_tags`, `pcs_get_tag`, `pcs_search_tags` | 3 |
 | PCS Datasets and Prod Tasks | `pcs_dataset_list`, `pcs_dataset_get`, `pcs_dataset_intake`, `pcs_prodtask_list`, `pcs_prodtask_get`, `pcs_prodtask_artifact`, `pcs_prodtask_intake`, `pcs_prodtask_link_input`, `pcs_prodtask_set_status` | 9 |
-| PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers` | 10 |
-| JLab Rucio | `jlab_rucio_*` — scopes, DIDs, metadata, content/files, rules/locks, replicas, RSEs, account usage | 13 |
-| BNL Rucio | `bnl_rucio_*` — scopes, DIDs, metadata, content/files, rules/locks, replicas, RSEs, account usage | 13 |
-| **Total** | | **86** |
+| PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers`, `panda_segfault_catalog`, `panda_segfault_signature`, `panda_segfault_findings`, `panda_segfault_finding_set`, `panda_segfault_reproduce` | 12 |
+| JLab Rucio | `jlab_rucio_*` — scopes, DIDs, dataset summaries, metadata, content/files, rules/locks, replicas, RSEs, account usage | 14 |
+| BNL Rucio | `bnl_rucio_*` — scopes, DIDs, dataset summaries, metadata, content/files, rules/locks, replicas, RSEs, account usage | 14 |
+| **Total** | | **90** |
 
 ## Implementation Files
 

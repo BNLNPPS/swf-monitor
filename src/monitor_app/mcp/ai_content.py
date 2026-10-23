@@ -18,6 +18,7 @@ from ai.assessments import (
 from ai.corun_client import CorunAPIError, CorunClient, corun_configured
 from monitor_app.epicprod_logging import log_epicprod_action
 from monitor_app.mcp import mcp
+from monitor_app.mcp.common import requires_authority
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +172,42 @@ def _register_ai_assessment_sync(
     # assessment calling for attention reaches operators without any
     # additional machinery (EPICPROD_ASSESSMENTS.md § Architecture).
     verdict = str(payload_data.get('verdict') or '').strip().lower()
+    # Report links are for people: slotted assessments get the slot-form
+    # path (campaign/kind/date); the page-group UUID form is the fallback
+    # for unslotted content only.
+    slot_parts = [p for p in str(payload_data.get('slot') or '').split('/') if p]
+    if len(slot_parts) == 3:
+        kind_part = 'daily' if slot_parts[1] == 'nightly' else slot_parts[1]
+        report_path = (f'/ai/assessments/{slot_parts[0]}/'
+                       f'{kind_part}/{slot_parts[2]}/')
+    elif page_group_id:
+        report_path = f'/ai/assessments/{page_group_id}/'
+    else:
+        report_path = ''
+    # A salvage or quarantine registration names itself in the title and
+    # explains itself in the summary, since it carries no narration
+    # (EPICPROD_ASSESSMENTS_V1.md: marked in the title, at warning or
+    # above).
+    severity = {'attention': 'warning', 'alarm': 'alarm'}.get(verdict, 'info')
+    outcome_attrs = {}
+    harness = payload_data.get('generation_harness') or {}
+    if payload_data.get('salvaged'):
+        failed = str(payload_data.get('run_failed') or 'the run failed')
+        rerun = ('rerun submitted' if harness.get('rerun_job_id')
+                 else 'no rerun, the retry was already spent')
+        outcome_attrs = {
+            'operation': 'assessment salvage',
+            'summary': f'salvage after a failed run ({failed}); {rerun}',
+        }
+    elif payload_data.get('quarantined'):
+        count = len(payload_data.get('problems') or [])
+        outcome_attrs = {
+            'operation': 'assessment quarantine',
+            'summary': (f'quarantined after retry: {count} validation '
+                        f'problem{"s" if count != 1 else ""}'),
+        }
+    if outcome_attrs and severity == 'info':
+        severity = 'warning'
     log_epicprod_action(
         'mcp', 'assessment_register',
         subject_type=canonical_type,
@@ -182,10 +219,14 @@ def _register_ai_assessment_sync(
         linked=linked,
         corun_page_group_id=page_group_id,
         report_title=report_title,
-        report_path=(f'/ai/assessments/{page_group_id}/'
-                     if page_group_id else ''),
+        report_path=report_path,
         assessment_kind=str(payload_data.get('assessment_kind') or ''),
         narration=str(payload_data.get('narration') or '')[:600],
+        # Notice-routing attributes (NOTICE_ROUTING.md): severity from
+        # the verdict, url to the report page.
+        severity=severity,
+        url=report_path,
+        **outcome_attrs,
         **({'verdict': verdict} if verdict else {}),
     )
     return {
@@ -331,6 +372,7 @@ def _get_ai_content_sync(ids=None, corun_page_group_ids=None):
 
 
 @mcp.tool()
+@requires_authority
 async def epic_register_ai_assessment(
     subject_type: str,
     subject_key: str,

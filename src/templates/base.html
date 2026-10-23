@@ -19,6 +19,51 @@
         } catch (e) {}
         if (mode !== 'testbed') mode = 'production';
         document.documentElement.setAttribute('data-nav-mode', mode);
+        /* The user view follows the URL alone: ?user_view=1 renders it,
+           any other request renders the full view. Nothing is remembered
+           in the browser (Torre, 2026-09-10: no flag in the URL, no user
+           view). A value an earlier version stored is cleared. */
+        var routeUserView = '{{ user_view_param|default:""|escapejs }}';
+        try { localStorage.removeItem('userView'); } catch (e) {}
+        if (routeUserView === '1') document.documentElement.setAttribute('data-user-view', '1');
+    })();
+    /* Poll gate: a page polls only while someone is with it. Visibility
+       alone does not establish that — the frontmost tab of a background
+       window reports itself visible, so an unattended window polls
+       forever. A page is attended while it is visible and either its
+       window holds focus or it was interacted with inside the idle
+       window. Pollers ask attended() before every request and register
+       onReturn() to catch up when attention comes back. Defined here,
+       ahead of the content block, so page scripts can use it. */
+    window.swfPollGate = (function() {
+        var idleMs = 5 * 60 * 1000;
+        var lastInteraction = Date.now();
+        var returnHandlers = [];
+        function attended() {
+            if (document.hidden) return false;
+            if (document.hasFocus && document.hasFocus()) return true;
+            return (Date.now() - lastInteraction) < idleMs;
+        }
+        function noteAttention() {
+            var wasAttended = attended();
+            lastInteraction = Date.now();
+            if (wasAttended) return;
+            returnHandlers.forEach(function(fn) {
+                try { fn(); } catch (e) {}
+            });
+        }
+        ['focus', 'pointerdown', 'keydown', 'wheel', 'touchstart']
+            .forEach(function(evt) {
+                window.addEventListener(evt, noteAttention,
+                                        {passive: true, capture: true});
+            });
+        document.addEventListener('visibilitychange', function() {
+            if (!document.hidden) noteAttention();
+        });
+        return {
+            attended: attended,
+            onReturn: function(fn) { returnHandlers.push(fn); }
+        };
     })();
     </script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
@@ -163,7 +208,9 @@
       .swf-table-frame.swf-wide-table-scroll {
         max-height: var(--swf-table-max-height, 70vh);
         overflow: auto;
-        overscroll-behavior: contain;
+        /* Scrolling chains to the page at the frame's ends, so the wheel
+           brings the matter above back when the table is at its top. */
+        overscroll-behavior: auto;
         scrollbar-gutter: stable;
       }
       .swf-wide-table-scroll > table {
@@ -171,6 +218,70 @@
       }
       .swf-wide-table-scroll > table thead th {
         top: 0;
+      }
+      /* Optional two-tier latch: a one-line table title sits above the
+         ordinary column headings. Both tiers use the established sticky-th
+         behavior and remain bounded by the table. The fixed one-line title
+         height keeps the second tier seated exactly beneath it without a
+         script-time measurement or jump. */
+      table.swf-latch-titled-head {
+        --swf-latch-title-height: 2rem;
+        --swf-latch-column-height: 2rem;
+        --swf-latch-section-height: 2rem;
+      }
+      table.swf-latch-titled-head thead tr.swf-latch-title-row > th {
+        top: var(--swf-nav-height, 0px);
+        height: var(--swf-latch-title-height);
+        line-height: 1.5rem;
+        white-space: nowrap;
+        z-index: 102;
+      }
+      table.swf-latch-titled-head thead tr.swf-latch-title-row + tr > th {
+        top: calc(var(--swf-nav-height, 0px)
+                  + var(--swf-latch-title-height));
+        height: var(--swf-latch-column-height);
+        line-height: 1.5rem;
+        white-space: nowrap;
+        z-index: 101;
+      }
+      table.swf-latch-titled-head tbody tr.swf-latch-section-row > * {
+        position: sticky;
+        top: calc(var(--swf-nav-height, 0px)
+                  + var(--swf-latch-title-height)
+                  + var(--swf-latch-column-height));
+        z-index: 100;
+        height: var(--swf-latch-section-height);
+        line-height: 1.5rem;
+        white-space: nowrap;
+        background-color: var(--bs-table-bg,
+                              var(--bs-secondary-bg, #e2e3e5));
+        box-shadow: inset 1px 0 0 #dee2e6,
+                    inset 0 -1px 0 #dee2e6;
+      }
+      table.swf-latch-titled-head tbody tr.swf-pc-anchor {
+        scroll-margin-top: calc(var(--swf-nav-height, 0px)
+                                + var(--swf-latch-title-height)
+                                + var(--swf-latch-column-height) + .5rem);
+      }
+      table.swf-latch-titled-head.swf-latch-section-heads
+          tbody tr.swf-pc-anchor {
+        scroll-margin-top: calc(var(--swf-nav-height, 0px)
+                                + var(--swf-latch-title-height)
+                                + var(--swf-latch-column-height)
+                                + var(--swf-latch-section-height) + .5rem);
+      }
+      .swf-wide-table-scroll > table.swf-latch-titled-head
+          thead tr.swf-latch-title-row > th {
+        top: 0;
+      }
+      .swf-wide-table-scroll > table.swf-latch-titled-head
+          thead tr.swf-latch-title-row + tr > th {
+        top: var(--swf-latch-title-height);
+      }
+      .swf-wide-table-scroll > table.swf-latch-titled-head
+          tbody tr.swf-latch-section-row > * {
+        top: calc(var(--swf-latch-title-height)
+                  + var(--swf-latch-column-height));
       }
       /* Wide tables pin two leading columns by default so a compact ID can
          retain the useful name beside it. data-swf-pin-columns can lower
@@ -213,9 +324,14 @@
         display: flex;
         gap: .8em;
       }
+      /* Its own line, right-aligned. It was floated, so every page header
+         that paints a full-width band wrapped around it: the band stopped
+         at the float and the stamp sat in the notch, over the page's own
+         chrome. */
       .main-time-info {
         color: #667085;
-        float: right;
+        display: block;
+        text-align: right;
         font-size: .75rem;
         margin: -.25rem 0 .25rem 1rem;
         white-space: nowrap;
@@ -257,8 +373,12 @@
         z-index: 1;
       }
 
-      /* Links inside the dropdown */
-      .dropdown-content a {
+      /* Links inside the dropdown. The selector carries three classes on
+         purpose: the menu-bar rule is `.sticky-header > nav a` (white on
+         #333) and outranks a bare `.dropdown-content a`, which painted
+         every menu item white on the panel's near-white background and
+         left the menus unreadable. */
+      .sticky-header .dropdown .dropdown-content a {
         color: black;
         padding: 12px 16px;
         text-decoration: none;
@@ -290,6 +410,35 @@
       #mode-label .mode-title { display: none; }
       html[data-nav-mode="production"] #mode-label .mode-title-production,
       html[data-nav-mode="testbed"] #mode-label .mode-title-testbed { display: inline; }
+      /* User view: the reduced nav replaces the mode nav, and the brand
+         reads "epicprod User View" and links to the user view home. */
+      html[data-user-view="1"][data-nav-mode] .nav-production,
+      html[data-user-view="1"][data-nav-mode] .nav-testbed { display: none; }
+      html[data-user-view="1"] .nav-user { display: contents; }
+      #mode-user-brand { display: none; }
+      html[data-user-view="1"] #mode-flipper { display: none; }
+      html[data-user-view="1"] #mode-user-brand {
+        display: inline-block;
+        border-right: 1px solid rgba(255,255,255,.2);
+        color: #fff;
+        font-weight: 700;
+        padding-right: 12px;
+        margin-right: 4px;
+        text-decoration: none;
+      }
+      /* Top-level user-view links take the menu-bar blue of the dropdown
+         buttons; the selector outranks style.css's `.sticky-header > nav a`. */
+      .sticky-header > nav a.nav-user-link,
+      .sticky-header > nav a.nav-user-item { color: #8fc7e8; }
+      .nav-user-link { font-weight: 700; }
+      .nav-user-exit { margin-left: 2.5em; }
+      /* In the user view the only white text is the brand: the System
+         menu and the built-at line are not shown, and the account links
+         take the menu-bar blue. */
+      html[data-user-view="1"] #nav-system,
+      html[data-user-view="1"] .main-time-info { display: none; }
+      html[data-user-view="1"] .sticky-header > nav .nav-auth,
+      html[data-user-view="1"] .sticky-header > nav .nav-auth a { color: #8fc7e8; }
       .nav-label {
         color: #fff;
         font-weight: 700;
@@ -425,6 +574,7 @@
     </script>
     <div class="sticky-header">
     <nav>
+        <a id="mode-user-brand" href="{% url 'monitor_app:prod_hub' %}?user_view=1">epicprod User View</a>
         <div class="dropdown" id="mode-flipper">
             <button class="dropbtn" id="mode-label">
                 <span class="mode-title mode-title-production">epicprod</span>
@@ -433,6 +583,8 @@
             <div class="dropdown-content">
                 <a href="{% url 'monitor_app:prod_hub' %}" id="flip-production" onclick="setNavMode('production');">epicprod - ePIC Production</a>
                 <a href="{% if is_tunnel %}https://pandaserver02.sdcc.bnl.gov/swf-monitor/testbed/{% else %}{% url 'monitor_app:testbed_hub' %}{% endif %}" id="flip-testbed" onclick="setNavMode('testbed');">ePIC Testbed</a>
+                {# The user view is a URL, not a nav mode: a plain link, no mode change. #}
+                <a href="{% url 'monitor_app:prod_hub' %}?user_view=1" id="flip-user-view">epicprod User View</a>
             </div>
         </div>
 
@@ -466,11 +618,11 @@
             <div class="dropdown-content">
                 <a href="{% url 'monitor_app:panda_hub' %}" class="{% if active_nav.panda_hub %}nav-active{% endif %}">PanDA/Rucio Hub</a>
                 <a href="{% url 'monitor_app:panda_activity' %}" class="{% if active_nav.panda_activity %}nav-active{% endif %}">Activity</a>
-                <a href="{% url 'monitor_app:panda_jobs_list' %}" class="{% if active_nav.panda_jobs %}nav-active{% endif %}">Jobs</a>
                 <a href="{% url 'monitor_app:panda_tasks_list' %}" class="{% if active_nav.panda_tasks %}nav-active{% endif %}">Tasks</a>
+                <a href="{% url 'monitor_app:panda_jobs_list' %}" class="{% if active_nav.panda_jobs %}nav-active{% endif %}">Jobs</a>
                 <a href="{% url 'monitor_app:panda_errors_list' %}" class="{% if active_nav.panda_errors %}nav-active{% endif %}">Errors</a>
-                <a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="{% if active_nav.panda_diagnostics %}nav-active{% endif %}">Diagnostics</a>
-                <a href="{% url 'monitor_app:epic_queues_list' %}" class="{% if active_nav.panda_queues %}nav-active{% endif %}">EIC PanDA Queues</a>
+                <a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="{% if active_nav.panda_diagnostics %}nav-active{% endif %}">Job diagnostics</a>
+                <a href="{% url 'monitor_app:epic_queues_list' %}" class="{% if active_nav.panda_queues %}nav-active{% endif %}">PanDA queues</a>
                 <a href="{% url 'monitor_app:panda_database_tables_list' %}" class="{% if active_nav.panda_database %}nav-active{% endif %}">PanDA Database</a>
                 <a href="{% url 'monitor_app:idds_database_tables_list' %}" class="{% if active_nav.idds_database %}nav-active{% endif %}">iDDS Database</a>
                 <a href="{% url 'monitor_app:rucio_endpoints_list' %}" class="{% if active_nav.rucio_endpoints %}nav-active{% endif %}">Rucio Endpoints</a>
@@ -478,16 +630,37 @@
         </div>
         </span>
 
-        {# ── Production mode ── #}
-        {# SYNC OBLIGATION: swf-remote renders its own copy of this production nav (swf-remote src/templates/base.html) for its natively served pages. #}
-        {# Any change to this nav block must be mirrored there — notify/hand off to the devcloud (ec2dev) side with every nav change. #}
-        <span class="nav-mode nav-production">
+        {# ── User view: the reduced epicprod face, entered with ?user_view=1 ── #}
+        <span class="nav-mode nav-user">
         <div class="dropdown">
             <button class="dropbtn{% if active_nav.requests %} nav-active{% endif %}">Requests</button>
             <div class="dropdown-content">
-                <a href="https://docs.google.com/forms/d/e/1FAIpQLScDqiEaHayAcwBDGAWa4W6k-6yUFzS-XiWuhLolpy64mLk5FA/viewform" target="_blank" rel="noopener">Google request form</a>
+                <a href="{% url 'pcs:pcs_request_composer' %}?user_view=1">Request form</a>
+                <a href="{% url 'pcs:questionnaires_list' %}?user_view=1">Request list</a>
+            </div>
+        </div>
+        <div class="dropdown">
+            <button class="dropbtn{% if active_nav.campaigns %} nav-active{% endif %}">Campaign</button>
+            <div class="dropdown-content">
+                <a href="{% url 'pcs:pcs_campaign_plan' %}?user_view=1">Current campaign</a>
+                <a href="{% url 'pcs:pcs_catalog' %}?user_view=1">Campaign Catalog</a>
+            </div>
+        </div>
+        <a href="{% url 'pcs:find_data' %}?user_view=1" class="nav-user-item{% if active_nav.find_data %} nav-active{% endif %}">Find data</a>
+        <a href="{% url 'monitor_app:prod_hub' %}?user_view=0" class="nav-user-item nav-user-exit">Full epicprod view</a>
+        </span>
+
+        {# ── Production mode ── #}
+        {# This nav is the only copy: swf-remote fetches it from the hub for its own pages. #}
+        <span class="nav-mode nav-production">
+        <a href="{% url 'monitor_app:prod_hub' %}?user_view=1" class="nav-user-link">User view</a>
+        <div class="dropdown">
+            <button class="dropbtn{% if active_nav.requests %} nav-active{% endif %}">Requests</button>
+            <div class="dropdown-content">
                 <a href="{% url 'pcs:pcs_request_composer' %}">Request Production</a>
-                <a href="{% url 'pcs:questionnaires_list' %}">Request list</a>
+                {% comment %}The Google Form intake is retired (2026-09-10); the link stays in the code and is not shown.{% endcomment %}
+                {% if False %}<a href="https://docs.google.com/forms/d/e/1FAIpQLScDqiEaHayAcwBDGAWa4W6k-6yUFzS-XiWuhLolpy64mLk5FA/viewform" target="_blank" rel="noopener">Google request form</a>{% endif %}
+                <a href="{% url 'pcs:questionnaires_list' %}">Production Requests</a>
             </div>
         </div>
         <div class="dropdown">
@@ -501,8 +674,11 @@
                 <a href="{% url 'pcs:tag_compose' tag_type='r' %}" class="{% if active_nav.pcs_reco_tags %}nav-active{% endif %}">Reco Tags</a>
                 <a href="{% url 'pcs:tag_compose' tag_type='k' %}" class="{% if active_nav.pcs_background_tags %}nav-active{% endif %}">Background Tags</a>
                 <a href="{% url 'pcs:datasets_compose' %}" class="{% if active_nav.pcs_datasets %}nav-active{% endif %}">Datasets</a>
+                <a href="{% url 'pcs:evgen_inputs' %}" class="{% if active_nav.pcs_evgen_inputs %}nav-active{% endif %}">EVGEN Inputs</a>
+                <a href="{% url 'pcs:pc_ingest' %}" class="{% if active_nav.pcs_ingest %}nav-active{% endif %}">PC ingest</a>
                 <a href="{% url 'pcs:prod_configs_compose' %}" class="{% if active_nav.pcs_configs %}nav-active{% endif %}">Prod Configs</a>
                 <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks" class="{% if active_nav.pcs_tasks %}nav-active{% endif %}">Prod Tasks</a>
+                <a href="{% url 'pcs:trials_list' %}" class="{% if active_nav.pcs_trials %}nav-active{% endif %}">Prod trials</a>
             </div>
         </div>
         <div class="dropdown">
@@ -517,32 +693,64 @@
             </div>
         </div>
         <div class="dropdown">
+            <button class="dropbtn{% if active_nav.data %} nav-active{% endif %}">Data</button>
+            <div class="dropdown-content">
+                <a href="{% url 'pcs:find_data' %}" class="{% if active_nav.find_data %}nav-active{% endif %}">Find data</a>
+                <a href="{% url 'pcs:evgen_inputs' %}" class="{% if active_nav.pcs_evgen_inputs %}nav-active{% endif %}">EVGEN Inputs</a>
+                <a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='storage' %}" class="{% if active_nav.snapper_storage %}nav-active{% endif %}">Snapper storage view</a>
+                <a href="{% url 'pcs:storage_listings' listing='ghosts' %}" class="{% if active_nav.pcs_storage %}nav-active{% endif %}">Storage exceptions</a>
+                <a href="{% url 'pcs:request_size_plot' %}" class="{% if active_nav.pcs_request_sizes %}nav-active{% endif %}">Request size plot</a>
+                <a href="{% url 'pcs:stash_page' %}">Failover stash</a>
+                <a href="{% url 'pcs:validation_v1_index' %}">Validation API</a>
+            </div>
+        </div>
+        <div class="dropdown">
             <button class="dropbtn{% if active_nav.ai_content %} nav-active{% endif %}">AI</button>
             <div class="dropdown-content">
-                <a href="{% url 'monitor_app:ai_content_list' %}" class="{% if active_nav.ai_content %}nav-active{% endif %}">Assessments</a>
-                <a href="{% url 'ai:ai_proposals' %}">Proposals</a>
+                <a href="{% url 'monitor_app:ai_content_list' %}" class="{% if active_nav.ai_content %}nav-active{% endif %}">Campaign Assessments</a>
+                <a href="{% url 'ai:ai_proposals' %}">AI Proposals</a>
+                <a href="{% url 'ai:ai_narratives' %}">Campaign Narratives</a>
+                <a href="{{ request.META.SCRIPT_NAME }}/mcp/" title="Connect an AI assistant to this monitor's MCP tools">MCP</a>
             </div>
         </div>
         <strong class="nav-label nav-panda-label">PanDA</strong>
-        <a href="{% url 'monitor_app:panda_activity' %}" class="{% if active_nav.panda_activity %}nav-active{% endif %}">Activity</a>
-        <a href="{% url 'monitor_app:panda_tasks_list' %}" class="{% if active_nav.panda_tasks %}nav-active{% endif %}">Tasks</a>
-        <a href="{% url 'monitor_app:panda_jobs_list' %}" class="{% if active_nav.panda_jobs %}nav-active{% endif %}">Jobs</a>
-        <a href="{% url 'monitor_app:panda_errors_list' %}" class="{% if active_nav.panda_errors %}nav-active{% endif %}">Errors</a>
-        <a href="{% url 'monitor_app:log_list' %}?app_name=epicprod" class="{% if active_nav.logs %}nav-active{% endif %}">Logs</a>
-        <a href="{% url 'monitor_app:alarms_dashboard' %}" class="{% if active_nav.alarms %}nav-active{% endif %}">Alarms</a>
-        <a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="{% if active_nav.panda_diagnostics %}nav-active{% endif %}">Diagnostics</a>
+        <div class="dropdown">
+            <button class="dropbtn{% if active_nav.panda_activity or active_nav.panda_tasks or active_nav.panda_jobs %} nav-active{% endif %}">Activity</button>
+            <div class="dropdown-content">
+                <a href="{% url 'monitor_app:panda_activity' %}" class="{% if active_nav.panda_activity %}nav-active{% endif %}">Activity summary</a>
+                <a href="{% url 'monitor_app:panda_tasks_list' %}" class="{% if active_nav.panda_tasks %}nav-active{% endif %}">Tasks</a>
+                <a href="{% url 'monitor_app:panda_jobs_list' %}" class="{% if active_nav.panda_jobs %}nav-active{% endif %}">Jobs</a>
+                <a href="{% url 'monitor_app:panda_front' %}">Pressure front</a>
+            </div>
+        </div>
+        <div class="dropdown">
+            <button class="dropbtn{% if active_nav.panda_errors or active_nav.panda_segfaults or active_nav.alarms or active_nav.panda_diagnostics %} nav-active{% endif %}">Diagnostics</button>
+            <div class="dropdown-content">
+                <a href="{% url 'monitor_app:panda_errors_list' %}" class="{% if active_nav.panda_errors %}nav-active{% endif %}">Error summary</a>
+                <a href="{% url 'monitor_app:panda_segfaults' %}" class="{% if active_nav.panda_segfaults %}nav-active{% endif %}">Segfault catalog</a>
+                <a href="{% url 'monitor_app:panda_segfault_findings' %}">Segfault findings</a>
+                <a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='errors' %}">Snapper error view</a>
+                <a href="{% url 'monitor_app:alarms_dashboard' %}" class="{% if active_nav.alarms %}nav-active{% endif %}">Alarms</a>
+                <a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="{% if active_nav.panda_diagnostics %}nav-active{% endif %}">Job diagnostics</a>
+            </div>
+        </div>
         <div class="dropdown">
             <button class="dropbtn{% if active_nav.sites %} nav-active{% endif %}">Sites</button>
             <div class="dropdown-content">
-                <a href="{% url 'monitor_app:compute_usage' %}" class="{% if active_nav.compute_usage %}nav-active{% endif %}">Site usage</a>
                 <a href="{% url 'monitor_app:epic_queues_list' %}" class="{% if active_nav.panda_queues %}nav-active{% endif %}">PanDA queues</a>
+                <a href="{% url 'monitor_app:compute_usage' %}" class="{% if active_nav.compute_usage %}nav-active{% endif %}">Site compute usage</a>
+                <a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='site' %}">Snapper site view</a>
+                <a href="{% url 'canary:probes_page' %}" class="{% if active_nav.canary %}nav-active{% endif %}">Canary probes</a>
+                <a href="{% url 'monitor_app:panda_node_guard' %}" class="{% if active_nav.panda_node_guard %}nav-active{% endif %}">Node guard</a>
+                <a href="{% url 'monitor_app:panda_storage_doors' %}" class="{% if active_nav.panda_storage_doors %}nav-active{% endif %}">Storage doors</a>
             </div>
         </div>
         <a href="{% url 'monitor_app:analysis' %}" class="nav-analysis{% if active_nav.analysis %} nav-active{% endif %}">Analysis</a>
+        <a href="{% url 'monitor_app:log_list' %}?app_name=epicprod" class="{% if active_nav.logs %}nav-active{% endif %}">Logs</a>
         </span>
         <span class="nav-spacer"></span>
-        <div class="dropdown">
-            <button class="dropbtn{% if system_status_overall == 'error' %} nav-system-error{% endif %}{% if active_nav.system or active_nav.snapper or active_nav.canary or active_nav.about %} nav-active{% endif %}"
+        <div class="dropdown" id="nav-system">
+            <button class="dropbtn{% if system_status_overall == 'error' %} nav-system-error{% endif %}{% if active_nav.system or active_nav.snapper or active_nav.about %} nav-active{% endif %}"
                     id="system-status-nav-link"
                     data-system-status="{{ system_status_overall|default:'unknown' }}"
                     data-system-status-url="{% url 'monitor_app:system_status_json' %}"
@@ -553,18 +761,25 @@
                    id="system-status-dropdown-link"
                    class="{% if system_status_overall == 'error' %}nav-system-error{% endif %}{% if active_nav.system %} nav-active{% endif %}">System Status</a>
                 <a href="{% url 'snapper_ai:snapper_report' scope='epicprod' %}"
-                   class="{% if active_nav.snapper %}nav-active{% endif %}">Snapper</a>
-                <a href="{% url 'canary:canary_page' %}"
-                   class="{% if active_nav.canary %}nav-active{% endif %}">Canary</a>
+                   class="{% if active_nav.snapper %}nav-active{% endif %}">Snapper report</a>
+                <a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='platform' %}">Platform status</a>
+                {% if teamcomms_url %}
+                    <a href="{{ teamcomms_url }}">TeamComms</a>
+                {% endif %}
+                {% if may_administer_users %}
+                    <a href="{% url 'monitor_app:user_admin' %}"
+                       class="{% if active_nav.user_admin %}nav-active{% endif %}">User admin</a>
+                {% endif %}
                 {% if user.is_authenticated and user.is_staff %}
                     <a href="{% url 'admin:index' %}">Admin</a>
                 {% endif %}
+                <a href="{{ request.META.SCRIPT_NAME }}/mcp/" title="Connect an AI assistant to this monitor's MCP tools">MCP</a>
                 <a href="{% url 'monitor_app:about' %}" class="{% if active_nav.about %}nav-active{% endif %}">About</a>
             </div>
         </div>
         <div class="nav-auth">
             {% if user.is_authenticated %}
-                <a href="{% url 'monitor_app:account' %}" class="{% if active_nav.account %}nav-active{% endif %}">{{ user.username }}</a>
+                <a href="{% url 'monitor_app:account' %}{% if user_view %}?user_view=1{% endif %}" class="{% if active_nav.account %}nav-active{% endif %}">{{ user.username }}</a>
                 <form method="post" action="{% url 'logout' %}" style="display:inline;margin:0;">{% csrf_token %}<button type="submit" style="background:none;border:none;color:inherit;cursor:pointer;padding:0;font:inherit;">Logout</button></form>
             {% else %}
                 <a href="{% url 'login' %}?next={{ request.get_full_path|urlencode }}">Login</a>
@@ -644,6 +859,7 @@ function applyNavMode(mode) {
     }
     function pollSystemStatus() {
         if (!statusUrl || !window.fetch) return;
+        if (!window.swfPollGate.attended()) return;
         fetch(statusUrl, {
             cache: 'no-store',
             credentials: 'same-origin',
@@ -668,6 +884,7 @@ function applyNavMode(mode) {
         dropdown.addEventListener('mouseenter', pollSystemStatus);
         dropdown.addEventListener('focusin', pollSystemStatus);
     }
+    window.swfPollGate.onReturn(pollSystemStatus);
     setInterval(refreshSystemNav, 10000);
     setInterval(pollSystemStatus, 60000);
 })();
@@ -694,7 +911,9 @@ function applyNavMode(mode) {
 
       /* The app-wide relative-time ticker: give any element
          data-relative-time="<ISO timestamp>" and its text renders and
-         ticks as 'just now' / 'Ns ago' / 'Nm ago' / 'Nh ago' / 'Nd ago'. */
+         ticks as 'just now' / 'Ns ago' / 'Nm ago' / 'Nh ago' / 'Nd ago'.
+         Optional data-relative-time-interval="<seconds>" slows that
+         element's redraw to every N seconds (default 1). */
       window.swfFormatElapsed = function (seconds) {
         if (seconds < 5) return 'just now';
         if (seconds < 60) return seconds + 's ago';
@@ -705,17 +924,43 @@ function applyNavMode(mode) {
         return Math.floor(hours / 24) + 'd ago';
       };
       (function () {
+        let n = 0;
         function tick() {
           const now = Date.now();
           document.querySelectorAll('[data-relative-time]').forEach(function (el) {
+            const every = parseInt(
+              el.getAttribute('data-relative-time-interval'), 10) || 1;
+            if (n % every !== 0) return;
             const ts = Date.parse(el.getAttribute('data-relative-time'));
             if (Number.isNaN(ts)) return;
             el.textContent = window.swfFormatElapsed(
               Math.max(0, Math.floor((now - ts) / 1000)));
           });
+          n += 1;
         }
         tick();
         setInterval(tick, 1000);
+      })();
+      /* Update-button click feedback: an element with class
+         swf-update-btn shows 'Updating...' while its navigation is in
+         flight. The label restores on pageshow (a back/forward-cache
+         return) and by a 20 s timeout (an aborted navigation), so it
+         can never stick. */
+      (function () {
+        function restore() {
+          document.querySelectorAll('.swf-update-btn[data-updating]').forEach(function (el) {
+            el.textContent = el.getAttribute('data-updating');
+            el.removeAttribute('data-updating');
+          });
+        }
+        document.addEventListener('click', function (ev) {
+          const el = ev.target.closest ? ev.target.closest('.swf-update-btn') : null;
+          if (!el || el.hasAttribute('data-updating')) return;
+          el.setAttribute('data-updating', el.textContent);
+          el.textContent = 'Updating...';
+          setTimeout(restore, 20000);
+        });
+        window.addEventListener('pageshow', restore);
       })();
       // Latching table headers latch beneath the sticky nav bar; expose
       // its measured height to the CSS above.
@@ -761,11 +1006,16 @@ function applyNavMode(mode) {
           if (!frame.classList.contains('swf-wide-table-scroll')) return;
           const nav = document.querySelector('.sticky-header');
           const navHeight = nav ? nav.offsetHeight : 0;
-          const top = Math.max(frame.getBoundingClientRect().top, navHeight);
+          // The region is sized to the whole height under the nav, wherever
+          // the frame sits, so the page keeps exactly (frame top - nav) to
+          // scroll: the matter above scrolls away until the header seats
+          // beneath the nav, where it latches. Until then the frame lets
+          // the wheel through (no vertical scrolling of its own), so
+          // scrolling anywhere moves the page first and the table after.
           const fullAvailable = Math.max(120, window.innerHeight - navHeight - 16);
-          const available = Math.max(
-            Math.min(240, fullAvailable), window.innerHeight - top - 16);
-          frame.style.setProperty('--swf-table-max-height', available + 'px');
+          frame.style.setProperty('--swf-table-max-height', fullAvailable + 'px');
+          const seated = frame.getBoundingClientRect().top <= navHeight + 1;
+          frame.style.overflowY = seated ? 'auto' : 'hidden';
         }
 
         function updateTableFrame(table) {
@@ -783,7 +1033,11 @@ function applyNavMode(mode) {
             return;
           }
 
-          const headerCells = table.querySelectorAll('thead tr:first-child > th');
+          const columnHeaderRow =
+            table.querySelector('thead tr.swf-latch-column-row')
+            || table.querySelector('thead tr:first-child');
+          const headerCells = columnHeaderRow
+            ? columnHeaderRow.querySelectorAll(':scope > th') : [];
           const pinned = Math.min(requestedPinnedColumns(table), headerCells.length);
           table.setAttribute('data-swf-active-pin-columns', String(pinned));
           if (pinned > 1) {
@@ -822,8 +1076,18 @@ function applyNavMode(mode) {
         $(function () {
           // House sortable tables get chrome-free DataTables sorting before
           // the adaptive frame measures their rendered column widths.
-          $('table.swf-sortable').DataTable({
-            paging: false, searching: false, info: false, order: []
+          // data-swf-order="N,desc" opts a table into a default sort.
+          $('table.swf-sortable').each(function () {
+            const spec = this.getAttribute('data-swf-order');
+            let order = [];
+            if (spec) {
+              const parts = spec.split(',');
+              order = [[parseInt(parts[0], 10) || 0,
+                        parts[1] === 'desc' ? 'desc' : 'asc']];
+            }
+            $(this).DataTable({
+              paging: false, searching: false, info: false, order: order
+            });
           });
           scheduleTableFrameUpdate();
         });

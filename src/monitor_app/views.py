@@ -47,6 +47,7 @@ from django.apps import apps
 from django.db import connection, transaction
 from django.utils import timezone
 from django.conf import settings as django_settings
+import html
 import logging
 import os
 import re
@@ -248,9 +249,22 @@ def account_view(request):
             logger.error('snapper embed failed for account page: %s', exc)
             snapper_embed = {'scope': 'testbed', 'error': str(exc)}
 
+    from .authority import (get_authority, is_ops, is_pac, may_act,
+                            may_set_priority)
+    authority_record = get_authority(request.user.username) \
+        if request.user.is_authenticated else None
+
     return render(request, 'monitor_app/account.html', {
         'form': form,
         'user': request.user,
+        'authority': {
+            'record': authority_record,
+            'may_act': bool(authority_record) and may_act(authority_record),
+            'is_ops': bool(authority_record) and is_ops(authority_record),
+            'is_pac': bool(authority_record) and is_pac(authority_record),
+            'may_set_priority': (bool(authority_record)
+                                 and may_set_priority(authority_record)),
+        } if authority_record else None,
         'panda_username': panda_username,
         'my_tasks': my_tasks,
         'my_tasks_error': my_tasks_error,
@@ -299,6 +313,25 @@ class SystemAgentViewSet(viewsets.ModelViewSet):
             instance_name=instance_name,
             defaults=defaults
         )
+
+        # The agent's own reports, merged into metadata (other keys stay):
+        # its heartbeat 'metadata' dict, and its ActiveMQ connection, since an
+        # agent that lost the broker still heartbeats here but receives nothing.
+        reported = request.data.get('metadata')
+        if reported is not None and not isinstance(reported, dict):
+            logger.warning(
+                f"Heartbeat from {instance_name}: metadata is "
+                f"{type(reported).__name__}, not an object; ignored")
+            reported = None
+        reported = dict(reported or {})
+        if 'mq_connected' in request.data:
+            reported['mq_connected'] = bool(request.data['mq_connected'])
+        if reported:
+            metadata = dict(agent.metadata or {})
+            if any(metadata.get(k) != v for k, v in reported.items()):
+                metadata.update(reported)
+                agent.metadata = metadata
+                agent.save(update_fields=['metadata'])
 
         # Piggyback: mark any stale agents as EXITED
         SystemAgent.mark_stale_agents()
@@ -471,6 +504,36 @@ class WorkflowExecutionViewSet(viewsets.ModelViewSet):
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticatedOrReadOnly]
     filterset_fields = ['status', 'namespace', 'executed_by']
+
+    TERMINAL_STATUSES = ('completed', 'failed')
+
+    def perform_update(self, serializer):
+        prev_status = serializer.instance.status
+        obj = serializer.save()
+        # Terminal transition = a named stream event for notice routing
+        # (docs/NOTICE_ROUTING.md); the run's notice stamp travels in
+        # parameter_values.
+        if (obj.status in self.TERMINAL_STATUSES
+                and prev_status not in self.TERMINAL_STATUSES):
+            from monitor_app.epicprod_logging import log_epicprod_action
+            params = obj.parameter_values or {}
+            elapsed = None
+            if obj.start_time and obj.end_time:
+                elapsed = round(
+                    (obj.end_time - obj.start_time).total_seconds(), 1)
+            log_epicprod_action(
+                'web', 'workflow_execution_completed',
+                subject_type='workflow_execution',
+                subject_key=obj.execution_id,
+                username=str(obj.executed_by or ''),
+                outcome='ok' if obj.status == 'completed' else 'error',
+                reason=('' if obj.status == 'completed'
+                        else 'workflow execution failed'),
+                sublevel='low', live_default=False,
+                namespace=obj.namespace, status=obj.status,
+                notice=bool(params.get('notice')),
+                url=f'/workflow-executions/{obj.execution_id}/',
+                elapsed_s=elapsed)
 
 
 # Fast Processing API ViewSets
@@ -2715,6 +2778,44 @@ def users_list(request):
 @api_view(['POST'])
 @authentication_classes([])
 @permission_classes([AllowAny])
+def jev_slash_command(request):
+    """Handle /jev from Mattermost: the physics configurations that answer
+    a request in plain words, ranked by Jev (swf-epicprod docs/JEV.md).
+
+    POST with token, text, user_name, response_url. A query ranked within
+    the week is answered at once; otherwise the prod-ops agent ranks it and
+    posts the answer to the response URL, and this reply says so."""
+    from decouple import config as decouple_config
+    from pcs.services import ServiceError, jev_like_request
+    from swf_epicprod.jev_like import mattermost_text
+
+    expected_token = decouple_config('MATTERMOST_JEV_SLASH_TOKEN', default='')
+    if not expected_token or request.data.get('token', '') != expected_token:
+        return JsonResponse({'text': 'Unauthorized.'}, status=401)
+    text = (request.data.get('text') or '').strip()
+    if not text:
+        return JsonResponse({'response_type': 'ephemeral', 'text': (
+            'Usage: `/jev <physics in your own words>`, for example '
+            '`/jev 18 on 275 neutral current DIS above Q2 of 10, radiative`. '
+            'Returns the physics configurations that answer it, ranked by Jev '
+            '(TypeSafe AI); experimental.')})
+    user = request.data.get('user_name', 'unknown')
+    try:
+        out = jev_like_request(text=text, created_by=f'mattermost:{user}',
+                               response_url=request.data.get('response_url', ''))
+    except ServiceError as exc:
+        return JsonResponse({'response_type': 'ephemeral', 'text': f'Jev: {exc}'})
+    if out.get('answer'):
+        return JsonResponse({'response_type': 'in_channel',
+                             'text': mattermost_text(out['answer'])})
+    return JsonResponse({'response_type': 'ephemeral',
+                         'text': f'Jev is ranking configurations for "{text}"; '
+                                 'the answer follows here in a few seconds.'})
+
+
+@api_view(['POST'])
+@authentication_classes([])
+@permission_classes([AllowAny])
 def panda_slash_command(request):
     """Handle /panda slash commands from Mattermost.
 
@@ -2773,9 +2874,16 @@ def panda_slash_command(request):
 
         if subcmd == 'errors':
             days = int(arg) if arg.isdigit() else 7
-            data = queries.error_summary(days=days, limit=10)
+            # Closed jobs are workflow disposals, not actual errors —
+            # excluded from the digest, named when present.
+            data = queries.error_summary(days=days, limit=10,
+                                         status='failed,cancelled')
             lines = [f"#### Top Errors (last {days} days)"]
             lines.append(f"Total error occurrences: {data.get('total_errors', 0)}")
+            closed = (data.get('status_counts') or {}).get('closed')
+            if closed:
+                lines.append(f"(+ {closed} closed — server workflow "
+                             f"disposals, excluded here)")
             for e in data.get('errors', []):
                 diag = (e.get('error_diag') or '')[:80]
                 lines.append(
@@ -3113,6 +3221,7 @@ def rucio_endpoints_list(request):
         {'name': 'endpoint_type', 'title': 'Type', 'orderable': True},
         {'name': 'is_tape', 'title': 'Tape', 'orderable': True},
         {'name': 'is_active', 'title': 'Active', 'orderable': True},
+        {'name': 'declared', 'title': 'Declared', 'orderable': False},
         {'name': 'updated_at', 'title': 'Updated', 'orderable': True},
         {'name': 'json', 'title': 'JSON', 'orderable': False},
     ]
@@ -3134,8 +3243,12 @@ def rucio_endpoints_datatable_ajax(request):
     from .utils import DataTablesProcessor, format_datetime
     
     # Initialize DataTables processor
-    columns = ['endpoint_name', 'site', 'endpoint_type', 'is_tape', 'is_active', 'updated_at', 'json']
+    columns = ['endpoint_name', 'site', 'endpoint_type', 'is_tape', 'is_active', 'declared', 'updated_at', 'json']
     dt = DataTablesProcessor(request, columns, default_order_column=0, default_order_direction='asc')
+    # What CRIC declares per endpoint: the rule in force or the next
+    # window (CONTINUOUS_PRODUCTION.md, Declared downtime).
+    from .declared import declared_for
+    declared = declared_for('endpoint')
     
     # Build base queryset
     queryset = RucioEndpoint.objects.all()
@@ -3167,9 +3280,15 @@ def rucio_endpoints_datatable_ajax(request):
         updated_str = format_datetime(endpoint.updated_at)
         json_link = f'<a href="{reverse("monitor_app:rucio_endpoint_json", args=[endpoint.endpoint_name])}">View JSON</a>'
         
+        slot = declared.get(endpoint.endpoint_name) or {}
+        declared_cell = html.escape(slot.get('line', ''))
+        if slot.get('active'):
+            declared_cell = f'<span class="offline_fill d-block px-1">{declared_cell}</span>'
+        elif slot.get('future'):
+            declared_cell = f'<span class="pending_fill d-block px-1">{declared_cell}</span>'
         data.append([
             endpoint_name_link, endpoint.site or '', endpoint.endpoint_type or '',
-            is_tape_badge, is_active_badge, updated_str, json_link
+            is_tape_badge, is_active_badge, declared_cell, updated_str, json_link
         ])
     
     return dt.create_response(data, records_total, records_filtered)
@@ -3192,9 +3311,15 @@ def rucio_endpoint_detail(request, endpoint_name):
             resource = endpoint.config_data['resource']
             summary_fields['resource_endpoint'] = resource.get('endpoint', '')
     
+    # What CRIC declares for the endpoint, in force and coming, and the
+    # history (CONTINUOUS_PRODUCTION.md, Declared downtime).
+    from .declared import for_detail_page
+    declared_now, declared_history = for_detail_page('endpoint', endpoint_name)
     context = {
         'endpoint': endpoint,
         'summary_fields': summary_fields,
+        'declared_now': declared_now,
+        'declared_history': declared_history,
     }
     return render(request, 'monitor_app/rucio_endpoint_detail.html', context)
 
@@ -3243,68 +3368,29 @@ def rucio_endpoints_all_json(request):
 @login_required
 @user_passes_test(lambda u: u.is_superuser)
 def update_panda_queues_from_github(request):
-    """Update PanDA queues from GitHub main branch. Requires superuser."""
-    import json
-    import urllib.request
+    """Refresh the PanDA queue inventory from PanDA's own queue table
+    (monitor_app/panda/queue_inventory.py), as every pressure-front cycle
+    does. Requires superuser. (The name is historical: the inventory was
+    once loaded from a static file on GitHub.)"""
     from django.contrib import messages
     from django.shortcuts import redirect
-    from datetime import datetime
-    import email.utils
-    
-    github_url = "https://raw.githubusercontent.com/BNLNPPS/swf-testbed/main/config/panda_queues.json"
-    repo_location = "BNLNPPS/swf-testbed"
-    file_path = "config/panda_queues.json"
-    github_file_url = "https://github.com/BNLNPPS/swf-testbed/blob/main/config/panda_queues.json"
-    
+    from .panda.queue_inventory import sync_queue_inventory
     try:
-        # Fetch JSON from GitHub
-        with urllib.request.urlopen(github_url) as response:
-            data = json.loads(response.read().decode())
-        
-        created_count = 0
-        updated_count = 0
-        for queue_name, config in data.items():
-            # Extract key fields from config
-            site = config.get('site', '')
-            queue_type = config.get('type', '')
-            
-            # Determine status based on config
-            status = 'active'  # Default to active
-            if config.get('status') == 'offline':
-                status = 'offline'
-            
-            _queue, created = PandaQueue.objects.update_or_create(
-                queue_name=queue_name,
-                defaults={
-                    'site': site,
-                    'queue_type': queue_type,
-                    'status': status,
-                    'config_data': config,
-                },
-            )
-            if created:
-                created_count += 1
-            else:
-                updated_count += 1
-        
+        result = sync_queue_inventory()
         from .epicprod_logging import log_epicprod_action
         log_epicprod_action(
             'web', 'queues_update',
             username=getattr(request.user, 'username', ''),
             sublevel='normal', live_default=True,
-            created=created_count, updated=updated_count)
-        messages.success(request, 
-            f'Successfully updated PanDA queues from GitHub '
-            f'({created_count} created, {updated_count} updated)<br>'
-            f'<strong>Repository:</strong> {repo_location}<br>'
-            f'<strong>File:</strong> {file_path}<br>'
-            f'<strong>View on GitHub:</strong> <a href="{github_file_url}" target="_blank">Click here to see what was loaded</a>',
-            extra_tags='safe'
-        )
-        
-    except Exception as e:
-        messages.error(request, f'Failed to update from GitHub: {str(e)}')
-    
+            created=result['created'], updated=result['updated'],
+            absent=result['absent'])
+        messages.success(
+            request,
+            f"Queue inventory refreshed from PanDA: {result['queues']} EIC queues, "
+            f"{result['created']} added, {result['updated']} updated, "
+            f"{result['absent']} no longer listed.")
+    except Exception as e:  # noqa: BLE001
+        messages.error(request, f'Queue inventory refresh failed: {e}')
     return redirect('monitor_app:panda_queues_list')
 
 
@@ -3445,20 +3531,45 @@ def prod_hub(request):
                                  username)
     else:
         tab = prefs.get('home_tab') if prefs.get('home_tab') in ('nav', 'ops') else 'nav'
+    from .cached_product import get_product
+    # The summary strip (swf-epicprod docs/EPICPROD_DASHBOARD.md), on
+    # both tabs: one campaign completion line per current or producing
+    # campaign, from the completion estimate (CAMPAIGN_DELIVERY.md,
+    # Completion). The estimate walks the campaign's editions and the
+    # daily delivery record, so it is served as a cached product.
+    summary_product = get_product(
+        'prod_hub_campaign_completion', _campaign_completion_lines,
+        ttl_seconds=600,
+        refresh=request.GET.get('refresh') == '1')
+    summary = {
+        'campaign_summary_lines': summary_product['value'] or [],
+        'campaign_summary_built_at': summary_product['built_at'],
+        # What CRIC declares, in force or coming, one line per target;
+        # nothing when nothing is declared (CONTINUOUS_PRODUCTION.md,
+        # Declared downtime). The record is read at most once a minute.
+        'declared_lines': _declared_lines(),
+    }
+    # The production root in the user view is the user view home
+    # (docs/USER_VIEW.md): https://epic-devcloud.org/prod/?user_view=1.
+    from .context_processors import _user_view
+    if _user_view(request) == '1':
+        return render(request, 'pcs/user_view_home.html', {
+            'nav_mode': 'production', **summary})
     if tab == 'ops':
         return render(request, 'monitor_app/prod_hub_workflow.html', {
             'active_tab': 'ops',
             'dashboard': build_dashboard(prefs.get('panel_order')),
             'can_save_layout': bool(username),
             'nav_mode': 'production',
+            **summary,
         })
     context = pcs_hub_counts()
     context['active_tab'] = 'nav'
     context['nav_mode'] = 'production'
+    context.update(summary)
     # The two corun counts are remote REST calls; served as a cached
     # product (docs/CACHED_PRODUCTS.md) so the Nav tab renders from the
     # store and stale rebuilds run behind the response.
-    from .cached_product import get_product
     corun_product = get_product(
         'prod_hub_corun_counts',
         lambda: {'assessments': _corun_ai_assessment_count(),
@@ -3472,6 +3583,39 @@ def prod_hub(request):
         status='proposed').count()
     context['campaign_narratives_count'] = corun_counts['narratives']
     return render(request, 'monitor_app/prod_hub_workflow.html', context)
+
+
+def _declared_lines():
+    """The home's declared-downtime line: every queue and endpoint with
+    a rule in force or a window coming, as ``[{target, kind, state,
+    line}]``, in force first; empty when nothing is declared. A failed
+    read logs and shows nothing."""
+    from .declared import declared_for
+    out = []
+    try:
+        for kind in ('queue', 'endpoint'):
+            for target, slot in sorted(declared_for(kind).items()):
+                state = 'in force' if slot.get('active') else 'coming' if slot.get('future') else ''
+                if state:
+                    out.append({'target': target, 'kind': kind, 'state': state,
+                                'line': slot.get('line', '')})
+    except Exception as e:                                    # noqa: BLE001
+        logger.error('declared lines for the home failed: %s', e)
+        return []
+    out.sort(key=lambda r: (r['state'] != 'in force', r['kind'], r['target']))
+    return out
+
+
+def _campaign_completion_lines():
+    """The campaign completion product value — built in
+    swf_epicprod.analytics.completion (completion_product_value) so the
+    panel here and the campaign plan page share one builder and one
+    product. Links are resolved in templates per request: the script
+    prefix differs between the internal and external faces, so a cached
+    URL would be wrong on one of them."""
+    from swf_epicprod.analytics.completion import completion_product_value
+
+    return completion_product_value()
 
 
 def ai_content_list(request):
@@ -3691,10 +3835,16 @@ def ai_content_list(request):
         'quality_all_url': filter_url(quality=''),
         'username_all_url': filter_url(username=''),
         'ai_all_url': filter_url(ai=''),
-        'clear_subject_url': filter_url(subject_type=''),
-        'clear_quality_url': filter_url(quality=''),
-        'clear_username_url': filter_url(username=''),
-        'clear_ai_url': filter_url(ai=''),
+        'active_filters': [
+            {'label': label, 'value': value}
+            for label, value in (
+                ('Subject', subject_type),
+                ('Quality', quality),
+                ('User', username),
+                ('AI', ai),
+            ) if value
+        ],
+        'clear_all_url': filter_url(subject_type='', quality='', username='', ai=''),
         'page_query': page_params.urlencode(),
     })
 

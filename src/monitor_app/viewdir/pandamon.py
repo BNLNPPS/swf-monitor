@@ -5,6 +5,9 @@ Web views for ePIC PanDA production monitoring — jobs, tasks, errors,
 activity overview, and detail pages with rich cross-linking.
 """
 
+from django.contrib.auth.decorators import login_required
+from collections import Counter
+
 from django.shortcuts import render, redirect
 from django.http import JsonResponse, HttpResponse
 from django.urls import reverse
@@ -14,30 +17,39 @@ import json
 import logging
 import os
 import hashlib
+import re
 from html import escape
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone as dt_timezone
 from urllib.parse import quote, urlencode, urlparse
 from zoneinfo import ZoneInfo
 
+from ..panda.operations import BULK_OPERATION_STATUSES
+
 from ..utils import DataTablesProcessor
 from ..panda import (
-    get_activity, study_job, list_jobs,
-    list_jobs_dt, build_tasks_window,
+    get_activity, study_job, list_jobs, task_payload_rollup,
+    list_jobs_dt, job_request_size, build_tasks_window,
     job_filter_counts, task_filter_counts,
     get_task, error_summary, diagnose_jobs, job_completion_details,
-    list_queues, get_queue, resource_usage, job_outcomes,
+    list_queues, get_queue, queue_last_use, landing_declines, node_declines,
+    queue_observed,
+    resource_usage, job_outcomes,
 )
 from ..panda.constants import (
     LIST_FIELDS, TASK_LIST_FIELDS,
     TASK_STATE_COLORS, JOB_STATE_COLORS,
 )
 from ..cell_fmt import fill_cell
+from ..pools import readings_by_queue
+from ..workers import worker_reading, allocation_product
+from ..es_reading import es_reading
 from ..activemq_connection import ActiveMQConnectionManager
 from ..epicprod_inventory import (
     cached_payload_log_parts,
     diagnosis_for_study_data,
     inventory_for_job_context,
 )
+from ..epicprod_logging import log_epicprod_action
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +135,8 @@ TASK_COLUMNS = [
     {'name': 'taskname', 'title': 'Task Name', 'orderable': True},
     {'name': 'status', 'title': 'Status', 'orderable': True},
     {'name': 'processingtype', 'title': 'Processing type', 'orderable': True},
+    # The task's pinned queue (jedi_tasks.site); unpinned when not set.
+    {'name': 'site', 'title': 'Queue', 'orderable': True},
     {'name': 'username', 'title': 'User', 'orderable': True},
     {'name': 'creationdate', 'title': 'Created', 'orderable': True},
     {'name': 'modificationtime', 'title': 'Modified', 'orderable': True},
@@ -235,8 +249,27 @@ def _linkify(text):
     return text
 
 
+_NAIVE_ISO_RE = re.compile(r'^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?$')
+
+
+def _tag_panda_utc(obj):
+    """PanDA DB timestamps are naive UTC. Stamp the offset onto naive ISO
+    strings, in place, so downstream formatters render true Eastern."""
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if isinstance(value, str):
+                if _NAIVE_ISO_RE.match(value):
+                    obj[key] = value + '+00:00'
+            elif isinstance(value, (dict, list)):
+                _tag_panda_utc(value)
+    elif isinstance(obj, list):
+        for item in obj:
+            _tag_panda_utc(item)
+
+
 def _fmt_dt(val):
-    """Format an ISO datetime string or datetime object for display."""
+    """Format an ISO datetime string or datetime object for display.
+    Naive values are PanDA DB timestamps, which are UTC."""
     if not val:
         return ''
     if isinstance(val, str):
@@ -244,6 +277,8 @@ def _fmt_dt(val):
             val = datetime.fromisoformat(val)
         except (ValueError, TypeError):
             return val
+    if val.tzinfo is None:
+        val = val.replace(tzinfo=dt_timezone.utc)
     return val.astimezone(_EASTERN).strftime('%Y%m%d %H:%M:%S')
 
 
@@ -291,6 +326,83 @@ def _get_days(request):
         return 7
 
 
+def _get_jobs_days(request):
+    """The jobs page's window in days: whole days from the selector, or
+    the fraction of a day the page narrowed a too-large request to
+    (``_judge_jobs_request``), which its table and count calls carry
+    back. Default 7."""
+    raw = request.GET.get('days', 7)
+    try:
+        days = float(raw)
+    except (ValueError, TypeError):
+        return 7
+    if days <= 0:
+        return 7
+    return int(days) if days == int(days) else days
+
+
+# The most jobs the jobs page builds for at once. Its queries are
+# aggregates and one paged read, a second or two at 400k jobs; the cap
+# keeps a 30-day, all-site ask from holding a web worker and the PanDA
+# database for a minute. A larger ask is narrowed to its newest slice
+# and the page says so (the yellow panel), as the PanDA monitor does.
+JOBS_PAGE_CAP = 100000
+
+
+def _window_label(days):
+    """'last 7 days', 'last 21 h', 'last 40 min'."""
+    if days >= 1 and days == int(days):
+        return f'last {int(days)} day' + ('' if days == 1 else 's')
+    hours = days * 24
+    if hours >= 2:
+        return f'last {hours:.0f} h'
+    return f'last {hours * 60:.0f} min'
+
+
+def _judge_jobs_request(days, status, username, site, taskid,
+                        ended_after, ended_before):
+    """Examine what a jobs-list request asks for before building it.
+
+    Counts the jobs the request covers; over JOBS_PAGE_CAP the window
+    is halved, anchored at its end, until the count fits (at most eight
+    halvings: a week becomes 40 minutes). Returns the window to build
+    for, (days, ended_after, ended_before), and a notice for the page
+    when it was narrowed, or None. A count that fails leaves the
+    request as asked."""
+    asked = job_request_size(
+        days=days, status=status, username=username, site=site,
+        taskid=taskid, ended_after=ended_after, ended_before=ended_before)
+    if asked is None or asked <= JOBS_PAGE_CAP:
+        return days, ended_after, ended_before, None
+    asked_label = (
+        f"{ended_after.astimezone(ZoneInfo(settings.TIME_ZONE)):%m-%d %H:%M}"
+        f" to {ended_before.astimezone(ZoneInfo(settings.TIME_ZONE)):%m-%d %H:%M} ET"
+        if ended_after is not None else _window_label(days))
+    count = asked
+    for _ in range(8):
+        if ended_after is not None:
+            ended_after = ended_before - (ended_before - ended_after) / 2
+        else:
+            days = days / 2
+        count = job_request_size(
+            days=days, status=status, username=username, site=site,
+            taskid=taskid, ended_after=ended_after, ended_before=ended_before)
+        if count is None or count <= JOBS_PAGE_CAP:
+            break
+    shown_label = (
+        f"the {(ended_before - ended_after).total_seconds() / 3600:.1f} h"
+        f" ending {ended_before.astimezone(ZoneInfo(settings.TIME_ZONE)):%m-%d %H:%M} ET"
+        if ended_after is not None else f'the {_window_label(days)}')
+    notice = (
+        f'This request covers {asked:,} jobs ({asked_label}), more than '
+        f'this page builds for at once ({JOBS_PAGE_CAP:,}). Showing '
+        f'{shown_label}'
+        + (f' ({count:,} jobs)' if count is not None else '')
+        + '. Add a status, user, site or task filter, or pick a shorter '
+        'window, for the selection you want.')
+    return days, ended_after, ended_before, notice
+
+
 def _get_ended_window(request):
     """Exact terminal-job interval carried by Snapper drill-down links."""
     from django.utils.dateparse import parse_datetime
@@ -329,7 +441,7 @@ def _activity_product(days, refresh):
             raise RuntimeError(data['error'])
         return data
 
-    return get_product(f'panda_activity:{days}', build,
+    return get_product(f'panda_activity:v2:{days}', build,
                        ttl_seconds=300, refresh=refresh)
 
 
@@ -427,8 +539,19 @@ def _compute_usage_dates(request):
     return (start_date, end_date, bucket), ''
 
 
+COMPUTE_USAGE_WORK = {'epicproduction': 'ePIC production'}
+
+
+def _compute_usage_work(request):
+    """The page's work selection: a processing type from
+    COMPUTE_USAGE_WORK (``processingtype=epicproduction``), or all work
+    at the queues when absent or unknown."""
+    value = (request.GET.get('processingtype') or '').strip()
+    return value if value in COMPUTE_USAGE_WORK else ''
+
+
 def _query_compute_usage(start_date, end_date, bucket, site=None,
-                         series_rollup=False):
+                         series_rollup=False, processingtype=''):
     """Plot-ready resource data for an inclusive Eastern date range,
     served as a cached product (docs/CACHED_PRODUCTS.md): the PanDA-DB
     aggregation never builds in the request path once a key is
@@ -446,6 +569,8 @@ def _query_compute_usage(start_date, end_date, bucket, site=None,
             bucket=bucket,
             site=site,
             series_rollup=series_rollup,
+            execute_sites=True,
+            processingtype=processingtype or None,
         )
         if usage.get('error'):
             raise RuntimeError(usage['error'])
@@ -456,8 +581,9 @@ def _query_compute_usage(start_date, end_date, bucket, site=None,
         }
         return usage
 
-    key = (f'compute_usage:v1:{start_date}:{end_date}:{bucket}'
-           f":{site or ''}:{int(series_rollup)}")
+    key = (f'compute_usage:v6:{start_date}:{end_date}:{bucket}'
+           f":{site or ''}:{int(series_rollup)}"
+           + (f':{processingtype}' if processingtype else ''))
     try:
         product = get_product(key, build, ttl_seconds=300)
     except Exception as e:                                  # noqa: BLE001
@@ -480,12 +606,27 @@ def _compute_usage(request):
         end_date,
         bucket,
         site=(request.GET.get('site') or '').strip() or None,
+        processingtype=_compute_usage_work(request),
     )
 
 
+def _pool_labels(queue_names):
+    """Umbrella name for the OSG pool queues (CRIC catchall osgpool=true):
+    'OSG Pool', shown with the queue name beside it wherever the queue
+    appears."""
+    from ..panda.queries import osg_pool_queues
+    pool = set(osg_pool_queues())
+    return {name: 'OSG Pool' for name in queue_names if name in pool}
+
+
 def compute_usage(request):
-    """Site-level PanDA core-hour history and interactive production plot."""
+    """Site-level PanDA core-hour history and interactive production plot.
+
+    The OSG pool queue is the special case: one PanDA queue spanning many
+    execute sites, so it alone gets an execute-site breakdown block
+    beneath the site table and the umbrella label 'OSG Pool'."""
     today = datetime.now(ZoneInfo(settings.TIME_ZONE)).date()
+    work = _compute_usage_work(request)
     selection, error = _compute_usage_dates(request)
     if selection:
         selected_start, selected_end, bucket = selection
@@ -498,6 +639,7 @@ def compute_usage(request):
             loaded_end,
             'day',
             series_rollup=True,
+            processingtype=work,
         )
         start = str(selected_start)
         end = str(selected_end)
@@ -522,13 +664,40 @@ def compute_usage(request):
             'end': period_end,
             'active': start == period_start and end == period_end,
         })
+    usage = usage or {}
+    if usage:
+        from ..panda.queries import queue_types
+        by_site = usage.get('by_site') or []
+        labels = _pool_labels([row['site'] for row in by_site])
+        execute_sites = usage.get('execute_sites') or {}
+        types = queue_types()
+        for row in by_site:
+            row['label'] = labels.get(row['site'], '')
+            # The pool row expands inline into these, in the table itself.
+            row['execute_sites'] = execute_sites.get(row['site'], [])
+            # Test queues stay out unless ticked: anything CRIC types as
+            # neither production nor unified (a unified queue serves both
+            # job classes and carries the production load: BNL_OSG_PanDA_1
+            # ran 20,000 jobs in the week to 9/16 and read as a test queue
+            # under the earlier production-only rule), and queues named as
+            # test, CI, dev, pilot-test, or IRI trials.
+            name = row['site']
+            row['is_test'] = (types.get(name, 'production') not in ('production', 'unified')
+                              or bool(re.search(r'test|_ci$|_dev$|pilotest|_iri$',
+                                                name, re.IGNORECASE)))
     return render(request, 'monitor_app/compute_usage.html', {
         'error': error,
-        'usage': usage or {},
+        'usage': usage,
+        'include_test': (request.GET.get('test') or '').strip() in ('1', 'true', 'yes'),
+        'default_start': str(today - timedelta(days=29)),
+        'default_end': str(today),
         'start': start,
         'end': end,
         'bucket': bucket,
         'periods': periods,
+        'work': work,
+        'work_label': COMPUTE_USAGE_WORK.get(work, ''),
+        'work_options': COMPUTE_USAGE_WORK,
     })
 
 
@@ -543,16 +712,19 @@ def compute_usage_data(request):
 # ── Job list ─────────────────────────────────────────────────────────────────
 
 def _jobs_outcomes_product(days, site, refresh,
-                           ended_after=None, ended_before=None):
+                           ended_after=None, ended_before=None,
+                           include_closed=False):
     """Completed-job outcome series (finished/failed per bin with
     cumulative integrals) for the jobs page's graphical view, served
-    as a cached product."""
+    as a cached product; closed jobs only when the page was asked for
+    them by status."""
     from ..cached_product import get_product
 
     def build():
         outcomes = job_outcomes(
             days=days, site=site or None,
-            start_time=ended_after, end_time=ended_before)
+            start_time=ended_after, end_time=ended_before,
+            include_closed=include_closed)
         if outcomes.get('error'):
             raise RuntimeError(outcomes['error'])
         return outcomes
@@ -561,51 +733,52 @@ def _jobs_outcomes_product(days, site, refresh,
         f':{ended_after.isoformat()}:{ended_before.isoformat()}'
         if ended_after is not None and ended_before is not None else '')
     return get_product(
-        f"jobs_outcomes:v2:{days}:{site or ''}{exact_key}", build,
+        f"jobs_outcomes:v3:{days}:{site or ''}{exact_key}"
+        f"{':closed' if include_closed else ''}", build,
         ttl_seconds=300, refresh=refresh)
 
 
-def _jobs_site_graphics_product(days, site, refresh,
-                                ended_after=None, ended_before=None):
-    """Placeable Snapper site history and outcomes pie for this page."""
+def _jobs_site_pie_product(days, site, refresh,
+                           ended_after=None, ended_before=None):
+    """The site's final-job-state pie over the window, from Snapper's
+    counter blocks (two cuts, seconds), as a cached product.
+
+    The embedded Snapper site-history plot this product carried until
+    2026-09-20 is gone: ``embed_context`` reads every snap of the window
+    into the web worker, about 65 s and 3 GB for a week and the same for
+    a queue with ten jobs as for one with 400,000; the 7-day jobs page
+    and the 14-day queue page together took the host into an OOM kill
+    (job 3492628's queue, 13:30 ET). The Site focus page in Snapper
+    remains the place for the history, by its link."""
     from django.utils import timezone as dj_timezone
 
-    from snapper_ai.embed import embed_context
     from ..cached_product import get_product
     from ..snapper_providers import panda_site_outcomes_pie
 
     def build():
         end = ended_before or dj_timezone.now()
         start = ended_after or (end - timedelta(days=days))
-        ctx = embed_context(
-            'epicprod', start, end,
-            families=(f'Site jobs {site}',))
-        if ctx.get('error'):
-            raise RuntimeError(ctx['error'])
-        # This embedded Site plot must open the same focused Site page,
-        # not the generic epicprod report.
-        ctx['report_focus_slug'] = 'site'
-        ctx['report_query'] = (
-            urlencode({'site': site}) + '&' + ctx['report_query'])
-        return {
-            'embed': ctx,
-            'outcomes_pie': panda_site_outcomes_pie(
-                site, start, end, size=270),
-        }
+        return panda_site_outcomes_pie(site, start, end, size=270)
 
     exact_key = (
         f':{ended_after.isoformat()}:{ended_before.isoformat()}'
         if ended_after is not None and ended_before is not None else '')
     return get_product(
-        f'snapper_site_graphics:v4:epicprod:site:{site}:{days}{exact_key}',
+        f'snapper_site_pie:v1:epicprod:site:{site}:{days}{exact_key}',
         build,
         ttl_seconds=300, refresh=refresh)
 
 
 def panda_jobs_list(request):
-    days = _get_days(request)
+    days = _get_jobs_days(request)
     ended_after, ended_before = _get_ended_window(request)
     selected_site = request.GET.get('site', '')
+    # The request is examined before anything is built for it: too
+    # large an ask is narrowed to its newest slice and the page says so.
+    days, ended_after, ended_before, request_notice = _judge_jobs_request(
+        days, request.GET.get('status', '') or None,
+        request.GET.get('username', '') or None, selected_site or None,
+        request.GET.get('taskid', '') or None, ended_after, ended_before)
     if ended_after is not None:
         et = ZoneInfo(settings.TIME_ZONE)
         ended_range_label = (
@@ -614,17 +787,17 @@ def panda_jobs_list(request):
         description = f'Production jobs ending in {ended_range_label}.'
         jobs_window_label = ended_range_label
     else:
-        description = f'Production jobs from the last {days} days.'
-        jobs_window_label = f'last {days} day' + ('' if days == 1 else 's')
+        description = f'Production jobs from the {_window_label(days)}.'
+        jobs_window_label = _window_label(days)
     if selected_site:
         site_url = reverse('monitor_app:epic_queue_detail', args=[selected_site])
         description += f'<br><a href="{site_url}">Site info for <strong>{selected_site}</strong></a>'
-
     refresh = request.GET.get('refresh') == '1'
     try:
         outcomes_product = _jobs_outcomes_product(
             days, selected_site, refresh,
-            ended_after=ended_after, ended_before=ended_before)
+            ended_after=ended_after, ended_before=ended_before,
+            include_closed=request.GET.get('status', '') == 'closed')
         job_outcomes_data = outcomes_product['value'] or {
             'error': 'Outcome history is building — reload shortly.'}
         if outcomes_product['value'] and outcomes_product['built_at']:
@@ -636,26 +809,19 @@ def panda_jobs_list(request):
     except Exception as e:                                   # noqa: BLE001
         logger.error('jobs outcomes build failed: %s', e)
         job_outcomes_data = {'error': str(e)}
-    snapper_embed = None
     job_outcomes_pie = None
     if selected_site:
         try:
-            graphics_product = _jobs_site_graphics_product(
+            job_outcomes_pie = _jobs_site_pie_product(
                 days, selected_site, refresh,
-                ended_after=ended_after, ended_before=ended_before)
-            graphics = graphics_product['value'] or {}
-            snapper_embed = graphics.get('embed') or {
-                'scope': 'epicprod',
-                'error': 'state history is building — reload shortly.'}
-            job_outcomes_pie = graphics.get('outcomes_pie')
+                ended_after=ended_after, ended_before=ended_before)['value']
         except Exception as e:                               # noqa: BLE001
-            logger.error('snapper site graphics failed for jobs list: %s', e)
-            snapper_embed = {'scope': 'epicprod', 'error': str(e)}
+            logger.error('site outcomes pie failed for jobs list: %s', e)
 
     context = {
         'job_outcomes': job_outcomes_data,
         'job_outcomes_pie': job_outcomes_pie,
-        'snapper_embed': snapper_embed,
+        'request_notice': request_notice,
         'table_title': 'PanDA Jobs',
         'table_description': description,
         'ajax_url': reverse('monitor_app:panda_jobs_datatable_ajax'),
@@ -677,6 +843,11 @@ def panda_jobs_list(request):
         'ended_before': (ended_before.isoformat()
                          if ended_before is not None else ''),
         'jobs_window_label': jobs_window_label,
+        # Nearest Snapper named window covering this page's day range,
+        # for the Snapper view link on the time-window line.
+        'snapper_window': ('24h' if days <= 1 else
+                           '48h' if days <= 2 else
+                           '7d' if days <= 7 else '30d'),
     }
     context.update(_days_context(days))
     return render(request, 'monitor_app/panda_jobs_list.html', context)
@@ -685,7 +856,7 @@ def panda_jobs_list(request):
 def panda_jobs_datatable_ajax(request):
     dt = DataTablesProcessor(request, JOB_FIELD_NAMES,
                              default_order_column=0, default_order_direction='desc')
-    days = _get_days(request)
+    days = _get_jobs_days(request)
     ended_after, ended_before = _get_ended_window(request)
     status = request.GET.get('status', '') or None
     username = request.GET.get('username', '') or None
@@ -746,7 +917,7 @@ def panda_jobs_datatable_ajax(request):
 
 
 def panda_jobs_filter_counts(request):
-    days = _get_days(request)
+    days = _get_jobs_days(request)
     ended_after, ended_before = _get_ended_window(request)
     status = request.GET.get('status', '') or None
     username = request.GET.get('username', '') or None
@@ -763,12 +934,29 @@ def panda_jobs_filter_counts(request):
 
 # ── Task list ────────────────────────────────────────────────────────────────
 
+def _production_queues():
+    try:
+        from swf_epicprod.front import regulated_queues
+        return regulated_queues()
+    except Exception:  # noqa: BLE001
+        logger.exception('production queues unreadable')
+        return []
+
+
 def panda_tasks_list(request):
     days = _get_days(request)
     from ..middleware import is_tunnel_request
+    from ..models import PandaQueue
 
     context = {
         'table_title': 'PanDA Tasks',
+        # The retry's target queue choices: the cached PanDA queue
+        # inventory, the names the retry validator accepts.
+        'panda_queue_names': list(
+            PandaQueue.objects.order_by('queue_name')
+            .values_list('queue_name', flat=True)),
+        # A Move's targets: the production queues (front.queues).
+        'production_queues': _production_queues(),
         'table_description': f'JEDI tasks from the last {days} days.',
         'ajax_url': reverse('monitor_app:panda_tasks_datatable_ajax'),
         'filter_counts_url': reverse('monitor_app:panda_tasks_filter_counts'),
@@ -779,10 +967,12 @@ def panda_tasks_list(request):
             {'name': 'status', 'label': 'Status', 'type': 'select'},
             {'name': 'username', 'label': 'User', 'type': 'select'},
             {'name': 'processingtype', 'label': 'Processing type', 'type': 'select'},
+            {'name': 'queue', 'label': 'Queue', 'type': 'select'},
         ],
         'selected_status': request.GET.get('status', ''),
         'selected_username': request.GET.get('username', ''),
         'selected_processingtype': request.GET.get('processingtype', ''),
+        'selected_queue': request.GET.get('queue', ''),
         'bulk_controls_operable': (
             request.user.is_authenticated and not is_tunnel_request(request)),
     }
@@ -817,6 +1007,13 @@ def _format_task_row(task, days, *, controls_operable):
     avg_rs = task.get('avg_retries_success')
     avg_rs_str = f'{avg_rs:.2f}' if avg_rs is not None else ''
 
+    site = task.get('site') or ''
+    tasks_by_queue_url = (_url_with_query('monitor_app:panda_tasks_list',
+                                          days=days, queue=site)
+                          if site else None)
+    queue_cell = (f'<a href="{tasks_by_queue_url}">{escape(site)}</a>'
+                  if site else '<span class="text-muted">unpinned</span>')
+
     processingtype = task.get('processingtype') or ''
     processingtype_html = escape(processingtype)
     processingtype_display = (
@@ -825,15 +1022,19 @@ def _format_task_row(task, days, *, controls_operable):
         else processingtype_html
     )
     task_status = str(task.get('status') or '').lower()
-    pause_eligible = task_status == 'running'
-    resume_eligible = task_status == 'paused'
-    actionable = pause_eligible or resume_eligible
+    eligible = {
+        op: task_status in statuses
+        for op, statuses in BULK_OPERATION_STATUSES.items()
+    }
+    actionable = any(eligible.values())
     checkbox_disabled = not controls_operable or not actionable
+    eligible_attrs = ' '.join(
+        f'data-{op.replace("_", "-")}-eligible="{1 if ok else 0}"'
+        for op, ok in eligible.items())
     checkbox = (
         f'<input type="checkbox" class="panda-task-select" '
         f'data-task-id="{int(task["jeditaskid"])}" '
-        f'data-pause-eligible="{1 if pause_eligible else 0}" '
-        f'data-resume-eligible="{1 if resume_eligible else 0}" '
+        f'{eligible_attrs} '
         f'aria-label="Select PanDA task {int(task["jeditaskid"])}"'
         f'{" disabled" if checkbox_disabled else ""}>'
     )
@@ -844,6 +1045,7 @@ def _format_task_row(task, days, *, controls_operable):
         f'<a href="{task_url}" title="{taskname_title}">{taskname_display}</a>',
         _fill_cell(task['status'], task['status'], tasks_by_status_url) if task.get('status') else '',
         processingtype_display,
+        queue_cell,
         f'<a href="{tasks_by_user_url}">{username_html}</a>' if tasks_by_user_url else '',
         _fmt_dt(task.get('creationdate')),
         _fmt_dt(task.get('modificationtime')),
@@ -904,14 +1106,16 @@ def panda_tasks_datatable_ajax(request):
     }
 
     # Equality filters over the raw record; '__blank__' selects NULL/empty.
-    for key in ('status', 'username', 'processingtype'):
+    # The queue filter reads the task's pinned queue (the site field).
+    for key in ('status', 'username', 'processingtype', 'queue'):
         wanted = request.GET.get(key, '') or None
         if wanted is None:
             continue
+        field = 'site' if key == 'queue' else key
         if wanted == '__blank__':
-            rows = [r for r in rows if not (r['raw'].get(key) or '')]
+            rows = [r for r in rows if not (r['raw'].get(field) or '')]
         else:
-            rows = [r for r in rows if (r['raw'].get(key) or '') == wanted]
+            rows = [r for r in rows if (r['raw'].get(field) or '') == wanted]
 
     search = (dt.search_value or '').strip().lower()
     if search:
@@ -950,21 +1154,30 @@ def panda_tasks_filter_counts(request):
     username = request.GET.get('username', '') or None
     processingtype = request.GET.get('processingtype', '') or None
     workinggroup = request.GET.get('workinggroup', '') or None
+    queue = request.GET.get('queue', '') or None
 
     counts = task_filter_counts(days=days, status=status,
                                 username=username,
                                 processingtype=processingtype,
-                                workinggroup=workinggroup)
+                                workinggroup=workinggroup,
+                                queue=queue)
     return JsonResponse({'filter_counts': counts})
 
 
 # ── Job detail ───────────────────────────────────────────────────────────────
 
 def panda_job_detail(request, pandaid):
-    data = study_job(int(pandaid))
+    # The batch record is read from the captured copy on disk, so asking for
+    # it costs a file read rather than a fetch, and it is the only whole
+    # account of a job that never started (docs/ERROR_ATTRIBUTION.md).
+    # fetch_remote=False for the same reason: the Perlmutter log listing is
+    # read from the copy captured off the request path, never fetched here.
+    data = study_job(int(pandaid), include_batch_reason=True,
+                     include_log_analysis=False, fetch_remote=False)
     if 'error' in data:
         return render(request, 'monitor_app/panda_job_detail.html',
                       {'error': data['error'], 'pandaid': pandaid})
+    _tag_panda_utc(data)
     data['pandaid'] = pandaid
     job = data.get('job') or {}
     job['transformation_is_url'] = (job.get('transformation') or '').startswith(('http://', 'https://'))
@@ -973,10 +1186,27 @@ def panda_job_detail(request, pandaid):
         job['transformation_view_url'] = _panda_view_text_url(trf)
     if job.get('jeditaskid'):
         data['pcs_task'] = _pcs_task_for_panda_task(data.get('task') or job)
+    # A job waiting to be fetched has no worker and no worker logs; why it
+    # waits is the harvester's last fetch for its queue.
+    if job.get('jobstatus') in ('activated', 'defined', 'assigned') and job.get('computingsite'):
+        try:
+            data['harvester_fetch'] = _reported_harvester(job['computingsite'])
+        except Exception as e:                               # noqa: BLE001
+            logger.error('harvester fetch reading failed for job %s: %s', pandaid, e)
     data['job_record_items'] = [
         {'name': key, 'value': '' if value is None else value}
         for key, value in sorted((data.get('job_record') or {}).items())
     ]
+    # The allocation the job ran in, for the pilot occupancy plot; the
+    # link outlives the harvester's worker record.
+    h = data.get('harvester') or {}
+    if h.get('harvesterid') and h.get('workerid') is not None:
+        data['allocation_ref'] = {'harvesterid': h['harvesterid'], 'workerid': int(h['workerid'])}
+    else:
+        from ..panda.queries import allocation_of_job
+        ref = allocation_of_job(pandaid)
+        if ref:
+            data['allocation_ref'] = {'harvesterid': ref[0], 'workerid': ref[1]}
     data['job_parameter_items'] = [
         {'label': label, 'value': job.get(key)}
         for label, key in (
@@ -990,9 +1220,25 @@ def panda_job_detail(request, pandaid):
         )
         if job.get(key) not in (None, '')
     ]
+    for item in data['job_parameter_items']:
+        # pilotid is '<stdout url>|<type>|<mode>|<version>': only the first
+        # element is a link; the rest stays as text beside it.
+        if item['label'] == 'Pilot ID' and '|' in str(item['value']):
+            url, _, rest = str(item['value']).partition('|')
+            if url in (data.get('dead_log_urls') or []):
+                # The file behind it is purged or never existed: text, no link.
+                item['dead'] = True
+            elif url.startswith(('http://', 'https://')):
+                item['url'] = url
+                item['rest'] = '|' + rest
     data.update(inventory_for_job_context(data))
     data['epicprod_diagnosis'] = diagnosis_for_study_data(
         data, epicprod_job=data.get('epicprod_job'))
+    # A crashed job's card names its segfault-catalog signature; swfdb only.
+    epicprod_job = data.get('epicprod_job')
+    if epicprod_job is not None and epicprod_job.phase == 'payload_crash':
+        from ..segfaults import signature_for_job
+        data['crash_signature'] = signature_for_job(pandaid)
     return render(request, 'monitor_app/panda_job_detail.html', data)
 
 
@@ -1248,7 +1494,7 @@ def panda_payload_log(request, pandaid):
     refresh. The web tier never touches the proxy or xrootd; it only reads the
     world-readable cache. See docs/EPICPROD_OPS.md.
     """
-    data = study_job(int(pandaid))
+    data = study_job(int(pandaid), include_log_analysis=False)
     if 'error' in data:
         return HttpResponse(f"job {pandaid}: {data['error']}\n",
                             status=404, content_type='text/plain; charset=utf-8')
@@ -1329,6 +1575,135 @@ def panda_payload_log(request, pandaid):
         pandaid, script_name)
 
 
+def panda_node_declines(request):
+    """Landing declines per worker node: what a node says it cannot do.
+
+    The ban list is a human decision on accumulated evidence, so this page
+    is the evidence: how often each node refused a landing, against what it
+    produced in the same window, with the node's own reason where the
+    payload's report has been filed (swf-epicprod docs/JOB_REPORTING.md).
+    """
+    try:
+        days = max(1, min(int(request.GET.get('days', 14)), 90))
+    except (TypeError, ValueError):
+        days = 14
+    data = node_declines(days=days)
+    data['days'] = days
+    return render(request, 'monitor_app/panda_node_declines.html', data)
+
+
+def panda_payload_report(request, pandaid):
+    """A job's payload report as the payload wrote it, verbatim JSON.
+
+    The card presents the report shaped for reading; this is the record
+    behind it, from the PanDA metatable for a finished job or from the copy
+    the sweep filed for a failed one (swf-epicprod docs/JOB_REPORTING.md).
+    """
+    from monitor_app.models import EpicProdJob
+    pandaid = int(pandaid)
+    job = EpicProdJob.objects.filter(pandaid=pandaid).only('data').first()
+    filed = ((job.data if job else None) or {}).get('payload_report') or {}
+    if filed.get('report'):
+        body = json.dumps(
+            {'source': 'swept from the object store',
+             'source_key': filed.get('source_key', ''),
+             'filed_at': filed.get('filed_at', ''),
+             'report': filed['report']},
+            indent=2, default=str)
+        return HttpResponse(body, content_type='application/json')
+
+    data = study_job(pandaid, include_log_analysis=False)
+    report = (data or {}).get('payload_report')
+    if not report:
+        return HttpResponse(
+            f'{{"error": "job {pandaid} carries no payload report"}}',
+            status=404, content_type='application/json')
+    return HttpResponse(json.dumps({'source': report.get('source', ''),
+                                    'report': report}, indent=2, default=str),
+                        content_type='application/json')
+
+
+def panda_batch_record(request, pandaid):
+    """The condor event log captured for a job, verbatim.
+
+    The batch layer's own account of a hold, an eviction or an abort, and
+    the only account of a job that never started. What PanDA stores of it
+    is cut to a column width; this is the whole of it
+    (docs/ERROR_ATTRIBUTION.md, Batch-layer records).
+    """
+    from monitor_app import batch_records
+    record = batch_records.stored(int(pandaid))
+    if not record:
+        # The same reason the job page gives, from the job's own record.
+        data = study_job(int(pandaid), include_log_analysis=False) or {}
+        reason = batch_records.why_absent(
+            data.get('job') or {},
+            has_batchlog=bool((data.get('harvester') or {}).get('batchlog')))
+        return HttpResponse(
+            f"job {pandaid}: no batch record captured. {reason}\n",
+            status=404, content_type='text/plain; charset=utf-8')
+    if record['status'] != 'captured':
+        return HttpResponse(
+            f"job {pandaid}: capture failed: {record['body']}\n",
+            status=404, content_type='text/plain; charset=utf-8')
+    return HttpResponse(record['body'],
+                        content_type='text/plain; charset=utf-8')
+
+
+def panda_allocation_detail(request, harvesterid, workerid):
+    """One batch allocation (a harvester worker) and the jobs its pilots
+    ran, drawn on the Event Service occupancy plot: what every pilot of
+    the allocation did from the batch start to its end. The timeline is
+    kept in the product store as first built (workers.allocation_product),
+    so the plot outlives the worker record in PanDA."""
+    from ..es_plot import slot_plot_svg
+    ctx = {'harvesterid': harvesterid, 'workerid': workerid}
+    try:
+        product = allocation_product(harvesterid, workerid,
+                                     refresh=request.GET.get('refresh') == '1')
+    except Exception as e:                                    # noqa: BLE001
+        logger.error('allocation page %s/%s: %s', harvesterid, workerid, e)
+        ctx['error'] = str(e)
+        return render(request, 'monitor_app/panda_allocation_detail.html', ctx)
+    tl = product.get('value') or {}
+    worker = dict(tl.get('worker') or {})
+    for key in ('submittime', 'starttime', 'endtime'):
+        if isinstance(worker.get(key), str):
+            worker[key] = datetime.fromisoformat(worker[key])
+    if worker.get('submittime') and worker.get('starttime'):
+        ctx['batch_wait_s'] = (worker['starttime'] - worker['submittime']).total_seconds()
+    ctx['tl'] = tl
+    ctx['worker'] = worker
+    ctx['product_built_at'] = product.get('built_at')
+    ctx['svg'] = slot_plot_svg(tl)
+    ctx['site'] = worker.get('computingsite') or next(
+        (u.get('site') for u in tl.get('units') or [] if u.get('site')), '')
+    ctx['job_rows'] = sorted(tl.get('units') or [], key=lambda u: (u['start_s'], u['unit_id']))
+    return render(request, 'monitor_app/panda_allocation_detail.html', ctx)
+
+
+def panda_harvester_stdout(request, pandaid):
+    """Our copy of the harvester's stdout of a job at a cache-stdout
+    queue, whole: the only log such a job leaves, copied before the PanDA
+    server's seven-day cache purge (docs/EPICPROD_OPS.md, Harvester
+    stdout records)."""
+    from monitor_app import harvester_stdout
+    record = harvester_stdout.stored(int(pandaid))
+    if not record:
+        return HttpResponse(
+            f"job {pandaid}: no harvester stdout copy. The capture keeps failed jobs of the "
+            f"cache-stdout queues (finished jobs when switched on), hourly; a job older than the "
+            f"capture, or one the cache had already let go, has none.\n",
+            status=404, content_type='text/plain; charset=utf-8')
+    if record['status'] != 'captured':
+        return HttpResponse(f"job {pandaid}: capture failed: {record['body']}\n",
+                            status=404, content_type='text/plain; charset=utf-8')
+    header = (f"# harvester stdout of PanDA job {pandaid}, our copy\n"
+              f"# source: {record.get('source')}\n# captured: {record.get('captured_at')}\n"
+              f"# bytes: {record['bytes']}\n\n")
+    return HttpResponse(header + record['body'], content_type='text/plain; charset=utf-8')
+
+
 # ── Task detail ──────────────────────────────────────────────────────────────
 
 def panda_task_detail(request, jeditaskid):
@@ -1336,6 +1711,7 @@ def panda_task_detail(request, jeditaskid):
     if isinstance(task, dict) and 'error' in task:
         return render(request, 'monitor_app/panda_task_detail.html',
                       {'error': task['error'], 'jeditaskid': jeditaskid})
+    _tag_panda_utc(task)
     pcs_task = _pcs_task_for_panda_task(task)
     panda_tasks_row = _panda_tasks_row_for_jeditaskid(jeditaskid)
 
@@ -1377,6 +1753,7 @@ def panda_task_detail(request, jeditaskid):
         if epicprod_job and epicprod_job.failure_summary:
             job['epicprod_phase'] = epicprod_job.phase
             job['epicprod_failure_summary'] = epicprod_job.failure_summary
+    _tag_panda_utc(jobs)
     task_record = task.get('task_record') or {}
     task_record_items = [
         {
@@ -1399,6 +1776,30 @@ def panda_task_detail(request, jeditaskid):
         )
         if value not in (None, '')
     ]
+    # PanDA attributes every command to the DN of the issuing credential,
+    # so agent-executed operations read as the credential holder in
+    # errordialog. When the durable operation record identifies the real
+    # requester, render the system as the actor and the requester by name.
+    errordialog_display = str(task.get('errordialog') or '')
+    dialog_match = re.match(
+        r'^(pause|resume|retry|incexec|finish|kill)\s+by\s+', errordialog_display)
+    if dialog_match:
+        verb_operations = {
+            'pause': 'pause', 'resume': 'resume', 'finish': 'finish',
+            'kill': 'finish', 'retry': 'retry_failures',
+            'incexec': 'retry_failures',
+        }
+        attributed_op = (PandaTaskOperation.objects
+                         .filter(jedi_task_id=int(jeditaskid),
+                                 operation=verb_operations[dialog_match.group(1)])
+                         .exclude(status__in=('failed', 'timeout'))
+                         .order_by('-requested_at')
+                         .first())
+        if attributed_op and attributed_op.requested_by:
+            errordialog_display = (
+                f'{dialog_match.group(1)} by epicprod. '
+                f'Requested by {attributed_op.requested_by}')
+
     pending_operation = (PandaTaskOperation.objects
                          .filter(
                              jedi_task_id=int(jeditaskid),
@@ -1411,14 +1812,54 @@ def panda_task_detail(request, jeditaskid):
         pending=pending_operation,
     )
 
+    # A PanDA task submitted outside PCS and linked to its PCS task by name
+    # only is moved into PCS from this page ("Move this task to PCS",
+    # swf-epicprod docs/JEDI_INTEGRATION.md § Residual rerun). The readiness
+    # read is database-only; a failure here never takes the page down.
+    pcs_adopt = None
+    if pcs_task is not None:
+        try:
+            from pcs.services import prodtask_adopt_readiness
+            pcs_adopt = prodtask_adopt_readiness(pcs_task)
+        except Exception:
+            logger.exception("PCS adopt readiness failed for PanDA task %s",
+                             jeditaskid)
+            pcs_adopt = {'applicable': True, 'eligible': False,
+                         'blocked': 'the readiness check failed; see the server log',
+                         'jedi_task_id': jeditaskid, 'config': None}
+    # Event Service facts across the task: the range counts by status and
+    # events done against requested, one query on jedi_events. Only for a
+    # task the flag marks as ES.
+    event_service = None
+    if task.get('eventservice'):
+        from ..panda.queries import event_service_task_summary, es_events_per_range
+        from ..panda.constants import ES_JOB_FLAVORS
+        try:
+            flavor = int(task.get('eventservice') or 0)
+        except (TypeError, ValueError):
+            flavor = 0
+        event_service = {
+            'flavor': flavor,
+            'flavor_name': ES_JOB_FLAVORS.get(flavor, f'flag {flavor}'),
+            'events_per_range': es_events_per_range(task.get('splitrule')),
+            'ranges': event_service_task_summary(
+                int(jeditaskid),
+                consumer_ids=[j['pandaid'] for j in jobs if j.get('pandaid')]),
+        }
+        from ..panda.queries import task_harness_rollup
+        event_service['harness'] = task_harness_rollup(int(jeditaskid))
     return render(request, 'monitor_app/panda_task_detail.html', {
         'task': task,
+        'event_service': event_service,
+        'pcs_adopt': pcs_adopt,
+        'errordialog_display': errordialog_display,
         'jeditaskid': jeditaskid,
         'pcs_task': pcs_task,
         'panda_tasks_metadata': (panda_tasks_row.metadata if panda_tasks_row else {}),
         'jobs': jobs,
         'job_summary': summary,
         'job_count': len(jobs),
+        'payload_rollup': task_payload_rollup(int(jeditaskid)),
         'requested_resource_items': requested_resource_items,
         'task_record_items': task_record_items,
         'task_operation_controls': task_operation_controls,
@@ -1449,15 +1890,313 @@ def panda_errors_list(request):
         'columns': ERROR_COLUMNS,
         'selected_site': request.GET.get('site', ''),
         'selected_error_source': request.GET.get('error_source', ''),
-        'selected_status': request.GET.get('status', ''),
+        # Default excludes closed (workflow disposals, not actual
+        # errors); the chips show every state present with its count.
+        'selected_status': request.GET.get('status', '') or 'failed,cancelled',
         'classified': request.GET.get('classified', ''),
+        'selected_taskid': request.GET.get('taskid', ''),
         'ended_after': (ended_after.isoformat()
                         if ended_after is not None else ''),
         'ended_before': (ended_before.isoformat()
                          if ended_before is not None else ''),
     }
+    without_taskid = request.GET.copy()
+    without_taskid.pop('taskid', None)
+    context['clear_task_query'] = without_taskid.urlencode()
     context.update(_days_context(days))
     return render(request, 'monitor_app/panda_errors.html', context)
+
+
+def panda_segfaults(request):
+    """The segfault catalog (swf-epicprod docs/SEGFAULT_DIAGNOSIS.md):
+    one row per crash signature, from swfdb alone, under the narrowing
+    filter of the operations views (monitor_app/narrowing_filter.py)."""
+    from ..narrowing_filter import Facet, NarrowingFilter
+    from ..reproductions import (REPRODUCTION_STATE_LABELS, REPRODUCTION_STATE_ORDER, attempts,
+                                 counts_by_signature, global_counts, reproduction_states)
+    from ..segfaults import CLASS_LABELS, CLASS_ORDER, STATUS_LABELS, catalog
+    rows_all, _class_counts = catalog()
+    # The reproduction attempts per row, active and ended, each attempt
+    # counted once; a trace-level row carries its members' attempts; and
+    # where each signature stands on reproduction (run needed, in
+    # progress, not runnable, or settled). Stored data only.
+    att = attempts()
+    members = {r['key']: [r['key']] + list(r.get('members') or []) for r in rows_all}
+    counts = counts_by_signature(att, members)
+    states = reproduction_states(rows_all, counts)
+    for r in rows_all:
+        c = counts.get(r['key']) or {'active': 0, 'ended': 0}
+        r['repro_active'], r['repro_ended'] = c['active'], c['ended']
+        r['repro_state'] = states.get(r['key'], '')
+        r['repro_state_label'] = REPRODUCTION_STATE_LABELS.get(r['repro_state'], r['repro_state'])
+    facets = [
+        Facet('class', 'Class', lambda r: r['class'],
+              display=lambda v: CLASS_LABELS.get(v, v), order=CLASS_ORDER),
+        Facet('exit', 'Exit code', lambda r: str(r['exit_code'])),
+        Facet('queue', 'Queue', lambda r: r['site_names'] or None),
+        Facet('status', 'Status', lambda r: r['status'],
+              display=lambda v: STATUS_LABELS.get(v, v)),
+        Facet('reproduction', 'Reproduction', lambda r: r['repro_state'],
+              display=lambda v: REPRODUCTION_STATE_LABELS.get(v, v), order=REPRODUCTION_STATE_ORDER),
+        Facet('level', 'Level', lambda r: r['level']),
+    ]
+    flt = NarrowingFilter(request.GET, facets)
+    # Every row is rendered with its facet values; the browser applies the
+    # selection (the server's initial state covers links and no script).
+    shown = flt.annotate(rows_all, facets)
+    context = {
+        'rows': rows_all,
+        'shown': shown,
+        'total': len(rows_all),
+        'crashes_total': sum(r['crashes'] for r in rows_all if r['level'] == 'record'),
+        'repro_counts': global_counts(att),
+        'run_needed': sum(1 for r in rows_all if r['repro_state'] == 'run_needed' and r['level'] == 'record'),
+        'narrowing_filter': flt.context(rows_all, facets, request),
+    }
+    return render(request, 'monitor_app/panda_segfaults.html', context)
+
+
+def panda_segfault_reproductions(request):
+    """Every reproduction attempt of the segfault catalog, one row each,
+    execution phase and reproduction result apart, from the signature
+    store and the canary store alone (monitor_app/reproductions.py);
+    under the narrowing filter, active attempts first. Nothing is
+    collected or reconciled on a read."""
+    from ..narrowing_filter import Facet, NarrowingFilter
+    from ..reproductions import (PHASE_LABELS, PHASE_ORDER, RESULT_LABELS, RESULT_ORDER,
+                                 attempts, counts_by_signature, freshness, global_counts,
+                                 reproduction_states)
+    rows_all = attempts()
+    # The signatures that still need a run, for the link to the catalog's
+    # run-needed selection (monitor_app/reproductions.py).
+    from ..segfaults import catalog
+    sig_rows, _counts = catalog()
+    members = {r['key']: [r['key']] + list(r.get('members') or []) for r in sig_rows}
+    states = reproduction_states(sig_rows, counts_by_signature(rows_all, members))
+    run_needed = sum(1 for r in sig_rows if states.get(r['key']) == 'run_needed' and r['level'] == 'record')
+    facets = [
+        Facet('phase', 'Execution', lambda r: r['phase'],
+              display=lambda v: PHASE_LABELS.get(v, v), order=PHASE_ORDER),
+        Facet('result', 'Result', lambda r: r['result'],
+              display=lambda v: RESULT_LABELS.get(v, v), order=RESULT_ORDER),
+        Facet('queue', 'Queue', lambda r: r['queue'] or None),
+        Facet('role', 'Role', lambda r: r['role']),
+        # A record-level attempt answers to its own key and to the
+        # trace-level signature it is a member of, so the catalog's
+        # trace-level row links to its members' attempts.
+        Facet('signature', 'Signature',
+              lambda r: [r['signature']] + ([r['member_of']] if r.get('member_of') else [])),
+    ]
+    flt = NarrowingFilter(request.GET, facets)
+    shown = flt.annotate(rows_all, facets)
+    context = {
+        'rows': rows_all,
+        'shown': shown,
+        'total': len(rows_all),
+        'counts': global_counts(rows_all),
+        'run_needed': run_needed,
+        'freshness': freshness(rows_all),
+        'narrowing_filter': flt.context(rows_all, facets, request),
+    }
+    return render(request, 'monitor_app/panda_segfault_reproductions.html', context)
+
+
+def panda_segfault_findings(request):
+    """Current findings or a saved assessment, joined to the live catalog."""
+    from django.http import Http404
+    from ..segfaults import findings
+    name = request.GET.get('finding')
+    version = request.GET.get('version')
+    try:
+        entries, error = findings(name=name, version=int(version) if version is not None else None,
+                                  include_history=True)
+    except ValueError:
+        raise Http404('No such finding version')
+    if name is not None and not entries:
+        raise Http404('No such finding')
+    return render(request, 'monitor_app/panda_segfault_findings.html',
+                  {'entries': entries, 'error': error, 'historical': version is not None})
+
+
+def panda_segfault_detail(request, key):
+    """One crash signature: its tasks, configuration, sites, crashed jobs,
+    trace, reproductions, verdict and assessments."""
+    from django.http import Http404
+    from django.shortcuts import redirect
+    from ..models import CrashSignature
+    from ..segfaults import signature_detail
+    detail = signature_detail(key)
+    if detail is None:
+        # A retired plain key of a task whose crashes split by stage: the
+        # link lands on the largest stage entry, whose page lists the rest.
+        stage_entry = (CrashSignature.objects.filter(key__startswith=f'{key}:')
+                       .order_by('-crashes', 'key').first()) if key.count(':') == 1 else None
+        if stage_entry is not None:
+            return redirect('monitor_app:panda_segfault_detail', key=stage_entry.key)
+        raise Http404(f'no crash signature {key}')
+    return render(request, 'monitor_app/panda_segfault_detail.html',
+                  {'sig': detail})
+
+
+def panda_segfault_dig(request, key):
+    """The Dig action: queue one signature's trace fetch to the production
+    operations agent (SEGFAULT_DIAGNOSIS.md, The dig); the result reaches
+    the page as segfault_dig_done over the SSE relay. An authenticated
+    operator decision under the authority gate; JSON in and out."""
+    from ..models import CrashSignature
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST only'}, status=405)
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'sign in to dig'}, status=403)
+    sig = CrashSignature.objects.filter(key=key).only('key').first()
+    if sig is None:
+        return JsonResponse({'error': f'no crash signature {key}'}, status=404)
+    pandaid = (request.POST.get('pandaid') or '').strip()
+    if pandaid and not pandaid.isdigit():
+        return JsonResponse({'error': 'pandaid must be a number'}, status=400)
+    msg = {'msg_type': 'segfault_dig', 'namespace': 'prodops', 'key': key,
+           'requested_by': request.user.username}
+    if pandaid:
+        msg['pandaid'] = pandaid
+    try:
+        queued = ActiveMQConnectionManager().send_message(
+            '/queue/epicprod.ops', json.dumps(msg))
+    except Exception as e:
+        logger.error(f"segfault dig trigger failed for {key}: {e}")
+        queued = False
+    if not queued:
+        return JsonResponse({'error': 'the ops-agent queue could not be reached'},
+                            status=502)
+    log_epicprod_action('web', 'segfault_dig_request', subject_type='crash_signature',
+                        subject_key=key, username=request.user.username,
+                        sublevel='low', live_default=False, pandaid=pandaid or None)
+    return JsonResponse({'queued': True, 'key': key, 'pandaid': pandaid or None})
+
+
+def panda_segfault_reproduce(request, key):
+    """The Reproduce action: run the crashed job's row again as payload
+    canaries on the production queue and the reference queue
+    (SEGFAULT_DIAGNOSIS.md, Reproduction), queued to the canary agent;
+    the outcomes are read from the runs on the next visit. JSON in and
+    out; authenticated, under the authority gate."""
+    from ..models import CrashSignature
+    from ..segfaults import REFERENCE_QUEUE, reproduce, reproduction_plan
+    if request.method == 'GET':
+        # The plan a page shows before asking: the job, its row, the queues
+        # and the production queue's memory.
+        sig = CrashSignature.objects.filter(key=key).first()
+        if sig is None:
+            return JsonResponse({'error': f'no crash signature {key}'}, status=404)
+        pandaid = (request.GET.get('pandaid') or '').strip()
+        try:
+            plan = reproduction_plan(sig, int(pandaid) if pandaid.isdigit() else None)
+        except ValueError as e:
+            return JsonResponse({'error': str(e)}, status=400)
+        return JsonResponse(plan)
+    if request.method != 'POST':
+        return JsonResponse({'error': 'GET or POST'}, status=405)
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'sign in to reproduce'}, status=403)
+    sig = CrashSignature.objects.filter(key=key).first()
+    if sig is None:
+        return JsonResponse({'error': f'no crash signature {key}'}, status=404)
+    pandaid = (request.POST.get('pandaid') or '').strip()
+    queues = [q.strip() for q in request.POST.getlist('queue') if q.strip()]
+    if not queues:
+        return JsonResponse({'error': 'name at least one queue'}, status=400)
+    mem_limits = {}
+    for q in queues:
+        raw = (request.POST.get(f'mem_limit_mb[{q}]') or '').strip()
+        if raw:
+            if not raw.isdigit():
+                return JsonResponse({'error': f'memory limit for {q} must be MB'}, status=400)
+            mem_limits[q] = int(raw)
+    try:
+        entries = reproduce(sig, int(pandaid) if pandaid.isdigit() else None,
+                            queues, mem_limits, request.user.username)
+    except ValueError as e:
+        return JsonResponse({'error': str(e)}, status=400)
+    except RuntimeError as e:
+        logger.error(f"segfault reproduce {key}: {e}")
+        return JsonResponse({'error': str(e)}, status=502)
+    log_epicprod_action('web', 'segfault_reproduce', subject_type='crash_signature',
+                        subject_key=key, username=request.user.username,
+                        sublevel='normal', live_default=True,
+                        message=(f"segfault_reproduce {key}: job {entries[0]['pandaid']} "
+                                 f"on {', '.join(queues)}"),
+                        runs=len(entries))
+    return JsonResponse({'queued': True, 'key': key, 'runs': entries,
+                         'reference_queue': REFERENCE_QUEUE})
+
+
+def panda_segfault_package(request, key):
+    """The reproduction package: POST queues its build for a crashed job to
+    the production operations agent (segfault_package_done when built);
+    GET serves the built tarball from the package store."""
+    from ..models import CrashSignature
+    sig = CrashSignature.objects.filter(key=key).first()
+    if sig is None:
+        return JsonResponse({'error': f'no crash signature {key}'}, status=404)
+    if request.method == 'GET':
+        tarball = (sig.package or {}).get('tarball') or ''
+        root = os.path.join(os.environ.get('SWF_TMP_DIR', '/data/swf-tmp'), 'segfault-packages')
+        if not tarball or not os.path.realpath(tarball).startswith(os.path.realpath(root) + os.sep) \
+                or not os.path.isfile(tarball):
+            return HttpResponse('no package built for this signature\n', status=404,
+                                content_type='text/plain; charset=utf-8')
+        from django.http import FileResponse
+        return FileResponse(open(tarball, 'rb'), as_attachment=True,
+                            filename=os.path.basename(tarball),
+                            content_type='application/gzip')
+    if request.method != 'POST':
+        return JsonResponse({'error': 'GET or POST'}, status=405)
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'sign in to build a package'}, status=403)
+    pandaid = (request.POST.get('pandaid') or '').strip()
+    if not pandaid.isdigit():
+        from ..segfaults import representative
+        rep = representative(sig)
+        if rep is None:
+            return JsonResponse({'error': 'no crashed job on record'}, status=400)
+        pandaid = str(rep[0])
+    msg = {'msg_type': 'segfault_package', 'namespace': 'prodops', 'key': key,
+           'pandaid': pandaid, 'requested_by': request.user.username}
+    try:
+        queued = ActiveMQConnectionManager().send_message('/queue/epicprod.ops', json.dumps(msg))
+    except Exception as e:
+        logger.error(f"segfault package trigger failed for {key}: {e}")
+        queued = False
+    if not queued:
+        return JsonResponse({'error': 'the ops-agent queue could not be reached'}, status=502)
+    return JsonResponse({'queued': True, 'key': key, 'pandaid': int(pandaid)})
+
+
+def panda_segfault_diagnose(request, key):
+    """The Diagnose action: queue the signature's LLM study to the
+    production operations agent (SEGFAULT_DIAGNOSIS.md, Diagnosis); the
+    page hears segfault_diagnose_queued when the run is submitted and
+    segfault_diagnosis_done when the result is enforced."""
+    from ..models import CrashSignature
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST only'}, status=405)
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'sign in to diagnose'}, status=403)
+    sig = CrashSignature.objects.filter(key=key).first()
+    if sig is None:
+        return JsonResponse({'error': f'no crash signature {key}'}, status=404)
+    msg = {'msg_type': 'segfault_diagnose', 'namespace': 'prodops', 'key': key,
+           'requested_by': request.user.username}
+    try:
+        queued = ActiveMQConnectionManager().send_message('/queue/epicprod.ops', json.dumps(msg))
+    except Exception as e:
+        logger.error(f"segfault diagnose trigger failed for {key}: {e}")
+        queued = False
+    if not queued:
+        return JsonResponse({'error': 'the ops-agent queue could not be reached'}, status=502)
+    log_epicprod_action('web', 'segfault_diagnose_request', subject_type='crash_signature',
+                        subject_key=key, username=request.user.username,
+                        sublevel='low', live_default=False)
+    return JsonResponse({'queued': True, 'key': key})
 
 
 def panda_errors_datatable_ajax(request):
@@ -1470,19 +2209,26 @@ def panda_errors_datatable_ajax(request):
     username = request.GET.get('username', '') or None
     site = request.GET.get('site', '') or None
     error_source = request.GET.get('error_source', '') or None
-    status = request.GET.get('status', '') or None
+    # Terminal-state filter, one status or CSV. The default excludes
+    # closed: the server disposed of those jobs for workflow reasons,
+    # by design not actual errors — the closed population stays
+    # visible in the status chips' counts and is one click away.
+    status = request.GET.get('status', '') or 'failed,cancelled'
     classified = request.GET.get('classified') == '1'
+    taskid = request.GET.get('taskid', '') or None
 
     # Served as a cached product: the error aggregation scans the window's
     # full faulty-job population (multi-second under failure churn), so
     # requests serve the stored summary and rebuilds run behind them.
     product = get_product(
-        f'panda_errors:v2:{days}:{username or ""}:{site or ""}'
+        f'panda_errors:v6:{days}:{username or ""}:{site or ""}'
         f':{error_source or ""}:{status or ""}:{int(classified)}:'
+        f'{taskid or ""}:'
         f'{ended_after.isoformat() if ended_after else ""}:'
         f'{ended_before.isoformat() if ended_before else ""}',
         lambda: error_summary(days=days, username=username, site=site,
                               error_source=error_source, limit=200,
+                              taskid=taskid,
                               ended_after=ended_after,
                               ended_before=ended_before, status=status,
                               classified=classified),
@@ -1495,6 +2241,12 @@ def panda_errors_datatable_ajax(request):
                              if product['built_at'] else None),
         'product_age_seconds': product['age_seconds'],
         'product_refreshing': product['refreshing'],
+        # Chip basis: per-status totals of the unrestricted window
+        # population, and the selection this response was built under.
+        'status_counts': result.get('status_counts') or {},
+        'status_selected': status,
+        # The failures under a declared downtime, per declaration.
+        'declared': result.get('declared'),
     }
 
     if 'error' in result:
@@ -1518,7 +2270,8 @@ def panda_errors_datatable_ajax(request):
         # Bootstrap shows as the one immediate tooltip. An inner
         # title= span would add a second, delayed native floater.
         diag_text = escape(err.get('error_diag', '') or '')
-
+        # The correction root: a label a rule marks unreliable renders
+        # its corrected reading first, the reported text beneath it.
         # Average run time before this error ended the job; patterns
         # whose jobs never started (pre-run failures) say so instead of
         # averaging in zeros.
@@ -1529,16 +2282,29 @@ def panda_errors_datatable_ajax(request):
         elif avg_text and never_started:
             avg_text += f' ({never_started} never started)'
 
-        data.append([
-            f'<a href="{diag_url}">{err["error_source"]}</a>',
-            str(err.get('error_code', '')),
-            diag_text,
-            str(err.get('count', 0)),
-            str(err.get('task_count', 0)),
-            avg_text,
-            users_str,
-            sites_str,
-        ])
+        # A pattern whose label a rule marks unreliable presents as its
+        # real failure modes: one row per mode, each with its count.
+        corr = err.get('correction')
+        modes = (corr.get('modes') or []) if corr else []
+        if corr and not modes:
+            modes = [{'reading': corr['label'],
+                      'count': err.get('count', 0)}]
+        if modes:
+            rows_out = [(escape(m['reading']), str(m['count']))
+                        for m in modes]
+        else:
+            rows_out = [(diag_text, str(err.get('count', 0)))]
+        for cell_text, cell_count in rows_out:
+            data.append([
+                f'<a href="{diag_url}">{err["error_source"]}</a>',
+                str(err.get('error_code', '')),
+                cell_text,
+                cell_count,
+                str(err.get('task_count', 0)),
+                avg_text,
+                users_str,
+                sites_str,
+            ])
 
     return dt.create_response(data, total, total, extra=product_extra)
 
@@ -1586,10 +2352,16 @@ def panda_diagnostics_datatable_ajax(request):
 
         errors_html = []
         for err in job.get('errors', []):
-            diag = err.get('diag', '')
+            corr = err.get('correction')
+            diag = corr['label'] if corr else err.get('diag', '')
             if len(diag) > 80:
                 diag = diag[:77] + '...'
             errors_html.append(f'<strong>{err["component"]}</strong>:{err["code"]} {diag}')
+        declared = (job.get('errors') or [{}])[0].get('declared') if job.get('errors') else None
+        if declared:
+            # The declaration leads: the job ended under a declared
+            # downtime of its queue (or the cache lag after it).
+            errors_html.insert(0, f'<span class="offline_fill px-1">declared downtime: {escape(declared["line"])}</span>')
 
         data.append([
             f'<a href="{job_url}">{job["pandaid"]}</a>',
@@ -1606,13 +2378,514 @@ def panda_diagnostics_datatable_ajax(request):
 
 # ── ePIC Queue views ────────────────────────────────────────────────────────
 
+SPARK_SPAN_DAYS = 14
+SPARK_BIN_HOURS = 8
+
+
+def _queue_completion_sparklines():
+    """Per-queue finished/failed completion flows for the 2-week
+    thumbnail sparklines: per-4-hour-bin deltas of the per-site
+    cumulative finished and failed counters in epicprod panda snaps,
+    extracted server-side (jsonb path, no full-state parsing).
+
+    A bin with no snaps is a coverage gap (None); the next sampled bin
+    carries the delta accumulated across the gap. A counter reset
+    (negative delta) renders as a gap, never as a negative flow.
+    """
+    from django.db import connection
+    from django.utils import timezone as dj_timezone
+    now = dj_timezone.now()
+    nbins = SPARK_SPAN_DAYS * 24 // SPARK_BIN_HOURS
+    # One extra lead-in bin supplies the baseline for the first delta.
+    start = now - timedelta(days=SPARK_SPAN_DAYS, hours=SPARK_BIN_HOURS)
+    sql = """
+        SELECT snap_time, state#>'{components,panda,data,jobs,sites}'
+        FROM snapper_system_snap
+        WHERE scope = 'epicprod'
+          AND snap_time >= %s
+          AND changed_components @> %s::jsonb
+          AND state#>'{components,panda,data,jobs,sites}' IS NOT NULL
+        ORDER BY snap_time
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(sql, [start, '["panda"]'])
+        rows = cursor.fetchall()
+    if not rows:
+        return {}
+    counters = {}              # site -> {slot: (cum finished, cum failed)}
+    for snap_time, sites in rows:
+        if isinstance(sites, str):
+            try:
+                sites = json.loads(sites)
+            except ValueError as e:
+                logger.error("sparkline snap JSON parse failed: %s", e)
+                continue
+        age_h = (now - snap_time).total_seconds() / 3600.0
+        slot = nbins - 1 - int(age_h // SPARK_BIN_HOURS)
+        if slot < -1:
+            continue
+        for site, block in (sites or {}).items():
+            cum = (block or {}).get('cum') or {}
+            counters.setdefault(site, {})[slot] = (
+                cum.get('finished') or 0, cum.get('failed') or 0)
+    sites_out = {}
+    for site, per_slot in counters.items():
+        flows = []
+        prev = per_slot.get(-1)
+        for i in range(nbins):
+            cur = per_slot.get(i)
+            if cur is None or prev is None:
+                flows.append(None)
+            else:
+                dfin, dfail = cur[0] - prev[0], cur[1] - prev[1]
+                flows.append([dfin, dfail]
+                             if dfin >= 0 and dfail >= 0 else None)
+            if cur is not None:
+                prev = cur
+        sites_out[site] = flows
+    return {'nbins': nbins, 'sites': sites_out}
+
+
+def _spark_svg(series, width=120, height=40):
+    """Stacked-area sparkline geometry for one queue's completion flows:
+    green fill = finished, red band above it = failed, scaled to the
+    queue's own peak total. None bins are coverage gaps and break the
+    paths."""
+    if not series:
+        return None
+    totals = [(v[0] + v[1]) if v is not None else None for v in series]
+    peak = max((t for t in totals if t is not None), default=None)
+    if peak is None:
+        return None
+    scale = peak if peak > 0 else 1
+    n = len(series)
+    step = width / max(n - 1, 1)
+    top, base = 2.0, float(height)
+    span = base - top
+    green, red = [], []
+    seg = []                   # (x, y at finished, y at finished+failed)
+
+    def close_segment():
+        if not seg:
+            return
+        fin_fwd = ' L '.join(f'{x:.1f},{yf:.1f}' for x, yf, yt in seg)
+        green.append(
+            f'M {seg[0][0]:.1f},{base:.1f} L {fin_fwd} '
+            f'L {seg[-1][0]:.1f},{base:.1f} Z')
+        if any(yt < yf for x, yf, yt in seg):
+            tot_fwd = ' L '.join(f'{x:.1f},{yt:.1f}' for x, yf, yt in seg)
+            fin_back = ' L '.join(
+                f'{x:.1f},{yf:.1f}' for x, yf, yt in reversed(seg))
+            red.append(f'M {tot_fwd} L {fin_back} Z')
+
+    for i, v in enumerate(series):
+        if v is None:
+            close_segment()
+            seg = []
+            continue
+        dfin, dfail = v
+        y_fin = base - span * dfin / scale
+        y_tot = base - span * (dfin + dfail) / scale
+        seg.append((i * step, y_fin, y_tot))
+    close_segment()
+    if not green:
+        return None
+    fin_total = sum(v[0] for v in series if v is not None)
+    fail_total = sum(v[1] for v in series if v is not None)
+    return {
+        'w': width, 'h': height,
+        'green': ' '.join(green), 'red': ' '.join(red),
+        'fin_total': fin_total, 'fail_total': fail_total,
+        'total': fin_total + fail_total,
+    }
+
+
+def _landing_declines_product():
+    """Landing declines per queue over the standing 2-week window, from
+    the payload's decline exit code on the PanDA record (swf-epicprod
+    docs/EPICPROD_PAYLOAD.md, exit code 80): a worker that could not
+    reach the Rucio server or the input door and started no work. A
+    cached product, since the query scans two weeks of jobs; 15 minutes
+    is fresh enough for a count that a job page can always confirm."""
+    from ..cached_product import get_product
+    product = get_product(
+        'epic_queues_landing_declines:v1',
+        lambda: landing_declines(SPARK_SPAN_DAYS),
+        ttl_seconds=15 * 60, async_first_fill=True)
+    value = (product or {}).get('value') or {}
+    if 'error' in value:
+        logger.error('landing declines product carries an error: %s',
+                     value['error'])
+        return {}
+    return value
+
+
+def _node_declines_product():
+    """Landing declines per worker node over the same standing window, from
+    the job record joined to the payload reports the sweep files. Cached
+    like the per-queue product: the query scans two weeks of jobs and reads
+    the filed reports, and a count is never the thing a decision turns on
+    within fifteen minutes."""
+    from ..cached_product import get_product
+    product = get_product(
+        'epic_queues_node_declines:v1',
+        lambda: node_declines(SPARK_SPAN_DAYS),
+        ttl_seconds=15 * 60, async_first_fill=True)
+    value = (product or {}).get('value') or {}
+    if value.get('error'):
+        logger.error('node declines product carries an error: %s',
+                     value['error'])
+        return []
+    return value.get('nodes') or []
+
+
+def _exclusions_context():
+    """What the OSG submission excludes, reported if possible.
+
+    The submit host reports what it is actually enforcing
+    (docs/OSG_SUBMIT_REPORTER.md); the declared list in
+    ``swf_epicprod.osg_exclusions`` carries the measurement that put each
+    entry there. The reported list is the authority for *what* is
+    excluded and the declared list supplies *why*, joined by site and
+    node. An entry the host enforces that we hold no evidence for
+    therefore shows with its evidence blank, which is worth seeing: it
+    means someone excluded something without a record of the reason.
+
+    With no report the declared list stands alone and the page says so,
+    because a copy presented as live is the failure this exists to end.
+    """
+    from swf_epicprod import osg_exclusions
+    from ..host_reports import latest
+
+    context = {
+        'exclusion_as_of': osg_exclusions.AS_OF,
+        'exclusion_queues': ', '.join(osg_exclusions.QUEUES),
+        'exclusion_totals': osg_exclusions.totals(),
+    }
+    report = latest('osgsub01') or {}
+    live = ((report.get('record') or {}).get('exclusions') or {})
+
+    if live.get('sites') is None:
+        context.update({
+            'excluded_sites': osg_exclusions.EXCLUDED_SITES,
+            'excluded_nodes': osg_exclusions.EXCLUDED_SITE_NODES,
+            'exclusion_source': 'declared',
+        })
+        return context
+
+    by_site = {s['site']: s for s in osg_exclusions.EXCLUDED_SITES}
+    by_node = {(n['site'], n['node'].split('.')[0]): n
+               for n in osg_exclusions.EXCLUDED_SITE_NODES}
+
+    sites = []
+    for name in live['sites']:
+        row = dict(by_site.get(name) or {})
+        row['site'] = name
+        sites.append(row)
+
+    nodes = []
+    for pair in live.get('site_nodes') or []:
+        known = by_node.get((pair['site'], pair['node']))
+        row = dict(known or {})
+        row['site'] = pair['site']
+        # The clause carries the host's first label; show the full name
+        # where the record has one, since that is what an operator reads.
+        row['node'] = (known or {}).get('node') or pair['node']
+        nodes.append(row)
+
+    context.update({
+        'excluded_sites': sites,
+        'excluded_nodes': nodes,
+        'exclusion_source': 'reported',
+        'exclusion_reported_at': report.get('reported_at'),
+        'exclusion_age_seconds': report.get('age_seconds'),
+        'exclusion_file_modified': live.get('modified'),
+        'exclusion_queues': ', '.join(live.get('queues')
+                                      or osg_exclusions.QUEUES),
+        'exclusion_pool': (report.get('record') or {}).get('pool') or {},
+    })
+    return context
+
+
+def _reported_submission(queue_name):
+    """How one queue's pilots are submitted, as the submit host reports it.
+
+    Only the queues the submit host serves have this; everything else
+    returns None and the page shows nothing rather than an empty card.
+    The facts are the ones that decide where a pilot may land and what
+    it asks for, which live in the submit description and the harvester
+    queue configuration and are invisible from here
+    (docs/OSG_SUBMIT_REPORTER.md).
+    """
+    from ..host_reports import latest
+    report = latest('osgsub01') or {}
+    record = report.get('record') or {}
+    queues = record.get('queues') or {}
+    entry = queues.get(queue_name)
+    if not isinstance(entry, dict):
+        return None
+    sdf_name = entry.get('submit_description')
+    sdf = (record.get('submit_descriptions') or {}).get(sdf_name) or {}
+    return {
+        'reported_at': report.get('reported_at'),
+        'submit_description': sdf_name,
+        'modified': sdf.get('modified'),
+        'requirements': sdf.get('requirements'),
+        'executable': sdf.get('executable'),
+        'job_duration_category': sdf.get('job_duration_category'),
+        'request_cpus': sdf.get('request_cpus'),
+        'request_memory': sdf.get('request_memory'),
+        'request_disk': sdf.get('request_disk'),
+        'max_workers': entry.get('max_workers'),
+        'max_new_workers_per_cycle': entry.get('max_new_workers_per_cycle'),
+        'workflow': entry.get('workflow'),
+        'excluded_sites': sdf.get('excluded_sites') or [],
+        'excluded_site_nodes': sdf.get('excluded_site_nodes') or [],
+        'pool': record.get('pool') or {},
+        'schedd': record.get('schedd') or {},
+    }
+
+
+HARVESTER_HOSTS = ('pandaharvester01', 'pandaharvester02', 'osgsub01-harvester')
+
+
+def _reported_harvester(queue_name):
+    """How one queue gets work, as its harvester host reports it: the last
+    job fetch and its outcome, the interval's fetches and workers, and the
+    failed calls to the PanDA server (docs/HARVESTER_REPORTER.md).
+
+    None for a queue no reporting harvester serves, so the page shows
+    nothing rather than an empty card."""
+    from ..host_reports import latest
+    for host in HARVESTER_HOSTS:
+        report = latest(host) or {}
+        record = report.get('record') or {}
+        fetch = ((record.get('fetching') or {}).get('queues') or {}).get(queue_name)
+        submit = ((record.get('submission') or {}).get('queues') or {}).get(queue_name)
+        db = record.get('harvester_db') or {}
+        limits = next((q for q in (db.get('launch_limits') or [])
+                       if isinstance(q, dict) and q.get('queue') == queue_name), None)
+        not_finished = db.get('not_finished') or {}
+        nf_site = (not_finished.get('sites') or {}).get(queue_name)
+        if not isinstance(fetch, dict) and not isinstance(submit, dict) and limits is None:
+            continue
+        calls = record.get('failed_calls') or {}
+        return {
+            'host': host,
+            'reported_at': report.get('reported_at'),
+            'age_seconds': report.get('age_seconds'),
+            'interval_seconds': (record.get('interval') or {}).get('seconds'),
+            'fetch': fetch or {},
+            'submit': submit or {},
+            'failed_calls': {d: v for d, v in calls.items()
+                             if isinstance(v, dict) and v.get('failed')},
+            # From the harvester's database and condor logs (reporter 1.1).
+            'limits': limits,
+            'workers_now': (db.get('workers_now') or {}).get(queue_name)
+                           if isinstance(db.get('workers_now'), dict) else None,
+            'ended': ((db.get('workers_ended') or {}).get('sites') or {}).get(queue_name),
+            'not_finished': nf_site,
+            'not_finished_hours': not_finished.get('hours'),
+            'db_error': db.get('error'),
+        }
+    return None
+
+
+def _batch_knowledge():
+    """The batch-record knowledge base as the learning pass last built it.
+
+    A file read of a product the nightly pass writes, so the page costs
+    nothing and shows exactly what the corpus said when it was last mined
+    (docs/ERROR_ATTRIBUTION.md, Retention and learning)."""
+    from monitor_app import batch_records
+    return batch_records.knowledge() or {}
+
+
 def epic_queues_list(request):
     """ePIC compute queues from live PanDA schedconfig."""
     result = list_queues(vo='eic')
     queues = result.get('queues', [])
+    # Operator-written description and tier live in the local model's
+    # metadata, which the CRIC sync never touches. One query, attached by
+    # name. The tier held there overrides schedconfig, whose value reflects
+    # the parent site rather than the facility actually providing the cycles.
+    from monitor_app.models import PandaQueue
+    local = {
+        row.queue_name: (row.metadata or {})
+        for row in PandaQueue.objects.only('queue_name', 'metadata')
+    }
+    # Canary's curated per-queue health, the failure percentage its policy
+    # judges, and the last job activity from the PanDA jobs tables, all
+    # joined by queue name.
+    from canary.store.models import PassiveSample, Queue as CanaryQueue
+    canary_queues = list(CanaryQueue.objects.all())
+    canary_health = {q.name: q.status for q in canary_queues}
+    canary_names = {q.id: q.name for q in canary_queues}
+    canary_pct = {}
+    canary_njobs = {}
+    seen_samples = set()
+    for sample in PassiveSample.objects.order_by('queue_id', '-window_end'):
+        if sample.queue_id in seen_samples:
+            continue
+        seen_samples.add(sample.queue_id)
+        name = canary_names.get(sample.queue_id)
+        if not name:
+            continue
+        canary_njobs[name] = sample.njobs
+        if sample.failure_rate is not None:
+            canary_pct[name] = f'{sample.failure_rate * 100:.0f}%'
+    last_use = queue_last_use()
+    pools = readings_by_queue([q.get('panda_queue') for q in queues])
+    from ..cached_product import get_product
+    spark_product = get_product(
+        'epic_queues_sparklines:v3', _queue_completion_sparklines,
+        ttl_seconds=6 * 3600, async_first_fill=True)
+    spark_data = (spark_product or {}).get('value') or {}
+    spark_sites = spark_data.get('sites') or {}
+    declines = _landing_declines_product()
+    # What CRIC declares for the queue: the rule in force or the next
+    # window, from the declared record (CONTINUOUS_PRODUCTION.md,
+    # Declared downtime); one read for the page.
+    from ..declared import declared_for
+    declared = declared_for('queue')
+    for queue in queues:
+        name = queue.get('panda_queue')
+        meta = local.get(name, {})
+        queue['declines'] = declines.get(name)
+        queue['declared'] = (declared.get(name) or {}).get('line', '')
+        queue['declared_state'] = ('active' if (declared.get(name) or {}).get('active')
+                                   else 'future' if (declared.get(name) or {}).get('future')
+                                   else '')
+        queue['description'] = meta.get('description', '')
+        queue['tier'] = meta.get('tier') or queue.get('tier') or ''
+        queue['canary'] = canary_health.get(name, 'unknown')
+        queue['canary_pct'] = canary_pct.get(name, '')
+        queue['canary_njobs'] = canary_njobs.get(name)
+        queue['last_use'] = last_use.get(name)
+        queue['spark'] = _spark_svg(spark_sites.get(name))
+        # The pool the queue's workers wait in: what share of it is
+        # claimed, and how many jobs are idle ahead of ours.
+        pool = pools.get(name)
+        if pool:
+            fraction = pool.get('claimed_fraction')
+            queue['pool_label'] = pool.get('label')
+            queue['pool_full'] = (round(100 * fraction) if fraction is not None
+                                  else None)
+            pool_queue = pool.get('queue') or {}
+            queue['pool_idle'] = pool_queue.get('idle')
+            # The two pools count different things: the SCDF collector
+            # answers for the whole pool, the OSG submit host only for
+            # the workers we ourselves put there. The cell says which.
+            queue['pool_idle_scope'] = (
+                'jobs waiting in {}, {}'.format(pool.get('label'),
+                                             pool_queue.get('scope'))
+                if pool_queue.get('scope') else None)
+        # Schedconfig mixes caps in resource_type (GRID vs cloud/gpu);
+        # display lowercase throughout.
+        if queue.get('resource_type'):
+            queue['resource_type'] = queue['resource_type'].lower()
+
+    filter_fields = [
+        ('status', 'Status'),
+        ('canary', 'Canary'),
+        ('resource_type', 'Resource Type'),
+        ('type', 'Queue Type'),
+        ('country', 'Region'),
+        ('tier', 'Tier'),
+    ]
+    # Options come from the full set, so a chosen filter does not empty the
+    # other filter bars.
+    # Tier options rank T1, T2, ... then Opp, not alphabetically.
+    def _tier_rank(v):
+        if v.startswith('T') and v[1:].isdigit():
+            return (0, int(v[1:]), v)
+        if v == 'Opp':
+            return (1, 0, v)
+        return (2, 0, v)
+
+    filters = []
+    selected = {}
+    for key, label in filter_fields:
+        value = (request.GET.get(key) or '').strip()
+        selected[key] = value
+        counts = Counter((q.get(key) or '') for q in queues if q.get(key))
+        ordered = sorted(counts, key=_tier_rank) if key == 'tier' else sorted(counts)
+        filters.append({
+            'key': key, 'label': label, 'selected': value,
+            'options': [{'value': v, 'count': counts[v]} for v in ordered],
+        })
+    for key, value in selected.items():
+        if value:
+            queues = [q for q in queues if (q.get(key) or '') == value]
+
+    # What the OSG submission excludes, and what the payload declined.
+    declines_rows = sorted(
+        ({'queue': q, **d} for q, d in declines.items()),
+        key=lambda r: r['count'], reverse=True)
+
     return render(request, 'monitor_app/epic_queues_list.html', {
         'queues': queues,
+        # Reported by the submit host where it has reported, declared
+        # otherwise, and the page states which (_exclusions_context).
+        **_exclusions_context(),
+        'declines_rows': declines_rows,
+        'declines_days': SPARK_SPAN_DAYS,
+        'node_decline_rows': _node_declines_product(),
+        'batch_knowledge': _batch_knowledge(),
+        'filters': filters,
+        'active_filters': [
+            {'label': f['label'], 'value': f['selected']}
+            for f in filters if f['selected']
+        ],
+        'clear_all_url': reverse('monitor_app:epic_queues_list'),
+        'any_filter': any(selected.values()),
+        'total_count': result.get('count', 0),
     })
+
+
+def _queue_observed_product(queue_name):
+    """What the queue delivered, cached: the query scans a month of jobs.
+
+    The declared schedconfig says what a queue offers; this is its observed
+    counterpart (swf inflight swf-node-map-benchmarks)."""
+    from ..cached_product import get_product
+    product = get_product(
+        f'epic_queue_observed:{queue_name}:v3',
+        lambda: queue_observed(queue_name, days=30),
+        ttl_seconds=60 * 60, async_first_fill=True)
+    return (product or {}).get('value') or {}
+
+
+def _with_measurements(observed, queue_name):
+    """The node measurement store's CPU seconds per event, simulation and
+    reconstruction, beside each processor of the observed section: the
+    job-weighted mean over the queue's workloads (site-canary
+    docs/MEASUREMENTS.md). A database read; the product is not rebuilt."""
+    processors = list((observed or {}).get('processors') or [])
+    if not processors:
+        return observed
+    try:
+        from canary.store.measure import queue_summary
+        measured = queue_summary(queue_name)
+    except Exception as e:                                   # noqa: BLE001
+        logger.error('node measurements unreadable for %s: %s', queue_name, e)
+        return observed
+    out = dict(observed)
+    rows = []
+    for entry in processors:
+        entry = dict(entry)
+        stages = measured.get(entry.get('processor'), {})
+        sim = stages.get('simulation') or {}
+        reco = stages.get('reconstruction') or {}
+        entry['sim_cpu_per_event'] = (round(sim['mean'], 2)
+                                      if sim.get('mean') is not None else None)
+        entry['reco_cpu_per_event'] = (round(reco['mean'], 2)
+                                       if reco.get('mean') is not None else None)
+        entry['measured_jobs'] = max(sim.get('jobs', 0), reco.get('jobs', 0))
+        rows.append(entry)
+    out['processors'] = rows
+    out['measured'] = any(r['measured_jobs'] for r in rows)
+    return out
 
 
 def epic_queue_detail(request, queue_name):
@@ -1630,6 +2903,7 @@ def epic_queue_detail(request, queue_name):
             'error': result['error'],
             'queue_name': queue_name,
             'panda_queue_metadata': (panda_queue.metadata if panda_queue else {}),
+            'description': ((panda_queue.metadata if panda_queue else {}) or {}).get('description', ''),
         })
     config = result['queue']
 
@@ -1676,10 +2950,74 @@ def epic_queue_detail(request, queue_name):
         shown.update(s.keys())
     other = {k: v for k, v in config.items() if k not in shown}
 
+    # The same outcomes pie the jobs page shows when filtered to this
+    # queue, over the standing 2-week window (the embedded site history
+    # that stood beside it is gone: _jobs_site_pie_product).
+    site_outcomes_pie = None
+    try:
+        site_outcomes_pie = _jobs_site_pie_product(
+            14, queue_name, request.GET.get('refresh') == '1')['value']
+    except Exception as e:                                   # noqa: BLE001
+        logger.error('site outcomes pie failed for queue detail: %s', e)
+
+    # What CRIC declares for the queue, in force and coming, and the
+    # history (CONTINUOUS_PRODUCTION.md, Declared downtime).
+    from ..declared import for_detail_page
+    declared_now, declared_history = for_detail_page('queue', queue_name)
     return render(request, 'monitor_app/epic_queue_detail.html', {
         'queue_name': queue_name,
         'panda_queue_metadata': (panda_queue.metadata if panda_queue else {}),
+        'description': ((panda_queue.metadata if panda_queue else {}) or {}).get('description', ''),
+        'declared_now': declared_now,
+        'declared_history': declared_history,
         'sections': sections,
         'other': other,
         'config_json': json_mod.dumps(config, indent=2, default=str),
+        'site_outcomes_pie': site_outcomes_pie,
+        'declines': _landing_declines_product().get(queue_name),
+        'observed': _with_measurements(_queue_observed_product(queue_name), queue_name),
+        'declines_days': SPARK_SPAN_DAYS,
+        'submission': _reported_submission(queue_name),
+        # How the harvester fetches this queue's jobs, from its host
+        # reporter's stored record (docs/HARVESTER_REPORTER.md).
+        'harvester': _reported_harvester(queue_name),
+        # How full the batch pool this queue's workers wait in is, and
+        # how deep the queue ahead of them; from the pool reporter's
+        # stored record, never a collector call in the render.
+        'pool': readings_by_queue([queue_name]).get(queue_name),
+        # The queue's own workers in that pool: waiting now, and what
+        # the ones that started waited (docs/POOL_REPORTER.md).
+        'workers': worker_reading(queue_name, refresh=request.GET.get('refresh') == '1'),
+        # What the node harness reported across the queue's Event Service
+        # jobs (swf-epicprod NODE_EVENT_DISPATCHER.md): a cached product,
+        # None for a queue that ran none in the window.
+        'es': es_reading(queue_name, refresh=request.GET.get('refresh') == '1'),
     })
+
+
+@login_required
+def epic_queue_description_update(request, queue_name):
+    """Save the operator-written description for a queue.
+
+    The description is held in the local model's ``metadata`` JSON rather than
+    in the mirrored schedconfig: the sync writers replace ``config_data`` and
+    leave ``metadata`` alone, so the text survives every refresh. The local
+    row is created on demand, since most queues are only known from
+    schedconfig until somebody annotates them.
+    """
+    from monitor_app.models import PandaQueue
+
+    if request.method != 'POST':
+        return redirect('monitor_app:epic_queue_detail', queue_name=queue_name)
+
+    queue, _created = PandaQueue.objects.get_or_create(
+        queue_name=queue_name,
+        defaults={'config_data': {}, 'metadata': {}},
+    )
+    metadata = dict(queue.metadata or {})
+    metadata['description'] = (request.POST.get('description') or '').strip()
+    metadata['description_updated_by'] = request.user.get_username()
+    metadata['description_updated_at'] = timezone.now().isoformat()
+    queue.metadata = metadata
+    queue.save(update_fields=['metadata', 'updated_at'])
+    return redirect('monitor_app:epic_queue_detail', queue_name=queue_name)

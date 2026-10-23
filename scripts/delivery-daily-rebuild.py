@@ -50,6 +50,21 @@ def main():
         campaigns, apply=not args.dry_run and not args.limit_files,
         created_by=args.created_by, limit_files=args.limit_files)
     print('SUMMARY ' + json.dumps(summary))
+
+    if not args.dry_run and not args.limit_files:
+        # The campaign view serves its series as a cached product;
+        # rebuilding it here, right after the record changed, means
+        # pages land on a warm product instead of churning behind a
+        # stale one. A prewarm failure is reported, never fatal to
+        # the chain step — the next page visit rebuilds behind.
+        try:
+            from snapper_ai.presentation import prewarm_focus_series
+            warmed = prewarm_focus_series('epicprod',
+                                          window_keys=('30d',))
+            print('PREWARM ' + json.dumps(warmed))
+        except Exception as exc:  # noqa: BLE001
+            print(f'WARNING: series prewarm failed: {exc}',
+                  file=sys.stderr)
     return 0
 
 

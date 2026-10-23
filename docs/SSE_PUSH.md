@@ -146,6 +146,6 @@ The substrate is shared; the devcloud delta is just the streaming proxy.
 `prodtask_submit_failed`, `prodtask_submit_unrecorded`,
 `panda_task_operation_done`); the internal browser pages hold the `EventSource`
 consumers
-(`src/monitor_app/viewdir/pandamon.py`, `src/pcs/templates/pcs/prod_task_compose.html`);
+(`src/monitor_app/viewdir/pandamon.py`, swf-epicprod `pcs/templates/pcs/prod_task_compose.html`);
 and the swf-remote streaming proxy relays the stream on the external face
 (`../swf-remote/src/remote_app/monitor_client.py`, `StreamingHttpResponse`).

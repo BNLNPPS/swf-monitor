@@ -1,0 +1,6 @@
+{# The three segfault pages as page tabs (base.html, .swf-page-tabs): every tab is a server-routed link; the including page names its own tab in segfault_tab. #}
+<div class="swf-page-tabs">
+    <a href="{% url 'monitor_app:panda_segfaults' %}" {% if segfault_tab == 'catalog' %}class="active"{% endif %}>Catalog</a>
+    <a href="{% url 'monitor_app:panda_segfault_findings' %}" {% if segfault_tab == 'findings' %}class="active"{% endif %}>Findings</a>
+    <a href="{% url 'monitor_app:panda_segfault_reproductions' %}" {% if segfault_tab == 'reproductions' %}class="active"{% endif %}>Reproduction runs</a>
+</div>

@@ -9,17 +9,27 @@ from .views import (
     get_next_run_number, get_next_agent_id, get_next_workflow_execution_id,
     ensure_namespace,
     ai_memory_record, ai_memory_load, dpid_verify, panda_slash_command,
+    jev_slash_command,
     users_list,
 )
+from .host_reports import host_report
 from .sse_views import sse_message_stream, sse_status
 from .panda import api as panda_api
 from .panda.corun_callback import corun_callback
+from .viewdir.authority_api import user_authority
+from .viewdir.user_admin import user_rights_set
 from .viewdir.capcom import (capcom_notice_ingest, capcom_notices,
-                             capcom_state, capcom_user_state)
+                             capcom_state, capcom_user_state,
+                             NoticeSubscriptionViewSet)
+from .viewdir.declared_api import declared_state, node_guard_exclusion, storage_doors
 from .viewdir.snapper_api import (snapper_changes_between,
                                   snapper_component_history, snapper_context,
-                                  snapper_latest, snapper_state_at,
-                                  system_status_history)
+                                  snapper_cut_summary, snapper_latest,
+                                  snapper_series, snapper_state_at,
+                                  system_status_history,
+                                  segfault_catalog_api,
+                                  segfault_findings_api,
+                                  segfault_signature_api)
 from .viewdir.snapper_episodes_api import (episode_detail_view,
                                            episodes_append, episodes_close,
                                            episodes_list_view, episodes_open)
@@ -42,6 +52,7 @@ router.register(r'tf-slices', TFSliceViewSet, basename='tfslice')
 router.register(r'workers', WorkerViewSet, basename='worker')
 router.register(r'run-states', RunStateViewSet, basename='runstate')
 router.register(r'system-state-events', SystemStateEventViewSet, basename='systemstateevent')
+router.register(r'notices/subscriptions', NoticeSubscriptionViewSet, basename='noticesubscription')
 
 urlpatterns = [
     path('logs/summary/', LogSummaryView.as_view(), name='log-summary'),
@@ -53,7 +64,11 @@ urlpatterns = [
     path('ai-memory/', ai_memory_load, name='ai-memory-load'),
     path('dpid/verify/', dpid_verify, name='dpid-verify'),
     path('slash/panda/', panda_slash_command, name='panda-slash-command'),
+    path('slash/jev/', jev_slash_command, name='jev-slash-command'),
     path('corun-callback/', corun_callback, name='corun-callback'),
+    # Host reporters push what only their own host can see
+    # (docs/OSG_SUBMIT_REPORTER.md).
+    path('host-reports/<str:host>/', host_report, name='host-report'),
     # PanDA REST API — read-only JSON for external consumers.
     # See monitor_app/panda/api.py.
     path('panda/tasks/', panda_api.tasks_list, name='panda-api-tasks-list'),
@@ -72,7 +87,14 @@ urlpatterns = [
          name='panda-task-operation-update'),
     path('panda/jobs/', panda_api.jobs_list, name='panda-api-jobs-list'),
     path('panda/activity/', panda_api.activity, name='panda-api-activity'),
+    path('panda/harvester-instances/', panda_api.harvester_instances,
+         name='panda-api-harvester-instances'),
+    path('panda/seconds-per-event/', panda_api.seconds_per_event, name='panda-api-seconds-per-event'),
     path('users/', users_list, name='users-list'),
+    # Who may act on the system, written by swf-remote at sign-in
+    # (docs/AUTHORITY.md).
+    path('user-authority/', user_authority, name='user-authority'),
+    path('user-rights/', user_rights_set, name='user-rights'),
     # Episode ingest (token-authenticated writes from the episode
     # builder agent) and read surfaces; snapper_episodes_api.py.
     path('snapper/episodes/open/', episodes_open, name='snapper-episodes-open'),
@@ -94,11 +116,26 @@ urlpatterns = [
          name='snapper-changes-between'),
     path('snapper/<str:scope>/context/', snapper_context,
          name='snapper-context'),
+    path('snapper/<str:scope>/series/', snapper_series,
+         name='snapper-series'),
+    path('snapper/<str:scope>/cut-summary/', snapper_cut_summary,
+         name='snapper-cut-summary'),
     path('system-status/history/', system_status_history,
          name='system-status-history'),
+    path('segfaults/', segfault_catalog_api, name='segfault-catalog'),
+    path('segfaults/findings/', segfault_findings_api, name='segfault-findings'),
+    path('segfaults/<str:key>/', segfault_signature_api,
+         name='segfault-signature'),
     path('capcom/state/', capcom_state, name='capcom-state'),
     path('capcom/user-state/', capcom_user_state, name='capcom-user-state'),
     path('capcom/notices/', capcom_notices, name='capcom-notices'),
+    # The declared record for out-of-process readers (the site canary's
+    # provider): CONTINUOUS_PRODUCTION.md, Declared downtime.
+    path('declared/', declared_state, name='declared-state'),
+    # The node guard's published exclusion (site-canary docs/NODE_GUARD.md,
+    # Actuation): what the cycle puts on the bucket's pilot prefix.
+    path('storage-doors/', storage_doors, name='storage-doors'),
+    path('node-guard/exclusion/', node_guard_exclusion, name='node-guard-exclusion'),
     path('capcom/notices/ingest/', capcom_notice_ingest,
          name='capcom-notice-ingest'),
     path('messages/stream/', sse_message_stream, name='sse-message-stream'),

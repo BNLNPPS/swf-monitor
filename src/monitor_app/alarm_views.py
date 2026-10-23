@@ -258,10 +258,22 @@ def alarms_dashboard(request):
     next_check_seconds = int(cycle_seconds - (now % cycle_seconds))
     built_at_dt = datetime.fromtimestamp(now, tz=_EASTERN)
 
+    pings_open, pings_done = alarms_data.list_pings()
+    ping_proposals, fulfil_proposals, remedies = _ping_proposals()
+    for pg in pings_open:
+        pg['fulfil_proposal'] = fulfil_proposals.get(pg['id'])
+        pg['remedy_proposal'] = remedies.get((pg['title'] or '').strip().lower())
+    for pr in ping_proposals:
+        pr['remedy'] = remedies.get((pr['title'] or '').strip().lower())
     return render(request, 'monitor_app/alarms.html', {
+        'ping_proposals': ping_proposals,
+        'ping_today': alarms_data._today_eastern().isoformat(),
         'hours': hours,
         'summary_rows': summary_rows,
         'sections': sections,
+        'pings_open': pings_open,
+        'pings_done': pings_done,
+        'ping_default_lead': alarms_data.PING_DEFAULT_LEAD_DAYS,
         'teams': alarms_data.list_teams(),
         'health': alarms_data.engine_health(),
         'recent_runs': alarms_data.recent_runs(limit=20),
@@ -270,6 +282,104 @@ def alarms_dashboard(request):
         'built_at_dt': built_at_dt,
         'auto_refresh_seconds': 10,
     })
+
+
+# ── pings (docs/PINGS.md) ──────────────────────────────────────────────
+
+def _ping_proposals():
+    """Pending AI proposals for the Pings section: proposed pings as
+    rows to accept with an editable due date, and proposed fulfilments
+    keyed by the ping they concern (AI_PROPOSALS.md, PINGS.md)."""
+    from datetime import date
+    try:
+        from ai.models import Proposal
+    except Exception as e:  # noqa: BLE001 - the ai app is optional to this page
+        import logging
+        logging.getLogger(__name__).error('ping proposals unavailable: %s', e)
+        return [], {}
+    today = alarms_data._today_eastern()
+    proposals = []
+    fulfils = {}
+    # Remedies (PINGS.md § Pings with a remedy): proposals in the
+    # obligation's own category, keyed by the ping title they close.
+    remedies = {}
+    for row in (Proposal.objects
+                .filter(action__in=('ping', 'ping_fulfil', 'standard_config'),
+                        status='proposed')
+                .order_by('created_at')):
+        payload = row.payload or {}
+        if row.action == 'ping_fulfil':
+            fulfils[row.subject_key] = {
+                'id': row.pk, 'ref': row.ref, 'proposer': row.proposer,
+                'comment': row.comment, 'created_at': row.created_at}
+            continue
+        if row.action == 'standard_config':
+            key = (payload.get('ping_title') or '').strip().lower()
+            remedies[key] = {
+                'id': row.pk, 'ref': row.ref, 'proposer': row.proposer,
+                'comment': row.comment, 'created_at': row.created_at,
+                'label': f"create {payload.get('name', '')}",
+                'detail': (f"from {payload.get('template', '')}, image "
+                           f"{payload.get('container_image', '')}")}
+            continue
+        due = None
+        try:
+            due = date.fromisoformat(str(payload.get('due') or '')[:10])
+        except ValueError:
+            pass
+        proposals.append({
+            'id': row.pk, 'ref': row.ref, 'proposer': row.proposer,
+            'comment': row.comment, 'created_at': row.created_at,
+            'title': payload.get('title', ''), 'due': payload.get('due', ''),
+            'days_left': (due - today).days if due else None,
+            'lead_days': payload.get('lead_days'),
+            'owner': payload.get('owner', ''), 'note': payload.get('note', ''),
+            'url': alarms_data._ping_link(payload.get('url', '')),
+        })
+    return proposals, fulfils, remedies
+
+
+def _json_body(request) -> dict:
+    if request.content_type and 'json' in request.content_type:
+        try:
+            return json.loads(request.body or b'{}')
+        except json.JSONDecodeError as e:
+            raise alarms_data.PingError(f'bad json: {e}')
+    return {k: v for k, v in request.POST.items()}
+
+
+@login_required
+@csrf_exempt
+@require_POST
+def ping_create(request):
+    """POST /alarms/pings/create/ — one open ping from the dashboard
+    form (JSON or form body: title, due, lead_days, owner, note, url).
+    Returns {ok, id}; a bad field returns {error} with the reason."""
+    username = getattr(request.user, 'username', '') or ''
+    try:
+        body = _json_body(request)
+        e, _log_id = alarms_data.ping_create_execute(
+            {k: body.get(k, '') for k in
+             ('title', 'due', 'lead_days', 'owner', 'note', 'url')},
+            changed_by=username)
+    except alarms_data.PingError as exc:
+        return JsonResponse({'error': str(exc)}, status=400)
+    return JsonResponse({'ok': True, 'id': e.id})
+
+
+@login_required
+@csrf_exempt
+@require_POST
+def ping_fulfil(request, ping_uuid: str):
+    """POST /alarms/pings/<uuid>/fulfil/ — record that the obligation
+    is met. The engine clears the ping's event on its next tick."""
+    username = getattr(request.user, 'username', '') or ''
+    try:
+        e, _log_id = alarms_data.ping_fulfil_execute(ping_uuid,
+                                                     changed_by=username)
+    except alarms_data.PingError as exc:
+        return JsonResponse({'error': str(exc)}, status=400)
+    return JsonResponse({'ok': True, 'id': e.id})
 
 
 # ── event detail ──────────────────────────────────────────────────────────

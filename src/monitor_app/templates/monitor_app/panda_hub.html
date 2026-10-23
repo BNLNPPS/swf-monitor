@@ -44,6 +44,14 @@
         <div class="col-md-4 mb-3">
             <div class="card h-100">
                 <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:panda_segfaults' %}" class="text-decoration-none">Segfault Catalog</a></strong></p>
+                    <p class="card-text">Payload crashes by signature: storms, dead configurations and sparse event-dependent crashes, from first sighting to a verdict.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
                     <p class="mb-2"><strong><a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="text-decoration-none">Diagnostics</a></strong></p>
                     <p class="card-text">Failed jobs with full error details for debugging production issues.</p>
                 </div>

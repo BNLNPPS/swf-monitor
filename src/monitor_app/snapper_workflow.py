@@ -24,7 +24,6 @@ from .workflow_models import WorkflowExecution
 PUBLISHER_IDENTITY = "swf-monitor:workflow-activity"
 ASSESSMENT_POLICY_VERSION = "swf-workflow-activity-v1"
 MAX_MAP_ITEMS = 32
-MAX_SERIALIZED_BYTES = 32 * 1024
 STF_PROCESSING_TYPE = "stfprocessing"
 
 # JEDI terminal task states; nonterminal STF tasks are the in-flight set.
@@ -42,7 +41,6 @@ WORKFLOW_REGISTRATION = {
     "visibility": "public",
     "owning_subsystem": "SWF testbed workflow layer",
     "assessment_policy": ASSESSMENT_POLICY_VERSION,
-    "max_serialized_bytes": MAX_SERIALIZED_BYTES,
     "quantities": {
         "executions_active": {
             "path": "executions.active",

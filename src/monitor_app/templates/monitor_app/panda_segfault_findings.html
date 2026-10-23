@@ -1,0 +1,117 @@
+{% extends 'base.html' %}
+{% load swf_fmt %}
+
+{% block title %}Segfault Findings{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h1>Segfault Findings</h1>
+    {% with segfault_tab='findings' %}{% include 'monitor_app/_segfault_tabs.html' %}{% endwith %}
+    <p class="text-muted mb-3" id="findings-desc">
+        The curated reading of the Segfault Catalog: one entry per crashing
+        frame, stating what the crash is, which configurations it hits and what they lost, and what production does about it.
+        The catalog is the record, rebuilt from the production record nightly; this page is the reading of it, written by the
+        production operator after checking each claim against its source, versioned with the editor's name on every change, and
+        corrected as the experts who know the code weigh in. An entry marked <em>model reading</em> is an LLM study's reading that has
+        not yet been checked. The crashes, configurations and loss are read live from the catalog.
+    </p>
+    {% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+    {% if entries and not historical %}
+    <ul class="list-unstyled mb-3" id="findings-jump">
+        {% for e in entries %}<li><a href="#{{ e.anchor }}"><strong>{{ e.fid }}</strong>: {{ e.title }}</a>{% if e.model_reading %} <span class="ai-attr">model reading</span>{% endif %}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    <style>
+      /* A jump lands the row below the nav bar and the latched header. */
+      #findings-table tbody tr[id] { scroll-margin-top: calc(var(--swf-nav-height, 0px) + 3rem); }
+      #findings-table td.sig-col { max-width: 16em; overflow-wrap: anywhere; }
+      #findings-table td.frame-col { max-width: 18em; overflow-wrap: anywhere; }
+      #findings-table td.finding-col { max-width: 70em; }
+      #findings-table td.finding-col h5 { margin: 0 0 0.5rem 0; }
+      #findings-table td.finding-col .finding-label { font-weight: bold; margin-top: 0.6rem; }
+      #findings-table td.finding-col p { margin: 0; white-space: pre-wrap; }
+    </style>
+    <table class="table table-bordered table-sm align-top w-auto swf-latch-head" id="findings-table">
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>{% if historical %}Replaced{% else %}Updated{% endif %}</th>
+                <th>Crashing frame</th>
+                <th>Stage</th>
+                <th>Class</th>
+                <th>Signatures</th>
+                <th>Crashes</th>
+                <th>Tasks</th>
+                <th title="Crashed manifest rows with no delivered output, and the events they carried">Rows lost</th>
+                <th>Standing</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for e in entries %}
+            <tr id="{{ e.anchor }}">
+                <td rowspan="2">{{ e.date }}</td>
+                <td rowspan="2">{% with t=e.updated_at|fmt_dt %}{{ t|slice:":8" }}<br>{{ t|slice:"9:" }}{% endwith %}<br>{% if historical %}{{ e.replaced_by }}{% else %}{{ e.updated_by }}{% endif %}</td>
+                <td class="frame-col">{{ e.frame }}</td>
+                <td>{{ e.stage }}</td>
+                <td>{{ e.class }}</td>
+                <td class="sig-col">{% for s in e.signatures %}{% if s.missing %}{{ s.key }} (not in the catalog){% else %}<a href="{% url 'monitor_app:panda_segfault_detail' key=s.key %}">{{ s.key }}</a>{% if s.level == 'trace' %} ({{ s.tasks }} task{{ s.tasks|pluralize }}){% endif %}{% endif %}{% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
+                <td>{{ e.crashes }}</td>
+                <td>{{ e.tasks }}</td>
+                <td class="text-nowrap">{% if e.rows_lost %}{{ e.rows_lost }}<br>{{ e.events_lost }} ev{% endif %}</td>
+                <td>{{ e.standing }}</td>
+            </tr>
+            <tr>
+                <td class="finding-col" colspan="8">
+                    <h5{% if e.serial %} id="f-{{ e.serial }}"{% endif %}>{% if e.fid %}{{ e.fid }}: {% endif %}{{ e.title }}{% if e.model_reading %} <span class="ai-attr">model reading</span>{% endif %}</h5>
+                    {% if historical %}
+                    <div class="alert alert-info py-2">
+                        Previous version {{ e.version }}{% if e.updated_by %}, assessment by {{ e.updated_by }}{% endif %}.
+                        Catalog counts are live, not historical.
+                        <a href="{% url 'monitor_app:panda_segfault_findings' %}#{{ e.current_anchor }}">View current assessment</a>
+                    </div>
+                    {% endif %}
+                    {% if e.versions %}
+                    <details class="mb-2"{% if historical %} open{% endif %}>
+                        <summary>{{ e.versions|length }} previous version{{ e.versions|length|pluralize }}</summary>
+                        <ul class="mb-0">
+                        {% for v in e.versions %}
+                            <li>{% if v.version_num == e.version %}<strong>Version {{ v.version_num }} (viewing)</strong>{% else %}<a href="{% url 'monitor_app:panda_segfault_findings' %}?finding={{ e.name|urlencode }}&amp;version={{ v.version_num }}">Version {{ v.version_num }}</a>{% endif %}
+                                — replaced {{ v.replaced_at|fmt_dt }} by {{ v.changed_by }}</li>
+                        {% endfor %}
+                        </ul>
+                    </details>
+                    {% endif %}
+                    <div class="finding-label">What it is</div>
+                    <p>{{ e.what|urlize }}</p>
+                    {% if e.sources %}<div class="finding-label">Sources</div>
+                    <p>{% for s in e.sources %}<a href="{{ s.url }}">{{ s.label }}</a>{% if not forloop.last %}<br>{% endif %}{% endfor %}</p>{% endif %}
+                    {% if e.action %}<div class="finding-label">What production does</div>
+                    <p>{{ e.action|urlize }}</p>{% endif %}
+                    {% if e.notes %}<div class="finding-label">Notes</div>
+                    <p>{{ e.notes|urlize }}</p>{% endif %}
+                    {% if e.fix %}<div class="finding-label">Fix</div>
+                    <p>{{ e.fix|urlize }}</p>{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<script>
+    // The description and the jump list take the table's width, no wider.
+    (function () {
+        const desc = document.getElementById('findings-desc');
+        const jump = document.getElementById('findings-jump');
+        const table = document.getElementById('findings-table');
+        if (!desc || !table) return;
+        const fit = () => {
+            desc.style.maxWidth = table.offsetWidth + 'px';
+            if (jump) jump.style.maxWidth = table.offsetWidth + 'px';
+        };
+        fit();
+        window.addEventListener('resize', fit);
+    })();
+</script>
+{% endblock %}

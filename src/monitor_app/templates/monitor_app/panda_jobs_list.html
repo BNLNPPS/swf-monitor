@@ -1,35 +1,35 @@
 {% extends "monitor_app/_datatable_dynamic_base.html" %}
 
 {% block extra_filters %}
+{% if request_notice %}
+<div class="alert alert-warning py-2 px-3 mb-3">{{ request_notice }}</div>
+{% endif %}
 <!-- Days selector -->
 <div style="margin-bottom:1em;">
     <strong>Time window:</strong>
     {% for opt in days_options %}
     {% if opt.active %}
-    <a href="?days={{ opt.value }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}" style="font-weight:bold;text-decoration:underline;margin-right:0.8em;">{{ opt.label }}</a>
+    <a href="?days={{ opt.value }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}" class="swf-days-link" data-days="{{ opt.value }}" style="font-weight:bold;text-decoration:underline;margin-right:0.8em;">{{ opt.label }}</a>
     {% else %}
-    <a href="?days={{ opt.value }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}" style="margin-right:0.8em;">{{ opt.label }}</a>
+    <a href="?days={{ opt.value }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}" class="swf-days-link" data-days="{{ opt.value }}" style="margin-right:0.8em;">{{ opt.label }}</a>
     {% endif %}
     {% endfor %}
     {% if selected_taskid %}
     | <strong>Task:</strong> <a href="{% url 'monitor_app:panda_task_detail' selected_taskid %}">{{ selected_taskid }}</a>
     <a href="?days={{ days }}" style="margin-left:0.5em;color:#dc3545;">[clear]</a>
     {% endif %}
+    <a href="{% url 'snapper_ai:snapper_report' scope='epicprod' %}?window={{ snapper_window }}"
+       style="margin-left:1cm;font-weight:bold;">Snapper view</a>
 </div>
-
-{% if snapper_embed %}
-<div class="mb-2">
-  <div class="d-flex align-items-baseline">
-    <h5 class="mb-1">State history · {{ selected_site }}</h5>
-    <a class="ms-3" href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='site' %}?site={{ selected_site|urlencode }}">Open in Snapper</a>
-  </div>
-  {% include 'snapper_ai/_snapper_embed.html' with embed=snapper_embed %}
-</div>
-{% endif %}
 
 {% if job_outcomes %}
 <div class="mb-3">
-  <h5 class="mb-1">Completed jobs{% if selected_site %} · {{ selected_site }}{% endif %} · {{ jobs_window_label }}</h5>
+  <div class="d-flex align-items-baseline">
+    <h5 class="mb-1">Completed jobs{% if selected_site %} · {{ selected_site }}{% endif %} · {{ jobs_window_label }}</h5>
+    {% if selected_site %}
+    <a class="ms-3" href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='site' %}?site={{ selected_site|urlencode }}">State history in Snapper</a>
+    {% endif %}
+  </div>
   {% if job_outcomes.error %}
   <div class="text-muted mb-2">{{ job_outcomes.error }}</div>
   {% else %}
@@ -46,7 +46,7 @@
   <div class="text-muted small">
     Bars are completions per {{ job_outcomes.bucket }} (Eastern time); lines are the cumulative integral over the window.
     {% if job_outcomes.built_at_text %}Built {{ job_outcomes.built_at_text }} ·
-    <a href="?days={{ days }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}{% if ended_after %}&ended_after={{ ended_after|urlencode }}&ended_before={{ ended_before|urlencode }}{% endif %}&refresh=1">Update</a>{% endif %}
+    <a href="?days={{ days }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}{% if ended_after %}&ended_after={{ ended_after|urlencode }}&ended_before={{ ended_before|urlencode }}{% endif %}&refresh=1" class="swf-update-btn">Update</a>{% endif %}
   </div>
   {{ job_outcomes|json_script:"job-outcomes-data" }}
   <script>
@@ -185,6 +185,7 @@
         font: {size: 14},
         height: 300,
         legend: {orientation: 'h'},
+        xaxis: {nticks: Math.min(data.bins.length + 1, 16)},
         yaxis: {title: {text: 'jobs / ' + data.bucket}, rangemode: 'tozero'},
         yaxis2: {title: {text: 'cumulative'}, overlaying: 'y', side: 'right',
                  rangemode: 'tozero', showgrid: false},

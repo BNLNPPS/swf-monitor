@@ -1,3 +1,10 @@
+/* These are state names, applied bare to the cell showing a state. Two of
+   them — `alert` and `warning` — are also Bootstrap component classes, so a
+   state colour was repainting whole alert boxes: a green Submit-ready panel
+   rendered its text firebrick, the theme's error colour. A Bootstrap alert
+   always carries a variant class alongside `.alert`, so those get their own
+   variant colour back; a bare `.alert` state cell is untouched. */
+.alert[class*="alert-"] { color: var(--bs-alert-color, inherit); }
 
 .alarm { color:red }
 .errspan {color: red}
@@ -255,6 +262,10 @@
    csv_import: imported from external CSV, not yet processed by the
    prod team → grey (inert, closed family). */
 .draft_fill { color:black; background-color:#e6f0f6 !important; }
+
+/* Ping severity (docs/PINGS.md): a reminder, not an outage; fulfilled is history. */
+.ping_fill { color:black; background-color:#cfe3f8 !important; }
+.fulfilled_fill { color:black; background-color:#e3efe3 !important; }
 
 /* Canary queue states; unknown_fill already above. */
 .healthy_fill { color:black; background-color:#96ca69 !important; }

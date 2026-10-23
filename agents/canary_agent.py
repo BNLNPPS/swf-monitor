@@ -53,6 +53,15 @@ CANARY_QUEUE = os.environ.get("CANARY_OPS_QUEUE", "/queue/canary.ops")
 # accounting query plus store writes; the evaluator reads the store only.
 ASSESS_TIMEOUT = int(os.environ.get("CANARY_ASSESS_TIMEOUT", "300"))
 EVALUATE_TIMEOUT = int(os.environ.get("CANARY_EVALUATE_TIMEOUT", "120"))
+# Probe dispatch builds a sandbox and runs a client-API submission per
+# due queue; generous bound, one dispatch cycle at a time.
+PROBE_TIMEOUT = int(os.environ.get("CANARY_PROBE_TIMEOUT", "900"))
+# The reconciliation of reproduction requests with their runs after a
+# collection (swf-epicprod SEGFAULT_DIAGNOSIS.md, Reproduction): a few
+# signature rows in swfdb and at most one bus message per settled
+# signature.
+RECONCILE_TIMEOUT = int(os.environ.get("CANARY_RECONCILE_TIMEOUT", "120"))
+RECONCILE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "segfault-reproductions-reconcile.py"
 
 # Dedicated namespace config shipped beside the agent. A fixed 'canary'
 # namespace makes the singleton identifiable in the monitor and lets callers
@@ -68,7 +77,8 @@ EXIT_DELIBERATE = 100
 class CanaryAgent(BaseAgent):
     """Canary site-health agent — dispatches canary messages to handlers."""
 
-    KNOWN_TYPES = {"assess_refresh", "health_ping", "shutdown"}
+    KNOWN_TYPES = {"assess_refresh", "probe_dispatch", "payload_canary",
+                   "health_ping", "shutdown"}
 
     def __init__(self):
         # System-level singleton (not a per-user testbed agent): its namespace
@@ -140,26 +150,193 @@ class CanaryAgent(BaseAgent):
         self.logger.info(f"CANARY assess_refresh done in {elapsed:.1f}s")
         self._emit_complete(ok=True)
 
+    def _handle_probe_dispatch(self, m):
+        """Enqueue one probe-dispatch cycle: advance probe-run statuses
+        and submit probes for due queues, or for a named queue when the
+        message carries one (the page's Run now); with ``collect_only``
+        the cycle collects the open runs and submits nothing (the
+        frequent tick while reproductions run). Deduped so an overlapping
+        cron tick and button press never double-submit."""
+        self.run_in_background(
+            self._do_probe_dispatch, m,
+            dedup_key="probe_dispatch", label="probe_dispatch")
+
+    def _do_probe_dispatch(self, m):
+        created_by = str(m.get("created_by") or "?")
+        queue = str(m.get("queue") or "").strip()
+        collect_only = bool(m.get("collect_only"))
+        args = ["probe-dispatch"]
+        if queue:
+            args += ["--queue", queue]
+        if collect_only:
+            args += ["--collect-only"]
+        self.logger.info(
+            f"CANARY probe_dispatch: starting (by {created_by})"
+            + (f" queue={queue}" if queue else "")
+            + (" collect-only" if collect_only else ""))
+        t0 = time.monotonic()
+        ok = self._run_doer(args, PROBE_TIMEOUT)
+        elapsed = time.monotonic() - t0
+        self.logger.info(
+            f"CANARY probe_dispatch {'done' if ok else 'FAILED'} "
+            f"in {elapsed:.1f}s")
+        # Whatever the collection did, the reproduction requests are
+        # reconciled with their runs now, never on a page read.
+        self._reconcile_reproductions()
+        self.send_message('/topic/epictopic', {
+            "msg_type": "canary_probe_dispatch_complete", "ok": ok,
+            "queue": queue, "collect_only": collect_only})
+
+    def _reconcile_reproductions(self):
+        """Run the reconciliation script (monitor_app/reproductions.py):
+        each open reproduction request takes its run's identity and
+        outcome, a settled pair settles its signature, and a settled
+        reproduction with a trace queues its diagnosis once. Bounded;
+        every failure is logged, none stops the cycle."""
+        cmd = [sys.executable, str(RECONCILE_SCRIPT)]
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=RECONCILE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"CANARY reproduction reconcile TIMEOUT after {RECONCILE_TIMEOUT}s")
+            return
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  reconcile: {line[:300]}")
+        summary = (p.stdout or "").strip().splitlines()[-1:] or ["{}"]
+        if p.returncode != 0:
+            self.logger.error(
+                f"CANARY reproduction reconcile FAILED rc={p.returncode}: {summary[0][:300]}")
+            return
+        self.logger.info(
+            f"CANARY reproduction reconcile done in {time.monotonic() - t0:.1f}s: "
+            f"{summary[0][:300]}")
+
+    def _handle_payload_canary(self, m):
+        """Run one payload canary (site-canary IMPLEMENTATION.md, Payload
+        canaries): the named PCS task's first manifest row through the
+        production payload on the named queue, as a canary task with an
+        expiring output dataset. Deduped per task and queue."""
+        task = str(m.get("task") or "").strip()
+        queue = str(m.get("queue") or "").strip()
+        if not task or not queue:
+            self.logger.error(
+                f"CANARY payload_canary: task and queue are required; got "
+                f"task={task!r} queue={queue!r}")
+            return
+        # A reproduction (SEGFAULT_DIAGNOSIS.md) names its signature; two
+        # of them on one queue for two crashed jobs must both run.
+        dedup = f"payload_canary:{task}:{queue}"
+        if m.get("signature"):
+            dedup += f":{m.get('signature')}:{m.get('pandaid') or ''}"
+        enqueued = self.run_in_background(
+            self._do_payload_canary, m, dedup_key=dedup, label="payload_canary")
+        if not enqueued:
+            # A duplicate of a submission in flight (two sessions asking
+            # for the same row in the same minute) is dropped here and
+            # runs nowhere; the request on the record must say so, or it
+            # reads "queued for submission" forever.
+            self._withdraw_request(
+                m, "duplicate: the same row's submission on this queue was "
+                   "already in flight when the request arrived")
+
+    def _do_payload_canary(self, m):
+        created_by = str(m.get("created_by") or "?")
+        task = str(m.get("task") or "").strip()
+        queue = str(m.get("queue") or "").strip()
+        self.logger.info(
+            f"CANARY payload_canary: {task} on {queue} (by {created_by})")
+        t0 = time.monotonic()
+        args = ["payload-canary", "--task", task, "--queue", queue]
+        # The reproduction settings (SEGFAULT_DIAGNOSIS.md, Reproduction):
+        # the crashed job's row, the memory match, the signature it serves.
+        if m.get("row_text"):
+            args += ["--row-text", str(m["row_text"])]
+        elif m.get("row"):
+            args += ["--row", str(int(m["row"]))]
+        if m.get("mem_limit_mb"):
+            args += ["--mem-limit-mb", str(int(m["mem_limit_mb"]))]
+        if m.get("signature"):
+            args += ["--signature", str(m["signature"])]
+        if m.get("pandaid"):
+            args += ["--pandaid", str(int(m["pandaid"]))]
+        if m.get("container"):
+            args += ["--container", str(m["container"])]
+        if m.get("request_id"):
+            args += ["--request-id", str(m["request_id"])]
+        ok, error = self._run_doer_detail(args, PROBE_TIMEOUT)
+        self.logger.info(
+            f"CANARY payload_canary {'submitted' if ok else 'FAILED'} "
+            f"in {time.monotonic() - t0:.1f}s")
+        if not ok:
+            # A dispatch that died before the CLI recorded a run leaves the
+            # request with nothing to be joined to; the withdraw writes the
+            # failure on it, and writes nothing when a run does exist.
+            self._withdraw_request(
+                m, f"submission failed: {error or 'see the agent log'}", failed=True)
+        # The same completion event the probes page already listens for,
+        # so a Run from the page reloads on it; the kind tells them apart.
+        self.send_message('/topic/epictopic', {
+            "msg_type": "canary_probe_dispatch_complete", "ok": ok,
+            "queue": queue, "kind": "payload", "task": task})
+
     # -- doers ---------------------------------------------------------------
 
     def _run_doer(self, canary_args, timeout):
         """Run one site-canary CLI subprocess, bounded; relay its output and
         surface every failure. Returns True on success."""
+        return self._run_doer_detail(canary_args, timeout)[0]
+
+    def _run_doer_detail(self, canary_args, timeout):
+        """``_run_doer`` with the failure's one line beside the flag, for a
+        caller that records it: (ok, error), error empty on success."""
         cmd = [sys.executable, "-m", "canary"] + canary_args
         name = canary_args[0]
         try:
             p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         except subprocess.TimeoutExpired:
             self.logger.error(f"CANARY {name} TIMEOUT after {timeout}s")
-            return False
+            return False, f"{name} timed out after {timeout}s"
         for line in (p.stderr or "").splitlines():
             self.logger.info(f"  canary {name}: {line}")
         if p.returncode != 0:
             tail = (p.stdout or "").strip().splitlines()[-1:] or ["(no output)"]
             self.logger.error(
                 f"CANARY {name} FAILED rc={p.returncode}: {tail[0]}")
-            return False
-        return True
+            return False, f"{name} rc={p.returncode}: {tail[0][:200]}"
+        return True, ""
+
+    def _withdraw_request(self, m, reason, failed=False):
+        """Record on the signature that a reproduction request was not run
+        (monitor_app/reproductions.py ``withdraw_request`` through the
+        reconcile script's ``--withdraw``): a duplicate dropped by the
+        dedup, or a dispatch that failed before a run existed. A message
+        with no request id or signature is a plain payload canary and
+        has no request to withdraw. Bounded; every failure is logged."""
+        request_id = str(m.get("request_id") or "").strip()
+        key = str(m.get("signature") or "").strip()
+        if not request_id or not key:
+            return
+        cmd = [sys.executable, str(RECONCILE_SCRIPT), "--key", key,
+               "--withdraw", request_id, "--reason", reason]
+        if failed:
+            cmd.append("--failed")
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=RECONCILE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"CANARY reproduction withdraw {request_id} TIMEOUT after {RECONCILE_TIMEOUT}s")
+            return
+        summary = (p.stdout or "").strip().splitlines()[-1:] or ["{}"]
+        if p.returncode != 0:
+            self.logger.error(
+                f"CANARY reproduction withdraw {request_id} on {key} FAILED "
+                f"rc={p.returncode}: {summary[0][:300]}")
+            return
+        self.logger.info(
+            f"CANARY reproduction withdraw {request_id} on {key}: {summary[0][:300]}")
 
     def _emit_complete(self, ok, stage=None):
         """Publish the cycle outcome to the SSE topic so pages can refresh

@@ -9,9 +9,13 @@ resolution, and the host service hooks (preferences, configuration,
 scheduler status, health page). Registered from MonitorAppConfig.ready().
 """
 
+import logging
+
 from snapper_ai.presentation import (ET_ZONE, component_data, cut_chip,
                                      cut_delta, et_naive, span_text)
 from snapper_ai.registry import ScopeProvider, register, register_hooks
+
+logger = logging.getLogger(__name__)
 
 # The host template rendering the provider card kinds below.
 CARD_TEMPLATE = 'monitor_app/_snapper_cards.html'
@@ -241,12 +245,21 @@ DELIVERY_LENSES = (
 )
 
 _PC_CACHE = {'at': None, 'requestors': {}, 'keys': {},
-             'categories': {}, 'group_names': {}}
+             'categories': {}, 'processes': {}, 'species': {},
+             'beam_energies': {}, 'q2_ranges': {}, 'samples': {},
+             'group_names': {}}
 
 
 def _group_slug(name):
     import re
     return re.sub(r'[^a-z0-9]+', '_', str(name).lower()).strip('_')
+
+
+def _species_slug(name):
+    # Preserve charge in curve identities: e+ and e- must not both
+    # collapse to the same generic ``e`` slug.
+    charged = str(name).replace('+', '_plus').replace('-', '_minus')
+    return _group_slug(charged) or 'unspecified'
 
 
 def _pc_cache():
@@ -263,13 +276,34 @@ def _pc_cache():
     if (_PC_CACHE['at'] is None
             or (now - _PC_CACHE['at']).total_seconds() > 60):
         requestors, keys, categories = {}, {}, {}
-        for label, groups, key, category in (
+        processes, species = {}, {}
+        beam_energies, q2_ranges, samples = {}, {}, {}
+        for label, groups, key, category, parameters, sample in (
                 PhysicsConfig.objects.values_list(
                     'label', 'requestors', 'config_key',
-                    'physics_tag__category__name')):
+                    'physics_tag__category__name',
+                    'physics_tag__parameters', 'sample_name')):
             requestors[label] = list(groups or [])
             keys[label] = key
             categories[label] = category or 'Uncategorized'
+            parameters = parameters or {}
+            processes[label] = str(parameters.get('process') or '')
+            # Collision species for ordinary samples; generated particle
+            # species for particle-gun samples, whose beam species is
+            # intentionally empty.
+            species[label] = str(parameters.get('beam_species')
+                                 or parameters.get('particle') or '')
+            electron = parameters.get('beam_energy_electron')
+            hadron = parameters.get('beam_energy_hadron')
+            energies = [str(value) for value in (electron, hadron)
+                        if value not in (None, '')]
+            beam_energies[label] = (
+                f"{' × '.join(energies)} GeV" if energies else '')
+            q2_range = str(parameters.get('q2_range') or '')
+            if q2_range.startswith('q2_'):
+                q2_range = q2_range[3:]
+            q2_ranges[label] = q2_range.replace('to', '–')
+            samples[label] = str(sample or '')
         group_names = {}
         for name in set(categories.values()):
             group_names[_group_slug(name)] = name
@@ -278,8 +312,16 @@ def _pc_cache():
                 group_names[_group_slug(name)] = name
         for name in ('Unassigned', 'Uncategorized'):
             group_names[_group_slug(name)] = name
+        species_names = {
+            _species_slug(name or 'Unspecified'): name or 'Unspecified'
+            for name in species.values()
+        }
         _PC_CACHE.update({'requestors': requestors, 'keys': keys,
                           'categories': categories,
+                          'processes': processes, 'species': species,
+                          'beam_energies': beam_energies,
+                          'q2_ranges': q2_ranges, 'samples': samples,
+                          'species_names': species_names,
                           'group_names': group_names, 'at': now})
     return _PC_CACHE
 
@@ -313,14 +355,41 @@ def _delivery_curve_values(state):
         # production bursts attributed — the lens only clusters the
         # tick boxes and the cut card. Cumulative draws at lens-group
         # level: a handful of lines, plus the total.
+        species_cum_e, species_cum_f = {}, {}
         for pc, leaf in (block.get('leaves') or {}).items():
             arrived_events = int(leaf.get('arrived_events') or 0)
             arrived_files = int(leaf.get('arrived_files') or 0)
-            if arrived_events:
-                values[f'dlvq_{tag}_{pc}'] = round(
-                    arrived_events / 1e6, 2)
-            if arrived_files:
-                values[f'dlvqf_{tag}_{pc}'] = arrived_files
+            # Zeros emit: a quiet day must stamp the quilt's time base,
+            # or the next arrival day's column widens back over the
+            # gap. The renderer stacks absent-at-stamp members as zero,
+            # so the stamps are what carry the day.
+            values[f'dlvq_{tag}_{pc}'] = round(arrived_events / 1e6, 2)
+            values[f'dlvqf_{tag}_{pc}'] = arrived_files
+            # The same daily record carries each configuration's
+            # cumulative standing.  Keep these as separate curves from
+            # the daily-arrival quilt: the campaign view reuses them in
+            # one stacked panel per top-level physics category.
+            cumulative_events = int(leaf.get('events') or 0)
+            cumulative_files = int(leaf.get('cum_files') or 0)
+            if cumulative_events:
+                values[f'dlvpc_{tag}_{pc}'] = round(
+                    cumulative_events / 1e6, 2)
+            if cumulative_files:
+                values[f'dlvpcf_{tag}_{pc}'] = cumulative_files
+            if cache['categories'].get(pc) == 'Single Particle':
+                species = (cache.get('species') or {}).get(pc) \
+                    or 'Unspecified'
+                slug = _species_slug(species)
+                species_cum_e[slug] = (species_cum_e.get(slug, 0)
+                                       + cumulative_events)
+                species_cum_f[slug] = (species_cum_f.get(slug, 0)
+                                       + cumulative_files)
+        for slug, value in species_cum_e.items():
+            if value:
+                values[f'dlvsp_{tag}_{slug}'] = round(value / 1e6, 2)
+        for slug, value in species_cum_f.items():
+            if value:
+                values[f'dlvspf_{tag}_{slug}'] = value
         for lens in DELIVERY_LENSES:
             seg = lens['seg']
             cum_e, cum_f = {}, {}
@@ -344,6 +413,52 @@ def _delivery_curve_values(state):
     return values
 
 
+_QUEUE_STACK_CACHE = {'members': (
+    'NERSC_Perlmutter_epic',
+    'BNL_OSG_EPIC_PROD_1',
+    'UM_GREX_PanDA_1',
+    'BNL_ePIC_GOOGLE',
+    'BNL_ePIC_GOOGLE_es',
+    'NERSC_Perlmutter_epic_es',
+    'BNL_NPPS_GPU',
+    'BNL_PanDA_1',
+)}
+
+# Named bands in the seven-day cores-by-queue stack beyond the production
+# queues, which always have theirs; every other queue collapses into 'other'.
+QUEUE_STACK_MAX = 6
+
+# The categorical palette used by the Site compute usage plots. Queue
+# colors are assigned by time-weighted stack rank; 'other' takes the next color.
+_QUEUE_BAND_COLORS = (
+    '#636efa', '#ef553b', '#00cc96', '#ab63fa', '#ffa15a', '#19d3f3',
+    '#ff6692', '#b6e880', '#ff97ff', '#fecb52', '#2f4b7c', '#a05195')
+
+# Keep these states in the captured PanDA record and detail tables, but do not
+# turn them into plot curves.  In particular, ``sent`` is normally a very
+# short dispatch transition; sampling it at five-minute cadence creates tall,
+# one-snap needles without useful operational structure.
+_EPICPROD_DISABLED_PLOT_JOB_STATES = frozenset(('sent',))
+_EPICPROD_TYPE_EXCLUDED_JOB_STATES = frozenset(
+    ('activated', 'starting')) | _EPICPROD_DISABLED_PLOT_JOB_STATES
+
+
+def _production_queues():
+    """The production queues (SysConfig front.queues), which always have
+    their own bands; none when unreadable."""
+    try:
+        from swf_epicprod.front import regulated_queues
+        return regulated_queues()
+    except Exception:  # noqa: BLE001
+        logger.exception('production queues unreadable')
+        return []
+
+
+def _queue_stack_members():
+    """Members derived from the report series already in hand."""
+    return _QUEUE_STACK_CACHE['members']
+
+
 def _site_curve_values(panda):
     """Per-site job lifecycle curves from the sites maps recorded in
     every snap: the in-flight population by status (submission through
@@ -351,22 +466,44 @@ def _site_curve_values(panda):
     finished/failed outcomes. Site names carry underscores, so the
     status is always the id's last segment."""
     values = {}
-    for site, block in ((panda.get('jobs') or {}).get('sites')
-                        or {}).items():
+    jobs = panda.get('jobs') or {}
+    job_sites = jobs.get('sites') or {}
+    # The scope view's cores-by-queue stack shares this walk: a handful
+    # of named queues and one 'other' band carrying every remaining
+    # queue, so the stack always sums to the whole running-core count.
+    for site, block in job_sites.items():
         for status, count in (block.get('by_status_now') or {}).items():
-            if status == 'starting':
+            if (status == 'starting'
+                    or status in _EPICPROD_DISABLED_PLOT_JOB_STATES):
                 continue
             values[f'sj_{site}_{status}'] = int(count or 0)
         if block.get('running_cores_now') is not None:
-            values[f'sjc_{site}'] = int(
-                block.get('running_cores_now') or 0)
+            cores = int(block.get('running_cores_now') or 0)
+            values[f'sjc_{site}'] = cores
+            values[f'qc_{site}'] = cores
         # Cumulative terminal counters (raw absolute values; the
         # window-relative families rebase them at render).
         cum = block.get('cum') or {}
+        # The same counters twice under distinct ids: one curve id
+        # carries one render projection, and these counters feed two —
+        # the integrated outcomes (window-relative) and the completions
+        # flow (counter_flow per-interval deltas).
         if 'finished' in cum:
             values[f'sjfw_{site}'] = int(cum.get('finished') or 0)
+            values[f'sjfin_{site}'] = int(cum.get('finished') or 0)
         if 'failed' in cum:
             values[f'sjxw_{site}'] = int(cum.get('failed') or 0)
+            values[f'sjfail_{site}'] = int(cum.get('failed') or 0)
+        # The allocation those jobs held, core-hours from the record's
+        # exact core-seconds: productive against wasted on one axis
+        # (docs/SNAPPER_ERRORS.md, Wasted resources).
+        held = block.get('cum_core_seconds') or {}
+        if 'finished' in held:
+            values[f'sjfh_{site}'] = round(
+                int(held.get('finished') or 0) / 3600, 1)
+        if 'failed' in held:
+            values[f'sjxh_{site}'] = round(
+                int(held.get('failed') or 0) / 3600, 1)
         for cls, count in (block.get('cum_failed_by_class')
                            or {}).items():
             values[f'sjxc_{site}_{cls}'] = int(count or 0)
@@ -375,6 +512,181 @@ def _site_curve_values(panda):
         for status, count in (block.get('by_status_now') or {}).items():
             values[f'stt_{site}_{status}'] = int(count or 0)
     return values
+
+
+PLATFORM_YIELD_WINDOW_SECONDS = 3600
+
+
+def _platform_series_transform(series):
+    """Derive the 60-minute heartbeat yield curve from the recorded
+    per-interval counts: at each snap, heartbeats received over
+    heartbeats expected summed across the snaps of the trailing hour —
+    the ratio of sums the record's own window carries, computed here
+    over the whole series so the curve spans the record from its first
+    publication. The expected counts are an input only and leave the
+    product."""
+    from datetime import datetime, timedelta
+
+    curves = series.get('curves') or {}
+    expected = curves.pop('plhb_expected', None)
+    received = (curves.get('plhb_received') or {}).get('points') or []
+    if not received or not expected:
+        return series
+    expected_at = {point[0]: float(point[1] or 0)
+                   for point in expected.get('points') or []}
+    rows = []
+    for stamp, value in received:
+        try:
+            rows.append((datetime.fromisoformat(stamp), stamp,
+                         float(value or 0), expected_at.get(stamp, 0.0)))
+        except (TypeError, ValueError) as e:
+            logger.error('platform yield window: bad stamp %r: %s', stamp, e)
+    rows.sort(key=lambda row: row[0])
+    span = timedelta(seconds=PLATFORM_YIELD_WINDOW_SECONDS)
+    points = []
+    head = 0
+    sum_received = sum_expected = 0.0
+    for at, stamp, got, want in rows:
+        sum_received += got
+        sum_expected += want
+        while rows[head][0] <= at - span:
+            sum_received -= rows[head][2]
+            sum_expected -= rows[head][3]
+            head += 1
+        if sum_expected > 0:
+            points.append(
+                [stamp, round(min(sum_received / sum_expected, 9.999), 3)])
+    if points:
+        curves['plhy_window'] = {
+            'label': _PLATFORM_LABELS['plhy_window'], 'points': points}
+    series['curves'] = curves
+    return series
+
+
+# Storage curve prefixes that are flows (counter projections and the
+# derived yield), never held forward.
+_STORAGE_FLOW_PREFIXES = ('stofa_', 'stoba_', 'stoft_', 'stobt_', 'stoxe_',
+                          'stopf_', 'stopb_', 'stoxy_')
+
+
+def _storage_series_transform(series):
+    """Derive the ghost yield per RSE (docs/SNAPPER_STORAGE.md) from the
+    projected flows: ghosts appeared over registrations, first copies
+    arrived plus ghosts appeared, per bin; absent where nothing was
+    registered in the bin. Both inputs are counter-flow projections on
+    the same bin ladder, so stamps align."""
+    curves = series.get('curves') or {}
+    for curve_id in [c for c in curves
+                     if c.startswith('stoxe_') and c.endswith('_appeared')]:
+        rse = curve_id[len('stoxe_'):-len('_appeared')]
+        first = curves.get(f'stofa_{rse}_first')
+        if not first:
+            continue
+        appeared = {point[0]: point[1] for point in curves[curve_id].get('points') or []}
+        points = []
+        for stamp, arrived in first.get('points') or []:
+            ghosts = appeared.get(stamp)
+            if ghosts is None:
+                continue
+            total = float(arrived or 0) + float(ghosts or 0)
+            if total > 0:
+                points.append([stamp, round(float(ghosts or 0) / total, 3)])
+        if points:
+            curves[f'stoxy_{rse}_yield'] = {
+                'label': _STORAGE_MEMBER_LABELS['yield'], 'points': points}
+    # State curves hold their last recorded value to the present: the
+    # record is four-hourly and a quiet pass affirms the state unchanged, so
+    # the last pass's gauges are the state until the next pass. Flows
+    # (counter projections and the yield) are per-bin and stay as they
+    # are. The hold stops two minutes short of the series end so the
+    # landing cut, which takes the last stamp, stays inside the capture
+    # scheduler's evaluated span (30 s boundaries plus evaluation lag)
+    # and never lands on a "coverage unknown" instant.
+    end = series.get('end')
+    if end:
+        from datetime import datetime, timedelta
+        try:
+            hold_stamp = (datetime.fromisoformat(end)
+                          - timedelta(seconds=120)).isoformat(timespec='seconds')
+        except ValueError:
+            hold_stamp = None
+        for curve_id, curve in curves.items():
+            if (hold_stamp is None or not curve_id.startswith('sto')
+                    or curve_id.startswith(_STORAGE_FLOW_PREFIXES)):
+                continue
+            points = curve.get('points') or []
+            if points and points[-1][0] < hold_stamp:
+                points.append([hold_stamp, points[-1][1]])
+    series['curves'] = curves
+    return series
+
+
+def _epicprod_series_transform(series):
+    """Rank and fold queue curves using the series already assembled."""
+    from datetime import datetime
+
+    series = _platform_series_transform(series)
+    series = _storage_series_transform(series)
+    curves = series.get('curves') or {}
+    queue_curves = {
+        curve_id: curve for curve_id, curve in curves.items()
+        if curve_id.startswith('qc_') and curve_id != 'qc_other'
+    }
+    running_points = (curves.get('running_cores') or {}).get('points') or []
+    if not queue_curves or not running_points:
+        return series
+
+    stamps = [point[0] for point in running_points]
+    running = {point[0]: int(point[1] or 0) for point in running_points}
+    values = {
+        curve_id: {point[0]: int(point[1] or 0)
+                   for point in curve.get('points') or []}
+        for curve_id, curve in queue_curves.items()
+    }
+    end = datetime.fromisoformat(series['end'])
+    durations = {}
+    for index, stamp in enumerate(stamps):
+        until = (datetime.fromisoformat(stamps[index + 1])
+                 if index + 1 < len(stamps) else end)
+        durations[stamp] = max(
+            0, (until - datetime.fromisoformat(stamp)).total_seconds())
+    ranked = sorted(
+        queue_curves,
+        key=lambda curve_id: (
+            -sum(values[curve_id].get(stamp, 0) * durations[stamp]
+                 for stamp in stamps),
+            curve_id))
+    # The production queues (front.queues) always have their own bands,
+    # idle or not, so a production queue never disappears into 'other'
+    # behind a test queue that ran briefly; the remaining bands go by
+    # core-hours over the window.
+    selected = [f'qc_{q}' for q in _production_queues()]
+    selected += [curve_id for curve_id in ranked
+                 if curve_id not in selected and any(values[curve_id].values())
+                 ][:max(0, QUEUE_STACK_MAX - len(selected))]
+    members = tuple(curve_id[3:] for curve_id in selected)
+    _QUEUE_STACK_CACHE['members'] = members
+
+    folded = {curve_id: curve for curve_id, curve in curves.items()
+              if not curve_id.startswith('qc_')}
+    for curve_id in selected:
+        folded[curve_id] = {
+            'label': curve_id[3:],
+            'points': [[stamp, values.get(curve_id, {}).get(stamp, 0)]
+                       for stamp in stamps],
+        }
+    folded['qc_other'] = {
+        'label': 'other',
+        'points': [
+            [stamp, max(0, running[stamp] - sum(
+                values.get(curve_id, {}).get(stamp, 0)
+                for curve_id in selected))]
+            for stamp in stamps
+        ],
+    }
+    series['curves'] = folded
+    series['queue_members'] = list(members)
+    return series
 
 
 def _epicprod_curve_values(state):
@@ -386,24 +698,33 @@ def _epicprod_curve_values(state):
     if jobs_now:
         values['running_cores'] = int(jobs_now.get('running_cores') or 0)
         for status, count in (jobs_now.get('by_status') or {}).items():
-            if status == 'starting':
+            if (status == 'starting'
+                    or status in _EPICPROD_DISABLED_PLOT_JOB_STATES):
                 continue
             values[f'job_{status}'] = int(count or 0)
         type_states = jobs_now.get('by_type_status') or {}
         for ptype, count in (jobs_now.get('by_type') or {}).items():
             states = type_states.get(ptype) or {}
             waiting = sum(int(states.get(status) or 0)
-                          for status in ('activated', 'starting'))
+                          for status in
+                          _EPICPROD_TYPE_EXCLUDED_JOB_STATES)
             values[f'type_{ptype}'] = max(0, int(count or 0) - waiting)
         for ptype, states in type_states.items():
             for status, count in (states or {}).items():
-                if status in ('activated', 'starting'):
+                if (status in ('activated', 'starting')
+                        or status in _EPICPROD_DISABLED_PLOT_JOB_STATES):
                     continue
                 values[f'ts_{ptype}_{status}'] = int(count or 0)
     for status in ('finished', 'failed'):
         if status in (jobs.get('cum') or {}):
             values[f'outcome_{status}'] = int(
                 jobs['cum'].get(status) or 0)
+        if status in (jobs.get('cum_core_seconds') or {}):
+            # The scope's productive and wasted allocation, core-hours
+            # from the record's exact core-seconds. Not an 'outcome_'
+            # id: that prefix is the job-count family's.
+            values[f'outh_{status}'] = round(
+                int(jobs['cum_core_seconds'].get(status) or 0) / 3600, 1)
     if tasks_now:
         for status, count in (tasks_now.get('by_status') or {}).items():
             if status in ('defined', 'ready'):
@@ -411,7 +732,257 @@ def _epicprod_curve_values(state):
             values[f'task_{status}'] = int(count or 0)
     values.update(_site_curve_values(panda))
     values.update(_delivery_curve_values(state))
+    values.update(_platform_curve_values(state))
+    values.update(_storage_curve_values(state))
+    values.update(_catalog_curve_values(state))
     return values
+
+
+# Monitor-host volume paths as curve-id segments.
+_PLATFORM_VOLUME_SLUGS = {'/': 'root'}
+
+
+def _platform_volume_slug(path):
+    return _PLATFORM_VOLUME_SLUGS.get(path) or _group_slug(path) or 'root'
+
+
+def _platform_curve_values(state):
+    """Curves from the platform-health component (docs/SNAPPER_PLATFORM.md).
+    Heartbeat-age tiers are recorded nested (older than 30, 60, 120
+    minutes) and plotted as exclusive bands so the stack sums to the
+    jobs older than 30 minutes; the per-site curves carry the oldest
+    tier. A group that recorded a read failure emits no curves — the
+    failure is stated on the card, never drawn as zero."""
+    values = {}
+    plat = component_data(state, 'platform')
+    if not plat:
+        return values
+    hb = plat.get('heartbeats') or {}
+    if hb and 'error' not in hb:
+        values['plhb_received'] = int(hb.get('received') or 0)
+        values['plhb_started'] = int(hb.get('started') or 0)
+        if hb.get('yield') is not None:
+            values['plhy_yield'] = float(hb['yield'])
+        # Input to the series transform, which derives the 60-minute
+        # yield curve over the whole record and removes this curve.
+        values['plhb_expected'] = int(hb.get('expected') or 0)
+        s30 = int(hb.get('stale_30') or 0)
+        s60 = int(hb.get('stale_60') or 0)
+        s120 = int(hb.get('stale_120') or 0)
+        values['plst_30'] = max(0, s30 - s60)
+        values['plst_60'] = max(0, s60 - s120)
+        values['plst_120'] = s120
+        for site, entry in (hb.get('sites') or {}).items():
+            values[f'plss_{site}'] = int((entry or {}).get('stale_120') or 0)
+    db = plat.get('database') or {}
+    if db and 'error' not in db:
+        # Activity (active + waiting) and the pool total draw on separate
+        # panels: the persistent PanDA server pools hold ~120 idle
+        # connections, a standing base that would squash activity into a
+        # hairline if stacked beneath it. Idle stays on the card.
+        for key in ('active', 'waiting'):
+            values[f'pldb_{key}'] = int(db.get(key) or 0)
+        values['pldb_total'] = int(db.get('connections') or 0)
+    server = plat.get('server') or {}
+    if server.get('latency_ms') is not None:
+        values['plsv_latency'] = float(server['latency_ms'])
+    for probe, entry in (plat.get('pandamon') or {}).items():
+        if (entry or {}).get('latency_ms') is not None:
+            values[f'plpm_{probe}'] = float(entry['latency_ms'])
+    host = plat.get('monitor_host') or {}
+    load = host.get('load') or {}
+    for key in ('1m', '5m', '15m'):
+        if load.get(key) is not None:
+            values[f'plml_{key}'] = float(load[key])
+    memory = host.get('memory') or {}
+    if memory.get('used_percent') is not None:
+        values['plmm_used_pct'] = float(memory['used_percent'])
+    for path, entry in (host.get('volumes') or {}).items():
+        used = (entry or {}).get('used_percent')
+        if used is not None:
+            values[f'plmv_{_platform_volume_slug(path)}'] = float(used)
+    for key in ('httpd', 'wsgi', 'asgi', 'ops_agent'):
+        rss = (host.get(key) or {}).get('rss_mb')
+        if rss is not None:
+            values[f'plmp_{key}'] = float(rss)
+    # The OSG submit host, delivered by its reporter
+    # (docs/OSG_SUBMIT_REPORTER.md). The submission side is invisible in
+    # every PanDA record: held pilots and the slots an exclusion removes
+    # are knowable only there.
+    submit = plat.get('submit_host') or {}
+    workers = submit.get('workers') or {}
+    for key in ('running', 'idle', 'held'):
+        if workers.get(key) is not None:
+            values[f'plsw_{key}'] = float(workers[key])
+    pool = submit.get('pool') or {}
+    for key, slug in (('slots_total', 'total'),
+                      ('slots_admitted', 'admitted'),
+                      ('slots_excluded_now', 'excluded')):
+        if pool.get(key) is not None:
+            values[f'plsp_{slug}'] = float(pool[key])
+    # The batch pools a collector answers for us about
+    # (docs/POOL_REPORTER.md): how full each is, and how deep the queue
+    # ahead of our workers. A pool whose reading carried an error emits
+    # no curves; the failure is stated on the card.
+    for pool, entry in (plat.get('pools') or {}).items():
+        if not isinstance(entry, dict) or entry.get('error'):
+            continue
+        slug = pool.replace('-', '_')
+        if entry.get('claimed_fraction') is not None:
+            values[f'plpf_{slug}'] = float(entry['claimed_fraction'])
+        for key, name in (('queue_idle', 'idle'), ('queue_running', 'running')):
+            if entry.get(key) is not None:
+                values[f'plpq_{slug}_{name}'] = float(entry[key])
+        for key, name in (('slots_claimed', 'claimed'),
+                          ('slots_unclaimed', 'free')):
+            if entry.get(key) is not None:
+                values[f'plps_{slug}_{name}'] = float(entry[key])
+    if submit.get('daemon_oldest_log_seconds') is not None:
+        values['plsd_oldest'] = float(submit['daemon_oldest_log_seconds'])
+    sload = submit.get('load') or {}
+    for key in ('1m', '5m', '15m'):
+        if sload.get(key) is not None:
+            values[f'plsl_{key}'] = float(sload[key])
+    for path, entry in (submit.get('volumes') or {}).items():
+        used = (entry or {}).get('used_percent')
+        if used is not None:
+            # plsu_, not plsv_: plsv_latency is the PanDA server's
+            # liveness measurement and a shared prefix would collide.
+            values[f'plsu_{_platform_volume_slug(path)}'] = float(used)
+    # The PanDA server host, delivered by its reporter
+    # (docs/PANDA_SERVER_REPORTER.md) and kept by the maintainer in the
+    # server_host group. Requests are rates over the reporter's own
+    # interval; a first-run record carries no interval and no rates.
+    srv = plat.get('server_host') or {}
+    for cls, rate in (srv.get('by_endpoint_per_minute') or {}).items():
+        values[f'plsrv_req_{cls}'] = float(rate)
+    if srv.get('status_5xx') is not None and srv.get('interval_seconds'):
+        values['plsrv_5xx'] = float(srv['status_5xx'])
+    if srv.get('daemon_oldest_log_seconds') is not None:
+        values['plsrv_daemon_oldest'] = float(srv['daemon_oldest_log_seconds'])
+    if (srv.get('database') or {}).get('connect_ms') is not None:
+        values['plsrv_db_ms'] = float(srv['database']['connect_ms'])
+    rload = srv.get('load') or {}
+    for key in ('1m', '5m', '15m'):
+        if rload.get(key) is not None:
+            values[f'plsrv_load_{key}'] = float(rload[key])
+    if srv.get('memory_used_percent') is not None:
+        values['plsrv_mem_used_pct'] = float(srv['memory_used_percent'])
+    for path, entry in (srv.get('volumes') or {}).items():
+        used = (entry or {}).get('used_percent')
+        if used is not None:
+            values[f'plsrv_vol_{_platform_volume_slug(path)}'] = float(used)
+    for key in ('httpd', 'pandaserver'):
+        rss = ((srv.get('processes') or {}).get(key) or {}).get('rss_mb')
+        if rss is not None:
+            values[f'plsrv_rss_{key}'] = float(rss)
+    return values
+
+
+def _epicprod_event_values(state):
+    """Discrete events recorded in one epicprod snap, for event_flow
+    families (snapper_ai series). Errors is the first event source."""
+    return _errors_event_values(state)
+
+
+# The run script's coded exit for its output upload-and-register step
+# (swf-epicprod docs/EPICPROD_OPS.md), read from the error entries'
+# payload exit code (docs/ERROR_ATTRIBUTION.md).
+STORAGE_EXIT_CODE = '78'
+
+
+def _core_hours(held_seconds):
+    """An event's weight: the core-seconds a job held, in core-hours to
+    the thousandth."""
+    try:
+        return round(float(held_seconds or 0) / 3600.0, 3)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _storage_consequence_key(comp, exitcode):
+    """The storage-consequence curve an error entry joins, or None:
+    psto_registration for a payload exit 78, the output upload or
+    registration failure, whatever label the pilot gave the job;
+    psto_ddm for the data-management component's other errors."""
+    if exitcode == STORAGE_EXIT_CODE:
+        return 'psto_registration'
+    if comp == 'ddm':
+        return 'psto_ddm'
+    return None
+
+
+def _errors_event_values(state):
+    """Error events from the error-state component's interval record
+    (docs/SNAPPER_ERRORS.md): one stamp per failed job at its end
+    time, keyed into the category (perr_), component (perrc_), and
+    per-task (terr_, terrc_) curves. Each stamp carries the job's
+    terminal state as its event qualifier (series bins per-qualifier
+    breakdowns for the view's terminal-state filter); rows recorded
+    before the status column report 'unrecorded'. Rows carry the
+    payload's exit code since v4: the storage-consequence curves
+    (psto_, the Storage view's consequences strip) derive from it and
+    the component (_storage_consequence_key); older rows join them
+    by component alone. Rows carry the held core-seconds since v5:
+    each event carries the job's core-hours as its weight, the bin's
+    second measure (docs/SNAPPER_ERRORS.md, Wasted resources), and a
+    row without the field carries none. Overflow rows — storm
+    intervals beyond the entry bound — carry no individual stamps;
+    their exact counts land at the interval end, scope curves only,
+    keyed 'category@status' since v3 and 'category@status@exitcode'
+    since v4, with the fold's summed core-hours spread evenly over its
+    events since v5."""
+    events = {}
+    errors = component_data(state, 'errors')
+    entries = errors.get('entries')
+    if entries is None:
+        return events
+    for row in entries:
+        try:
+            taskid = int(row[1] or 0)
+            comp, _, code = str(row[2]).partition(':')
+            stamp = str(row[3])
+        except (IndexError, TypeError, ValueError):
+            continue
+        status = (str(row[4]) if len(row) > 4 and row[4]
+                  else 'unrecorded')
+        exitcode = (str(row[5]).strip() if len(row) > 5 and row[5]
+                    else '')
+        event = [stamp, status]
+        if len(row) > 6 and row[6] is not None:
+            event.append(_core_hours(row[6]))
+        events.setdefault(f'perr_{comp}_{code}', []).append(event)
+        events.setdefault(f'perrc_{comp}', []).append(event)
+        storage_key = _storage_consequence_key(comp, exitcode)
+        if storage_key:
+            events.setdefault(storage_key, []).append(event)
+        if taskid:
+            events.setdefault(
+                f'terr_{taskid}_{comp}_{code}', []).append(event)
+            events.setdefault(f'terrc_{taskid}_{comp}', []).append(event)
+    overflow = errors.get('overflow') or {}
+    interval_end = str((errors.get('interval') or {}).get('end') or '')
+    if interval_end:
+        held_folds = overflow.get('held_by_category')
+        for fold_key, count in (overflow.get('by_category') or {}).items():
+            parts = str(fold_key).split('@')
+            category = parts[0]
+            status = (parts[1] if len(parts) > 1 and parts[1]
+                      else 'unrecorded')
+            exitcode = parts[2].strip() if len(parts) > 2 else ''
+            comp, _, code = str(category).partition(':')
+            event = [interval_end, status]
+            count = int(count or 0)
+            if held_folds is not None and count:
+                event.append(_core_hours(
+                    (held_folds.get(fold_key) or 0) / count))
+            stamps = [event] * count
+            events.setdefault(f'perr_{comp}_{code}', []).extend(stamps)
+            events.setdefault(f'perrc_{comp}', []).extend(stamps)
+            storage_key = _storage_consequence_key(comp, exitcode)
+            if storage_key:
+                events.setdefault(storage_key, []).extend(stamps)
+    return events
 
 
 def _testbed_curve_values(state):
@@ -430,8 +1001,9 @@ def _testbed_curve_values(state):
 
 
 def _delivery_curve_parts(curve_id):
-    """(campaign, remainder) from a per-PC arrivals curve id
-    (dlvq_26_07_pc12); campaign tags serialize dots as underscores."""
+    """(campaign, remainder) from a per-PC delivery curve id
+    (dlvq_26_07_pc12 or dlvpc_26_07_pc12); campaign tags serialize
+    dots as underscores."""
     remainder = curve_id.split('_', 1)[1]
     tag, _, rest = remainder.partition('_')
     while rest and rest[0].isdigit():
@@ -460,20 +1032,74 @@ def _epicprod_curve_color(curve_id):
     several types sharing one status must stay distinguishable."""
     from .panda.constants import JOB_STATE_COLORS, TASK_STATE_COLORS
 
+    if curve_id.startswith('sto'):
+        return _storage_curve_color(curve_id)
+    if curve_id.startswith('cat'):
+        return _catalog_curve_color(curve_id)
     # Operator-set colors on every jobs panel: the running pair reads
-    # as blues — cores strong, running jobs lighter — and activated is
+    # as blues — cores dark, running jobs lighter — and activated is
     # grey context rather than health/completion green.
     if curve_id == 'running_cores':
-        return '#1565c0'
+        return '#0d47a1'
     if curve_id.startswith('sjfw_'):
         return JOB_STATE_COLORS.get('activated')
     if curve_id.startswith('sjxw_'):
         return JOB_STATE_COLORS.get('failed')
+    # The core-hours pair wears the outcome colors of the jobs it
+    # accounts for: productive finished, wasted failed.
+    if curve_id.startswith('sjfh_') or curve_id == 'outh_finished':
+        return JOB_STATE_COLORS.get('finished')
+    if curve_id.startswith('sjxh_') or curve_id == 'outh_failed':
+        return JOB_STATE_COLORS.get('failed')
+    if curve_id.startswith('sjfin_'):
+        return JOB_STATE_COLORS.get('finished')
+    if curve_id.startswith('sjfail_'):
+        return JOB_STATE_COLORS.get('failed')
     if curve_id.startswith('sjxc_'):
         return _FAILURE_CLASS_COLORS.get(
             curve_id.rsplit('_', 1)[1], '#424242')
-    if curve_id.startswith('sjc_'):
+    if curve_id.startswith('perrc_'):
+        return _FAILURE_CLASS_COLORS.get(curve_id[6:], '#424242')
+    if curve_id == 'psto_registration':
+        return JOB_STATE_COLORS.get('failed')
+    if curve_id == 'psto_ddm':
+        return _FAILURE_CLASS_COLORS.get('ddm')
+    if curve_id.startswith('terrc_'):
+        return _FAILURE_CLASS_COLORS.get(
+            curve_id[6:].partition('_')[2], '#424242')
+    # Platform view: heartbeat-age bands climb warning → failure; the
+    # connection limit and the yield line wear the operator dark blue;
+    # waiting connections are the warning color.
+    if curve_id == 'plst_30':
+        return '#f9a825'
+    if curve_id == 'plst_60':
+        return '#ef6c00'
+    if curve_id == 'plst_120':
+        return '#c62828'
+    if curve_id == 'plhy_window':
+        return '#0d47a1'
+    if curve_id == 'plhy_yield':
+        return '#90caf9'
+    if curve_id == 'plhb_started':
+        return '#7e57c2'
+    if curve_id == 'pldb_waiting':
+        return '#ef6c00'
+    if curve_id == 'pldb_active':
         return '#1565c0'
+    if curve_id == 'pldb_total':
+        return '#0d47a1'
+    if curve_id.startswith('qc_'):
+        queue = curve_id[3:]
+        members = _queue_stack_members()
+        if queue == 'other':
+            return _QUEUE_BAND_COLORS[
+                len(members) % len(_QUEUE_BAND_COLORS)]
+        if queue in members:
+            return _QUEUE_BAND_COLORS[
+                members.index(queue) % len(_QUEUE_BAND_COLORS)]
+        return _QUEUE_BAND_COLORS[-1]
+    if curve_id.startswith('sjc_'):
+        return '#0d47a1'
     if curve_id.startswith('sj_'):
         status = curve_id.rsplit('_', 1)[1]
         if status == 'running':
@@ -508,17 +1134,111 @@ def _epicprod_curve_color(curve_id):
     return None
 
 
+_PLATFORM_LABELS = {
+    'plhb_received': 'heartbeats received',
+    'plhb_started': 'jobs started',
+    'plhb_expected': 'heartbeats expected',
+    'plhy_yield': 'yield per interval',
+    'plhy_window': 'yield, 60-min window',
+    'pldb_active': 'active',
+    'pldb_total': 'total',
+    'pldb_waiting': 'waiting',
+    'plsv_latency': 'is_alive latency',
+    'plpm_front': 'front page',
+    'plpm_workers': 'worker-stats query',
+    'plst_30': '30–60 min silent',
+    'plst_60': '60–120 min silent',
+    'plst_120': 'over 120 min silent',
+    'plml_1m': '1 min',
+    'plml_5m': '5 min',
+    'plml_15m': '15 min',
+    'plmm_used_pct': 'memory used',
+    'plmv_root': '/',
+    'plmp_httpd': 'httpd (all)',
+    'plmp_wsgi': 'WSGI daemon',
+    'plmp_asgi': 'ASGI (MCP)',
+    'plmp_ops_agent': 'prod-ops agent',
+    'plsw_running': 'running',
+    'plsw_idle': 'idle',
+    'plsw_held': 'held',
+    'plsp_total': 'slots in the pool',
+    'plsp_admitted': 'admitted by requirements',
+    'plsp_excluded': 'removed by exclusions',
+    'plpf_bnl_scdf': 'SCDF shared pool',
+    'plpq_bnl_scdf_idle': 'SCDF waiting',
+    'plpq_bnl_scdf_running': 'SCDF running',
+    'plps_bnl_scdf_claimed': 'SCDF claimed',
+    'plps_bnl_scdf_free': 'SCDF free',
+    'plsd_oldest': 'oldest daemon silence',
+    'plsl_1m': '1 min',
+    'plsl_5m': '5 min',
+    'plsl_15m': '15 min',
+    'plsrv_req_update_job': 'update_job',
+    'plsrv_req_acquire_jobs': 'acquire_jobs',
+    'plsrv_req_pilot_other': 'other pilot calls',
+    'plsrv_req_harvester': 'harvester',
+    'plsrv_req_cache': 'schedconfig cache',
+    'plsrv_req_statistics': 'statistics',
+    'plsrv_req_other': 'other',
+    'plsrv_5xx': '5xx responses',
+    'plsrv_daemon_oldest': 'oldest daemon silence',
+    'plsrv_db_ms': 'TCP connect to the database',
+    'plsrv_load_1m': '1 min',
+    'plsrv_load_5m': '5 min',
+    'plsrv_load_15m': '15 min',
+    'plsrv_mem_used_pct': 'memory used',
+    'plsrv_rss_httpd': 'httpd (all processes)',
+    'plsrv_rss_pandaserver': 'pandaserver python',
+}
+
+
 def _epicprod_curve_label(curve_id):
     # Per-site curves: the family title names the site; the curve
     # label is the lifecycle stage alone. 'running' says 'running
     # jobs' — 'running cores' sits beside it and the bare word is
     # ambiguous.
+    if curve_id.startswith('sto'):
+        return _storage_curve_label(curve_id)
+    if curve_id.startswith('cat'):
+        return _catalog_curve_label(curve_id)
+    if curve_id in _PLATFORM_LABELS:
+        return _PLATFORM_LABELS[curve_id]
+    if curve_id.startswith('plss_'):
+        return curve_id[5:]
+    if curve_id.startswith('plmv_'):
+        return '/' + curve_id[5:]
+    if curve_id.startswith('plsu_'):
+        return '/' + curve_id[5:]
+    if curve_id.startswith('plsrv_vol_'):
+        return '/' + curve_id[len('plsrv_vol_'):]
+    if curve_id.startswith('plsrv_req_'):
+        return curve_id[len('plsrv_req_'):]
+    if curve_id in _STORAGE_CONSEQUENCE_LABELS:
+        return _STORAGE_CONSEQUENCE_LABELS[curve_id]
+    if curve_id.startswith('perrc_'):
+        return curve_id[6:]
+    if curve_id.startswith('perr_'):
+        comp, _, code = curve_id[5:].rpartition('_')
+        return f'{comp} {code}'
+    if curve_id.startswith('terrc_'):
+        return curve_id[6:].partition('_')[2]
+    if curve_id.startswith('terr_'):
+        rest = curve_id[5:].partition('_')[2]
+        comp, _, code = rest.rpartition('_')
+        return f'{comp} {code}'
+    if curve_id.startswith('qc_'):
+        # The cores-by-queue stack: the member is the queue itself.
+        return curve_id[3:]
     if curve_id.startswith('sjc_'):
         return 'running cores'
-    if curve_id.startswith('sjfw_'):
+    if curve_id.startswith(('sjfw_', 'sjfin_')):
         return 'finished'
-    if curve_id.startswith('sjxw_'):
+    if curve_id.startswith(('sjxw_', 'sjfail_')):
         return 'failed'
+    if curve_id.startswith('sjfh_') or curve_id == 'outh_finished':
+        return 'productive'
+    if curve_id.startswith('sjxh_') or curve_id == 'outh_failed':
+        return 'wasted'
     if curve_id.startswith('sjxc_'):
         # Failure-class curves: the class is the last id segment.
         return curve_id.rsplit('_', 1)[1]
@@ -527,10 +1247,13 @@ def _epicprod_curve_label(curve_id):
         return 'running jobs' if status == 'running' else status
     if curve_id.startswith('stt_'):
         return curve_id.rsplit('_', 1)[1]
-    if curve_id.startswith(('dlvq_', 'dlvqf_')):
+    if curve_id.startswith(('dlvq_', 'dlvqf_', 'dlvpc_', 'dlvpcf_')):
         _campaign, pc = _delivery_curve_parts(curve_id)
         key = _pc_cache()['keys'].get(pc, '')
         return f'{pc} {key}' if key else pc
+    if curve_id.startswith(('dlvsp_', 'dlvspf_')):
+        _campaign, slug = _delivery_curve_parts(curve_id)
+        return (_pc_cache().get('species_names') or {}).get(slug, slug)
     if curve_id.startswith(('dlvc_', 'dlvcf_')):
         # The line states the group; the family header states
         # campaign, kind, and unit.
@@ -570,16 +1293,37 @@ def _testbed_curve_label(curve_id):
 
 
 EPICPROD_GROUPS = (
-    {'name': 'In-flight jobs', 'title': 'Jobs', 'prefixes': ['job_'],
-     'ids': ['running_cores'], 'default_off_ids': ['job_activated']},
+    {'name': 'Running cores by queue', 'title': 'Running cores · by queue',
+     'prefixes': ['qc_'], 'ids': [], 'stacked': True, 'panel_px': 150,
+     'units': 'cores'},
     {'name': 'Job outcomes', 'prefixes': ['outcome_'], 'ids': [],
+     'stacked': True, 'panel_px': 150,
      'order': ['outcome_finished', 'outcome_failed'],
      'window_relative': True},
-    {'name': 'Tasks', 'prefixes': ['task_'], 'ids': []},
     {'name': 'In-flight job types', 'title': 'Job types',
-     'prefixes': ['type_'], 'ids': []},
-    {'name': 'Type × state', 'prefixes': ['ts_'], 'ids': []},
+     'prefixes': ['type_'], 'ids': [], 'stacked': True, 'panel_px': 150,
+     'units': 'jobs'},
+    {'name': 'In-flight jobs', 'title': 'Job states', 'prefixes': ['job_'],
+     'ids': [], 'default_off_ids': ['job_activated'],
+     'stacked': True, 'panel_px': 150, 'units': 'jobs'},
+    {'name': 'Type × state', 'prefixes': ['ts_'], 'ids': [],
+     'stacked': True, 'panel_px': 150, 'units': 'jobs'},
+    {'name': 'Tasks', 'prefixes': ['task_'], 'ids': [],
+     'stacked': True, 'panel_px': 150, 'units': 'tasks'},
 )
+
+
+def _epicprod_scope_groups():
+    """The compact scope families with the queue stack in rank order."""
+    groups = [dict(group) for group in EPICPROD_GROUPS
+              if group['name'] not in ('In-flight jobs', 'Type × state')]
+    queue_order = [f'qc_{site}' for site in _queue_stack_members()]
+    queue_order.append('qc_other')
+    for group in groups:
+        if group['name'] == 'Running cores by queue':
+            group['order'] = queue_order
+            break
+    return tuple(groups)
 
 
 _CAMPAIGN_START_CACHE = {'at': None, 'starts': {}}
@@ -620,6 +1364,85 @@ def _campaign_delivery_starts():
     return starts
 
 
+def _delivery_categories():
+    """The stable top-level physics-category vocabulary used to split
+    the campaign cumulative PC plots."""
+    return tuple(sorted(set(_pc_cache()['categories'].values())
+                        or {'Uncategorized'}))
+
+
+def _delivery_pc_family_name(campaign, quantity, category):
+    if category == 'Single Particle':
+        return f'Cumulative {campaign} {quantity} species {category}'
+    return f'Cumulative {campaign} {quantity} PCs {category}'
+
+
+def _delivery_detail_key(kind, campaign):
+    return f'delivery-{kind}-{_group_slug(campaign)}'
+
+
+def _delivery_pc_detail_key(campaign, category):
+    return (f'delivery-pcs-{_group_slug(campaign)}-'
+            f'{_group_slug(category)}')
+
+
+def _campaign_member_restrict(query):
+    """member_restrict hook of the Campaign focus view: the campaign
+    plan's filter parameters (priority, status, process, ...) narrow
+    the plotted configurations to the same slice the plan page shows,
+    stated in the same words. Only per-configuration curves survive a
+    restriction; lens-group aggregates cannot be reprojected and drop."""
+    from pcs.views import PLAN_FILTER_PARAMS, campaign_plan_pc_filter
+
+    try:
+        from swf_epicprod.analytics.rollup import resolve_target_campaigns
+        campaigns = sorted(resolve_target_campaigns(), reverse=True)
+    except Exception:                                       # noqa: BLE001
+        campaigns = []
+    raw = (query.get('campaign') or '').strip()
+    name = raw.split(',')[0].strip() if raw else (
+        campaigns[0] if campaigns else '')
+    if not name:
+        return None
+    active, pc_set = campaign_plan_pc_filter(name, query)
+    if not active:
+        return None
+    tag = name.replace('.', '_')
+    per_pc = tuple(f'{prefix}{tag}_'
+                   for prefix in ('dlvq_', 'dlvqf_', 'dlvpc_', 'dlvpcf_'))
+
+    def keep(curve_id):
+        cid = str(curve_id)
+        for prefix in per_pc:
+            if cid.startswith(prefix):
+                return cid[len(prefix):] in pc_set
+        return False
+
+    note = ('Filtered to ' + ' · '.join(
+        f'{label}: {value}' for label, value in active)
+        + f' — {len(pc_set)} physics configurations '
+          '(campaign plan filters)')
+    # The Single Particle cumulative family stacks species aggregates,
+    # which a subset cannot prune honestly; under restriction it
+    # substitutes the slice's per-configuration curves.
+    cache = _pc_cache()
+    sp_pcs = sorted(pc for pc in pc_set
+                    if cache['categories'].get(pc) == 'Single Particle')
+    group_ids = {}
+    group_titles = {}
+    if sp_pcs:
+        for quantity, prefix in (('files', 'dlvpcf_'), ('events', 'dlvpc_')):
+            family = _delivery_pc_family_name(name, quantity,
+                                              'Single Particle')
+            group_ids[family] = [f'{prefix}{tag}_{pc}' for pc in sp_pcs]
+            group_titles[family] = f'Cumulative {name} · Single Particle'
+    return {'note': note, 'keep': keep,
+            'params': {key: (query.get(key) or '').strip()
+                       for key in PLAN_FILTER_PARAMS
+                       if (query.get(key) or '').strip()},
+            'group_ids': group_ids, 'group_titles': group_titles}
+
+
 def _delivery_focus_view():
     """The Campaign focus tab: the report narrowed to one campaign's
     delivery — its family only, the delivery card in the cut, the
@@ -637,10 +1460,17 @@ def _delivery_focus_view():
     return {
         'param': 'campaign',
         'label': 'Campaign',
+        'note': ("Click on a bin to see a breakdown of data arrivals "
+                 "below. Daily bins are constructed overnight based on the "
+                 "day's arrivals, hence no today bin."),
         # The natural campaign span carries thousands of unrelated
         # scope snaps and curves. Persist the selected campaign
-        # families as their own small product for immediate display.
+        # families as their own small product for immediate display,
+        # built from the delivery component's snaps alone — the scope's
+        # frequent panda/health snaps carry nothing for this record.
         'cache_series': True,
+        'components': ('delivery',),
+        'member_restrict': _campaign_member_restrict,
         'default': campaigns[0],
         # Two selector axes: the plotted quantity (files is the
         # default while the measured event rates are under review;
@@ -666,6 +1496,9 @@ def _delivery_focus_view():
                  f'{quantity}|{lens["value"]}': [
                      f'Arrivals {name} {quantity}',
                      f'Cumulative {name} {quantity} {lens["value"]}',
+                 ] + [
+                     _delivery_pc_family_name(name, quantity, category)
+                     for category in _delivery_categories()
                  ]
                  for quantity in ('files', 'events')
                  for lens in DELIVERY_LENSES},
@@ -703,7 +1536,9 @@ def _delivery_groups():
         campaigns = resolve_target_campaigns()
     except Exception:                                       # noqa: BLE001
         return ()
+    cache = _pc_cache()
     pc_groups = _pc_tick_groupings()
+    categories = _delivery_categories()
     groups = []
     for name in campaigns:
         tag = name.replace('.', '_')
@@ -711,26 +1546,103 @@ def _delivery_groups():
             'name': f'Arrivals {name} files',
             'title': f'Arrivals {name}',
             'prefixes': [f'dlvqf_{tag}_'], 'ids': [],
-            'stacked': True, 'pc_groups': pc_groups,
+            'stacked': True, 'end_stamped': True,
+            'detail_key': _delivery_detail_key('arrivals', name),
+            'pc_groups': pc_groups,
+            'empty_note': 'No arrivals in this window',
             'units': 'files'})
         groups.append({
             'name': f'Arrivals {name} events',
             'title': f'Arrivals {name}',
             'prefixes': [f'dlvq_{tag}_'], 'ids': [],
-            'stacked': True, 'pc_groups': pc_groups,
+            'stacked': True, 'end_stamped': True,
+            'detail_key': _delivery_detail_key('arrivals', name),
+            'pc_groups': pc_groups,
+            'empty_note': 'No arrivals in this window',
             'default_off': True, 'units': 'events (M)'})
         for lens in DELIVERY_LENSES:
             seg, lens_value = lens['seg'], lens['value']
+            category_stack = lens_value == 'category'
+            category_names = categories if category_stack else ()
+            category_file_ids = [
+                f'dlvcf_{seg}_{tag}_{_group_slug(category)}'
+                for category in category_names]
+            category_event_ids = [
+                f'dlvc_{seg}_{tag}_{_group_slug(category)}'
+                for category in category_names]
             groups.append({
                 'name': f'Cumulative {name} files {lens_value}',
                 'title': f'Cumulative {name}',
-                'prefixes': [f'dlvcf_{seg}_{tag}_'], 'ids': [],
+                # The former wireframe carried an explicit total line.
+                # A stack is the total of its category bands; including
+                # that old line as another band would double the height.
+                'prefixes': ([] if category_stack
+                             else [f'dlvcf_{seg}_{tag}_']),
+                'ids': category_file_ids,
+                'order': category_file_ids,
+                'stacked': category_stack,
+                'cumulative_stack': category_stack,
+                'panel_px': 300 if category_stack else 0,
+                'detail_key': (_delivery_detail_key('categories', name)
+                               if category_stack else ''),
                 'default_off': True, 'units': 'files'})
             groups.append({
                 'name': f'Cumulative {name} events {lens_value}',
                 'title': f'Cumulative {name}',
-                'prefixes': [f'dlvc_{seg}_{tag}_'], 'ids': [],
+                'prefixes': ([] if category_stack
+                             else [f'dlvc_{seg}_{tag}_']),
+                'ids': category_event_ids,
+                'order': category_event_ids,
+                'stacked': category_stack,
+                'cumulative_stack': category_stack,
+                'panel_px': 300 if category_stack else 0,
+                'detail_key': (_delivery_detail_key('categories', name)
+                               if category_stack else ''),
                 'default_off': True, 'units': 'events (M)'})
+        for category in categories:
+            pcs = sorted(pc for pc, pc_category
+                         in cache['categories'].items()
+                         if pc_category == category)
+            by_species = category == 'Single Particle'
+            species_names = sorted({
+                (cache.get('species') or {}).get(pc) or 'Unspecified'
+                for pc in pcs
+            }) if by_species else []
+            file_ids = ([f'dlvspf_{tag}_{_species_slug(species)}'
+                         for species in species_names]
+                        if by_species
+                        else [f'dlvpcf_{tag}_{pc}' for pc in pcs])
+            event_ids = ([f'dlvsp_{tag}_{_species_slug(species)}'
+                          for species in species_names]
+                         if by_species
+                         else [f'dlvpc_{tag}_{pc}' for pc in pcs])
+            title = (f'Cumulative {name} · {category} by species'
+                     if by_species else f'Cumulative {name} · {category}')
+            groups.append({
+                'name': _delivery_pc_family_name(name, 'files', category),
+                'title': title,
+                'prefixes': [],
+                'ids': file_ids, 'order': file_ids,
+                # The species family's per-PC curves ride the cached
+                # focus series (not the display) so a campaign-plan
+                # filter can substitute them for the aggregates.
+                'extra_cache_prefixes': ([f'dlvpcf_{tag}_']
+                                         if by_species else []),
+                'stacked': True, 'cumulative_stack': True,
+                'compact': not by_species,
+                'detail_key': _delivery_pc_detail_key(name, category),
+                'panel_px': 300, 'units': 'files'})
+            groups.append({
+                'name': _delivery_pc_family_name(name, 'events', category),
+                'title': title,
+                'prefixes': [],
+                'ids': event_ids, 'order': event_ids,
+                'extra_cache_prefixes': ([f'dlvpc_{tag}_']
+                                         if by_species else []),
+                'stacked': True, 'cumulative_stack': True,
+                'compact': not by_species,
+                'detail_key': _delivery_pc_detail_key(name, category),
+                'panel_px': 300, 'units': 'events (M)'})
     return tuple(groups)
 
 _SITE_CACHE = {'at': None, 'sites': ()}
@@ -772,8 +1684,10 @@ def _panda_sites():
     return sites
 
 
-# Display order of the site jobs family: submission through queueing
-# to execution (cores beside running jobs) to the trailing outcomes.
+# Display order of the site jobs stack, bottom to top. Running cores is
+# deliberately last: it is complementary capacity information in different
+# units, so its band may move the outer boundary but never re-seat or distort
+# any of the job-state boundaries below it.
 _JOB_LIFECYCLE_EARLY = ('defined', 'waiting', 'assigned', 'activated',
                         'sent')
 _JOB_LIFECYCLE_LATE = ('holding', 'transferring', 'merging')
@@ -784,22 +1698,53 @@ def _site_groups():
     window-relative terminal outcomes, and tasks. Off by default on the
     scope view — the Site focus page is their home."""
     groups = []
-    for site in _panda_sites():
+    sites = list(_panda_sites())
+    # A queue name extending another (SITE vs SITE_test) collides under
+    # prefix matching: the longer sibling's curves are excluded from the
+    # shorter name's families. Siblings are scanned over the full known
+    # queue inventory, not the displayed site list — test-named queues
+    # are excluded from display yet their curves exist in snap history.
+    known = set(sites)
+    try:
+        from .models import PandaQueue
+        known.update(
+            PandaQueue.objects.values_list('queue_name', flat=True))
+        from canary.store.models import Queue as CanaryQueue
+        known.update(CanaryQueue.objects.values_list('name', flat=True))
+    except Exception as e:                                   # noqa: BLE001
+        logger.error('site sibling inventory failed: %s', e)
+    for site in sites:
+        longer = [s for s in known
+                  if s != site and s.startswith(site + '_')]
         # Keep instantaneous job populations and terminal flow on
         # separate scales. Outcome staircases rise from zero at the
         # window's left edge; the displayed window is their integration
         # range.
         order = ([f'sj_{site}_{s}' for s in _JOB_LIFECYCLE_EARLY]
-                 + [f'sj_{site}_running', f'sjc_{site}']
-                 + [f'sj_{site}_{s}' for s in _JOB_LIFECYCLE_LATE])
+                 + [f'sj_{site}_{s}' for s in _JOB_LIFECYCLE_LATE]
+                 + [f'sj_{site}_running', f'sjc_{site}'])
         groups.append({
             'name': f'Site jobs {site}',
             'title': f'Jobs · {site}',
             'prefixes': [f'sj_{site}_'],
+            'exclude_prefixes': [f'sj_{s}_' for s in longer],
             'ids': [f'sjc_{site}'],
             'order': order,
             'default_off_ids': [f'sj_{site}_activated'],
-            'tall': True,
+            # Cores are a distinct quantity, not a job population: they
+            # ride the jobs stack as a foreground line, never summed in.
+            'overlay_ids': [f'sjc_{site}'],
+            'stacked': True, 'panel_px': 300,
+            'default_off': True})
+        groups.append({
+            'name': f'Site completions {site}',
+            'title': f'Job completions · {site}',
+            'prefixes': [],
+            'ids': [f'sjfin_{site}', f'sjfail_{site}'],
+            'order': [f'sjfin_{site}', f'sjfail_{site}'],
+            'counter_flow': True, 'end_stamped': True,
+            'stacked': True,
+            'panel_px': 150, 'units': 'jobs',
             'default_off': True})
         groups.append({
             'name': f'Site outcomes {site}',
@@ -808,19 +1753,37 @@ def _site_groups():
             'prefixes': [],
             'ids': [f'sjfw_{site}', f'sjxw_{site}'],
             'order': [f'sjfw_{site}', f'sjxw_{site}'],
-            'window_relative': True,
+            'window_relative': True, 'stacked': True,
+            'panel_px': 150, 'units': 'jobs',
+            'default_off': True})
+        groups.append({
+            'name': f'Site core-hours {site}',
+            'title': f'Core-hours · {site}',
+            'prefixes': [],
+            'ids': [f'sjfh_{site}', f'sjxh_{site}'],
+            'order': [f'sjfh_{site}', f'sjxh_{site}'],
+            # The same window-relative staircases as the job outcomes
+            # above, in the allocation those jobs held: what the site
+            # produced against what it wasted (docs/SNAPPER_ERRORS.md,
+            # Wasted resources).
+            'window_relative': True, 'stacked': True,
+            'panel_px': 150, 'units': 'core-hours',
             'default_off': True})
         groups.append({
             'name': f'Site failures {site}',
             'title': f'Failures by class · {site}',
             'prefixes': [f'sjxc_{site}_'], 'ids': [],
-            'window_relative': True,
+            'exclude_prefixes': [f'sjxc_{s}_' for s in longer],
+            'window_relative': True, 'stacked': True,
+            'panel_px': 150, 'units': 'jobs',
             'focus_closed': True,
             'default_off': True})
         groups.append({
             'name': f'Site tasks {site}',
             'title': f'Tasks · {site}',
             'prefixes': [f'stt_{site}_'], 'ids': [],
+            'exclude_prefixes': [f'stt_{s}_' for s in longer],
+            'stacked': True, 'panel_px': 150, 'units': 'tasks',
             'focus_closed': True,
             'default_off': True})
     return tuple(groups)
@@ -830,7 +1793,1185 @@ def _epicprod_groups():
     """The epicprod curve families, resolved per render (the seam's
     callable form) so new campaigns and sites appear without an app
     restart."""
-    return EPICPROD_GROUPS + _delivery_groups() + _site_groups()
+    return (EPICPROD_GROUPS + _delivery_groups() + _site_groups()
+            + _errors_groups() + _platform_groups() + _storage_groups()
+            + _catalog_groups())
+
+
+# The Platform view's families in panel order — load, platform,
+# consequences (docs/SNAPPER_PLATFORM.md). The load and consequence
+# families re-project curves the scope families already carry (in-flight
+# jobs, outcomes, error events) under platform-view names so the page
+# orders its panels itself; nothing is recorded twice.
+_PLATFORM_FAMILIES_COMMON_HEAD = (
+    'Platform heartbeats', 'Platform heartbeat yield')
+_PLATFORM_FAMILIES_COMMON_TAIL = (
+    'Platform DB activity', 'Platform DB connections',
+    'Platform server latency', 'Platform PanDA monitor latency',
+    # The server host's own view of its web tier and daemons, from its
+    # reporter: requests by class, failing responses, daemon silence,
+    # and the database as reached from that host.
+    'Platform server requests', 'Platform server 5xx',
+    'Platform server daemons', 'Platform server DB reach',
+    # The hosts, PanDA server first, then swf-monitor.
+    'Platform server load', 'Platform server memory',
+    'Platform server storage', 'Platform server processes',
+    'Platform monitor load', 'Platform monitor memory',
+    'Platform monitor storage', 'Platform monitor processes',
+    # The batch pool the queues wait in, read from its own collector:
+    # how full it is and how deep the queue ahead, which is what decides
+    # a worker's wait and appears in no PanDA record.
+    'Platform pool fullness', 'Platform pool queue', 'Platform pool slots',
+    # The submission side, from the submit host's own reporter. It sits
+    # with the other host panels and above the load and consequence
+    # panels, because held pilots and a shrinking admitted-slot count
+    # are causes of what those panels show.
+    'Platform submit workers', 'Platform submit pool',
+    'Platform submit excluded',
+    'Platform submit daemons', 'Platform submit host',
+    'Platform submit storage',
+    'Platform jobs', 'Platform kills', 'Platform outcomes')
+PLATFORM_FAMILIES_BY_LENS = {
+    'tiers': (_PLATFORM_FAMILIES_COMMON_HEAD
+              + ('Platform staleness',) + _PLATFORM_FAMILIES_COMMON_TAIL),
+    'sites': (_PLATFORM_FAMILIES_COMMON_HEAD
+              + ('Platform stale by site',) + _PLATFORM_FAMILIES_COMMON_TAIL),
+}
+
+
+def _platform_section(label):
+    """A section band over the families that follow it on the Platform view.
+
+    The view carries some two dozen panels and read as one run of rows;
+    the bands are the same mechanism the per-option views use, declared
+    statically here because these sections are the page's own structure
+    rather than one section per queue or campaign.
+    """
+    return {'label': label, 'display': label,
+            'pinned': True, 'idle': False, 'peak': ''}
+
+
+def _platform_groups():
+    qualifier = {'qualifier_label': 'Terminal state',
+                 'qualifier_param': 'states',
+                 'qualifiers_off': ['closed']}
+    lifecycle = ([f'job_{s}' for s in _JOB_LIFECYCLE_EARLY]
+                 + [f'job_{s}' for s in _JOB_LIFECYCLE_LATE]
+                 + ['job_running', 'running_cores'])
+    # Panel order: the platform's own quantities first, then the load
+    # and consequence panels beneath them for correlation by eye.
+    return (
+        # Starts are (in practice) a subset of the heartbeats received:
+        # a light hatch beneath the starts curve marks the subset
+        # without reading as a stacked band. A start that pokes above
+        # received is a job that started and left running within one
+        # interval — a burn-through signature, left visible.
+        {'name': 'Platform heartbeats', 'title': 'Heartbeats',
+         'section': _platform_section('Pilot heartbeats'),
+         'prefixes': ['plhb_'], 'ids': [],
+         'order': ['plhb_received', 'plhb_started'],
+         'fills': {'plhb_started': {
+             'pattern': '/', 'fgcolor': 'rgba(126,87,194,0.35)',
+             'bgcolor': 'rgba(126,87,194,0.05)', 'size': 7,
+             'solidity': 0.15}},
+         'panel_px': 150, 'units': 'per interval'},
+        # The window yield (ratio of sums over two heartbeat periods) is
+        # the assessed figure; the per-interval yield beats against the
+        # pilot's 30-minute heartbeat phase and draws faint beneath it.
+        # The per-interval yield starts unticked: its phase spikes would
+        # set the axis and flatten the window curve.
+        {'name': 'Platform heartbeat yield', 'title': 'Heartbeat yield',
+         'prefixes': [], 'ids': ['plhy_window', 'plhy_yield'],
+         'order': ['plhy_window', 'plhy_yield'],
+         'default_off_ids': ['plhy_yield'],
+         'panel_px': 110, 'units': 'received / expected'},
+        {'name': 'Platform staleness', 'title': 'Heartbeat staleness',
+         'prefixes': [], 'ids': ['plst_30', 'plst_60', 'plst_120'],
+         'order': ['plst_30', 'plst_60', 'plst_120'],
+         'stacked': True, 'panel_px': 150, 'units': 'running jobs'},
+        {'name': 'Platform stale by site', 'title': 'Silent over 120 min · by site',
+         'prefixes': ['plss_'], 'ids': [],
+         'stacked': True, 'panel_px': 150, 'units': 'running jobs'},
+        # Activity on its own scale; the pool total as one line beneath
+        # it (a drop to zero is a server restart, a climb is a leak or a
+        # second pool). The connection limit is stated on the card and in
+        # the summary ('of N'); drawn on the plot it dwarfs both into a
+        # sliver.
+        {'name': 'Platform DB activity', 'title': 'DB activity',
+         'section': _platform_section('PanDA database'),
+         'prefixes': [], 'ids': ['pldb_active', 'pldb_waiting'],
+         'order': ['pldb_active', 'pldb_waiting'],
+         'stacked': True, 'panel_px': 150, 'units': 'connections'},
+        {'name': 'Platform DB connections', 'title': 'DB connections',
+         'prefixes': [], 'ids': ['pldb_total'],
+         'panel_px': 110, 'units': 'connections'},
+        {'name': 'Platform server latency',
+         'section': _platform_section('PanDA server host'),
+         'title': 'PanDA server latency, measured from swf-monitor',
+         'prefixes': [], 'ids': ['plsv_latency'],
+         'panel_px': 110, 'units': 'ms'},
+        {'name': 'Platform PanDA monitor latency',
+         'title': 'pandamon latency',
+         'prefixes': ['plpm_'], 'ids': [],
+         'order': ['plpm_front', 'plpm_workers'],
+         'panel_px': 110, 'units': 'ms'},
+        {'name': 'Platform server requests',
+         'title': 'PanDA server requests',
+         'prefixes': ['plsrv_req_'], 'ids': [],
+         'order': ['plsrv_req_acquire_jobs', 'plsrv_req_update_job',
+                   'plsrv_req_pilot_other', 'plsrv_req_harvester',
+                   'plsrv_req_cache', 'plsrv_req_statistics',
+                   'plsrv_req_other'],
+         'stacked': True, 'panel_px': 150, 'units': 'per minute'},
+        {'name': 'Platform server 5xx', 'title': 'PanDA server 5xx responses',
+         'prefixes': [], 'ids': ['plsrv_5xx'],
+         'panel_px': 110, 'units': 'per interval'},
+        {'name': 'Platform server daemons',
+         'title': 'PanDA server daemon silence',
+         'prefixes': [], 'ids': ['plsrv_daemon_oldest'],
+         'panel_px': 110, 'units': 'seconds since last log write'},
+        {'name': 'Platform server DB reach',
+         'title': 'Database reachability from the server host',
+         'prefixes': [], 'ids': ['plsrv_db_ms'],
+         'panel_px': 110, 'units': 'ms'},
+        {'name': 'Platform server load',
+         'title': 'PanDA server host load',
+         'prefixes': ['plsrv_load_'], 'ids': [],
+         'order': ['plsrv_load_1m', 'plsrv_load_15m', 'plsrv_load_5m'],
+         'default_off_ids': ['plsrv_load_5m'],
+         'panel_px': 110, 'units': 'load average'},
+        {'name': 'Platform server memory', 'title': 'PanDA server host memory',
+         'prefixes': [], 'ids': ['plsrv_mem_used_pct'],
+         'panel_px': 110, 'units': '% used'},
+        {'name': 'Platform server storage', 'title': 'PanDA server host storage',
+         'prefixes': ['plsrv_vol_'], 'ids': [],
+         'panel_px': 110, 'units': '% used'},
+        {'name': 'Platform server processes',
+         'title': 'PanDA server host processes',
+         'prefixes': ['plsrv_rss_'], 'ids': [],
+         'order': ['plsrv_rss_httpd', 'plsrv_rss_pandaserver'],
+         'panel_px': 110, 'units': 'MB resident'},
+        {'name': 'Platform monitor load',
+         'section': _platform_section('swf-monitor host'),
+         'title': 'swf-monitor host load',
+         'prefixes': ['plml_'], 'ids': [],
+         'order': ['plml_1m', 'plml_5m', 'plml_15m'],
+         'panel_px': 110, 'units': 'load average'},
+        {'name': 'Platform monitor memory', 'title': 'swf-monitor host memory',
+         'prefixes': [], 'ids': ['plmm_used_pct'],
+         'panel_px': 110, 'units': '% used'},
+        {'name': 'Platform monitor storage', 'title': 'swf-monitor host storage',
+         'prefixes': ['plmv_'], 'ids': [],
+         'panel_px': 110, 'units': '% used'},
+        {'name': 'Platform monitor processes', 'title': 'swf-monitor host processes',
+         'prefixes': ['plmp_'], 'ids': [],
+         'order': ['plmp_httpd', 'plmp_wsgi', 'plmp_asgi', 'plmp_ops_agent'],
+         'panel_px': 110, 'units': 'MB resident'},
+        # The pool our workers wait in, and what is ahead of them there.
+        # Fullness is the fraction claimed, on its own 0–1 scale; the
+        # queue depth is jobs, tens of thousands of them, and would flatten
+        # the fraction to a line if they shared an axis.
+        {'name': 'Platform pool fullness', 'title': 'Batch pool claimed',
+         'section': _platform_section('Batch pool'),
+         'prefixes': ['plpf_'], 'ids': [],
+         'panel_px': 110, 'units': 'fraction of slots'},
+        {'name': 'Platform pool queue', 'title': 'Batch pool queue',
+         'prefixes': ['plpq_'], 'ids': [],
+         'panel_px': 130, 'units': 'jobs'},
+        {'name': 'Platform pool slots', 'title': 'Batch pool slots',
+         'prefixes': ['plps_'], 'ids': [],
+         'stacked': True, 'panel_px': 130, 'units': 'slots'},
+        {'name': 'Platform submit workers', 'title': 'Submit host pilots',
+         'section': _platform_section('Submit hosts'),
+         'prefixes': ['plsw_'], 'ids': [],
+         'order': ['plsw_running', 'plsw_idle', 'plsw_held'],
+         'panel_px': 110, 'units': 'pilots'},
+        {'name': 'Platform submit pool', 'title': 'OSG pool as the submitter sees it',
+         'prefixes': [], 'ids': ['plsp_total', 'plsp_admitted'],
+         'order': ['plsp_total', 'plsp_admitted'],
+         'panel_px': 110, 'units': 'slots'},
+        # On the pool's own axis the exclusions are a hairline — tens of
+        # slots against twelve thousand — so they get their own panel,
+        # as the connection pool's idle base does on the DB panels.
+        {'name': 'Platform submit excluded',
+         'title': 'Slots removed by the exclusions',
+         'prefixes': [], 'ids': ['plsp_excluded'],
+         'panel_px': 110, 'units': 'slots'},
+        {'name': 'Platform submit daemons',
+         'title': 'Submit host daemon silence',
+         'prefixes': [], 'ids': ['plsd_oldest'],
+         'panel_px': 110, 'units': 'seconds since last log write'},
+        {'name': 'Platform submit host', 'title': 'Submit host load',
+         'prefixes': ['plsl_'], 'ids': [],
+         # Three load curves on one panel read as noise; 1 and 15 minutes
+         # give the instant and the trend. The 5-minute stays in the
+         # record and a tick away.
+         'order': ['plsl_1m', 'plsl_15m', 'plsl_5m'],
+         'default_off_ids': ['plsl_5m'],
+         'panel_px': 110, 'units': 'load average'},
+        {'name': 'Platform submit storage', 'title': 'Submit host storage',
+         'prefixes': ['plsu_'], 'ids': [],
+         'panel_px': 110, 'units': '% used'},
+        # The PanDA server host, from its reporter
+        # (docs/PANDA_SERVER_REPORTER.md). Requests stack by endpoint
+        # class as rates over the reporter's interval; the 5xx count is
+        # its own panel because on the request axis it is a hairline.
+        {'name': 'Platform jobs',
+         'section': _platform_section('Production activity'), 'title': 'Jobs in flight',
+         'prefixes': ['job_'], 'ids': ['running_cores'],
+         'order': lifecycle, 'default_off_ids': ['job_activated'],
+         'overlay_ids': ['running_cores'],
+         'stacked': True, 'panel_px': 220, 'units': 'jobs'},
+        {'name': 'Platform kills', 'title': 'Faulty job events by component',
+         'prefixes': ['perrc_'], 'ids': [],
+         'event_flow': True, 'end_stamped': True, 'stacked': True,
+         'member_ticks': False,
+         'panel_px': 200, 'units': 'errors', **qualifier},
+        {'name': 'Platform outcomes', 'title': 'Job outcomes',
+         'prefixes': ['outcome_'], 'ids': [],
+         'order': ['outcome_finished', 'outcome_failed'],
+         'window_relative': True, 'stacked': True,
+         'panel_px': 150, 'units': 'jobs'},
+    )
+
+
+def _platform_focus_view():
+    """The Platform focus tab (docs/SNAPPER_PLATFORM.md): load,
+    platform state, and consequences on one axis, the cut narrowed to
+    the platform component's card with the summary across every
+    metric. One option — the whole platform — with a staleness lens
+    switching the heartbeat-age panel between age tiers and sites."""
+    return {
+        'param': 'platform',
+        'label': 'Platform',
+        'selector_label': 'Platform',
+        'cache_series': True,
+        'components': ('platform', 'panda', 'errors'),
+        # Warmed, because a cold build of this view is a timeout for
+        # whoever arrives first. Any change to its curve vocabulary
+        # invalidates every cached window at once (the product key
+        # hashes the family set), and on 2026-09-07 the cold rebuilds
+        # ran 8, 30 and 56 seconds against a 60-second gateway limit.
+        # The builds themselves are one to two seconds, so warming them
+        # costs seconds and spares a reader the 504.
+        'prewarm_series': True,
+        'note': ('The platform itself on top; load and consequences '
+                 'beneath it, on one time axis. Heartbeats and starts count '
+                 'the 5-minute publication interval ending at each stamp; '
+                 'yield is heartbeats received over the count expected '
+                 'from the running population. Click the plot for the '
+                 'platform state at that instant and the summary across '
+                 'every metric.'),
+        'default': 'overall',
+        'selectors': [
+            {'param': 'lens', 'label': 'Staleness',
+             'default': 'tiers',
+             'choices': [{'value': 'tiers', 'label': 'by age'},
+                         {'value': 'sites', 'label': 'by site'}]},
+        ],
+        'options': [{'value': 'overall', 'label': 'Overall',
+                     'families_by': {
+                         lens: list(families)
+                         for lens, families in PLATFORM_FAMILIES_BY_LENS.items()},
+                     'component': 'platform'}],
+    }
+
+
+# ── Storage view (docs/SNAPPER_STORAGE.md) ──────────────────────────────
+
+_STORAGE_CACHE = {'at': None, 'inventory': None}
+_STORAGE_STATE_ORDER = ('AVAILABLE', 'COPYING', 'TEMPORARY_UNAVAILABLE',
+                        'UNAVAILABLE', 'BAD')
+_STORAGE_ROOT_ORDER = ('RECO', 'FULL', 'EVGEN')
+_STORAGE_LENS_LABEL = {'state': 'Rucio replica state',
+                       'root': 'data tier root',
+                       'campaign': 'campaign'}
+# Each panel offers the groupings its record supports, on its own
+# control row (docs/SNAPPER_STORAGE.md, Grouping): the copying backlog
+# is all COPYING by definition, so state says nothing there; the record
+# carries no ghosts by root; the inventory answers to all three.
+_STORAGE_PANEL_LENSES = (
+    {'param': 'backlog', 'family': 'backlog', 'default': 'root',
+     'values': ('root', 'campaign')},
+    {'param': 'ghosts', 'family': 'ghosts', 'default': 'state',
+     'values': ('state', 'campaign')},
+    {'param': 'inventory', 'family': 'inventory', 'default': 'state',
+     'values': ('state', 'root', 'campaign')},
+)
+_STORAGE_QUANTITIES = ({'value': 'bytes', 'label': 'bytes'},
+                       {'value': 'files', 'label': 'files'})
+# The option carrying the scope-level campaign families, pinned after
+# the ranked RSE sections.
+_STORAGE_CAMPAIGNS_OPTION = 'campaigns'
+_TB = 1e12
+
+
+def _storage_slug(name):
+    """Campaign names carry dots; curve-id segments carry hyphens."""
+    return str(name).replace('.', '-')
+
+
+def _storage_unslug(segment):
+    return str(segment).replace('-', '.')
+
+
+def _storage_tb(value):
+    return round(int(value or 0) / _TB, 4)
+
+
+def _storage_inventory():
+    """RSEs, campaigns and the record's first snap, from the latest snap
+    carrying the storage component; resolved per render (cached
+    briefly) so a new RSE or campaign appears without a restart."""
+    from django.utils import timezone
+
+    from snapper_ai.models import SystemSnap
+
+    now = timezone.now()
+    if (_STORAGE_CACHE['at'] is not None
+            and _STORAGE_CACHE['inventory'] is not None
+            and (now - _STORAGE_CACHE['at']).total_seconds() < 300):
+        return _STORAGE_CACHE['inventory']
+    carrying = SystemSnap.objects.filter(
+        scope='epicprod', state__components__has_key='storage')
+    state = (carrying.order_by('-snap_time')
+             .values_list('state', flat=True).first())
+    first = (carrying.order_by('snap_time')
+             .values_list('snap_time', flat=True).first())
+    data = component_data(state or {}, 'storage')
+    rse_blocks = {rse: block for rse, block in (data.get('rses') or {}).items()
+                  if isinstance(block, dict)}
+    inventory = {
+        'rses': tuple(sorted(rse_blocks)),
+        'campaigns': tuple(sorted(
+            name for name, block in (data.get('campaigns') or {}).items()
+            if isinstance(block, dict))),
+        'first': first,
+        # Whether the record carries the production account's own usage
+        # yet; until it does, the capacity band is the RSE-wide usage.
+        'account': any(
+            (block.get('capacity') or {}).get('account_used') is not None
+            for block in rse_blocks.values()),
+    }
+    _STORAGE_CACHE.update({'at': now, 'inventory': inventory})
+    return inventory
+
+
+def _storage_curve_values(state):
+    """Curves from the storage component (docs/SNAPPER_STORAGE.md): per
+    RSE the flow counters (raw cumulative values; the counter_flow
+    families project them to per-bin deltas at render), the backlog,
+    ghost and inventory gauges under the three groupings, rule locks
+    and capacity; per campaign the protection, quality, dataset and
+    latency gauges and the arrival counters. Bytes plot in TB.
+
+    Ids are ``sto`` + a two-letter code (quantity f/b/x, then the
+    panel kind; ``p`` + kind for the campaign families) + ``_`` + the
+    RSE or campaign segment + ``_`` + the member. RSE names carry no
+    underscore and campaign segments carry hyphens for dots, so the
+    member is the remainder after the segment."""
+    values = {}
+    sto = component_data(state, 'storage')
+    if not sto:
+        return values
+    for rse, block in (sto.get('rses') or {}).items():
+        if not isinstance(block, dict):
+            continue
+        # A counter or block absent from a publication emits no value:
+        # the arrivals backfill carries the arrival counters alone, and
+        # a zero for an unrecorded quantity would draw a false step at
+        # the census.
+        flow = block.get('flow') or {}
+        for key, curve_id, as_tb in (
+                # All arrivals: the option's ranking curve, cached with
+                # every panel set and never displayed.
+                ('arrived_files', f'stoxa_{rse}_files', False),
+                ('first_copy_files', f'stofa_{rse}_first', False),
+                ('replica_files', f'stofa_{rse}_replica', False),
+                ('first_copy_bytes', f'stoba_{rse}_first', True),
+                ('replica_bytes', f'stoba_{rse}_replica', True),
+                ('transfers_completed', f'stoft_{rse}_transfers', False),
+                ('ghosts_appeared', f'stoxe_{rse}_appeared', False)):
+            if key in flow:
+                values[curve_id] = (_storage_tb(flow[key]) if as_tb
+                                    else int(flow[key] or 0))
+        backlog = block.get('backlog') or {}
+        if backlog:
+            values[f'stofs_{rse}_copying'] = int(backlog.get('copying_files') or 0)
+            values[f'stobs_{rse}_copying'] = _storage_tb(backlog.get('copying_bytes'))
+            values[f'stoxo_{rse}_over'] = int(backlog.get('over_threshold') or 0)
+        ages = backlog.get('age_s') or {}
+        for member in ('median', 'p90', 'max'):
+            if ages.get(member) is not None:
+                values[f'stoxb_{rse}_{member}'] = round(
+                    float(ages[member]) / 3600, 2)
+        inventory = block.get('inventory') or {}
+        for state_name, entry in (inventory.get('by_state') or {}).items():
+            entry = entry or {}
+            values[f'stofn_{rse}_{state_name}'] = int(entry.get('files') or 0)
+            values[f'stobn_{rse}_{state_name}'] = _storage_tb(entry.get('bytes'))
+        # Campaign and root maps carry files_<STATE> and bytes_<STATE>:
+        # the inventory total over states, and the copying slice.
+        for total_f, total_b, copy_f, copy_b, mapping, segment_of in (
+                ('fm', 'bm', 'fc', 'bc',
+                 inventory.get('by_campaign') or {}, _storage_slug),
+                ('fo', 'bo', 'fr', 'br',
+                 inventory.get('by_root') or {}, str)):
+            for name, entry in mapping.items():
+                entry = entry or {}
+                segment = segment_of(name)
+                values[f'sto{total_f}_{rse}_{segment}'] = sum(
+                    int(v or 0) for k, v in entry.items()
+                    if k.startswith('files_'))
+                values[f'sto{total_b}_{rse}_{segment}'] = round(sum(
+                    int(v or 0) for k, v in entry.items()
+                    if k.startswith('bytes_')) / _TB, 4)
+                values[f'sto{copy_f}_{rse}_{segment}'] = int(
+                    entry.get('files_COPYING') or 0)
+                values[f'sto{copy_b}_{rse}_{segment}'] = _storage_tb(
+                    entry.get('bytes_COPYING'))
+        ghosts = block.get('ghosts') or {}
+        for state_name, count in (ghosts.get('by_state') or {}).items():
+            values[f'stofg_{rse}_{state_name}'] = int(count or 0)
+        for name, entry in (ghosts.get('by_campaign') or {}).items():
+            values[f'stofh_{rse}_{_storage_slug(name)}'] = int(
+                (entry or {}).get('files') or 0)
+        if ghosts:
+            values[f'stofi_{rse}_files'] = int(ghosts.get('files') or 0)
+            values[f'stobi_{rse}_bytes'] = _storage_tb(ghosts.get('bytes'))
+        locks = (block.get('rules') or {}).get('locks') or {}
+        if locks:
+            values[f'stoxl_{rse}_replicating'] = int(locks.get('replicating') or 0)
+            values[f'stoxl_{rse}_stuck'] = int(locks.get('stuck') or 0)
+        capacity = block.get('capacity') or {}
+        # The production account's own usage (what the limit charges,
+        # the rows of rucio account limit list eicprod) beside the
+        # RSE-wide usage the catalog reports for every account.
+        if capacity.get('account_used') is not None:
+            values[f'stobu_{rse}_account'] = _storage_tb(capacity.get('account_used'))
+        if capacity.get('account_files') is not None:
+            values[f'stofu_{rse}_account_files'] = int(capacity.get('account_files') or 0)
+        if capacity.get('used') is not None:
+            values[f'stobu_{rse}_used'] = _storage_tb(capacity.get('used'))
+        if capacity.get('limit'):
+            values[f'stobu_{rse}_limit'] = _storage_tb(capacity.get('limit'))
+        if capacity.get('files') is not None:
+            values[f'stofu_{rse}_files'] = int(capacity.get('files') or 0)
+    for name, block in (sto.get('campaigns') or {}).items():
+        if not isinstance(block, dict):
+            continue
+        segment = _storage_slug(name)
+        protection = block.get('protection') or {}
+        if protection:
+            values[f'stopc_{segment}_single'] = int(protection.get('single_copy') or 0)
+            values[f'stopc_{segment}_two_plus'] = int(protection.get('two_plus') or 0)
+        if 'unattached_files' in block:
+            values[f'stopq_{segment}_unattached'] = int(block.get('unattached_files') or 0)
+        if 'no_events_attr' in block:
+            values[f'stopq_{segment}_no_events'] = int(block.get('no_events_attr') or 0)
+        datasets = block.get('datasets') or {}
+        if datasets:
+            for member in ('open', 'partial_anywhere', 'quiet_open', 'stalled'):
+                values[f'stopd_{segment}_{member}'] = int(datasets.get(member) or 0)
+        for kind, entry in (block.get('latency_s') or {}).items():
+            median = (entry or {}).get('median')
+            if median is not None:
+                values[f'stopl_{segment}_{kind}'] = round(float(median) / 3600, 2)
+        flow = block.get('flow') or {}
+        for key, curve_id, as_tb in (
+                ('arrived_files', f'stopf_{segment}_arrived', False),
+                ('arrived_bytes', f'stopb_{segment}_arrived', True)):
+            if key in flow:
+                values[curve_id] = (_storage_tb(flow[key]) if as_tb
+                                    else int(flow[key] or 0))
+    return values
+
+
+def _storage_curve_parts(curve_id):
+    """(code, segment, member) of a storage curve id, else None."""
+    if not curve_id.startswith('sto') or len(curve_id) < 7 or curve_id[5] != '_':
+        return None
+    segment, _, member = curve_id[6:].partition('_')
+    return curve_id[3:5], segment, member
+
+
+# Members with semantic color: replica states on the house vocabulary
+# (available blue, copying the warning color, unavailable and bad the
+# failure color), completion green, the limit a dark neutral line. Campaign, root and latency members take the
+# palette.
+_STORAGE_MEMBER_COLORS = {
+    'AVAILABLE': '#1565c0', 'COPYING': '#f9a825',
+    'TEMPORARY_UNAVAILABLE': '#ef6c00', 'UNAVAILABLE': '#c62828',
+    'BAD': '#b71c1c',
+    'first': '#1565c0', 'replica': '#8ab6e8',
+    'transfers': '#2e7d32',
+    'copying': '#f9a825', 'over': '#c62828',
+    'appeared': '#c62828',
+    'replicating': '#f9a825', 'stuck': '#c62828',
+    'account': '#1565c0', 'account_files': '#1565c0',
+    'used': '#8ab6e8', 'limit': '#424242', 'files': '#8ab6e8',
+    'median': '#8ab6e8', 'p90': '#1565c0', 'max': '#0d47a1',
+    'single': '#f9a825', 'two_plus': '#2e7d32',
+    'unattached': '#ef6c00', 'no_events': '#7e57c2',
+    'open': '#1565c0', 'partial_anywhere': '#f9a825',
+    'quiet_open': '#8a8a8a', 'stalled': '#c62828',
+    'arrived': '#1565c0',
+    'yield': '#c62828',
+}
+_STORAGE_PALETTE_CODES = frozenset(
+    ('fm', 'bm', 'fc', 'bc', 'fh', 'fo', 'bo', 'fr', 'br', 'pl'))
+_STORAGE_MEMBER_LABELS = {
+    'first': 'first copies', 'replica': 'replicas',
+    'transfers': 'transfers completed',
+    'copying': 'copying', 'over': 'over the stuck threshold',
+    'median': 'median age', 'p90': '90th percentile age', 'max': 'oldest',
+    'appeared': 'ghosts appeared',
+    'replicating': 'replicating locks', 'stuck': 'stuck locks',
+    'account': 'eicprod usage', 'account_files': 'eicprod files',
+    'used': 'RSE-wide usage', 'limit': 'eicprod limit',
+    'single': 'single copy', 'two_plus': 'two or more copies',
+    'unattached': 'unattached files', 'no_events': 'no event count',
+    'open': 'open', 'partial_anywhere': 'partial somewhere',
+    'quiet_open': 'quiet and open', 'stalled': 'stalled',
+    'arrived': 'arrived',
+    'yield': 'ghost yield',
+}
+
+
+def _storage_curve_color(curve_id):
+    parts = _storage_curve_parts(curve_id)
+    if parts is None:
+        return None
+    code, _segment, member = parts
+    if code in ('fi', 'bi'):
+        return '#7e57c2'
+    if code in _STORAGE_PALETTE_CODES:
+        return None
+    return _STORAGE_MEMBER_COLORS.get(member)
+
+
+def _storage_curve_label(curve_id):
+    parts = _storage_curve_parts(curve_id)
+    if parts is None:
+        return None
+    code, segment, member = parts
+    if code in ('fi', 'bi'):
+        return 'ghosts'
+    if code == 'fu':
+        return ('eicprod files' if member == 'account_files'
+                else 'files on the RSE, every account')
+    if code == 'pa':
+        return _storage_unslug(segment)
+    if code in ('fm', 'bm', 'fc', 'bc', 'fh'):
+        return _storage_unslug(member)
+    if code in ('fo', 'bo', 'fr', 'br'):
+        return member
+    if code in ('fn', 'bn', 'fg'):
+        return member.lower().replace('_', ' ')
+    if code == 'pl':
+        return member.replace('_', ' ')
+    return _STORAGE_MEMBER_LABELS.get(member, member)
+
+
+_STORAGE_PANELS = ({'value': 'status', 'label': 'status'},
+                   {'value': 'capacity', 'label': 'RSE capacity'},
+                   {'value': 'ghosts', 'label': 'ghosts'},
+                   {'value': 'lifecycle', 'label': 'all panels'})
+
+
+def _storage_rse_families(rse, quantity, lenses, panels='lifecycle'):
+    """The per-RSE families for one quantity, panel set and grouping
+    per panel, in panel order (docs/SNAPPER_STORAGE.md, Families per
+    RSE). ``lenses`` maps a panel — backlog, ghosts, inventory — to its
+    grouping, each panel carrying its own on its control row. The
+    capacity and ghosts sets are the RSE-status and ghost-history
+    readings alone, one click from the whole lifecycle."""
+    backlog_lens = lenses.get('backlog') or 'root'
+    ghost_lens = lenses.get('ghosts') or 'state'
+    inventory_lens = lenses.get('inventory') or 'state'
+    if panels == 'status':
+        # The moving picture: what lands, what fails, how full.
+        return [f'Storage arrivals {rse} {quantity}',
+                f'Storage ghost flow {rse}',
+                f'Storage capacity {rse} {quantity}']
+    if panels == 'capacity':
+        return [f'Storage capacity {rse} {quantity}']
+    if panels == 'ghosts':
+        return [(f'Storage ghosts {rse} files {ghost_lens}'
+                 if quantity == 'files' else f'Storage ghosts {rse} bytes'),
+                f'Storage ghost flow {rse}',
+                f'Storage ghost yield {rse}',
+                f'Storage capacity {rse} {quantity}']
+    return [f'Storage arrivals {rse} {quantity}',
+            f'Storage transfers {rse} {quantity}',
+            f'Storage backlog {rse} {quantity} {backlog_lens}',
+            f'Storage backlog age {rse}',
+            (f'Storage ghosts {rse} files {ghost_lens}'
+             if quantity == 'files' else f'Storage ghosts {rse} bytes'),
+            f'Storage ghost flow {rse}',
+            f'Storage ghost yield {rse}',
+            f'Storage inventory {rse} {quantity} {inventory_lens}',
+            f'Storage locks {rse}',
+            f'Storage capacity {rse} {quantity}']
+
+
+def _storage_campaign_families(campaigns, quantity, panels='lifecycle'):
+    """The scope-level families, per target campaign, in panel order:
+    the campaigns' arrivals under status, everything under all panels,
+    none under the capacity set; the consequences strip (the
+    data-management job failures of the error record) closes the
+    status, ghosts and all-panels sets."""
+    names = []
+    if panels == 'status':
+        return ([f'Storage arrived {name} {quantity}' for name in campaigns]
+                + ['Storage consequences'])
+    if panels == 'ghosts':
+        return ['Storage consequences']
+    if panels != 'lifecycle':
+        return names
+    for name in campaigns:
+        names += [f'Storage copies {name}',
+                  f'Storage catalog quality {name}',
+                  f'Storage datasets {name}', f'Storage latency {name}',
+                  f'Storage arrived {name} {quantity}']
+    names.append('Storage consequences')
+    return names
+
+
+def _storage_groups():
+    """Curve families of the Storage view, resolved per render from the
+    record's RSE and campaign inventories: per RSE, per quantity and
+    grouping, with the quantity-independent families (backlog age,
+    ghost flow, locks) shared; then the campaign families. Absent from
+    the compact scope families, so they render only on the Storage
+    focus page. Small secondary panels start closed."""
+    inventory = _storage_inventory()
+    groups = []
+    closed = {'focus_closed': True, 'start_closed': True}
+    backlog_code = {'campaign': 'c', 'state': 's', 'root': 'r'}
+    inventory_code = {'campaign': 'm', 'state': 'n', 'root': 'o'}
+    for rse in inventory['rses']:
+        for quantity in ('files', 'bytes'):
+            q = quantity[0]
+            units = 'files' if quantity == 'files' else 'TB'
+            groups.append({
+                'name': f'Storage arrivals {rse} {quantity}',
+                'title': f'Arrivals · {rse}',
+                'prefixes': [f'sto{q}a_{rse}_'], 'ids': [],
+                'order': [f'sto{q}a_{rse}_first', f'sto{q}a_{rse}_replica'],
+                # The ranking curve (all arrivals) and, under bytes
+                # counting, the files first-copy flow the ghost yield
+                # divides by ride the cached series without joining the
+                # display.
+                'extra_cache_prefixes': (
+                    [f'stoxa_{rse}_', f'stofa_{rse}_']
+                    if quantity == 'bytes' else [f'stoxa_{rse}_']),
+                'counter_flow': True, 'end_stamped': True, 'stacked': True,
+                'panel_px': 150, 'units': units,
+                'empty_note': 'No arrivals in this window'})
+            # Completed transfers carry a file count alone, so the panel
+            # counts files under either counting.
+            groups.append({
+                'name': f'Storage transfers {rse} {quantity}',
+                'title': f'Transfers completed · {rse}',
+                'prefixes': [], 'ids': [f'stoft_{rse}_transfers'],
+                'counter_flow': True, 'end_stamped': True,
+                'panel_px': 110, 'units': 'files',
+                'empty_note': 'No transfers in this window'})
+            for lens, code in backlog_code.items():
+                backlog = {
+                    'name': f'Storage backlog {rse} {quantity} {lens}',
+                    'title': f'Copying backlog · {rse}',
+                    'prefixes': ([f'sto{q}{code}_{rse}_']
+                                 if lens != 'state' else []),
+                    'ids': ([f'sto{q}s_{rse}_copying']
+                            if lens == 'state' else []),
+                    # The panel's own grouping axis attaches here.
+                    'selector_group': 'backlog',
+                    'stacked': True, 'panel_px': 200, 'units': units}
+                if lens == 'root':
+                    backlog['order'] = [f'sto{q}r_{rse}_{root}'
+                                        for root in _STORAGE_ROOT_ORDER]
+                if quantity == 'files':
+                    # The count over the stuck threshold rides the
+                    # stack as a foreground line, never summed in.
+                    backlog['ids'] = backlog['ids'] + [f'stoxo_{rse}_over']
+                    backlog['overlay_ids'] = [f'stoxo_{rse}_over']
+                groups.append(backlog)
+                if quantity == 'files':
+                    ghosts = {
+                        'name': f'Storage ghosts {rse} files {lens}',
+                        'title': f'Ghosts · {rse}',
+                        'prefixes': [], 'ids': [],
+                        # Only the files variants carry the grouping
+                        # axis: under bytes the record holds the ghost
+                        # total alone, so there is nothing to choose.
+                        'selector_group': 'ghosts',
+                        'stacked': True, 'panel_px': 200, 'units': 'files'}
+                    if lens == 'state':
+                        ghosts['prefixes'] = [f'stofg_{rse}_']
+                        ghosts['order'] = [f'stofg_{rse}_{s}'
+                                           for s in _STORAGE_STATE_ORDER]
+                    elif lens == 'campaign':
+                        ghosts['prefixes'] = [f'stofh_{rse}_']
+                    else:
+                        # Ghosts by root are not recorded yet
+                        # (SNAPPER_STORAGE.md, Record additions).
+                        ghosts['ids'] = [f'stofi_{rse}_files']
+                        ghosts['title'] = (f'Ghosts · {rse} '
+                                           '(total; by root not yet recorded)')
+                    groups.append(ghosts)
+                inventory_group = {
+                    'name': f'Storage inventory {rse} {quantity} {lens}',
+                    'title': f'Inventory · {rse}',
+                    'prefixes': [f'sto{q}{inventory_code[lens]}_{rse}_'],
+                    'ids': [],
+                    # All three groupings are real here.
+                    'selector_group': 'inventory',
+                    'stacked': True, 'panel_px': 220, 'units': units}
+                if lens == 'state':
+                    inventory_group['order'] = [
+                        f'sto{q}n_{rse}_{s}' for s in _STORAGE_STATE_ORDER]
+                elif lens == 'root':
+                    inventory_group['order'] = [
+                        f'sto{q}o_{rse}_{root}' for root in _STORAGE_ROOT_ORDER]
+                groups.append(inventory_group)
+            if quantity == 'bytes':
+                groups.append({
+                    'name': f'Storage ghosts {rse} bytes',
+                    'title': f'Ghosts · {rse}',
+                    'prefixes': [], 'ids': [f'stobi_{rse}_bytes'],
+                    'stacked': True, 'panel_px': 200, 'units': 'TB'})
+                # The eicprod account's usage is the band, what the limit
+                # charges; the limit and the RSE-wide usage (every
+                # account, unticked by default) are foreground lines,
+                # never summed in. Until the record carries the account
+                # usage, the RSE-wide usage is the band.
+                if inventory['account']:
+                    groups.append({
+                        'name': f'Storage capacity {rse} bytes',
+                        'title': f'Capacity · {rse}',
+                        'prefixes': [],
+                        'ids': [f'stobu_{rse}_account', f'stobu_{rse}_used',
+                                f'stobu_{rse}_limit'],
+                        'order': [f'stobu_{rse}_account', f'stobu_{rse}_used',
+                                  f'stobu_{rse}_limit'],
+                        'overlay_ids': [f'stobu_{rse}_used', f'stobu_{rse}_limit'],
+                        'default_off_ids': [f'stobu_{rse}_used'],
+                        # The ranking curve rides the capacity-only reading.
+                        'extra_cache_prefixes': [f'stoxa_{rse}_'],
+                        'stacked': True, 'panel_px': 150, 'units': 'TB',
+                        'detail_key': f'sto-{rse}'})
+                else:
+                    groups.append({
+                        'name': f'Storage capacity {rse} bytes',
+                        'title': f'Capacity · {rse} (RSE-wide usage)',
+                        'prefixes': [],
+                        'ids': [f'stobu_{rse}_used', f'stobu_{rse}_limit'],
+                        'order': [f'stobu_{rse}_used', f'stobu_{rse}_limit'],
+                        'overlay_ids': [f'stobu_{rse}_limit'],
+                        'extra_cache_prefixes': [f'stoxa_{rse}_'],
+                        'stacked': True, 'panel_px': 150, 'units': 'TB',
+                        'detail_key': f'sto-{rse}'})
+            elif inventory['account']:
+                groups.append({
+                    'name': f'Storage capacity {rse} files',
+                    'title': f'Capacity · {rse}',
+                    'prefixes': [],
+                    'ids': [f'stofu_{rse}_account_files', f'stofu_{rse}_files'],
+                    'order': [f'stofu_{rse}_account_files', f'stofu_{rse}_files'],
+                    'overlay_ids': [f'stofu_{rse}_files'],
+                    'default_off_ids': [f'stofu_{rse}_files'],
+                    'extra_cache_prefixes': [f'stoxa_{rse}_'],
+                    'stacked': True, 'panel_px': 150, 'units': 'files',
+                    'detail_key': f'sto-{rse}'})
+            else:
+                groups.append({
+                    'name': f'Storage capacity {rse} files',
+                    'title': f'Capacity · {rse} (files on the RSE)',
+                    'prefixes': [], 'ids': [f'stofu_{rse}_files'],
+                    'extra_cache_prefixes': [f'stoxa_{rse}_'],
+                    'stacked': True, 'panel_px': 150, 'units': 'files',
+                    'detail_key': f'sto-{rse}'})
+        # The ranking family is never listed by an option: it exists so
+        # the series projects the arrivals counter to per-bin flows.
+        groups.append({
+            'name': f'Storage arrival activity {rse}',
+            'title': f'Arrivals · {rse}',
+            'prefixes': [f'stoxa_{rse}_'], 'ids': [],
+            'counter_flow': True, 'end_stamped': True,
+            'panel_px': 110, 'units': 'files'})
+        groups.append({
+            'name': f'Storage backlog age {rse}',
+            'title': f'Copying age · {rse}',
+            'prefixes': [],
+            'ids': [f'stoxb_{rse}_median', f'stoxb_{rse}_p90',
+                    f'stoxb_{rse}_max'],
+            'order': [f'stoxb_{rse}_median', f'stoxb_{rse}_p90',
+                      f'stoxb_{rse}_max'],
+            'panel_px': 110, 'units': 'hours', **closed})
+        groups.append({
+            'name': f'Storage ghost flow {rse}',
+            'title': f'Ghosts appeared · {rse}',
+            'prefixes': [],
+            'ids': [f'stoxe_{rse}_appeared'],
+            'counter_flow': True, 'end_stamped': True,
+            'panel_px': 110, 'units': 'files',
+            'empty_note': 'No ghosts appeared in this window', **closed})
+        # Ghost yield: ghosts appeared over registrations (first copies
+        # arrived plus ghosts appeared) per bin, derived at series time
+        # from the two projected flows (_storage_series_transform).
+        groups.append({
+            'name': f'Storage ghost yield {rse}',
+            'title': f'Ghost yield · {rse}',
+            'prefixes': [], 'ids': [f'stoxy_{rse}_yield'],
+            'panel_px': 110, 'units': 'ghosts / registrations',
+            'empty_note': 'No registrations in this window'})
+        groups.append({
+            'name': f'Storage locks {rse}',
+            'title': f'Rule locks · {rse}',
+            'prefixes': [],
+            'ids': [f'stoxl_{rse}_replicating', f'stoxl_{rse}_stuck'],
+            'order': [f'stoxl_{rse}_replicating', f'stoxl_{rse}_stuck'],
+            'panel_px': 110, 'units': 'locks', **closed})
+    for name in inventory['campaigns']:
+        segment = _storage_slug(name)
+        copies = [f'stopc_{segment}_single', f'stopc_{segment}_two_plus']
+        groups.append({
+            'name': f'Storage copies {name}', 'title': f'Disk copies · {name}',
+            'prefixes': [], 'ids': copies, 'order': copies,
+            'stacked': True, 'panel_px': 150, 'units': 'files'})
+        groups.append({
+            'name': f'Storage catalog quality {name}',
+            'title': f'Catalog quality · {name}',
+            'prefixes': [],
+            'ids': [f'stopq_{segment}_unattached', f'stopq_{segment}_no_events'],
+            'panel_px': 110, 'units': 'files', **closed})
+        groups.append({
+            'name': f'Storage datasets {name}', 'title': f'Datasets · {name}',
+            'prefixes': [],
+            'ids': [f'stopd_{segment}_{m}' for m in
+                    ('open', 'partial_anywhere', 'quiet_open', 'stalled')],
+            'panel_px': 110, 'units': 'datasets', **closed})
+        groups.append({
+            'name': f'Storage latency {name}',
+            'title': f'Latency medians · {name}',
+            'prefixes': [f'stopl_{segment}_'], 'ids': [],
+            'panel_px': 110, 'units': 'hours', **closed})
+        for quantity in ('files', 'bytes'):
+            q = quantity[0]
+            groups.append({
+                'name': f'Storage arrived {name} {quantity}',
+                'title': f'Arrived · {name}',
+                'prefixes': [],
+                'ids': [f'stop{q}_{segment}_arrived'],
+                'counter_flow': True, 'end_stamped': True,
+                'panel_px': 110,
+                'units': 'files' if quantity == 'files' else 'TB',
+                'empty_note': 'No arrivals in this window'})
+    # The consequences strip (SNAPPER_STORAGE.md): the jobs that failed
+    # at storage — the error record's entries with payload exit 78,
+    # the output upload or registration failure whatever the pilot's
+    # label, and the ddm component's other errors — binned at render
+    # with the Errors view's terminal-state chips. The entries carry
+    # no RSE, so the strip is scope-level, once.
+    groups.append({
+        'name': 'Storage consequences',
+        'title': ('Jobs failed at upload or registration · all queues '
+                  '(payload exit 78, ddm errors)'),
+        'title_by_measure': {
+            'count': ('Jobs failed at upload or registration · all '
+                      'queues (payload exit 78, ddm errors)'),
+            'weight': ('Core-hours lost at upload or registration · all '
+                       'queues (payload exit 78, ddm errors)')},
+        # Both measures down the page: the jobs that failed at storage
+        # and the core-hours they held, each with its integrated panel.
+        'measures': ['count', 'weight'],
+        'units_by_measure': {'count': 'jobs', 'weight': 'core-hours'},
+        'cumulative_panel': True,
+        # One docked detail per plot group, as every focus view
+        # renders: the cut detail beneath the per-bin panels, the
+        # aggregate detail beneath the integrated ones
+        # (_storage_consequence_sections).
+        'detail_key': 'sto-consequences',
+        'aggregate_detail_key': 'sto-consequences-aggregate',
+        'prefixes': [], 'ids': ['psto_registration', 'psto_ddm'],
+        'event_flow': True, 'end_stamped': True, 'stacked': True,
+        # Bins twice the ladder rung: a handful of events a week draws
+        # as hairlines at the 15-minute rung of a 7-day window.
+        'event_flow_bin_scale': 2,
+        'member_ticks': False,
+        'panel_px': 150, 'units': 'jobs',
+        'qualifier_label': 'Terminal state', 'qualifier_param': 'states',
+        'qualifiers_off': ['closed'],
+        'empty_note': ('No jobs failed at upload or registration in '
+                       'this window')})
+    return tuple(groups)
+
+
+def _storage_focus_view():
+    """The Storage focus tab (docs/SNAPPER_STORAGE.md): the data
+    lifecycle per RSE — arrivals, completed transfers, the copying
+    backlog, ghosts, inventory, rule locks and capacity — with the
+    campaign families pinned after the ranked RSE sections, and the
+    cut narrowed to the storage component's card. The clean page lands
+    on the last seven days, with no floor at the record's start."""
+    inventory = _storage_inventory()
+    if not inventory['rses']:
+        return None
+    # No window floor: the page lands on the last seven days whatever
+    # the record's age, and a young record leaves the left of the
+    # window empty rather than shrinking the window to its span.
+    floor = None
+    options = [
+        {'value': rse, 'label': rse,
+         # Presentation follows arrivals per bin, first copies and
+         # replicas together (a tape RSE receives only replicas); an
+         # RSE with no arrivals in the window is idle and closed.
+         'activity': f'stoxa_{rse}_files',
+         # Five axes — counting, panel set, and a grouping per panel —
+         # so the families resolve from the selected values rather than
+         # from a precomputed combination of them (snapper-ai
+         # INTEGRATION.md, callable families_by).
+         'families_by': (lambda values, rse=rse: _storage_rse_families(
+             rse, values.get('quantity') or 'bytes',
+             {axis['param']: values.get(axis['param']) or axis['default']
+              for axis in _STORAGE_PANEL_LENSES},
+             values.get('panels') or 'status')),
+         'component': 'storage', 'start': floor}
+        for rse in inventory['rses']]
+    if inventory['campaigns']:
+        options.append({
+            'value': _STORAGE_CAMPAIGNS_OPTION, 'label': 'Campaign totals',
+            'pin': 'last',
+            'families_by': (
+                lambda values, names=inventory['campaigns']:
+                    _storage_campaign_families(
+                        names, values.get('quantity') or 'bytes',
+                        values.get('panels') or 'status')),
+            'component': 'storage', 'start': floor})
+    return {
+        'param': 'rse',
+        'label': 'Storage',
+        'selector_label': 'RSE display',
+        'jump_label': 'RSEs by peak arrivals',
+        'cache_series': True,
+        # The error record's events feed the consequences strip.
+        'components': ('storage', 'errors'),
+        'prewarm_series': False,
+        'default_window': '7d',
+        'note': ('Per RSE: status (arrivals and ghosts per bin, with '
+                 'usage against the eicprod limit), RSE capacity alone, '
+                 'ghosts, or all panels: arrivals, completed '
+                 'transfers, copying backlog, ghosts, inventory, rule '
+                 'locks, capacity. State panels hold the last storage '
+                 'pass\'s values until the next pass; bytes plot in TB. '
+                 'Click the plot for the RSE table at that instant.'),
+        'default': 'all',
+        'activity_label': 'arrivals per bin',
+        'selectors': [
+            # Bytes by default: the capacity reading is TB against the
+            # limit, as Rucio states it.
+            {'param': 'quantity', 'label': 'Counting',
+             'default': 'bytes', 'choices': list(_STORAGE_QUANTITIES)},
+            # A grouping per panel, each on the panel's own control
+            # row, offering only what that panel's record supports.
+            # Replica state leads where it is offered: its members are
+            # the operational reading — a growing copying band is
+            # uploads that never finished, unavailable is replicas lost
+            # after arrival — where campaign collapses into one 'other'
+            # slab while the target list covers a fraction of what is
+            # on disk.
+            *[{'param': axis['param'], 'label': 'Grouping',
+               'family': axis['family'], 'default': axis['default'],
+               'choices': [{'value': value,
+                            'label': _STORAGE_LENS_LABEL[value]}
+                           for value in axis['values']]}
+              for axis in _STORAGE_PANEL_LENSES],
+            # The landing is status, the moving picture per RSE:
+            # arrivals and ghost flow per bin with capacity, the
+            # capacity table beneath. The other readings are one click.
+            {'param': 'panels', 'label': 'Show',
+             'default': 'status', 'choices': list(_STORAGE_PANELS)},
+        ],
+        'options': options,
+    }
+
+
+# The error families plot either measure of their events under the
+# Errors view's Measure selector: the count, or the core-hours the
+# jobs held before failing (docs/SNAPPER_ERRORS.md, Wasted resources).
+_ERRORS_MEASURE = {
+    # Both measures of the same events, down the page: the error count
+    # and the wasted core-hours, correlated by eye. The per-interval
+    # panels open under a section band; the integrated panels open
+    # under their own (the observatory's integrated section).
+    'section': {'label': 'Cut time', 'pinned': True, 'idle': False,
+                'peak': ''},
+    'measures': ['count', 'weight'],
+    'units_by_measure': {'count': 'errors', 'weight': 'core-hours'},
+    # Beneath each panel, its bins integrated from the left edge of
+    # the view: the relative contribution of each failure kind.
+    'cumulative_panel': True,
+    # One docked detail per plot: the cut detail beneath the panel,
+    # the aggregate detail beneath the integrated panel (_errors_card).
+    'detail_key': 'errors',
+    'aggregate_detail_key': 'errors-aggregate',
+}
+
+
+def _errors_groups():
+    """Error-flood families (docs/SNAPPER_ERRORS.md): recorded error
+    events by category or component, event-flow binned at render by
+    each job's end time. Scope families only — a ?task= request
+    synthesizes its per-task families through the focus view's
+    open_option hook. Absent from the compact scope families, so they
+    render only on the Errors focus page and in embeds that name
+    them. Member ticks stay off: identification lives in hover and
+    the breakdown below."""
+    # The terminal-state chip declarations feed the observatory's
+    # event-qualifier filter: chips self-discover from the recorded
+    # statuses with counts over the visible range; closed is off by
+    # default — the server disposed of those jobs for workflow
+    # reasons, by design not actual errors (docs/SNAPPER_ERRORS.md).
+    qualifier = {'qualifier_label': 'Terminal state',
+                 'qualifier_param': 'states',
+                 'qualifiers_off': ['closed'],
+                 **_ERRORS_MEASURE}
+    return (
+        {'name': 'Errors by category', 'title': 'Errors by category',
+         'title_by_measure': {
+             'count': 'Errors by category',
+             'weight': 'Wasted core-hours by category'},
+         'prefixes': ['perr_'], 'ids': [],
+         'event_flow': True, 'end_stamped': True, 'stacked': True,
+         'member_ticks': False,
+         'panel_px': 300, 'units': 'errors', 'default_off': True,
+         **qualifier},
+        {'name': 'Errors by component', 'title': 'Errors by component',
+         'title_by_measure': {
+             'count': 'Errors by component',
+             'weight': 'Wasted core-hours by component'},
+         'prefixes': ['perrc_'], 'ids': [],
+         'event_flow': True, 'end_stamped': True, 'stacked': True,
+         'member_ticks': False,
+         'panel_px': 300, 'units': 'errors', 'default_off': True,
+         **qualifier},
+        # The productive baseline the wasted hours read against, in the
+        # aggregate band and the window-relative form of the integrated
+        # panels above it: what the scope's terminal jobs produced,
+        # stacked with what they wasted, from the PanDA component's
+        # core-seconds counters (docs/SNAPPER_ERRORS.md, Productive
+        # baseline and per-site reading).
+        {'name': 'Scope core-hours',
+         'title': 'Core-hours · productive and wasted',
+         'prefixes': [], 'ids': ['outh_finished', 'outh_failed'],
+         'order': ['outh_finished', 'outh_failed'],
+         'window_relative': True, 'stacked': True,
+         'section': {'label': 'Aggregate', 'display': 'Aggregate',
+                     'pinned': True, 'idle': False, 'peak': ''},
+         'panel_px': 220, 'units': 'core-hours',
+         'empty_note': 'No terminal jobs recorded in this window'},
+        # Umbrella over every per-task error curve: the series build
+        # resolves event_flow membership from registered families, and
+        # per-task families are synthesized per request. Panels never
+        # name this family — the synthesized per-task groups do that.
+        {'name': 'Task errors', 'title': 'Task errors',
+         'prefixes': ['terr_', 'terrc_'], 'ids': [],
+         'event_flow': True, 'end_stamped': True, 'stacked': True,
+         'member_ticks': False,
+         'panel_px': 300, 'units': 'errors', 'default_off': True,
+         **qualifier},
+    )
+
+
+def _errors_task_groups(taskid):
+    """The synthesized per-task error families for one requested task."""
+    qualifier = {'qualifier_label': 'Terminal state',
+                 'qualifier_param': 'states',
+                 'qualifiers_off': ['closed'],
+                 **_ERRORS_MEASURE}
+    titles = {'count': f'Errors · task {taskid}',
+              'weight': f'Wasted core-hours · task {taskid}'}
+    return (
+        {'name': f'Task errors {taskid} category',
+         'title': f'Errors · task {taskid}', 'title_by_measure': titles,
+         'prefixes': [f'terr_{taskid}_'], 'ids': [],
+         'event_flow': True, 'end_stamped': True, 'stacked': True,
+         'member_ticks': False,
+         'panel_px': 300, 'units': 'errors', 'default_off': True,
+         **qualifier},
+        {'name': f'Task errors {taskid} component',
+         'title': f'Errors · task {taskid}', 'title_by_measure': titles,
+         'prefixes': [f'terrc_{taskid}_'], 'ids': [],
+         'event_flow': True, 'end_stamped': True, 'stacked': True,
+         'member_ticks': False,
+         'panel_px': 300, 'units': 'errors', 'default_off': True,
+         **qualifier},
+    )
+
+
+def _errors_open_task(value):
+    """open_option hook of the Errors focus view: any task id reached
+    by link (the task page's Error History) is a valid filter; its
+    families are synthesized for the request."""
+    try:
+        taskid = int(value)
+    except (TypeError, ValueError):
+        return None
+    if taskid <= 0:
+        return None
+    return {
+        'option': {
+            'value': str(taskid),
+            'label': f'Task {taskid}',
+            'families_by': {
+                'category': [f'Task errors {taskid} category'],
+                'component': [f'Task errors {taskid} component']},
+            'component': 'errors'},
+        'groups': _errors_task_groups(taskid),
+    }
+
+
+def _errors_focus_view():
+    """The Errors focus tab: recorded error events by category or
+    component. The per-task reading is the overall view filtered
+    (?task=, an open parameter — the PanDA task page links here); no
+    task list is offered on the view itself."""
+    return {
+        'param': 'task',
+        'label': 'Errors',
+        'selector_label': 'Task',
+        'cache_series': True,
+        # The productive baseline rides the PanDA component's counters,
+        # so the series walk reads both components' snaps.
+        'components': ('errors', 'panda'),
+        'prewarm_series': False,
+        'note': ('Each bin counts the jobs that ended with an error '
+                 'in that interval, and beneath it the core-hours '
+                 'those jobs held before failing; the integrated '
+                 'panels sum each from the left edge of the view. '
+                 'Zooming in refines the bins down to the recorded '
+                 '5-minute quantum. A click cuts every panel: the '
+                 'detail beneath the per-bin panels reads the hour '
+                 'around the cut, the detail beneath the integrated '
+                 'panels the whole span to the cut.'),
+        'default': 'overall',
+        'open_option': _errors_open_task,
+        'selectors': [
+            {'param': 'lens', 'label': 'Grouping',
+             'default': 'category',
+             'choices': [{'value': 'category', 'label': 'error category'},
+                         {'value': 'component', 'label': 'error component'}]},
+        ],
+        'options': [{'value': 'overall', 'label': 'Overall',
+                     'families_by': {
+                         'category': ['Errors by category',
+                                      'Scope core-hours'],
+                         'component': ['Errors by component',
+                                       'Scope core-hours']},
+                     'component': 'errors'}],
+    }
 
 
 def _site_focus_view():
@@ -844,17 +2985,35 @@ def _site_focus_view():
     return {
         'param': 'site',
         'label': 'Site',
-        'selector_label': 'Queue',
+        'selector_label': 'Queue display',
+        'jump_label': 'Queues by peak running jobs',
+        # A Site view needs only the selected queue's PanDA curves. Sharing
+        # the all-scope product makes a cold 30-day request assemble every
+        # campaign and every queue before discarding nearly all of it.
+        'cache_series': True,
+        'components': ('panda',),
+        # The delivery rebuild prewarms campaign products. It must not turn
+        # that one job into a 30-day build for every PanDA queue.
+        'prewarm_series': False,
+        # A clean landing is a week: a 14-day build of one queue costs about
+        # 30 s cold, a week about 8 s (measured 2026-09-07).
+        'default_window': '7d',
         'note': ('In-flight counts are the recorded queue state through '
                  'time; finished and failed accumulate from the left '
                  'edge of the shown window — the window is the '
                  'integration range, and zooming re-bases it. Click '
                  'the plot for the full picture at that instant.'),
-        'default': sites[0],
+        'default': 'all',
+        # With several queues shown, presentation follows activity: the
+        # peak of each queue's running-jobs curve over the window.
+        'activity_label': 'running jobs',
         'options': [
             {'value': site, 'label': site,
+             'activity': f'sj_{site}_running',
              'families': [f'Site jobs {site}',
+                          f'Site completions {site}',
                           f'Site outcomes {site}',
+                          f'Site core-hours {site}',
                           f'Site failures {site}',
                           f'Site tasks {site}'],
              'component': 'panda'}
@@ -869,6 +3028,11 @@ TESTBED_GROUPS = (
 
 
 # ── Component cards ──────────────────────────────────────────────────────
+
+_STORAGE_CONSEQUENCE_LABELS = {
+    'psto_registration': 'upload or registration failure (payload exit 78)',
+    'psto_ddm': 'data-management error (ddm)',
+}
 
 _FAILURE_CLASS_COLORS = {
     'brokerage': '#8d6e63',
@@ -1065,48 +3229,77 @@ def panda_site_outcomes_pie(site, since, until, size=270):
 
 
 def _panda_card(data, previous_data, ctx):
+    jobs = data.get('jobs') or {}
+    prev_job_data = previous_data.get('jobs') or {}
     jobs_now = (data.get('jobs') or {}).get('in_flight_now') or {}
     prev_jobs = ((previous_data.get('jobs') or {})
                  .get('in_flight_now') or {})
     tasks_now = (data.get('tasks') or {}).get('in_flight_now') or {}
     prev_tasks = ((previous_data.get('tasks') or {})
                   .get('in_flight_now') or {})
+    params = (ctx or {}).get('params') or {}
 
-    def stat(label, value, previous):
-        return {'label': label,
-                'value': value if value is not None else '—',
-                'delta': cut_delta(value, previous)}
+    def plotted_type_counts(block):
+        by_type_status = block.get('by_type_status') or {}
+        if not by_type_status:
+            return {str(name): int(count or 0)
+                    for name, count in (block.get('by_type') or {}).items()}
+        return {
+            str(ptype): sum(
+                int(count or 0) for status, count in (states or {}).items()
+                if status not in _EPICPROD_TYPE_EXCLUDED_JOB_STATES)
+            for ptype, states in by_type_status.items()
+        }
 
-    headline = [
-        stat('running jobs', jobs_now.get('running_jobs'),
-             prev_jobs.get('running_jobs')),
-        stat('running cores', jobs_now.get('running_cores'),
-             prev_jobs.get('running_cores')),
-        stat('in-flight jobs', jobs_now.get('total'),
-             prev_jobs.get('total')),
-        stat('queued (activated)',
-             (jobs_now.get('by_status') or {}).get('activated'),
-             (prev_jobs.get('by_status') or {}).get('activated')),
-        stat('in-flight tasks', tasks_now.get('total'),
-             prev_tasks.get('total')),
+    type_counts = plotted_type_counts(jobs_now)
+    prev_type_counts = plotted_type_counts(prev_jobs)
+    types = [
+        {'label': ptype, 'curve': f'type_{ptype}', 'value': value,
+         'delta': cut_delta(value, prev_type_counts.get(ptype))}
+        for ptype, value in sorted(
+            type_counts.items(), key=lambda item: (-item[1], item[0]))
+        if value or prev_type_counts.get(ptype)
     ]
-    types = sorted((jobs_now.get('by_type') or {}).items(),
-                   key=lambda item: -item[1])
-    type_states = []
-    for ptype, states in sorted(
-            (jobs_now.get('by_type_status') or {}).items()):
-        for status, count in sorted((states or {}).items()):
-            previous = ((prev_jobs.get('by_type_status') or {})
-                        .get(ptype) or {}).get(status)
-            type_states.append({
-                'label': f'{ptype} · {status}', 'value': count,
-                'delta': cut_delta(count, previous)})
+
+    job_statuses = jobs_now.get('by_status') or {}
+    prev_job_statuses = prev_jobs.get('by_status') or {}
+    states = [
+        {'label': status, 'curve': f'job_{status}',
+         'value': int(count or 0),
+         'delta': cut_delta(count, prev_job_statuses.get(status))}
+        for status, count in sorted(job_statuses.items())
+        if status not in _EPICPROD_TYPE_EXCLUDED_JOB_STATES
+    ]
+
+    task_statuses = tasks_now.get('by_status') or {}
+    prev_task_statuses = prev_tasks.get('by_status') or {}
+    tasks = [
+        {'label': status, 'curve': f'task_{status}',
+         'value': int(count or 0),
+         'delta': cut_delta(count, prev_task_statuses.get(status))}
+        for status, count in sorted(task_statuses.items())
+        if status not in ('defined', 'ready')
+    ]
+
+    cut_cum = jobs.get('cum') or {}
+    prev_cum = prev_job_data.get('cum') or {}
+    since_jobs = (((ctx or {}).get('since_data') or {}).get('jobs') or {})
+    basis_cum = since_jobs.get('cum') or {}
+    have_basis = (ctx or {}).get('since') is not None
+    outcomes = []
+    for status in ('finished', 'failed'):
+        current = int(cut_cum.get(status) or 0)
+        basis = int(basis_cum.get(status) or 0)
+        outcomes.append({
+            'label': status, 'curve': f'outcome_{status}',
+            'value': max(0, current - basis) if have_basis else current,
+            'delta': cut_delta(current, prev_cum.get(status)),
+        })
     # The Site focus narrows the card to the selected sites' detail:
     # the germane facts of the slice, color-coded as in the plot —
     # window outcomes first (differenced against the ?since= basis,
     # the view's left edge), then the in-flight standing in lifecycle
     # order, then tasks. One swatch per fact, no repetition.
-    params = (ctx or {}).get('params') or {}
     selected = [value for value in
                 (params.get('site') or '').split(',') if value]
     compact = str(params.get('compact') or '') == '1'
@@ -1301,9 +3494,1743 @@ def _panda_card(data, previous_data, ctx):
             # The pie fills the table's height: sized to the row count.
             'pie_size': min(400, max(220, 34 * (len(rows) + 1))),
         })
-    return {'kind': 'panda', 'headline': headline, 'types': types,
-            'type_states': type_states, 'sites': sites,
-            'site_only': bool(sites) and compact}
+    # Cores by queue: the scope view's stacked panel read as numbers,
+    # folding the tail into 'other' exactly as the curves do.
+    requested_queues = ((ctx.get('params') or {}).get('queues') or '')
+    tracked_order = tuple(
+        site for site in requested_queues.split(',') if site
+    )[:QUEUE_STACK_MAX] or _queue_stack_members()
+    tracked = set(tracked_order)
+    site_blocks = (data.get('jobs') or {}).get('sites') or {}
+    prev_blocks = (previous_data.get('jobs') or {}).get('sites') or {}
+    queue_cores = []
+    for site in tracked_order:
+        cores = int((site_blocks.get(site) or {})
+                    .get('running_cores_now') or 0)
+        was = int((prev_blocks.get(site) or {})
+                  .get('running_cores_now') or 0)
+        queue_cores.append({'site': site, 'curve': f'qc_{site}',
+                            'value': cores,
+                            'delta': cut_delta(cores, was)})
+    # Read by size: queues in running-cores order, the fold last.
+    queue_cores.sort(key=lambda entry: (-entry['value'], entry['site']))
+    other_now = other_prev = 0
+    for site in set(site_blocks) | set(prev_blocks):
+        cores = int((site_blocks.get(site) or {})
+                    .get('running_cores_now') or 0)
+        was = int((prev_blocks.get(site) or {})
+                  .get('running_cores_now') or 0)
+        if site not in tracked:
+            other_now += cores
+            other_prev += was
+    queue_cores.append({'site': 'other', 'curve': 'qc_other',
+                        'value': other_now,
+                        'delta': cut_delta(other_now, other_prev)})
+
+    site_only = bool(sites) and compact
+    return {'kind': 'panda', 'types': types, 'states': states,
+            'tasks': tasks, 'outcomes': outcomes,
+            'outcomes_basis': ('Since window start'
+                               if have_basis else 'Cumulative'),
+            'sites': sites, 'queue_cores': queue_cores,
+            'site_only': site_only, 'split_panels': not site_only}
+
+
+def _errors_counts_from_series(params, window_from, window_to,
+                               single_task, state_filter):
+    """The integrated breakdown's category counts and held core-seconds
+    from the page's own series product: the error curves' native bins
+    with their terminal-state breakdowns, summed over the bins whose
+    trailing edge lies in (from, to] — the rule the integrated panel
+    draws by, so the card matches the bands at the cut. Returns
+    (cat_counts, cat_held, total, total_held), or None when the page
+    named no window key or the product cannot be built (the caller
+    then reads the recorded snaps)."""
+    from datetime import datetime
+    from datetime import timezone as dt_timezone
+
+    from snapper_ai.products import series_product
+
+    window_key = str(params.get('window') or '').strip()
+    if not window_key:
+        return None
+    try:
+        product = series_product(
+            'epicprod', 'errors', window_key,
+            selection=single_task or '', selectors={'lens': 'category'})
+    except Exception as e:  # noqa: BLE001
+        logger.error('errors breakdown: series product %r failed: %s',
+                     window_key, e)
+        return None
+    prefix = f'terr_{single_task}_' if single_task else 'perr_'
+    cat_counts, cat_held = {}, {}
+    total = 0
+    total_held = 0
+    wanted = set(state_filter or [])
+    for curve_id, curve in (product.get('curves') or {}).items():
+        if not curve_id.startswith(prefix):
+            continue
+        comp, _, code = curve_id[len(prefix):].rpartition('_')
+        category = f'{comp}:{code}'
+        for point in curve.get('points') or []:
+            try:
+                edge = datetime.fromisoformat(str(point[0]))
+            except ValueError:
+                continue
+            if edge.tzinfo is None:
+                edge = edge.replace(tzinfo=dt_timezone.utc)
+            if not window_from < edge <= window_to:
+                continue
+            count = float(point[1] or 0)
+            held = float(point[3] or 0) * 3600 if len(point) > 3 else 0.0
+            if wanted:
+                per = point[2] if len(point) > 2 and point[2] else {}
+                per_held = (point[4] if len(point) > 4 and point[4]
+                            else {})
+                kept = sum(float(v) for q, v in per.items() if q in wanted)
+                kept_held = sum(float(v) * 3600 for q, v in per_held.items()
+                                if q in wanted)
+                if 'unrecorded' in wanted:
+                    kept += count - sum(float(v) for v in per.values())
+                    kept_held += held - sum(
+                        float(v) * 3600 for v in per_held.values())
+                count, held = kept, kept_held
+            if count <= 0 and held <= 0:
+                continue
+            cat_counts[category] = (cat_counts.get(category) or 0) + int(
+                round(count))
+            cat_held[category] = (cat_held.get(category) or 0) + int(
+                round(held))
+            total += int(round(count))
+            total_held += int(round(held))
+    return cat_counts, cat_held, total, total_held
+
+
+def _errors_card(data, previous_data, ctx):
+    """The error-state cut card: one docked section per plot
+    (docs/SNAPPER_ERRORS.md). The cut detail, docked beneath the error
+    panel, is the breakdown over the detail window around the cut —
+    the clicked display bin when it is an hour or wider, else the hour
+    around the cut. The aggregate detail, docked beneath the integrated
+    panel when the request carries the integration range (agg_from,
+    agg_to: the view's left edge to the cut), is the same breakdown
+    over that range, what the integrated bands show at the cut."""
+    from datetime import datetime
+    from datetime import timezone as dt_timezone
+
+    if data.get('entries') is None:
+        # A counter-era snap holds no interval record to read.
+        return None
+    params = ctx.get('params') or {}
+    selected = [v for v in (params.get('task') or '').split(',')
+                if v and v != 'overall']
+
+    def _parse(iso):
+        try:
+            parsed = datetime.fromisoformat(
+                str(iso or '').replace('Z', '+00:00'))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt_timezone.utc)
+        return parsed
+
+    cut = _errors_breakdown(data, ctx)
+    if cut is None:
+        return None
+    sections = [dict(cut, detail_key='errors', heading='Cut detail')]
+    agg_from = _parse(params.get('agg_from'))
+    agg_to = _parse(params.get('agg_to'))
+    if agg_from is not None and agg_to is not None and agg_from < agg_to:
+        aggregate = _errors_breakdown(data, ctx, window_from=agg_from,
+                                      window_to=agg_to, integrated=True)
+        if aggregate is not None:
+            sections.append(dict(aggregate, detail_key='errors-aggregate',
+                                 heading='Aggregate detail'))
+    return {
+        'kind': 'errors',
+        'task_selection': ', '.join(selected),
+        'sections': sections,
+    }
+
+
+def _errors_breakdown(data, ctx, window_from=None, window_to=None,
+                      integrated=None):
+    """One error breakdown over (window_from, window_to]: category
+    counts, held core-hours and shares, the share donut, the attribution
+    reading, and the diagnostic patterns. Bounds absent take the
+    request's from/to, else the hour ending at the cut snap's interval.
+    Category counts and the donut aggregate the recorded interval
+    entries over the window (an integrated breakdown reads the page's
+    series product); the diagnostic patterns aggregate live from the
+    job records over the same bounds, each with its held core-seconds.
+    A task selection (?task=) narrows everything to that task's
+    events."""
+    import math
+    from datetime import datetime, timedelta
+    from datetime import timezone as dt_timezone
+    from urllib.parse import quote
+
+    from django.urls import reverse
+    from zoneinfo import ZoneInfo
+
+    from snapper_ai.models import SystemSnap
+
+    from .panda.error_labels import category_label
+    from .snapper_errors import (
+        MAX_PATTERN_SITES,
+        MAX_PATTERN_TASKS,
+        MAX_PATTERNS,
+        error_axes,
+        error_patterns,
+    )
+
+    params = ctx.get('params') or {}
+    selected = [v for v in (params.get('task') or '').split(',')
+                if v and v != 'overall']
+    single_task = selected[0] if len(selected) == 1 else None
+    # The terminal-state chip selection (?states=): entries filter on
+    # the recorded status, live job-record queries restrict to the
+    # real statuses among it. Absent means unrestricted.
+    state_filter = [v for v in (params.get('states') or '').split(',')
+                    if v]
+    if integrated is None:
+        integrated = str(params.get('integrated') or '') == '1'
+
+    def _parse(iso):
+        try:
+            parsed = datetime.fromisoformat(
+                str(iso or '').replace('Z', '+00:00'))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt_timezone.utc)
+        return parsed
+
+    if window_from is None or window_to is None:
+        window_from = _parse(params.get('from'))
+        window_to = _parse(params.get('to'))
+    if (window_from is None or window_to is None
+            or not window_from < window_to):
+        # No client bounds: the hour ending at the cut snap's interval.
+        window_to = _parse((data.get('interval') or {}).get('end'))
+        if window_to is None:
+            return None
+        window_from = window_to - timedelta(hours=1)
+
+    # Entries over the window from the recorded snaps. Snap intervals
+    # tile, so snaps stamped in (from, to + one capture interval]
+    # cover every event in bounds; an unchanged component can repeat
+    # across snaps, so intervals dedup by their end.
+    cat_counts = {}
+    cat_held = {}
+    total = 0
+    total_held = 0
+    from_series = (_errors_counts_from_series(
+        params, window_from, window_to, single_task, state_filter)
+        if integrated and not (selected and not single_task) else None)
+    if from_series is not None:
+        cat_counts, cat_held, total, total_held = from_series
+    # Only the errors component's data leaves the database: a snap's
+    # full state carries every component, and an integrated range
+    # spans thousands of snaps.
+    states = (SystemSnap.objects
+              .filter(scope='epicprod',
+                      snap_time__gt=window_from,
+                      snap_time__lte=window_to + timedelta(minutes=10),
+                      state__components__errors__data__has_key='entries')
+              .order_by('snap_time')
+              .values_list('state__components__errors__data', flat=True)
+              ) if from_series is None else []
+    seen_intervals = set()
+    for errors in (states.iterator() if from_series is None else ()):
+        errors = errors if isinstance(errors, dict) else {}
+        interval = errors.get('interval') or {}
+        interval_key = str(interval.get('end') or '')
+        if not interval_key or interval_key in seen_intervals:
+            continue
+        seen_intervals.add(interval_key)
+        for row in errors.get('entries') or []:
+            try:
+                taskid = str(int(row[1] or 0))
+                category = str(row[2])
+                when = _parse(row[3])
+            except (IndexError, TypeError, ValueError):
+                continue
+            if when is None or when <= window_from or when > window_to:
+                continue
+            if selected and taskid not in selected:
+                continue
+            status = (str(row[4]) if len(row) > 4 and row[4]
+                      else 'unrecorded')
+            if state_filter and status not in state_filter:
+                continue
+            cat_counts[category] = (cat_counts.get(category) or 0) + 1
+            total += 1
+            # The core-seconds held, on rows since schema v5.
+            held = int(row[6] or 0) if len(row) > 6 else 0
+            cat_held[category] = (cat_held.get(category) or 0) + held
+            total_held += held
+        if not selected:
+            interval_end = _parse(interval.get('end'))
+            if (interval_end is not None
+                    and window_from < interval_end <= window_to):
+                # Overflow folds key 'component:code@status' since v3
+                # and 'component:code@status@exitcode' since v4; earlier
+                # keys carry no status and read 'unrecorded'. The held
+                # core-seconds fold under the same keys since v5.
+                overflow = errors.get('overflow') or {}
+                held_folds = overflow.get('held_by_category') or {}
+                for fold_key, count in (overflow.get('by_category')
+                                        or {}).items():
+                    parts = str(fold_key).split('@')
+                    category = parts[0]
+                    status = (parts[1] if len(parts) > 1 and parts[1]
+                              else 'unrecorded')
+                    if state_filter and status not in state_filter:
+                        continue
+                    cat_counts[category] = (
+                        cat_counts.get(category) or 0) + int(count or 0)
+                    total += int(count or 0)
+                    held = int(held_folds.get(fold_key) or 0)
+                    cat_held[category] = (
+                        cat_held.get(category) or 0) + held
+                    total_held += held
+
+    eastern = ZoneInfo('America/New_York')
+    from_et = window_from.astimezone(eastern)
+    to_et = window_to.astimezone(eastern)
+    basis_text = (from_et.strftime('%m-%d %H:%M') + ' – '
+                  + to_et.strftime(
+                      '%H:%M ET' if to_et.date() == from_et.date()
+                      else '%m-%d %H:%M ET'))
+
+    errors_base = reverse('monitor_app:panda_errors_list')
+    jobs_base = reverse('monitor_app:panda_jobs_list')
+    window_days = max(1, math.ceil(
+        (window_to - window_from).total_seconds() / 86400))
+    window_q = (f'&days={window_days}&ended_after='
+                + quote(window_from.isoformat())
+                + '&ended_before=' + quote(window_to.isoformat()))
+
+    def _errors_url(comp):
+        # No single-status pin: the record counts every faulty status
+        # (failed, cancelled, closed), and a status=failed link on a
+        # kill storm — closed jobs — lands on an empty page. The
+        # active terminal-state selection carries over instead, so
+        # the pattern page shows the same population as the card.
+        query = []
+        if comp and comp != 'other':
+            query.append(f'classified=1&error_source={quote(comp)}')
+        if single_task:
+            query.append(f'taskid={quote(single_task)}')
+        real_states = [s for s in state_filter if s != 'unrecorded']
+        if real_states:
+            query.append('status=' + quote(','.join(real_states)))
+        joined = '&'.join(query)
+        return (errors_base + '?'
+                + (joined + window_q if joined else window_q.lstrip('&')))
+
+    rows = []
+    comp_counts = {}
+    for key in sorted(cat_counts, key=lambda k: (-cat_counts[k], k)):
+        comp, _, code = str(key).partition(':')
+        count = cat_counts[key]
+        comp_counts[comp] = comp_counts.get(comp, 0) + count
+        curve = (f'terr_{single_task}_{comp}_{code}' if single_task
+                 else f'perr_{comp}_{code}')
+        held = cat_held.get(key) or 0
+        rows.append({
+            'label': category_label(comp, code),
+            'curve': curve,
+            'url': _errors_url(comp),
+            'window': str(count),
+            'delta': '',
+            # The core-hours the category's jobs held, and its share of
+            # the window's wasted core-hours (docs/SNAPPER_ERRORS.md,
+            # Wasted resources).
+            'hours': f'{held / 3600:,.0f}',
+            'hours_share': (f'{held / total_held:.0%}' if total_held
+                            else ''),
+        })
+    rows = rows[:24]
+    window_hours = f'{total_held / 3600:,.0f}'
+
+    # The donut follows the active lens and wears the plot's own
+    # colors — the same data-curve painting as the table swatches, so
+    # plot, rows, and donut tell one color story. Small shares fold
+    # into a grey remainder slice.
+    lens = str(params.get('lens') or 'category')
+    if lens == 'component':
+        shares = comp_counts
+
+        def _slice_curve(key):
+            return (f'terrc_{single_task}_{key}' if single_task
+                    else f'perrc_{key}')
+
+        def _slice_label(key):
+            return key
+
+        def _slice_url(key):
+            return _errors_url(key)
+    else:
+        shares = cat_counts
+
+        def _slice_curve(key):
+            comp, _, code = key.partition(':')
+            return (f'terr_{single_task}_{comp}_{code}' if single_task
+                    else f'perr_{comp}_{code}')
+
+        def _slice_label(key):
+            comp, _, code = key.partition(':')
+            return category_label(comp, code)
+
+        def _slice_url(key):
+            return _errors_url(key.partition(':')[0])
+
+    pie = []
+    if total:
+        max_slices = 12
+        ranked = sorted(shares.items(), key=lambda kv: (-kv[1], kv[0]))
+        slices = [
+            {'count': count, 'curve': _slice_curve(key),
+             'color': None, 'url': _slice_url(key),
+             'label': _slice_label(key)}
+            for key, count in ranked[:max_slices]]
+        folded = sum(count for _, count in ranked[max_slices:])
+        if folded:
+            slices.append({
+                'count': folded, 'curve': '', 'color': '#9e9e9e',
+                'url': _errors_url(''),
+                'label': f'{len(ranked) - max_slices} more'})
+        tau = 2 * math.pi
+        angle = 0.0
+        for entry in slices:
+            span = tau * entry['count'] / total
+            pie.append({
+                'path': _pie_segment(60, 60, 26, 58, angle, angle + span),
+                'curve': entry['curve'],
+                'color': entry['color'],
+                'url': entry['url'],
+                'title': (f"{entry['label']} · {entry['count']:,} "
+                          f"({entry['count'] / total:.0%})")})
+            angle += span
+
+    # Diagnostic patterns aggregate live from the job records over the
+    # same bounds; a single-task filter restricts the query itself,
+    # a multi-task selection filters the aggregated rows.
+    from .error_corrections import correction as _correction
+    from .error_corrections import match as _match
+    patterns = []
+    window_patterns = 0
+    for (comp, code, _pattern, diag, count, rep, taskids,
+         pattern_sites, exit_counts, pattern_held) in error_patterns(
+            window_from, window_to,
+            taskid=int(single_task) if single_task else None,
+            statuses=state_filter or None):
+        task_list = sorted({int(t) for t in (taskids or []) if t})
+        if (selected and not single_task
+                and not any(str(t) in selected for t in task_list)):
+            continue
+        window_patterns += 1
+        rep = int(rep or 0)
+        site_list = sorted({str(s) for s in (pattern_sites or []) if s})
+        base = {
+            'category': category_label(comp, code),
+            'curve': f'perr_{comp}_{code}',
+            'tasks': task_list[:MAX_PATTERN_TASKS],
+            'sites': site_list[:MAX_PATTERN_SITES],
+            'site_overflow': max(0, len(site_list) - MAX_PATTERN_SITES),
+        }
+
+        def _row(diag_text, row_count, row_rep, row_held):
+            row_rep = int(row_rep or 0)
+            return dict(base, diag=diag_text, count=int(row_count or 0),
+                        hours=f'{float(row_held or 0) / 3600:,.0f}',
+                        rep_pandaid=row_rep,
+                        rep_url=(reverse('monitor_app:panda_job_detail',
+                                         args=[row_rep])
+                                 if row_rep else ''))
+
+        # The correction root (docs/ERROR_ATTRIBUTION.md): a pattern
+        # whose label a rule marks unreliable presents as its real
+        # failure modes — one row per mode, each with its own count,
+        # core-hours and a representative job of that mode.
+        rule = _match(comp, code, diag)
+        corr = (_correction(rule, exit_counts or {})
+                if rule is not None else None)
+        if corr and corr['modes']:
+            for m in corr['modes']:
+                if len(patterns) < MAX_PATTERNS:
+                    patterns.append(_row(m['reading'], m['count'],
+                                         m.get('rep_pandaid') or rep,
+                                         m.get('held')))
+        elif len(patterns) < MAX_PATTERNS:
+            patterns.append(_row(corr['label'] if corr else str(diag or ''),
+                                 count, rep, pattern_held))
+    patterns.sort(key=lambda p: -p['count'])
+
+    # The attribution reading: where the window's errors concentrate,
+    # axis by axis — category, task, site — with spread itself a
+    # conclusion. Deterministic shares from one live scan
+    # (error_axes); the task axis is omitted when the view is already
+    # filtered to tasks.
+    axes = error_axes(window_from, window_to, taskids=selected or None,
+                      statuses=state_filter or None)
+
+    def _axis_item(values, singular, plural, label_of, url_of):
+        axis_total = sum(values.values())
+        if not axis_total:
+            return None
+        ranked = sorted(values.items(),
+                        key=lambda kv: (-kv[1], str(kv[0])))
+        top_key, top_count = ranked[0]
+        share = top_count / axis_total
+        n = len(ranked)
+        if n == 1:
+            pre, post = f'single {singular}: ', ' (100%)'
+        elif share >= 0.9:
+            pre, post = (f'essentially one {singular}: ',
+                         f' ({share:.0%} of {n})')
+        elif share >= 0.55:
+            pre, post = (f'{singular}-dominated: ',
+                         f' ({share:.0%} of {n})')
+        elif share >= 0.3:
+            pre, post = ('led by ', f' ({share:.0%} of {n} {plural})')
+        else:
+            pre, post = (f'spread over {n} {plural} — largest ',
+                         f' ({share:.0%})')
+        return {'pre': pre, 'label': label_of(top_key),
+                'post': post, 'url': url_of(top_key)}
+
+    reading = []
+    item = _axis_item(
+        axes['categories'], 'category', 'categories',
+        lambda key: category_label(*str(key).partition(':')[::2]),
+        lambda key: _errors_url(str(key).partition(':')[0]))
+    if item:
+        reading.append(item)
+    if not selected:
+        item = _axis_item(
+            axes['tasks'], 'task', 'tasks',
+            lambda t: f'task {t}',
+            lambda t: reverse('monitor_app:panda_task_detail',
+                              kwargs={'jeditaskid': t}))
+        if item:
+            reading.append(item)
+    item = _axis_item(
+        axes['sites'], 'site', 'sites',
+        lambda s: str(s),
+        lambda s: f'{jobs_base}?site={quote(str(s))}' + window_q)
+    if item:
+        reading.append(item)
+
+    return {
+        'basis': basis_text,
+        'integrated': integrated,
+        'reading': reading,
+        'rows': rows,
+        'row_overflow': max(0, len(cat_counts) - len(rows)),
+        'row_overflow_note': 'more categories',
+        'pie': pie,
+        'pie_label': ('Component shares' if lens == 'component'
+                      else 'Category shares'),
+        'pie_size': min(360, max(200, 30 * (len(rows) + 1))),
+        'window_total': total,
+        'detail_window_minutes': int(
+            (window_to - window_from).total_seconds() // 60),
+        'window_errors': total,
+        'window_hours': window_hours,
+        'window_patterns': window_patterns,
+        'patterns': patterns,
+        'errors_url': _errors_url(''),
+        'jobs_url': (f'{jobs_base}?status=failed'
+                     + (f'&taskid={quote(single_task)}'
+                        if single_task else '') + window_q),
+    }
+
+
+# Summary rows of the Platform view's cut: label, curve id for the
+# swatch ('' when the row is a total no single curve draws), unit, and
+# the extractor over (platform data, panda data). Order = panel order.
+_PLATFORM_SUMMARY_SPECS = (
+    ('heartbeats received', 'plhb_received', 'per interval',
+     lambda p, j: (p.get('heartbeats') or {}).get('received')),
+    ('jobs started', 'plhb_started', 'per interval',
+     lambda p, j: (p.get('heartbeats') or {}).get('started')),
+    ('heartbeat yield, 60-min window', 'plhy_window', '',
+     lambda p, j: ((p.get('heartbeats') or {}).get('window') or {}).get('yield')),
+    ('heartbeat yield', 'plhy_yield', 'per interval',
+     lambda p, j: (p.get('heartbeats') or {}).get('yield')),
+    ('silent 30–60 min', 'plst_30', 'jobs',
+     lambda p, j: _platform_band(p, 30, 60)),
+    ('silent 60–120 min', 'plst_60', 'jobs',
+     lambda p, j: _platform_band(p, 60, 120)),
+    ('silent over 120 min', 'plst_120', 'jobs',
+     lambda p, j: (p.get('heartbeats') or {}).get('stale_120')),
+    ('DB active', 'pldb_active', 'connections',
+     lambda p, j: (p.get('database') or {}).get('active')),
+    ('DB waiting', 'pldb_waiting', 'connections',
+     lambda p, j: (p.get('database') or {}).get('waiting')),
+    ('DB connections', 'pldb_total', 'of limit',
+     lambda p, j: (p.get('database') or {}).get('connections')),
+    ('longest transaction', '', 's',
+     lambda p, j: (p.get('database') or {}).get('longest_transaction_s')),
+    ('server latency', 'plsv_latency', 'ms',
+     lambda p, j: (p.get('server') or {}).get('latency_ms')),
+    ('pandamon front page', 'plpm_front', 'ms',
+     lambda p, j: ((p.get('pandamon') or {}).get('front') or {}).get('latency_ms')),
+    ('pandamon worker query', 'plpm_workers', 'ms',
+     lambda p, j: ((p.get('pandamon') or {}).get('workers') or {}).get('latency_ms')),
+    ('PanDA server requests', '', 'per minute',
+     lambda p, j: (p.get('server_host') or {}).get('requests_per_minute')),
+    ('PanDA server 5xx responses', 'plsrv_5xx', 'per interval',
+     lambda p, j: (p.get('server_host') or {}).get('status_5xx')
+     if (p.get('server_host') or {}).get('interval_seconds') else None),
+    ('PanDA server daemon silence', 'plsrv_daemon_oldest', 's',
+     lambda p, j: (p.get('server_host') or {}).get('daemon_oldest_log_seconds')),
+    ('database reach from the server host', 'plsrv_db_ms', 'ms',
+     lambda p, j: ((p.get('server_host') or {}).get('database') or {}).get('connect_ms')),
+    ('PanDA server load (1 min)', 'plsrv_load_1m', '',
+     lambda p, j: ((p.get('server_host') or {}).get('load') or {}).get('1m')),
+    ('PanDA server memory used', 'plsrv_mem_used_pct', '%',
+     lambda p, j: (p.get('server_host') or {}).get('memory_used_percent')),
+    ('PanDA server httpd resident', 'plsrv_rss_httpd', 'MB',
+     lambda p, j: (((p.get('server_host') or {}).get('processes') or {})
+                   .get('httpd') or {}).get('rss_mb')),
+    ('swf-monitor load (1 min)', 'plml_1m', '',
+     lambda p, j: ((p.get('monitor_host') or {}).get('load') or {}).get('1m')),
+    ('swf-monitor memory used', 'plmm_used_pct', '%',
+     lambda p, j: ((p.get('monitor_host') or {}).get('memory') or {}).get('used_percent')),
+    ('swf-monitor WSGI resident', 'plmp_wsgi', 'MB',
+     lambda p, j: ((p.get('monitor_host') or {}).get('wsgi') or {}).get('rss_mb')),
+    ('jobs in flight', '', 'jobs',
+     lambda p, j: ((j.get('jobs') or {}).get('in_flight_now') or {}).get('total')),
+    ('running jobs', 'job_running', 'jobs',
+     lambda p, j: ((j.get('jobs') or {}).get('in_flight_now') or {}).get('running_jobs')),
+    ('running cores', 'running_cores', 'cores',
+     lambda p, j: ((j.get('jobs') or {}).get('in_flight_now') or {}).get('running_cores')),
+)
+
+
+def _platform_band(plat, lower, upper):
+    hb = plat.get('heartbeats') or {}
+    if 'error' in hb or f'stale_{lower}' not in hb:
+        return None
+    return max(0, int(hb.get(f'stale_{lower}') or 0)
+               - int(hb.get(f'stale_{upper}') or 0))
+
+
+def _platform_summary_walk(scope, since, until, limit=3000):
+    """(snap_time, platform data, panda data) rows over (since, until],
+    newest first, from the snaps carrying the platform component —
+    only the two components' payloads leave the database."""
+    from django.db.models.fields.json import KeyTransform
+
+    from snapper_ai.models import SystemSnap
+
+    query = (SystemSnap.objects
+             .filter(scope=scope, snap_time__lte=until,
+                     state__components__has_key='platform'))
+    if since is not None:
+        query = query.filter(snap_time__gt=since)
+    rows = (query.order_by('-snap_time')
+            .annotate(plat=KeyTransform('platform',
+                                        KeyTransform('components', 'state')),
+                      pand=KeyTransform('panda',
+                                        KeyTransform('components', 'state')))
+            .values_list('snap_time', 'plat', 'pand')[:limit + 1])
+    out = []
+    for snap_time, plat, pand in rows:
+        out.append((snap_time,
+                    (plat or {}).get('data') or {},
+                    (pand or {}).get('data') or {}))
+    return out
+
+
+def _faulty_events_in_window(scope, window_from, window_to):
+    """Total faulty job events and per-component counts over the
+    window, from the error-state component's interval entries (the
+    same aggregation the errors card performs)."""
+    from datetime import datetime, timedelta
+    from datetime import timezone as dt_timezone
+
+    from snapper_ai.models import SystemSnap
+
+    def _parse(iso):
+        try:
+            parsed = datetime.fromisoformat(str(iso or '').replace('Z', '+00:00'))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt_timezone.utc)
+
+    states = (SystemSnap.objects
+              .filter(scope=scope, snap_time__gt=window_from,
+                      snap_time__lte=window_to + timedelta(minutes=10),
+                      state__components__errors__data__has_key='entries')
+              .order_by('snap_time')
+              .values_list('state', flat=True))
+    total = 0
+    by_component = {}
+    seen = set()
+    for state in states.iterator():
+        errors = (((state.get('components') or {}).get('errors')
+                   or {}).get('data')) or {}
+        interval = errors.get('interval') or {}
+        key = str(interval.get('end') or '')
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        for row in errors.get('entries') or []:
+            try:
+                comp = str(row[2]).partition(':')[0]
+                when = _parse(row[3])
+            except (IndexError, TypeError):
+                continue
+            if when is None or when <= window_from or when > window_to:
+                continue
+            total += 1
+            by_component[comp] = by_component.get(comp, 0) + 1
+        interval_end = _parse(interval.get('end'))
+        if interval_end is not None and window_from < interval_end <= window_to:
+            for fold_key, count in ((errors.get('overflow') or {})
+                                    .get('by_category') or {}).items():
+                comp = str(fold_key).partition(':')[0]
+                total += int(count or 0)
+                by_component[comp] = by_component.get(comp, 0) + int(count or 0)
+    return total, by_component
+
+
+def _scope_cum_at(scope, instant):
+    """The panda component's scope-level cumulative outcome counters at
+    the nearest counter-bearing snap at or before the instant."""
+    from snapper_ai.models import SystemSnap
+
+    if instant is None:
+        return {}
+    row = (SystemSnap.objects
+           .filter(scope=scope, snap_time__lte=instant,
+                   state__components__panda__data__jobs__has_key='cum')
+           .order_by('-snap_time')
+           .values('state').first())
+    if not row:
+        return {}
+    jobs = (((((row['state'] or {}).get('components') or {})
+              .get('panda') or {}).get('data') or {}).get('jobs') or {})
+    return jobs.get('cum') or {}
+
+
+def _platform_summary(scope, requested_at, since, data, kills_total,
+                      kills_by_comp):
+    """The summary across every metric the Platform view plots: value
+    at the cut, change against the previous snap, and min/mean/max
+    over (since, requested_at], read from the coherent snaps carrying
+    the platform component. Serves the card and the cut-summary query
+    alike (snapper_ai.products.cut_summary). Rows carry formatted text
+    for the page and raw numbers for programmatic readers. Returns
+    (rows, range text, walk error)."""
+    assessment = data.get('assessment') or {}
+    db = data.get('database') or {}
+    walk = []
+    walk_error = ''
+    if requested_at is not None:
+        try:
+            walk = _platform_summary_walk(scope, since, requested_at)
+        except Exception as e:                               # noqa: BLE001
+            logger.error('platform summary: walk failed: %s', e)
+            walk_error = f'range statistics failed: {e}'
+    capped = len(walk) > 3000
+    walk = walk[:3000]
+    at = walk[0] if walk else (requested_at, data, {})
+    prev = walk[1] if len(walk) > 1 else None
+    warn_rows = set()
+    verdict_map = assessment.get('verdicts') or {}
+    if verdict_map.get('heartbeat_yield') == 'warning':
+        warn_rows.add('heartbeat yield, 60-min window')
+    if verdict_map.get('heartbeat_staleness') == 'warning':
+        warn_rows.update({'silent 60–120 min', 'silent over 120 min'})
+    if verdict_map.get('db_connections') == 'warning':
+        warn_rows.add('DB connections')
+    if verdict_map.get('server_latency') == 'warning':
+        warn_rows.add('server latency')
+    if verdict_map.get('pandamon_latency') == 'warning':
+        warn_rows.update({'pandamon front page',
+                          'pandamon worker query'})
+    if verdict_map.get('monitor_volumes') == 'warning':
+        warn_rows.add('monitor storage')
+    if verdict_map.get('server_5xx') == 'warning':
+        warn_rows.add('PanDA server 5xx responses')
+    if verdict_map.get('server_daemons') == 'warning':
+        warn_rows.add('PanDA server daemon silence')
+    summary = []
+    for label, curve, unit, extract in _PLATFORM_SUMMARY_SPECS:
+        value = extract(at[1], at[2])
+        previous = extract(prev[1], prev[2]) if prev else None
+        samples = [v for v in (extract(p, j) for _, p, j in walk)
+                   if isinstance(v, (int, float)) and not isinstance(v, bool)]
+        stats = None
+        if samples:
+            lo, hi = min(samples), max(samples)
+            mean = sum(samples) / len(samples)
+            position = (None if hi == lo or not isinstance(value, (int, float))
+                        else round(100 * (value - lo) / (hi - lo)))
+            stats = {'min': _fmt_num(lo), 'mean': _fmt_num(mean),
+                     'max': _fmt_num(hi), 'position': position,
+                     'min_raw': lo, 'mean_raw': mean, 'max_raw': hi,
+                     'samples': len(samples)}
+        numeric = (isinstance(value, (int, float))
+                   and not isinstance(value, bool))
+        summary.append({
+            'label': label, 'curve': curve, 'unit': unit,
+            'value': _fmt_num(value), 'raw': value if numeric else None,
+            'previous_raw': (previous if isinstance(previous, (int, float))
+                             and not isinstance(previous, bool) else None),
+            'delta': cut_delta(
+                round(value) if isinstance(value, float) else value,
+                round(previous) if isinstance(previous, float) else previous)
+            if isinstance(value, (int, float)) and isinstance(previous, (int, float))
+            and not label.startswith('heartbeat yield') else (
+                _fmt_signed(value - previous)
+                if label.startswith('heartbeat yield')
+                and isinstance(value, (int, float))
+                and isinstance(previous, (int, float)) else None),
+            'stats': stats, 'warn': label in warn_rows,
+        })
+    if db.get('max_connections'):
+        for row in summary:
+            if row['label'] == 'DB connections':
+                row['unit'] = f"of {db['max_connections']}"
+    # Consequence rows: faulty events over the detail window, outcomes
+    # since the shown range's start (the counters' window basis).
+    summary.append({
+        'label': 'faulty job events', 'curve': '',
+        'unit': 'in the detail window', 'value': _fmt_num(kills_total),
+        'raw': kills_total, 'previous_raw': None,
+        'delta': None, 'stats': None, 'warn': False,
+        'detail': ', '.join(f'{c} {n}' for c, n in sorted(
+            kills_by_comp.items(), key=lambda kv: -kv[1])[:6]),
+        'by_component': dict(kills_by_comp),
+    })
+    cum_at = _scope_cum_at(scope, requested_at)
+    cum_since = _scope_cum_at(scope, since) if since is not None else {}
+    for status in ('finished', 'failed'):
+        current = int(cum_at.get(status) or 0)
+        basis = int(cum_since.get(status) or 0)
+        summary.append({
+            'label': f'{status} since range start', 'curve': f'outcome_{status}',
+            'unit': 'jobs', 'value': _fmt_num(max(0, current - basis))
+            if cum_at else '—',
+            'raw': max(0, current - basis) if cum_at else None,
+            'previous_raw': None,
+            'delta': None, 'stats': None, 'warn': False,
+        })
+
+    range_text = ''
+    if walk:
+        first, last = walk[-1][0], walk[0][0]
+        range_text = (f"{first.astimezone(ET_ZONE).strftime('%m-%d %H:%M')} – "
+                      f"{last.astimezone(ET_ZONE).strftime('%m-%d %H:%M ET')}, "
+                      f"{len(walk)} snaps"
+                      + (' (the newest 3000)' if capped else ''))
+    return summary, range_text, walk_error
+
+
+def _platform_cut_summary(scope, requested_at, since, data, previous_data):
+    """The registered cut-summary builder for the platform component
+    (snapper_ai.products.cut_summary): the card's summary rows, with
+    the faulty-event window defaulting to the hour ending at the cut
+    interval as the card does without a client window."""
+    from datetime import datetime, timedelta
+    from datetime import timezone as dt_timezone
+
+    def _parse(iso):
+        try:
+            parsed = datetime.fromisoformat(str(iso or '').replace('Z', '+00:00'))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt_timezone.utc)
+
+    window_to = _parse((data.get('interval') or {}).get('end')) or requested_at
+    window_from = (window_to - timedelta(hours=1)) if window_to else None
+    kills_total, kills_by_comp = 0, {}
+    if window_from and window_to:
+        kills_total, kills_by_comp = _faulty_events_in_window(
+            scope, window_from, window_to)
+    rows, range_text, walk_error = _platform_summary(
+        scope, requested_at, since, data, kills_total, kills_by_comp)
+    return {
+        'rows': rows,
+        'range': range_text,
+        'faulty_event_window': {
+            'from': window_from.isoformat() if window_from else None,
+            'to': window_to.isoformat() if window_to else None},
+        'overall': (data.get('assessment') or {}).get('overall'),
+        'verdicts': (data.get('assessment') or {}).get('verdicts') or {},
+        'error': walk_error,
+    }
+
+
+def _platform_card(data, previous_data, ctx):
+    """The platform cut card (docs/SNAPPER_PLATFORM.md): the assessment
+    against thresholds, the database, heartbeat, server, and
+    monitor-host detail at the instant, and — last — the summary
+    across every metric the view plots: value at the cut, change
+    against the previous snap, and min/mean/max over the shown range,
+    read from the coherent snaps carrying the platform component."""
+    from datetime import datetime, timedelta
+    from datetime import timezone as dt_timezone
+    from urllib.parse import quote
+
+    from django.urls import reverse
+
+    if not data or 'heartbeats' not in data:
+        return None
+    params = (ctx or {}).get('params') or {}
+    scope = (ctx or {}).get('scope') or 'epicprod'
+    requested_at = (ctx or {}).get('requested_at')
+    since = (ctx or {}).get('since')
+    hb = data.get('heartbeats') or {}
+    db = data.get('database') or {}
+    server = data.get('server') or {}
+    pandamon = data.get('pandamon') or {}
+    host = data.get('monitor_host') or {}
+    assessment = data.get('assessment') or {}
+    thresholds = assessment.get('thresholds') or {}
+
+    threshold_text = {
+        'heartbeat_yield': f"warn below {thresholds.get('platform_yield_warn_below')}",
+        'heartbeat_staleness': (
+            f"warn when over {thresholds.get('platform_stale_warn_fraction')} "
+            f"of running jobs are silent {thresholds.get('platform_stale_warn_tier_minutes')}+ min"),
+        'db_connections': (
+            f"warn above {thresholds.get('platform_connections_warn_fraction')} of the limit"),
+        'server_latency': f"warn above {thresholds.get('platform_latency_warn_ms')} ms or not ok",
+        'monitor_volumes': f"warn above {thresholds.get('platform_volume_warn_percent')}% used",
+        'monitor_services': 'warn when the ASGI or prod-ops service is not active',
+        'reporter': f"stale after {thresholds.get('platform_reporter_stale_seconds')} s",
+        'submit_reporter': f"stale after {thresholds.get('platform_reporter_stale_seconds')} s",
+        'submit_daemons': (
+            f"warn when a must-tick harvester daemon is silent over "
+            f"{thresholds.get('platform_submit_daemon_warn_seconds')} s"),
+        'submit_workers_held': 'warn when any pilot is held on the submit schedd',
+        'submit_processes': 'warn when harvester or the submit schedd is not running',
+        'server_units': 'warn when a PanDA unit is not active on the server host',
+        'server_daemons': (
+            f"warn when a must-tick PanDA daemon is silent over "
+            f"{thresholds.get('platform_server_daemon_warn_seconds')} s"),
+        'server_5xx': (
+            f"warn above {thresholds.get('platform_server_5xx_warn_fraction')} of "
+            f"requests answered 5xx, over at least "
+            f"{thresholds.get('platform_server_5xx_warn_min_requests')} requests"),
+        'server_web_errors': (
+            'warn on saturation, timeout, truncation, crash or memory markers '
+            'in the web tier error log'),
+    }
+    verdicts = [
+        {'name': name.replace('_', ' '), 'chip': cut_chip(
+            'ok' if verdict == 'ok' else 'warning' if verdict == 'warning'
+            else 'unknown'),
+         'threshold': threshold_text.get(name, '')}
+        for name, verdict in (assessment.get('verdicts') or {}).items()]
+
+    # Detail tables.
+    running = int(hb.get('running') or 0)
+    site_rows = []
+    site_url = reverse('snapper_ai:snapper_focus',
+                       kwargs={'scope': scope, 'focus_slug': 'site'})
+    cut_q = (f'&cut={quote(requested_at.isoformat())}'
+             if requested_at is not None else '')
+    for site, entry in sorted((hb.get('sites') or {}).items(),
+                              key=lambda kv: -int((kv[1] or {}).get('running') or 0)):
+        entry = entry or {}
+        if not int(entry.get('running') or 0):
+            continue
+        site_rows.append({
+            'site': site,
+            'url': f'{site_url}?site={quote(site)}{cut_q}',
+            'running': int(entry.get('running') or 0),
+            'received': int(entry.get('received') or 0),
+            'stale_30': int(entry.get('stale_30') or 0),
+            'stale_60': int(entry.get('stale_60') or 0),
+            'stale_120': int(entry.get('stale_120') or 0),
+        })
+    by_app = sorted((db.get('by_app') or {}).items(), key=lambda kv: -kv[1])
+    j4 = db.get('jobsactive4') or {}
+    volumes = [{'path': path, **(entry or {})}
+               for path, entry in sorted((host.get('volumes') or {}).items())]
+    processes = [
+        {'label': label, **(host.get(key) or {})}
+        for key, label in (('httpd', 'httpd (all processes)'),
+                           ('wsgi', 'WSGI daemon'),
+                           ('asgi', 'ASGI service (MCP)'),
+                           ('ops_agent', 'prod-ops agent'))]
+    server_host_card = _server_host_card(data.get('server_host') or {})
+
+    # Faulty events over the detail window (the errors card's window
+    # convention: the client's from/to, else the hour ending at the
+    # cut interval).
+    def _parse(iso):
+        try:
+            parsed = datetime.fromisoformat(str(iso or '').replace('Z', '+00:00'))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt_timezone.utc)
+
+    window_from = _parse(params.get('from'))
+    window_to = _parse(params.get('to'))
+    if window_from is None or window_to is None or not window_from < window_to:
+        window_to = _parse((data.get('interval') or {}).get('end')) or requested_at
+        window_from = (window_to - timedelta(hours=1)) if window_to else None
+    kills_total, kills_by_comp = (0, {})
+    kills_error = ''
+    if window_from and window_to:
+        try:
+            kills_total, kills_by_comp = _faulty_events_in_window(
+                scope, window_from, window_to)
+        except Exception as e:                               # noqa: BLE001
+            logger.error('platform card: faulty-event window failed: %s', e)
+            kills_error = f'faulty-event count failed: {e}'
+
+    summary, range_text, walk_error = _platform_summary(
+        scope, requested_at, since, data, kills_total, kills_by_comp)
+    window_text = ''
+    if window_from and window_to:
+        window_text = (f"{window_from.astimezone(ET_ZONE).strftime('%m-%d %H:%M')} – "
+                       f"{window_to.astimezone(ET_ZONE).strftime('%H:%M ET')}")
+    errors_url = (reverse('snapper_ai:snapper_focus',
+                          kwargs={'scope': scope, 'focus_slug': 'errors'})
+                  + (f'?cut={quote(requested_at.isoformat())}'
+                     if requested_at is not None else ''))
+    return {
+        'kind': 'platform',
+        'overall': assessment.get('overall') or 'unknown',
+        'overall_chip': cut_chip(
+            'ok' if assessment.get('overall') == 'ok'
+            else 'warning' if assessment.get('overall') == 'warning'
+            else 'unknown'),
+        'verdicts': verdicts,
+        'interval': data.get('interval') or {},
+        'reporter_status': data.get('reporter_status') or 'absent',
+        'heartbeats': {
+            'running': running,
+            'received': int(hb.get('received') or 0),
+            'expected': int(hb.get('expected') or 0),
+            'yield': hb.get('yield'),
+            'window_yield': (hb.get('window') or {}).get('yield'),
+            'window_received': int((hb.get('window') or {}).get('received') or 0),
+            'window_expected': int((hb.get('window') or {}).get('expected') or 0),
+            'window_minutes': round(
+                int((hb.get('window') or {}).get('seconds') or 0) / 60),
+            'window_intervals': int((hb.get('window') or {}).get('intervals') or 0),
+            'started': int(hb.get('started') or 0),
+            'period_minutes': round(int(hb.get('period_seconds') or 1800) / 60),
+            'stale_30': int(hb.get('stale_30') or 0),
+            'stale_60': int(hb.get('stale_60') or 0),
+            'stale_120': int(hb.get('stale_120') or 0),
+            'error': hb.get('error') or '',
+        },
+        'site_rows': site_rows,
+        'database': {
+            'connections': db.get('connections'),
+            'max_connections': db.get('max_connections'),
+            'active': db.get('active'), 'idle': db.get('idle'),
+            'waiting': db.get('waiting'),
+            'longest_transaction_s': db.get('longest_transaction_s'),
+            'live_tuples': j4.get('live_tuples'),
+            'dead_tuples': j4.get('dead_tuples'),
+            'minutes_since_autovacuum': j4.get('minutes_since_autovacuum'),
+            'by_app': by_app, 'error': db.get('error') or '',
+        },
+        'server': server,
+        'pandamon': [
+            ('front page', pandamon.get('front') or {}),
+            ('worker-stats query', pandamon.get('workers') or {}),
+        ] if pandamon else [],
+        'host': {
+            'load': host.get('load') or {}, 'cpus': host.get('cpus'),
+            'memory': host.get('memory') or {},
+            'volumes': volumes, 'processes': processes,
+            'db_connections': host.get('db_connections'),
+            'errors': [v for k, v in host.items() if k.endswith('_error')],
+        },
+        'server_host': server_host_card,
+        'summary': summary,
+        # The batch pools at the cut, so the fullness a wait happened
+        # under is readable at the instant, not only on the curve.
+        'pools': [
+            {'pool': name,
+             'claimed_fraction': entry.get('claimed_fraction'),
+             'slots_claimed': entry.get('slots_claimed'),
+             'slots_total': entry.get('slots_total'),
+             'queue_idle': entry.get('queue_idle'),
+             'status': entry.get('status'),
+             'error': entry.get('error') or ''}
+            for name, entry in sorted((data.get('pools') or {}).items())
+            if isinstance(entry, dict)],
+        'summary_range': range_text,
+        'summary_window': window_text,
+        'summary_errors': [e for e in (walk_error, kills_error) if e],
+        'errors_url': errors_url,
+    }
+
+
+def _server_host_card(srv):
+    """The server-host table of the platform card: the reporter's
+    record as the component keeps it (snapper_platform
+    _server_host_projection), shaped for the template. Empty when no
+    record has been delivered."""
+    from .snapper_platform import SERVER_HEARTBEAT_DAEMONS
+
+    if not srv:
+        return {'present': False}
+    per_minute = srv.get('by_endpoint_per_minute') or {}
+    endpoints = sorted(
+        ((cls, n, per_minute.get(cls))
+         for cls, n in (srv.get('by_endpoint') or {}).items()),
+        key=lambda row: -row[1])
+    daemons = [(name, entry.get('log_age_seconds'))
+               for name, entry in (srv.get('daemons') or {}).items()
+               if isinstance(entry, dict)
+               and isinstance(entry.get('log_age_seconds'), int)]
+    judged = [(name, age) for name, age in daemons
+              if name in SERVER_HEARTBEAT_DAEMONS]
+    # The quiet ones are the rows worth reading; a daemon writing every
+    # few seconds says nothing a count cannot.
+    quiet = sorted([(name, age) for name, age in judged if age > 60],
+                   key=lambda row: -row[1])[:10]
+    memory = srv.get('memory_kb') or {}
+    volumes = []
+    for path, entry in sorted((srv.get('volumes') or {}).items()):
+        entry = entry or {}
+        volumes.append({
+            'path': path, 'error': entry.get('error') or '',
+            'used_percent': entry.get('used_percent'),
+            'free_gb': (round(entry['free_bytes'] / 1e9, 1)
+                        if entry.get('free_bytes') is not None else None)})
+    uptime = srv.get('uptime_seconds')
+    return {
+        'present': True,
+        'collected_at': srv.get('collected_at'),
+        'interval_seconds': srv.get('interval_seconds'),
+        'requests': srv.get('requests'),
+        'requests_per_minute': srv.get('requests_per_minute'),
+        'endpoints': endpoints,
+        'status_classes': sorted((srv.get('by_status_class') or {}).items()),
+        'status_5xx': srv.get('status_5xx'),
+        'clients': srv.get('clients'),
+        'limits': srv.get('web_limits') or {},
+        'error_levels': sorted(
+            ((level, n) for level, n in (srv.get('error_levels') or {}).items()
+             if level != 'info'), key=lambda kv: -kv[1]),
+        'error_markers': sorted(
+            ((name, n) for name, n in (srv.get('error_markers') or {}).items()
+             if n), key=lambda kv: -kv[1]),
+        'error_recent': srv.get('error_recent') or [],
+        'daemon_oldest_name': srv.get('daemon_oldest_name'),
+        'daemon_oldest_log_seconds': srv.get('daemon_oldest_log_seconds'),
+        'judged_count': len(judged),
+        'quiet_daemons': quiet,
+        'units': [(unit, entry or {})
+                  for unit, entry in (srv.get('units') or {}).items()],
+        'processes': [(label, (srv.get('processes') or {}).get(key) or {})
+                      for key, label in (('httpd', 'httpd (all processes)'),
+                                         ('pandaserver', 'pandaserver python'))],
+        'database': srv.get('database') or {},
+        'load': srv.get('load') or {},
+        'memory_used_percent': srv.get('memory_used_percent'),
+        'memory_total_mb': (round(memory['MemTotal'] / 1024)
+                            if memory.get('MemTotal') else None),
+        'memory_used_mb': (
+            round((memory['MemTotal'] - memory['MemAvailable']) / 1024)
+            if memory.get('MemTotal') and memory.get('MemAvailable') is not None
+            else None),
+        'swap_used_mb': (
+            round((memory['SwapTotal'] - memory['SwapFree']) / 1024)
+            if memory.get('SwapTotal') is not None
+            and memory.get('SwapFree') is not None else None),
+        'volumes': volumes,
+        'uptime_days': round(uptime / 86400, 1) if uptime else None,
+    }
+
+
+def _fmt_count(value):
+    """A file or lock count on the storage card: millions as 1.3M,
+    else with separators; a missing value as a dash."""
+    if value is None:
+        return '—'
+    value = int(value)
+    if value >= 1_000_000:
+        return f'{value / 1e6:.1f}M'
+    return f'{value:,}'
+
+
+def _iso_instant(value):
+    """An ISO timestamp as an aware instant, or None."""
+    from datetime import datetime
+    from datetime import timezone as dt_timezone
+
+    try:
+        parsed = datetime.fromisoformat(
+            str(value or '').replace('Z', '+00:00'))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt_timezone.utc)
+    return parsed
+
+
+# The affected tasks the consequences detail lists, most core-hours
+# first, with the exact remainder stated.
+MAX_CONSEQUENCE_TASKS = 8
+
+
+def _storage_consequence_detail(key, heading, window_from, window_to,
+                                state_filter):
+    """One docked detail of the consequences strip
+    (docs/SNAPPER_STORAGE.md, Consequences) over
+    (window_from, window_to]: per member the jobs that failed at
+    storage and the core-hours they held, the tasks they came from,
+    and a representative job of each member. Read from the error
+    record's entries — the rows the strip's curves are binned from, so
+    the detail and the bands are the same jobs. Overflow folds join the
+    member totals by their component and exit code, so a storm interval
+    loses no job."""
+    import math
+    from datetime import timedelta
+    from urllib.parse import quote
+
+    from django.urls import reverse
+    from snapper_ai.models import SystemSnap
+
+    members = {curve: {'jobs': 0, 'held': 0, 'rep': 0}
+               for curve in _STORAGE_CONSEQUENCE_LABELS}
+    tasks = {}
+    states = (SystemSnap.objects
+              .filter(scope='epicprod',
+                      snap_time__gt=window_from,
+                      snap_time__lte=window_to + timedelta(minutes=10),
+                      state__components__errors__data__has_key='entries')
+              .order_by('snap_time')
+              .values_list('state__components__errors__data', flat=True))
+    seen_intervals = set()
+    for errors in states.iterator():
+        errors = errors if isinstance(errors, dict) else {}
+        interval = errors.get('interval') or {}
+        interval_key = str(interval.get('end') or '')
+        if not interval_key or interval_key in seen_intervals:
+            continue
+        seen_intervals.add(interval_key)
+        for row in errors.get('entries') or []:
+            try:
+                pandaid = int(row[0] or 0)
+                taskid = int(row[1] or 0)
+                comp = str(row[2]).partition(':')[0]
+                when = _iso_instant(row[3])
+            except (IndexError, TypeError, ValueError):
+                continue
+            if when is None or when <= window_from or when > window_to:
+                continue
+            status = (str(row[4]) if len(row) > 4 and row[4]
+                      else 'unrecorded')
+            if state_filter and status not in state_filter:
+                continue
+            exitcode = (str(row[5]).strip() if len(row) > 5 and row[5]
+                        else '')
+            curve = _storage_consequence_key(comp, exitcode)
+            if curve is None:
+                continue
+            held = int(row[6] or 0) if len(row) > 6 else 0
+            member = members[curve]
+            member['jobs'] += 1
+            member['held'] += held
+            member['rep'] = max(member['rep'], pandaid)
+            if taskid:
+                counts = tasks.setdefault(taskid, [0, 0])
+                counts[0] += 1
+                counts[1] += held
+        interval_end = _iso_instant(interval.get('end'))
+        if interval_end is None or not (
+                window_from < interval_end <= window_to):
+            continue
+        # Overflow folds key 'component:code@status@exitcode', with the
+        # held core-seconds under the same keys; they name no job, so
+        # they join the member totals alone.
+        overflow = errors.get('overflow') or {}
+        held_folds = overflow.get('held_by_category') or {}
+        for fold_key, count in (overflow.get('by_category') or {}).items():
+            parts = str(fold_key).split('@')
+            status = (parts[1] if len(parts) > 1 and parts[1]
+                      else 'unrecorded')
+            if state_filter and status not in state_filter:
+                continue
+            curve = _storage_consequence_key(
+                parts[0].partition(':')[0],
+                parts[2].strip() if len(parts) > 2 else '')
+            if curve is None:
+                continue
+            members[curve]['jobs'] += int(count or 0)
+            members[curve]['held'] += int(held_folds.get(fold_key) or 0)
+
+    total_jobs = sum(member['jobs'] for member in members.values())
+    total_held = sum(member['held'] for member in members.values())
+    from_et = window_from.astimezone(ET_ZONE)
+    to_et = window_to.astimezone(ET_ZONE)
+    rows = [
+        {'curve': curve,
+         'label': _STORAGE_CONSEQUENCE_LABELS[curve],
+         'jobs': f'{member["jobs"]:,}',
+         'hours': f'{member["held"] / 3600:,.0f}',
+         'share': (f'{member["held"] / total_held:.0%}'
+                   if total_held else ''),
+         'rep_pandaid': member['rep'],
+         'rep_url': (reverse('monitor_app:panda_job_detail',
+                             args=[member['rep']])
+                     if member['rep'] else '')}
+        for curve, member in sorted(members.items(),
+                                    key=lambda item: -item[1]['held'])
+        if member['jobs']]
+    task_rows = [
+        {'taskid': taskid, 'jobs': f'{counts[0]:,}',
+         'hours': f'{counts[1] / 3600:,.0f}'}
+        for taskid, counts in sorted(
+            tasks.items(), key=lambda item: (-item[1][1], -item[1][0]))
+        [:MAX_CONSEQUENCE_TASKS]]
+    jobs_base = reverse('monitor_app:panda_jobs_list')
+    window_days = max(1, math.ceil(
+        (window_to - window_from).total_seconds() / 86400))
+    return {
+        'key': key,
+        'heading': heading,
+        'integrated': key.endswith('aggregate'),
+        'basis': (from_et.strftime('%m-%d %H:%M') + ' – '
+                  + to_et.strftime('%H:%M ET'
+                                   if to_et.date() == from_et.date()
+                                   else '%m-%d %H:%M ET')),
+        'jobs': f'{total_jobs:,}',
+        'hours': f'{total_held / 3600:,.0f}',
+        'rows': rows,
+        'tasks': task_rows,
+        'task_overflow': max(0, len(tasks) - len(task_rows)),
+        'jobs_url': (f'{jobs_base}?status=failed&days={window_days}'
+                     '&ended_after=' + quote(window_from.isoformat())
+                     + '&ended_before=' + quote(window_to.isoformat())),
+    }
+
+
+def _storage_consequence_sections(ctx):
+    """The consequences strip's docked details: the cut detail beneath
+    the per-bin panels, the hour around the cut, and the aggregate
+    detail beneath the integrated panels, the view's left edge to the
+    cut. One docked detail per plot, as every focus view renders it;
+    both ride the one cut request, which carries the ranges as from/to
+    and agg_from/agg_to (docs/SNAPPER_ERRORS.md, Wasted resources)."""
+    from datetime import timedelta
+
+    params = (ctx or {}).get('params') or {}
+    state_filter = [value for value in (params.get('states') or '').split(',')
+                    if value]
+    ranges = []
+    cut_from = _iso_instant(params.get('from'))
+    cut_to = _iso_instant(params.get('to'))
+    if cut_from is None or cut_to is None or not cut_from < cut_to:
+        # No client bounds: the hour ending at the cut instant.
+        cut_to = (ctx or {}).get('requested_at')
+        cut_from = cut_to - timedelta(hours=1) if cut_to is not None else None
+    if cut_from is not None and cut_to is not None and cut_from < cut_to:
+        ranges.append(('sto-consequences', 'Cut detail', cut_from, cut_to))
+    agg_from = _iso_instant(params.get('agg_from'))
+    agg_to = _iso_instant(params.get('agg_to'))
+    if agg_from is not None and agg_to is not None and agg_from < agg_to:
+        ranges.append(('sto-consequences-aggregate', 'Aggregate detail',
+                       agg_from, agg_to))
+    return [_storage_consequence_detail(key, heading, start, end,
+                                        state_filter)
+            for key, heading, start, end in ranges]
+
+
+def _storage_card(data, previous_data, ctx):
+    """The storage cut card (docs/SNAPPER_STORAGE.md). For each shown
+    RSE its standing at the instant — verdicts, inventory by replica
+    state, datasets, the copying backlog and its ages, ghosts, rules
+    and locks, capacity — and the flow since the window's left edge,
+    differenced from the counters at the basis snap; each section docks
+    beneath its RSE's panels. Then the scope section once: the pass and
+    interval, the capacity table across every RSE (the rows of
+    ``rucio account limit list eicprod`` at this instant), the target
+    campaigns' standing, and the exception heads the component carries
+    with their overflow counts."""
+    from urllib.parse import quote
+
+    from django.urls import reverse
+
+    if not data or 'rses' not in data:
+        return None
+    params = (ctx or {}).get('params') or {}
+    since = (ctx or {}).get('since')
+    since_data = (ctx or {}).get('since_data') or {}
+    quantity_code = 'f' if (params.get('quantity') or 'bytes') == 'files' else 'b'
+    # The Show selector shapes the card: under the RSE capacity reading
+    # the card is the capacity table across RSEs alone, docked nowhere,
+    # so it sits directly beneath the capacity panels.
+    capacity_only = (params.get('panels') or 'status') == 'capacity'
+    rses = {rse: block for rse, block in (data.get('rses') or {}).items()
+            if isinstance(block, dict)}
+    prev_rses = previous_data.get('rses') or {}
+    since_rses = since_data.get('rses') or {}
+    thresholds = data.get('thresholds') or {}
+    assessment = data.get('assessment') or {}
+    verdicts = assessment.get('verdicts') or {}
+    selected = [value for value in (params.get('rse') or '').split(',')
+                if value]
+    shown = [] if capacity_only else [rse for rse in selected if rse in rses]
+    ticked = [rse for rse in selected if rse in rses]
+    basis_text = (since.astimezone(ET_ZONE).strftime('%m-%d %H:%M ET')
+                  if since is not None else '')
+    threshold_text = {
+        'transfers_stuck': (
+            'copying replicas older than '
+            f"{thresholds.get('storage_copying_stuck_hours')} h "
+            '(storage_copying_stuck_hours)'),
+        'rules_stuck': 'rules with stuck locks',
+        'datasets_stalled': (
+            'open datasets with no arrival for '
+            f"{thresholds.get('storage_stalled_hours')} h while their "
+            'task runs (storage_stalled_hours)'),
+        'single_copy_old': (
+            'single-copy files older than '
+            f"{thresholds.get('storage_single_copy_warn_days')} d "
+            '(storage_single_copy_warn_days)'),
+    }
+    listing_urls = {
+        listing: reverse('pcs:storage_listings', kwargs={'listing': listing})
+        for listing in ('ghosts', 'stuck_rules', 'stalled_datasets')}
+
+    def _chip(verdict):
+        return cut_chip('ok' if verdict == 'ok'
+                        else 'warning' if verdict == 'warning'
+                        else 'unknown')
+
+    def _verdict_text(name, block):
+        """The verdict as a sentence with its number and threshold: what
+        the reader is to conclude, not the name of a check."""
+        if name == 'transfers_stuck':
+            backlog = block.get('backlog') or {}
+            return (f"{_fmt_count(backlog.get('over_threshold'))} copying "
+                    'replicas older than '
+                    f"{thresholds.get('storage_copying_stuck_hours')} h")
+        if name == 'rules_stuck':
+            rules = block.get('rules') or {}
+            locks = rules.get('locks') or {}
+            text = f"{_fmt_count(locks.get('stuck'))} stuck locks"
+            stuck_rules = (rules.get('by_state') or {}).get('STUCK')
+            if stuck_rules:
+                text += f" on {_fmt_count(stuck_rules)} stuck rules"
+            if rules.get('oldest_stuck_age_s') is not None:
+                text += f", oldest {_days(rules['oldest_stuck_age_s'])} d"
+            return text
+        if name == 'datasets_stalled':
+            return (f"{_fmt_count((block.get('datasets') or {}).get('stalled'))} "
+                    'open datasets with no arrival for '
+                    f"{thresholds.get('storage_stalled_hours')} h while their "
+                    'task runs')
+        if name == 'single_copy_old':
+            return (f"{_fmt_count((block.get('protection') or {}).get('single_copy_old'))} "
+                    'single-copy files older than '
+                    f"{thresholds.get('storage_single_copy_warn_days')} d")
+        return name.replace('_', ' ')
+
+    def _verdict_rows(prefix, block):
+        return [{'name': key[len(prefix):].replace('_', ' '),
+                 'chip': _chip(verdict),
+                 'text': (_verdict_text(key[len(prefix):], block)
+                          if verdict != 'ok' else key[len(prefix):].replace('_', ' ')),
+                 'threshold': threshold_text.get(key[len(prefix):], '')}
+                for key, verdict in sorted(verdicts.items())
+                if key.startswith(prefix)]
+
+    warning_count = sum(1 for v in verdicts.values() if v == 'warning')
+    rse_warnings = sum(1 for k, v in verdicts.items()
+                       if v == 'warning' and k.startswith('rse:'))
+    verdict_summary = (
+        f'{warning_count} of {len(verdicts)} checks in warning '
+        f'({rse_warnings} on RSEs, {warning_count - rse_warnings} on campaigns)'
+        if verdicts else 'no checks recorded')
+
+    def _tb(value):
+        return None if value is None else round(int(value or 0) / _TB, 2)
+
+    def _hours(seconds):
+        return None if seconds is None else round(float(seconds) / 3600, 1)
+
+    def _days(seconds):
+        return None if seconds is None else round(float(seconds) / 86400, 1)
+
+    def _did_url(name):
+        return reverse('pcs:rucio_did_detail',
+                       kwargs={'scope': 'epic',
+                               'name': str(name or '').lstrip('/')})
+
+    def _state_key(state):
+        return ((_STORAGE_STATE_ORDER.index(state)
+                 if state in _STORAGE_STATE_ORDER
+                 else len(_STORAGE_STATE_ORDER)), state)
+
+    def _state_label(state):
+        return str(state).lower().replace('_', ' ')
+
+    sections = []
+    for rse in shown:
+        block = rses[rse]
+        prev = prev_rses.get(rse) or {}
+        flow = block.get('flow') or {}
+        base_flow = (since_rses.get(rse) or {}).get('flow') or {}
+        by_state = (block.get('inventory') or {}).get('by_state') or {}
+        prev_by_state = (prev.get('inventory') or {}).get('by_state') or {}
+        inventory = [
+            {'state': _state_label(state),
+             'curve': f'sto{quantity_code}n_{rse}_{state}',
+             'files': _fmt_count(int((entry or {}).get('files') or 0)),
+             'tb': _tb((entry or {}).get('bytes')),
+             'delta': cut_delta((entry or {}).get('files'),
+                                (prev_by_state.get(state) or {}).get('files'))
+             or ''}
+            for state, entry in sorted(by_state.items(),
+                                       key=lambda kv: _state_key(kv[0]))]
+        backlog = block.get('backlog') or {}
+        ages = backlog.get('age_s') or {}
+        ghosts = block.get('ghosts') or {}
+        rules = block.get('rules') or {}
+        locks = rules.get('locks') or {}
+        capacity = block.get('capacity') or {}
+        used, limit = capacity.get('used'), capacity.get('limit')
+        account_used = capacity.get('account_used')
+        # The quota reads against the account's own usage when the
+        # record has it, else against the RSE-wide usage.
+        charged = account_used if account_used is not None else used
+
+        def _since(key, _flow=flow, _base=base_flow):
+            if not _base or key is None:
+                return None
+            return max(0, int(_flow.get(key) or 0) - int(_base.get(key) or 0))
+
+        flow_rows = []
+        if base_flow:
+            for label, files_key, bytes_key, curve in (
+                    ('first copies', 'first_copy_files', 'first_copy_bytes',
+                     f'sto{quantity_code}a_{rse}_first'),
+                    ('replicas', 'replica_files', 'replica_bytes',
+                     f'sto{quantity_code}a_{rse}_replica'),
+                    ('transfers completed', 'transfers_completed', None,
+                     f'stoft_{rse}_transfers'),
+                    ('ghosts appeared', 'ghosts_appeared', None,
+                     f'stoxe_{rse}_appeared')):
+                flow_rows.append({
+                    'label': label, 'curve': curve,
+                    'files': _fmt_count(_since(files_key)),
+                    'tb': _tb(_since(bytes_key)) if bytes_key else None})
+        sections.append({
+            'rse': rse, 'key': f'sto-{rse}',
+            'type': str(block.get('type') or '').lower(),
+            'url': f"{listing_urls['ghosts']}?rse={quote(rse)}",
+            'verdicts': _verdict_rows(f'rse:{rse}:', block),
+            'inventory': inventory,
+            'datasets': block.get('datasets') or {},
+            'backlog': {
+                'files': _fmt_count(int(backlog.get('copying_files') or 0)),
+                'tb': _tb(backlog.get('copying_bytes')),
+                'median_h': _hours(ages.get('median')),
+                'p90_h': _hours(ages.get('p90')),
+                'max_h': _hours(ages.get('max')),
+                'over': _fmt_count(int(backlog.get('over_threshold') or 0)),
+                'stuck_hours': thresholds.get('storage_copying_stuck_hours'),
+                'curve': f'sto{quantity_code}s_{rse}_copying',
+                'over_curve': f'stoxo_{rse}_over'},
+            'ghosts': {
+                'files': _fmt_count(int(ghosts.get('files') or 0)),
+                'tb': _tb(ghosts.get('bytes')),
+                'delta': cut_delta(ghosts.get('files'),
+                                   (prev.get('ghosts') or {}).get('files')) or '',
+                # The size fingerprint: mean ghost size against the mean
+                # first copy arrived here, over the record's counters.
+                'mean_mb': (round(int(ghosts.get('bytes') or 0)
+                                  / int(ghosts['files']) / 1e6, 1)
+                            if ghosts.get('files') else None),
+                'arrived_mean_mb': (round(int(flow.get('first_copy_bytes') or 0)
+                                          / int(flow['first_copy_files']) / 1e6, 1)
+                                    if flow.get('first_copy_files') else None),
+                'by_state': [
+                    {'state': _state_label(state),
+                     'files': _fmt_count(int(count or 0)),
+                     'curve': f'stofg_{rse}_{state}'}
+                    for state, count in sorted(
+                        (ghosts.get('by_state') or {}).items(),
+                        key=lambda kv: _state_key(kv[0]))],
+                'oldest_d': _days(ghosts.get('oldest_age_s')),
+                'url': f"{listing_urls['ghosts']}?rse={quote(rse)}"},
+            'rules': {
+                'by_state': sorted((rules.get('by_state') or {}).items()),
+                'ok': _fmt_count(int(locks.get('ok') or 0)),
+                'replicating': _fmt_count(int(locks.get('replicating') or 0)),
+                'stuck': _fmt_count(int(locks.get('stuck') or 0)),
+                'oldest_stuck_d': _days(rules.get('oldest_stuck_age_s')),
+                'expiring_30d': int(rules.get('expiring_30d') or 0),
+                'url': f"{listing_urls['stuck_rules']}?rse={quote(rse)}"},
+            'capacity': {
+                'account_tb': _tb(account_used),
+                'account_files': (_fmt_count(capacity.get('account_files'))
+                                  if capacity.get('account_files') is not None
+                                  else None),
+                'used_tb': _tb(used),
+                'limit_tb': _tb(limit) if limit else None,
+                'left_tb': (_tb(limit - charged)
+                            if limit and charged is not None else None),
+                'fill_pct': (round(100 * float(charged) / float(limit), 1)
+                             if limit and charged is not None else None),
+                'files': _fmt_count(capacity.get('files')),
+                'as_of': capacity.get('as_of'),
+                'curve': (f'stobu_{rse}_account' if quantity_code == 'b'
+                          else f'stofu_{rse}_account_files')},
+            'flow': flow_rows,
+            'basis': basis_text if base_flow else '',
+        })
+
+    capacity_rows = []
+    for rse, block in sorted(rses.items()):
+        if rse == 'none':
+            continue
+        capacity = block.get('capacity') or {}
+        used, limit = capacity.get('used'), capacity.get('limit')
+        account_used = capacity.get('account_used')
+        charged = account_used if account_used is not None else used
+        capacity_rows.append({
+            'rse': rse, 'type': str(block.get('type') or '').lower(),
+            'url': f"{listing_urls['ghosts']}?rse={quote(rse)}",
+            'account_tb': _tb(account_used),
+            'account_files': (_fmt_count(capacity.get('account_files'))
+                              if capacity.get('account_files') is not None
+                              else None),
+            'used_tb': _tb(used),
+            'limit_tb': _tb(limit) if limit else None,
+            'left_tb': (_tb(limit - charged)
+                        if limit and charged is not None else None),
+            'fill_pct': (round(100 * float(charged) / float(limit), 1)
+                         if limit and charged is not None else None),
+            'files': _fmt_count(capacity.get('files')),
+            'as_of': capacity.get('as_of'),
+            'shown': rse in ticked,
+            'curve': (f'stobu_{rse}_account' if quantity_code == 'b'
+                      else f'stofu_{rse}_account_files')})
+    account_recorded = any(row['account_tb'] is not None for row in capacity_rows)
+
+    campaigns = []
+    since_campaigns = since_data.get('campaigns') or {}
+    for name, block in sorted((data.get('campaigns') or {}).items()):
+        if capacity_only or not isinstance(block, dict):
+            continue
+        protection = block.get('protection') or {}
+        flow = block.get('flow') or {}
+        base = (since_campaigns.get(name) or {}).get('flow') or {}
+
+        def _campaign_since(key, _flow=flow, _base=base):
+            if not _base:
+                return None
+            return max(0, int(_flow.get(key) or 0) - int(_base.get(key) or 0))
+
+        campaigns.append({
+            'name': name, 'segment': _storage_slug(name),
+            'verdicts': _verdict_rows(f'campaign:{name}:', block),
+            'files': _fmt_count(int(block.get('files') or 0)),
+            'tb': _tb(block.get('bytes')),
+            'single': _fmt_count(int(protection.get('single_copy') or 0)),
+            'single_old': int(protection.get('single_copy_old') or 0),
+            'two_plus': _fmt_count(int(protection.get('two_plus') or 0)),
+            'unattached': _fmt_count(int(block.get('unattached_files') or 0)),
+            'no_events': _fmt_count(int(block.get('no_events_attr') or 0)),
+            'datasets': block.get('datasets') or {},
+            'latency': [
+                {'kind': str(kind).replace('_', ' '),
+                 'n': (entry or {}).get('n'),
+                 'median_h': _hours((entry or {}).get('median')),
+                 'p90_h': _hours((entry or {}).get('p90'))}
+                for kind, entry in sorted((block.get('latency_s') or {}).items())],
+            'arrived_files': _fmt_count(_campaign_since('arrived_files')),
+            'arrived_tb': _tb(_campaign_since('arrived_bytes')),
+            'basis': basis_text if base else '',
+        })
+
+    exceptions = {} if capacity_only else (data.get('exceptions') or {})
+    ghost_rows = []
+    for row in (exceptions.get('ghosts') or []):
+        if not isinstance(row, (list, tuple)) or len(row) < 6:
+            continue
+        name = str(row[0])
+        dataset, _, file_name = name.rpartition('/')
+        ghost_rows.append({
+            'dataset': dataset, 'url': _did_url(dataset), 'file': file_name,
+            'rse': row[1], 'state': _state_label(row[2] or ''),
+            'campaign': row[3], 'mb': round(int(row[4] or 0) / 1e6, 1),
+            'created': row[5]})
+    stuck_rows = [
+        {'dataset': row[0], 'url': _did_url(row[0]), 'rse': row[1],
+         'stuck_at': row[2], 'locks': row[3]}
+        for row in (exceptions.get('stuck_rules') or [])
+        if isinstance(row, (list, tuple)) and len(row) >= 4]
+    stalled_rows = [
+        {'dataset': row[0], 'url': _did_url(row[0]), 'campaign': row[1],
+         'last_arrival': row[2]}
+        for row in (exceptions.get('stalled_datasets') or [])
+        if isinstance(row, (list, tuple)) and len(row) >= 3]
+    pass_info = data.get('pass') or {}
+    return {
+        'kind': 'storage',
+        'sections': sections,
+        # The consequences strip's own docked details, one per plot
+        # group: the cut detail beneath the per-bin panels, the
+        # aggregate detail beneath the integrated ones.
+        'consequences': _storage_consequence_sections(ctx),
+        'scope': {
+            'key': 'sto-scope',
+            'capacity_only': capacity_only,
+            'account_recorded': account_recorded,
+            # A cut inside the arrivals backfill (STORAGE.md, Backfill)
+            # reads a reconstructed publication carrying counters alone.
+            'reconstructed': (pass_info.get('mode') == 'backfill'),
+            'overall': assessment.get('overall') or 'unknown',
+            'overall_chip': _chip(assessment.get('overall')),
+            'verdict_summary': verdict_summary,
+            'interval': data.get('interval') or {},
+            'pass': {
+                'mode': pass_info.get('mode') or '',
+                'files': _fmt_count(pass_info.get('files_checked')),
+                'datasets': _fmt_count(pass_info.get('datasets_checked')),
+                'duration_min': round(float(pass_info.get('duration_s') or 0) / 60),
+                'errors': int(pass_info.get('error_count') or 0)},
+            'capacity_rows': capacity_rows,
+            'campaigns': campaigns,
+            'ghosts': ghost_rows, 'stuck': stuck_rows, 'stalled': stalled_rows,
+            'overflow': {key: int(value or 0) for key, value
+                         in (exceptions.get('overflow') or {}).items()},
+            'urls': listing_urls,
+        },
+    }
+
+
+def _fmt_num(value):
+    if value is None:
+        return '—'
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, float):
+        if abs(value) < 10:
+            return f'{value:.3g}'
+        return f'{value:,.0f}' if abs(value) >= 1000 else f'{value:.1f}'
+    return f'{value:,}'
+
+
+def _fmt_signed(value):
+    if value == 0:
+        return None
+    return f'{value:+.3f}'
 
 
 def _delivery_card(data, previous_data, ctx):
@@ -1312,17 +5239,50 @@ def _delivery_card(data, previous_data, ctx):
     cumulative standing. On a live placed-basis snap, the placement
     totals with deltas and the top configurations. Full lists live on
     the campaign plan page."""
+    # Delivery detail belongs to the Campaign focus, whose selected PCs
+    # and daily bins provide its visual context. The scope report has no
+    # campaign or PC family and therefore carries no delivery card.
+    params = (ctx or {}).get('params') or {}
+    selected = {value for value in
+                (params.get('campaign') or '').split(',') if value}
+    if not selected:
+        return None
     from django.urls import reverse
+
+    # The campaign plan filters ride the cut fetch (the focus view's
+    # member_restrict params): the card prunes its configuration rows
+    # to the same slice the plot shows, and states the restriction.
+    filter_note = ''
+    pc_filter = None
+    try:
+        from pcs.views import campaign_plan_pc_filter
+        active, pc_filter = campaign_plan_pc_filter(
+            sorted(selected)[0], params)
+    except Exception:                                       # noqa: BLE001
+        logger.exception('delivery card filter resolution failed')
+        active, pc_filter = None, None
+    if active:
+        filter_note = ('Filtered to ' + ' · '.join(
+            f'{label}: {value}' for label, value in active)
+            + f' — {len(pc_filter)} physics configurations '
+              '(campaign plan filters)')
+    else:
+        pc_filter = None
+
+    def _leaves(block):
+        lv = block.get('leaves') or {}
+        if pc_filter is None:
+            return lv
+        return {pc: leaf for pc, leaf in lv.items() if pc in pc_filter}
 
     cache = _pc_cache()
     requestors = cache['requestors']
     keys = cache['keys']
-    # The campaign view's selection narrows the card: only the ticked
-    # campaigns' sections render. Without the parameter (a scope-view
-    # cut) every campaign in the snap renders.
-    params = (ctx or {}).get('params') or {}
-    selected = {value for value in
-                (params.get('campaign') or '').split(',') if value}
+    processes = cache.get('processes') or {}
+    species = cache.get('species') or {}
+    beam_energies = cache.get('beam_energies') or {}
+    q2_ranges = cache.get('q2_ranges') or {}
+    samples = cache.get('samples') or {}
     campaigns = []
     for name, block in sorted((data.get('campaigns') or {}).items()):
         if selected and name not in selected:
@@ -1331,7 +5291,7 @@ def _delivery_card(data, previous_data, ctx):
         previous_totals = (((previous_data.get('campaigns') or {})
                             .get(name) or {}).get('totals') or {})
         if 'arrived_files' in totals:
-            leaves = block.get('leaves') or {}
+            leaves = _leaves(block)
             # The day's arrivals grouped by the ACTIVE lens — the same
             # projection the quilt draws, so each section's swatch is
             # the patch color above it. The drilldown inside a group
@@ -1349,6 +5309,8 @@ def _delivery_card(data, previous_data, ctx):
                 if not arrived:
                     continue
                 delivering += 1
+                cum_events = int(leaf.get('events') or 0)
+                expected = leaf.get('expected')
                 row = {
                     'label': pc,
                     # The quilt curve this row is a patch of, in
@@ -1356,16 +5318,21 @@ def _delivery_card(data, previous_data, ctx):
                     # takes the first candidate the plot carries.
                     'curve': (f'dlvq_{tag}_{pc} dlvqf_{tag}_{pc}'),
                     'identity': keys.get(pc, ''),
+                    'process': processes.get(pc, ''),
+                    'species': species.get(pc, ''),
                     'url': reverse('pcs:pcs_config_detail', args=[pc]),
+                    'cumulative_anchor': f'delivery-pc-{tag}-{pc}',
                     'groups': ', '.join(requestors.get(pc)
                                         or ['Unassigned']),
                     'arrived_events': int(
                         leaf.get('arrived_events') or 0),
-                    'cum_events': int(leaf.get('events') or 0),
+                    'cum_events': cum_events,
                     'arrived': arrived,
                     'cum': int(leaf.get('cum_files') or 0),
-                    'expected': leaf.get('expected'),
+                    'expected': expected,
                     'tier': leaf.get('tier') or '',
+                    'completion': (round(100 * cum_events / expected, 1)
+                                   if expected else None),
                 }
                 for group in _lens_groups(pc, seg, cache):
                     slot = by_group.setdefault(group, {
@@ -1382,10 +5349,124 @@ def _delivery_card(data, previous_data, ctx):
             for group in day_groups:
                 group['rows'].sort(
                     key=lambda r: (-r['arrived_events'], -r['arrived']))
+            # The second campaign panel is the additive cumulative
+            # category stack.  Its cut table uses the same category
+            # partition and the same cumulative values as the curves.
+            category_totals = {}
+            category_pc_rows = {}
+            for pc, leaf in sorted(leaves.items()):
+                category = cache['categories'].get(pc) or 'Uncategorized'
+                slot = category_totals.setdefault(category, {
+                    'name': category, 'configurations': 0,
+                    'events': 0, 'today_events': 0,
+                    'files': 0, 'today_files': 0})
+                slot['configurations'] += 1
+                slot['events'] += int(leaf.get('events') or 0)
+                slot['today_events'] += int(
+                    leaf.get('arrived_events') or 0)
+                slot['files'] += int(leaf.get('cum_files') or 0)
+                slot['today_files'] += int(
+                    leaf.get('arrived_files') or 0)
+                cumulative_events = int(leaf.get('events') or 0)
+                expected = leaf.get('expected')
+                row_species = species.get(pc, '') or 'Unspecified'
+                if category == 'Single Particle':
+                    species_slug = _species_slug(row_species)
+                    row_curve = (f'dlvsp_{tag}_{species_slug} '
+                                 f'dlvspf_{tag}_{species_slug}')
+                else:
+                    row_curve = (f'dlvpc_{tag}_{pc} '
+                                 f'dlvpcf_{tag}_{pc}')
+                category_pc_rows.setdefault(category, []).append({
+                    'label': pc,
+                    'identity': keys.get(pc, ''),
+                    'process': processes.get(pc, ''),
+                    'species': row_species,
+                    'beam_energy': beam_energies.get(pc, ''),
+                    'q2_range': q2_ranges.get(pc, ''),
+                    'sample': samples.get(pc, ''),
+                    'url': reverse('pcs:pcs_config_detail', args=[pc]),
+                    'cumulative_anchor': f'delivery-pc-{tag}-{pc}',
+                    'groups': ', '.join(requestors.get(pc)
+                                        or ['Unassigned']),
+                    'events': cumulative_events,
+                    'today_events': int(
+                        leaf.get('arrived_events') or 0),
+                    'files': int(leaf.get('cum_files') or 0),
+                    'today_files': int(
+                        leaf.get('arrived_files') or 0),
+                    'expected': expected,
+                    'tier': leaf.get('tier') or '',
+                    'completion': (
+                        round(100 * cumulative_events / expected, 1)
+                        if expected else None),
+                    'curve': row_curve,
+                })
+            for rows in category_pc_rows.values():
+                rows.sort(key=lambda row: (
+                    row['species'], row['process'], row['label']))
+            category_rows = []
+            for category in sorted(category_totals):
+                row = category_totals[category]
+                slug = _group_slug(category)
+                row['curve'] = (f'dlvc_cat_{tag}_{slug} '
+                                f'dlvcf_cat_{tag}_{slug}')
+                row['plot_anchor'] = (
+                    'snapper-plot-'
+                    + _delivery_pc_detail_key(name, category))
+                category_rows.append(row)
+            category_pc_groups = []
+            for category in _delivery_categories():
+                rows = category_pc_rows.get(category, [])
+                species_groups = []
+                if category == 'Single Particle':
+                    by_species = {}
+                    for row in rows:
+                        by_species.setdefault(row['species'], []).append(row)
+                    for species_name in sorted(by_species):
+                        species_rows = by_species[species_name]
+                        targets = [row['expected'] for row in species_rows
+                                   if row['expected'] is not None]
+                        target = sum(targets) if targets else None
+                        events = sum(row['events'] for row in species_rows)
+                        species_groups.append({
+                            'name': species_name,
+                            'curve': species_rows[0]['curve'],
+                            'rows': species_rows,
+                            'configurations': len(species_rows),
+                            'events': events,
+                            'today_events': sum(
+                                row['today_events']
+                                for row in species_rows),
+                            'files': sum(row['files']
+                                         for row in species_rows),
+                            'today_files': sum(
+                                row['today_files']
+                                for row in species_rows),
+                            'target': target,
+                            'target_partial': (
+                                bool(targets)
+                                and len(targets) != len(species_rows)),
+                            'completion': (
+                                round(100 * events / target, 1)
+                                if target and len(targets) == len(species_rows)
+                                else None),
+                        })
+                category_pc_groups.append({
+                    'name': category,
+                    'detail_key': _delivery_pc_detail_key(name, category),
+                    'rows': rows,
+                    'species_groups': species_groups,
+                })
             requested_at = (ctx or {}).get('requested_at')
             unmeasured = int(totals.get('unmeasured_files') or 0)
             campaigns.append({
                 'name': name,
+                'daily': True,
+                'arrivals_detail_key': _delivery_detail_key(
+                    'arrivals', name),
+                'categories_detail_key': _delivery_detail_key(
+                    'categories', name),
                 # The compact card names its own day — no surrounding
                 # chrome does it anymore.
                 'day': (requested_at.astimezone(ET_ZONE)
@@ -1409,13 +5490,15 @@ def _delivery_card(data, previous_data, ctx):
                     {'label': 'configurations delivering',
                      'value': delivering, 'delta': None},
                 ],
+                'category_rows': category_rows,
+                'category_pc_groups': category_pc_groups,
                 'unmeasured_files': unmeasured,
                 'plan_url': (reverse('pcs:pcs_campaign_plan')
                              + f'?campaign={name}'),
             })
             continue
         by_group = {}
-        for pc, leaf in (block.get('leaves') or {}).items():
+        for pc, leaf in _leaves(block).items():
             files = int(leaf.get('files') or 0)
             if not files:
                 continue
@@ -1427,7 +5510,7 @@ def _delivery_card(data, previous_data, ctx):
         # top rows; the plan page is the full list.
         pcs = []
         for pc, leaf in sorted(
-                (block.get('leaves') or {}).items(),
+                _leaves(block).items(),
                 key=lambda kv: -int(kv[1].get('files') or 0))[:10]:
             if not int(leaf.get('files') or 0):
                 continue
@@ -1464,7 +5547,8 @@ def _delivery_card(data, previous_data, ctx):
             'plan_url': (reverse('pcs:pcs_campaign_plan')
                          + f'?campaign={name}'),
         })
-    return {'kind': 'delivery', 'campaigns': campaigns}
+    return {'kind': 'delivery', 'campaigns': campaigns,
+            'filter_note': filter_note}
 
 
 def _workflow_card(data, previous_data, ctx):
@@ -1696,19 +5780,280 @@ def _scheduler_status(scope):
         name=f'snapper-{scope}-scheduler').first()
 
 
-def _series_cache(key, builder):
+def _series_cache(key, builder, refresh=False):
     """Snapper series as a cached product (docs/CACHED_PRODUCTS.md):
     served stored, rebuilt behind responses on staleness. Refresh state
     is returned with the value so the page can fetch the newly built
-    product promptly; a concurrent first fill never duplicates work."""
+    product promptly; a concurrent first fill never duplicates work.
+
+    Focus products (day-granular records such as the campaign quilt,
+    rebuilt by the nightly prewarm when their record changes) carry an
+    hours-scale TTL as a backstop; the scope report's live curves keep
+    the short one. ``refresh=True`` is the prewarm path: rebuild
+    synchronously."""
     from .cached_product import get_product
 
-    product = get_product(key, builder, ttl_seconds=90)
+    # The Errors focus (param 'task') plots a component that advances
+    # every refresh cycle; its products take the live TTL, not the
+    # day-granular focus backstop.
+    # The Platform focus (param 'platform') likewise plots components
+    # that advance every refresh cycle, and the Storage focus (param
+    # 'rse') a record that advances with every storage pass.
+    if (':focus:task:' in key or ':focus:platform:' in key
+            or ':focus:rse:' in key or ':focus:catalog:' in key):
+        ttl_seconds = 90
+    else:
+        ttl_seconds = 6 * 3600 if ':focus:' in key else 90
+    product = get_product(key, builder, ttl_seconds=ttl_seconds,
+                          refresh=refresh,
+                          async_first_fill=':focus:site:' in key)
+    value = product.get('value')
+    if isinstance(value, dict) and value.get('queue_members'):
+        _QUEUE_STACK_CACHE['members'] = tuple(value['queue_members'])
     return {
-        'value': product['value'],
+        'value': value,
         'refreshing': product['refreshing'],
         'built_at': product['built_at'],
         'age_seconds': product['age_seconds'],
+    }
+
+
+# ── Catalog view (docs/SNAPPER_CATALOG.md) ──────────────────────────────
+
+_CATALOG_OUTCOME_ORDER = ('registered', 'diverted', 'pending', 'unfinished',
+                          'failed', 'not_reached', 'none')
+_CATALOG_OUTCOME_LABELS = {
+    'registered': 'registered', 'diverted': 'diverted (clash)',
+    'pending': 'pending (catalog unreachable)',
+    'unfinished': 'unfinished (died or stashed in registration)',
+    'failed': 'failed (registration lost)',
+    'not_reached': 'not reached (the job ended before its registration stage)',
+    'none': 'no digest (the payload wrote no report: died before it, or predates it)',
+}
+# One hue per outcome: the house state colors where the outcome is a
+# state (registered blue, pending the warning color, failed the failure
+# color), green for a registration that landed on a diverted path,
+# purple for one that never ended, and two greys that read on white for
+# the jobs that never registered at all.
+_CATALOG_OUTCOME_COLORS = {
+    'registered': '#1565c0', 'diverted': '#2e7d32', 'pending': '#f9a825',
+    'unfinished': '#7e57c2', 'failed': '#c62828', 'not_reached': '#6d4c41',
+    'none': '#424242',
+}
+# A registrations reading covers the interval since the previous
+# publication, five minutes on the drumbeat and longer across a missed
+# cycle (a deploy, a restart); the curves carry every interval's count
+# scaled to five minutes so a long interval reads as its rate, not as a
+# spike. The cut card keeps the interval's own count and bounds.
+_CATALOG_RATE_SECONDS = 300.0
+
+
+def _catalog_interval_scale(cat):
+    """The factor taking the interval's count to a five-minute rate; 1
+    where the interval is five minutes or its bounds are missing."""
+    from datetime import datetime
+    interval = cat.get('interval') or {}
+    try:
+        start = datetime.fromisoformat(str(interval.get('start')).replace('Z', '+00:00'))
+        end = datetime.fromisoformat(str(interval.get('end')).replace('Z', '+00:00'))
+    except (TypeError, ValueError):
+        return 1.0
+    seconds = (end - start).total_seconds()
+    if seconds <= 0:
+        return 1.0
+    return _CATALOG_RATE_SECONDS / seconds
+_CATALOG_PROBE_LABELS = {'tls': 'TLS handshake', 'ping': '/ping',
+                         'read': 'authenticated read'}
+_CATALOG_PROBE_COLORS = {'tls': '#7e57c2', 'ping': '#1565c0', 'read': '#2e7d32'}
+_CATALOG_EXIT_COLORS = {'1': '#c62828', '81': '#ef6c00', '78': '#b71c1c',
+                        '84': '#8e24aa', 'unknown': '#78909c'}
+
+
+def _catalog_curve_values(state):
+    """Curves from the catalog component (docs/SNAPPER_CATALOG.md): the
+    interval's registrations by outcome (catrg_), the failed split by
+    payload exit code (catfx_), the probe timings in ms (catpr_), the
+    registration stage's wall seconds (catlt_), the pending backlog
+    (catrr_). A group that recorded a read failure emits no curves."""
+    values = {}
+    cat = component_data(state, 'catalog')
+    if not cat:
+        return values
+    reg = cat.get('registrations') or {}
+    if reg and 'error' not in reg:
+        scale = _catalog_interval_scale(cat)
+        for outcome, n in (reg.get('by_outcome') or {}).items():
+            if n:
+                values[f'catrg_{outcome}'] = round(int(n) * scale, 1)
+        for code, n in (reg.get('failed_by_exit') or {}).items():
+            values[f'catfx_{code}'] = round(int(n) * scale, 1)
+    probe = cat.get('probe') or {}
+    if probe and 'error' not in probe:
+        for k in ('tls', 'ping', 'read'):
+            entry = probe.get(k) or {}
+            if entry.get('latency_ms') is not None and not (
+                    k == 'read' and 'read not made' in str(entry.get('error') or '')):
+                values[f'catpr_{k}'] = float(entry['latency_ms'])
+    lat = cat.get('latency') or {}
+    if lat and 'error' not in lat:
+        reg_stats = lat.get('registered') or {}
+        if reg_stats.get('count'):
+            values['catlt_median'] = float(reg_stats.get('median_s') or 0)
+            values['catlt_p90'] = float(reg_stats.get('p90_s') or 0)
+    rr = cat.get('registrar') or {}
+    if rr and 'error' not in rr:
+        values['catrr_pending'] = int(rr.get('pending') or 0)
+        if rr.get('oldest_pending_h') is not None:
+            values['catrr_oldest_h'] = float(rr['oldest_pending_h'])
+    return values
+
+
+def _catalog_curve_label(curve_id):
+    prefix, _, member = curve_id.partition('_')
+    if prefix == 'catrg':
+        return _CATALOG_OUTCOME_LABELS.get(member, member)
+    if prefix == 'catfx':
+        return f'exit {member}'
+    if prefix == 'catpr':
+        return _CATALOG_PROBE_LABELS.get(member, member)
+    if prefix == 'catlt':
+        return {'median': 'median', 'p90': '90th percentile'}.get(member, member)
+    if prefix == 'catrr':
+        return {'pending': 'pending owed (24 h)', 'oldest_h': 'oldest pending, h'}.get(member, member)
+    return None
+
+
+def _catalog_curve_color(curve_id):
+    prefix, _, member = curve_id.partition('_')
+    if prefix == 'catrg':
+        return _CATALOG_OUTCOME_COLORS.get(member)
+    if prefix == 'catfx':
+        return _CATALOG_EXIT_COLORS.get(member)
+    if prefix == 'catpr':
+        return _CATALOG_PROBE_COLORS.get(member)
+    if prefix == 'catlt':
+        return {'median': '#1565c0', 'p90': '#7e57c2'}.get(member)
+    if prefix == 'catrr':
+        return {'pending': '#f9a825', 'oldest_h': '#ef6c00'}.get(member)
+    return None
+
+
+def _catalog_section(label):
+    return {'label': label, 'display': label,
+            'pinned': True, 'idle': False, 'peak': ''}
+
+
+def _catalog_groups():
+    # Panel order following the question: what was asked, what came
+    # back, how fast, what is owed.
+    return (
+        {'name': 'Catalog registrations', 'title': 'Registrations by outcome',
+         'section': _catalog_section('What the jobs asked'),
+         'prefixes': ['catrg_'], 'ids': [],
+         'order': [f'catrg_{o}' for o in _CATALOG_OUTCOME_ORDER],
+         'stacked': True, 'panel_px': 170, 'units': 'jobs ended per five minutes'},
+        {'name': 'Catalog failed by exit', 'title': 'Registration lost, by payload exit code',
+         'prefixes': ['catfx_'], 'ids': [],
+         'stacked': True, 'panel_px': 130, 'units': 'jobs per five minutes'},
+        {'name': 'Catalog probe', 'title': 'Catalog response, measured from swf-monitor',
+         'section': _catalog_section('How the catalog answered'),
+         'prefixes': ['catpr_'], 'ids': [],
+         'order': ['catpr_tls', 'catpr_ping', 'catpr_read'],
+         'panel_px': 130, 'units': 'ms (timeouts drawn at the timeout)'},
+        {'name': 'Catalog registration time', 'title': 'Registration stage wall time, registered jobs',
+         'prefixes': ['catlt_'], 'ids': [],
+         'order': ['catlt_median', 'catlt_p90'],
+         'panel_px': 130, 'units': 'seconds'},
+        {'name': 'Catalog registrar', 'title': 'Registrations owed',
+         'section': _catalog_section('What is owed'),
+         'prefixes': [], 'ids': ['catrr_pending', 'catrr_oldest_h'],
+         'order': ['catrr_pending', 'catrr_oldest_h'],
+         'default_off_ids': ['catrr_oldest_h'],
+         'panel_px': 110, 'units': 'pending jobs (24 h) · hours'},
+    )
+
+
+CATALOG_FAMILIES = ('Catalog registrations', 'Catalog failed by exit',
+                    'Catalog probe', 'Catalog registration time',
+                    'Catalog registrar')
+
+
+def _catalog_focus_view():
+    """The Catalog focus tab (docs/SNAPPER_CATALOG.md): what the jobs
+    asked of the JLab Rucio catalog, what they got, how it answered,
+    and what is owed, on one axis; the cut is the catalog card."""
+    return {
+        'param': 'catalog',
+        'label': 'Catalog',
+        'view_label': 'Rucio Catalog',
+        'selector_label': 'Catalog',
+        'cache_series': True,
+        'components': ('catalog',),
+        'prewarm_series': True,
+        'note': ('Registrations count the production jobs that ended in each '
+                 'five-minute interval by what their payload reported of the '
+                 'JLab Rucio catalog; the probe is measured from swf-monitor. '
+                 'Click the plot for the catalog\'s standing at that instant.'),
+        'default': 'overall',
+        'default_window': '24h',
+        'options': [{'value': 'overall', 'label': 'JLab Rucio',
+                     'families': list(CATALOG_FAMILIES),
+                     'component': 'catalog'}],
+    }
+
+
+def _catalog_card(data, previous_data, ctx):
+    """The catalog cut card: the verdicts with their thresholds, the
+    probe timings, the interval's registrations by outcome, queue and
+    exit code, the registration times, and the backlog."""
+    if not data or 'registrations' not in data:
+        return None
+    assessment = data.get('assessment') or {}
+    thresholds = assessment.get('thresholds') or {}
+    threshold_text = {
+        'probe': (f"warn when a probe fails or exceeds {thresholds.get('catalog_probe_slow_ms')} ms "
+                  f"(timeout {thresholds.get('catalog_probe_timeout_s')} s)"),
+        'failed_share': (f"warn when at least {thresholds.get('catalog_failed_share')} of registrations "
+                         f"fail, over at least {thresholds.get('catalog_failed_floor')} attempts"),
+        'pending_backlog': f"warn when the oldest pending registration is over {thresholds.get('catalog_pending_old_hours')} h",
+    }
+    verdicts = [{'name': name.replace('_', ' '), 'value': value,
+                 'chip': cut_chip('ok' if value == 'ok' else 'warning' if value == 'warning' else 'unknown'),
+                 'threshold': threshold_text.get(name, '')}
+                for name, value in (assessment.get('verdicts') or {}).items()]
+    probe = data.get('probe') or {}
+    probe_rows = [{'name': _CATALOG_PROBE_LABELS.get(k, k), **(probe.get(k) or {})}
+                  for k in ('tls', 'ping', 'read')] if 'error' not in probe else []
+    reg = data.get('registrations') or {}
+    by_outcome = [{'outcome': o, 'label': _CATALOG_OUTCOME_LABELS.get(o, o),
+                   'count': int((reg.get('by_outcome') or {}).get(o) or 0),
+                   'color': _CATALOG_OUTCOME_COLORS.get(o)}
+                  for o in _CATALOG_OUTCOME_ORDER if (reg.get('by_outcome') or {}).get(o)]
+    queue_rows = []
+    for queue, counts in sorted((reg.get('by_queue') or {}).items(),
+                                key=lambda kv: -sum(kv[1].values())):
+        queue_rows.append({'queue': queue, 'total': sum(counts.values()),
+                           'registered': counts.get('registered', 0),
+                           'pending': counts.get('pending', 0),
+                           'failed': counts.get('failed', 0),
+                           'not_reached': counts.get('not_reached', 0)})
+    return {
+        'kind': 'catalog',
+        'overall': assessment.get('overall') or 'unknown',
+        'overall_chip': cut_chip('ok' if assessment.get('overall') == 'ok'
+                                 else 'warning' if assessment.get('overall') == 'warning' else 'unknown'),
+        'verdicts': verdicts,
+        'interval': data.get('interval') or {},
+        'probe_host': probe.get('host') or '', 'probe_error': probe.get('error') or '',
+        'probe_rows': probe_rows,
+        'registrations': {'jobs': reg.get('jobs'), 'attempted': reg.get('attempted'),
+                          'failed_share': reg.get('failed_share'),
+                          'failed_by_exit': sorted((reg.get('failed_by_exit') or {}).items()),
+                          'versions': sorted((reg.get('payload_versions') or {}).items()),
+                          'error': reg.get('error') or ''},
+        'by_outcome': by_outcome, 'queue_rows': queue_rows,
+        'latency': data.get('latency') or {},
+        'registrar': data.get('registrar') or {},
     }
 
 
@@ -1716,6 +6061,38 @@ def _health_url():
     from django.urls import reverse
 
     return reverse('monitor_app:system_status')
+
+
+def _publication_too_large(scope, name, size, limit):
+    """Record a Snapper publication rejected at snapper-ai's data limit as
+    an alarm incident; the capcom subscription delivers it. snapper-ai
+    calls this inside the publication's transaction, which then rolls
+    back, so the record is written from a separate thread on that
+    thread's own database connection and survives the rollback."""
+    import threading
+
+    from django.db import connections
+
+    from .epicprod_logging import log_epicprod_action
+
+    def record():
+        try:
+            log_epicprod_action(
+                'snapper', 'snapper_publication_too_large',
+                subject_type='snapper_component', subject_key=f'{scope}:{name}',
+                outcome='error', sublevel='normal', level=logging.ERROR,
+                message=(f'Snapper {scope}:{name} publication rejected: '
+                         f'{size} bytes, over the {limit}-byte limit'),
+                severity='alarm',
+                reason=(f'{size} canonical bytes, over the {limit}-byte limit; '
+                        f'the component record stops advancing'),
+                size_bytes=size, limit_bytes=limit)
+        finally:
+            connections.close_all()
+
+    worker = threading.Thread(target=record, name='snapper-too-large')
+    worker.start()
+    worker.join()
 
 
 def register_snapper_providers():
@@ -1730,13 +6107,25 @@ def register_snapper_providers():
         scope='epicprod',
         label='epicprod',
         curve_values=_epicprod_curve_values,
+        event_values=_epicprod_event_values,
+        series_transform=_epicprod_series_transform,
+        cut_summaries={'platform': _platform_cut_summary},
         curve_label=_epicprod_curve_label,
         curve_color=_epicprod_curve_color,
         curve_groups=_epicprod_groups,
-        scope_curve_groups=EPICPROD_GROUPS,
-        focus_view=(_delivery_focus_view, _site_focus_view),
+        scope_curve_groups=_epicprod_scope_groups,
+        # The report page's cut carries the scope's own cards; errors
+        # and platform have their focus views and their cards live there.
+        scope_components=('panda', 'health', 'delivery'),
+        focus_view=(_delivery_focus_view, _site_focus_view,
+                    _errors_focus_view, _platform_focus_view,
+                    _storage_focus_view, _catalog_focus_view),
         component_cards={'panda': _panda_card,
-                         'delivery': _delivery_card},
+                         'delivery': _delivery_card,
+                         'errors': _errors_card,
+                         'platform': _platform_card,
+                         'storage': _storage_card,
+                         'catalog': _catalog_card},
         card_template=CARD_TEMPLATE,
         annotate_references=annotate_references,
     ))
@@ -1764,4 +6153,5 @@ def register_snapper_providers():
         scheduler_status=_scheduler_status,
         health_url=_health_url,
         series_cache=_series_cache,
+        publication_too_large=_publication_too_large,
     )

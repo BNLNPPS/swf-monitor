@@ -1,0 +1,21 @@
+[Unit]
+Description=SWF TeamComms Mattermost live-feed bridge
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/data/wenauseic/.config/teamcomms/swf-events/connector-token
+ConditionPathExists=/data/wenauseic/.config/teamcomms/swf-events/live-bot-token
+
+[Service]
+Type=simple
+User=wenauseic
+Group=eic
+WorkingDirectory=/opt/swf-monitor/current
+Environment=PYTHONUNBUFFERED=1
+UMask=0077
+ExecStart=/opt/swf-monitor/current/.venv/bin/python -m teamcomms.connectors.cli --config /data/wenauseic/.config/teamcomms/swf-events/connector.json mattermost --routes /data/wenauseic/.config/teamcomms/swf-events/mattermost.json
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=40
+
+[Install]
+WantedBy=multi-user.target

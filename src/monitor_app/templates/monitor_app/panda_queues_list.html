@@ -8,13 +8,11 @@
 </p>
 {% if user.is_superuser %}
 <p class="d-flex justify-content-end align-items-center">
-    <span class="text-muted me-2">Superusers can</span>
-    <a href="{% url 'monitor_app:update_panda_queues_from_github' %}" 
-       class="btn btn-warning"
-       onclick="return confirm('This will replace all PanDA queue data with the latest from GitHub main branch. Continue?')">
-        update the JSON data
+    <span class="text-muted me-2">The list follows PanDA's queue table every five minutes; superusers can</span>
+    <a href="{% url 'monitor_app:update_panda_queues_from_github' %}"
+       class="btn btn-primary btn-sm">
+        refresh it now
     </a>
-    <span class="text-muted ms-2">from GitHub main</span>
 </p>
 {% endif %}
 {% endblock %}

@@ -12,6 +12,9 @@ explicit JSON, never empty results.
 
 from django.http import JsonResponse
 from django.utils.dateparse import parse_datetime
+from rest_framework.authentication import SessionAuthentication, TokenAuthentication
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.permissions import AllowAny
 
 from snapper_ai.queries import (InvalidQuery, SnapNotFound, SnapperError,
                                 changes_between, component_history,
@@ -46,6 +49,59 @@ def _run(query):
 def snapper_latest(request, scope):
     """GET /api/snapper/<scope>/latest/"""
     return _run(lambda: latest(scope))
+
+
+def _run_dict(query):
+    """As _run, for products that return plain dicts."""
+    try:
+        payload = query()
+    except InvalidQuery as e:
+        return JsonResponse({'error': str(e)}, status=400)
+    except SnapNotFound as e:
+        return JsonResponse({'error': str(e)}, status=404)
+    except SnapperError as e:
+        return JsonResponse({'error': str(e)}, status=500)
+    return JsonResponse(payload, json_dumps_params={'default': str})
+
+
+def snapper_series(request, scope):
+    """GET /api/snapper/<scope>/series/?focus=<view>&window=24h
+    [&selection=a,b][&<selector param>=value]
+
+    The focus view's series product as data — the same cached product
+    the page plots (snapper-ai PLAN.md section 9)."""
+    from snapper_ai.products import series_product
+
+    def query():
+        focus = (request.GET.get('focus') or '').strip()
+        if not focus:
+            raise InvalidQuery('focus names the view, e.g. focus=platform')
+        reserved = {'focus', 'window', 'selection'}
+        selectors = {k: v for k, v in request.GET.items()
+                     if k not in reserved}
+        return series_product(
+            scope, focus, window=request.GET.get('window') or '24h',
+            selection=request.GET.get('selection'), selectors=selectors)
+    return _run_dict(query)
+
+
+def snapper_cut_summary(request, scope):
+    """GET /api/snapper/<scope>/cut-summary/?focus=<view>&time=<ISO>
+    [&since=<ISO>]
+
+    The summary at a cut as data: each plotted metric's value at the
+    instant, its delta, and its statistics since the basis."""
+    from snapper_ai.products import cut_summary
+
+    def query():
+        focus = (request.GET.get('focus') or '').strip()
+        if not focus:
+            raise InvalidQuery('focus names the view, e.g. focus=platform')
+        since = request.GET.get('since')
+        return cut_summary(
+            scope, focus, _parse_time(request.GET.get('time'), 'time'),
+            since=_parse_time(since, 'since') if since else None)
+    return _run_dict(query)
 
 
 def snapper_state_at(request, scope):
@@ -143,3 +199,83 @@ def snapper_context(request, scope):
     payload = result.as_dict()
     payload['references'] = annotate_references(payload['references'])
     return JsonResponse(payload, json_dumps_params={'default': str})
+
+
+def segfault_catalog_api(request):
+    """GET /api/segfaults/?status=&class=&limit=
+
+    The segfault catalog (swf-epicprod docs/SEGFAULT_DIAGNOSIS.md) for
+    out-of-process consumers, the payload of panda_segfault_catalog.
+    """
+    from ..segfaults import catalog
+    try:
+        limit = int(request.GET.get('limit') or 200)
+    except ValueError:
+        return JsonResponse({'error': 'limit must be an integer'}, status=400)
+    if limit < 1:
+        return JsonResponse({'error': 'limit must be positive'}, status=400)
+    rows, counts = catalog(status=request.GET.get('status') or None,
+                           class_hint=request.GET.get('class') or None,
+                           limit=min(limit, 2000))
+    return JsonResponse({'class_counts': counts, 'total_count': len(rows),
+                         'signatures': rows},
+                        json_dumps_params={'default': str})
+
+
+def segfault_signature_api(request, key):
+    """GET /api/segfaults/<key>/?jobs_limit=
+
+    One crash signature with its crashed jobs, the payload of
+    panda_segfault_signature.
+    """
+    from ..segfaults import signature_detail
+    try:
+        jobs_limit = min(int(request.GET.get('jobs_limit') or 200), 5000)
+    except ValueError:
+        return JsonResponse({'error': 'jobs_limit must be an integer'}, status=400)
+    if jobs_limit < 0:
+        return JsonResponse({'error': 'jobs_limit must not be negative'}, status=400)
+    detail = signature_detail(key, jobs_limit=jobs_limit)
+    if detail is None:
+        return JsonResponse({'error': f'no crash signature {key}'}, status=404)
+    return JsonResponse(detail, json_dumps_params={'default': str})
+
+
+@api_view(['GET', 'POST'])
+@authentication_classes([SessionAuthentication, TokenAuthentication])
+@permission_classes([AllowAny])
+def segfault_findings_api(request):
+    """GET /api/segfaults/findings/ — the curated findings joined to the
+    catalog (the payload of panda_segfault_findings).
+    POST, under a token or a signed-in account with authority: create or
+    update one finding; JSON body {name, title, what, date, frame, stage,
+    class, action, standing, fix, notes, sources, signatures,
+    model_reading, changed_by}."""
+    import json as _json
+    from ..segfaults import findings, set_finding
+    if request.method == 'GET':
+        entries, error = findings()
+        return JsonResponse({'findings': entries, 'error': error or None},
+                            json_dumps_params={'default': str})
+    # A DRF view, so a token POST needs no CSRF cookie while a session POST
+    # keeps CSRF protection (SessionAuthentication enforces it).
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'a token or a signed-in account is required'}, status=403)
+    token_ok = request.auth is not None
+    try:
+        body = _json.loads(request.body or b'{}')
+    except ValueError:
+        return JsonResponse({'error': 'the body must be JSON'}, status=400)
+    name = str(body.get('name') or '').strip()
+    if not name:
+        return JsonResponse({'error': 'name is required'}, status=400)
+    fields = {k: body[k] for k in ('title', 'what', 'date', 'frame', 'stage', 'class', 'action',
+                                   'standing', 'fix', 'notes', 'sources', 'signatures',
+                                   'model_reading') if k in body}
+    if not fields:
+        return JsonResponse({'error': 'nothing to set'}, status=400)
+    who = (str(body.get('changed_by') or request.user.username) if token_ok
+           else request.user.username)
+    entry, created = set_finding(name, fields, who)
+    return JsonResponse({'name': name, 'created': created, 'versions': entry.versions.count(),
+                         'title': entry.title, 'standing': entry.status})

@@ -19,7 +19,6 @@ ASSESSMENT_POLICY_VERSION = "swf-system-status-v1"
 EVENT_RESOLVER = "swf-system-status-history"
 MAX_CHECKS = 128
 MAX_SUMMARY_LENGTH = 500
-MAX_SERIALIZED_BYTES = 64 * 1024
 
 HEALTH_SCOPE_CHECKS = {
     "testbed": (
@@ -48,7 +47,6 @@ HEALTH_REGISTRATION = {
     "visibility": "public",
     "owning_subsystem": "swf-monitor System Status",
     "assessment_policy": ASSESSMENT_POLICY_VERSION,
-    "max_serialized_bytes": MAX_SERIALIZED_BYTES,
     "quantities": {
         "overall_status": {
             "path": "overall.status",

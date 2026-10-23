@@ -1,0 +1,120 @@
+{% extends 'base.html' %}
+{% load swf_fmt %}
+
+{% block title %}Segfault Catalog{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h1>Segfault Catalog</h1>
+    {% with segfault_tab='catalog' %}{% include 'monitor_app/_segfault_tabs.html' %}{% endwith %}
+    <p class="text-muted mb-2">
+        Payload crashes in ePIC production jobs, one row per crash signature: a job whose payload died on a signal
+        (exit code 128 plus the signal: 139 SIGSEGV, 134 SIGABRT, 135 SIGBUS, 136 SIGFPE), found from the PanDA record
+        and grouped by exit code and PanDA task at record level; signatures sharing a crashing frame merge into one
+        trace-level entry once dug. Rebuilt nightly by the catalog sync; the crashed jobs behind each row carry their
+        manifest row where the attempt's manifest is on record.
+    </p>
+    <details class="mb-3">
+        <summary>Definitions</summary>
+        <ul class="mb-2 mt-1">
+            <li><strong>Class</strong>, read from the record alone:
+                <ul>
+                    <li><strong>Storm</strong>: a fixed time to death across many nodes, one deterministic cause (crash rate at or above 20% and the middle half of the deaths within 20% of the median).</li>
+                    <li><strong>Config dead</strong>: the configuration cannot run at all (95% or more of the task's jobs crash).</li>
+                    <li><strong>Sparse</strong>: a few crashes at varying times, about one per host; where event-dependent crashes live (under 5% of the task's jobs).</li>
+                    <li><strong>Abort</strong>: exit 134, the program aborted itself (an exception or assertion), whatever the rate.</li>
+                    <li><strong>Mixed</strong>: none of the above; a class to look at, not a verdict.</li>
+                </ul>
+            </li>
+            <li><strong>Status</strong>, where the signature stands from first sighting to a verdict:
+                <ul>
+                    <li><strong>new</strong>: on the record, nothing read yet.</li>
+                    <li><strong>digging</strong>: a representative job's payload log is being fetched.</li>
+                    <li><strong>traced</strong>: the crashing frame is on record.</li>
+                    <li><strong>reproducing</strong>: the crashed row is running again as canary jobs on the production queue and the reference queue.</li>
+                    <li><strong>reproduced</strong>: a rerun crashed (on both queues, or on the production queue alone: site dependent).</li>
+                    <li><strong>not reproduced</strong>: neither rerun crashed.</li>
+                    <li><strong>diagnosed</strong>: the LLM study has classified the crash and named the operator action.</li>
+                    <li><strong>handed off</strong>: the study handed the crash to the software experts with the reproduction package.</li>
+                    <li><strong>fixed</strong>: a fix is named (the fixing image or commit); the residual rerun under it closes the signature.</li>
+                    <li><strong>accepted</strong>: production accepted the stated loss.</li>
+                </ul>
+            </li>
+            <li><strong>Manifest row</strong>: the unit of work of a production job, one line of the task's manifest: the EVGEN input file, its extension, the number of events, and the chunk index; the payload skips chunk × events into the file, simulates and reconstructs those events with the seed chunk + 1, and writes one output named by the row. A crashed job's row is what a reproduction runs again.</li>
+            <li><strong>Rows lost</strong>: crashed manifest rows with no delivered output in any attempt of the configuration (and the events they carried).</li>
+            <li><strong>TTD</strong>, time to death: minutes from job start to the crash, the 10th and 50th percentile over the signature's crashed jobs.</li>
+            <li><strong>Rate</strong>: the signature's crashes over the task's finished plus failed jobs.</li>
+            <li><strong>Stage</strong>: where the payload died, simu (npsim) or reco (eicrecon), where the jobs' payload digest carries it.</li>
+            <li><strong>Reproduction</strong>, where the signature stands on running its crashed row again (the attempts themselves are on the Reproduction runs page):
+                <ul>
+                    <li><strong>Run needed</strong>: no attempt has settled it (none yet, or every run inconclusive) and a run can be formed: a crashed job has its manifest row and a PCS task to run under.</li>
+                    <li><strong>In progress</strong>: an attempt is queued or running.</li>
+                    <li><strong>Not runnable</strong>: no run can be formed yet; the row is unresolved (the attempt has no manifest record) or the task is not in PCS.</li>
+                    <li><strong>Reproduced</strong>, <strong>Site dependent</strong>, <strong>Not reproduced</strong>: settled by its own runs, or through another member of its frame. Runnability is read at the nightly record build.</li>
+                </ul>
+            </li>
+        </ul>
+    </details>
+    <p class="mb-2">
+        <strong class="swf-nf-shown">{{ shown }}</strong> of <strong>{{ total }}</strong> signatures,
+        <strong>{{ crashes_total }}</strong> crashed jobs in the inventory{% if repro_counts.total %};
+        <strong>{{ repro_counts.active }}</strong> reproduction runs active, <strong>{{ repro_counts.ended }}</strong> ended{% endif %};
+        <strong>{{ run_needed }}</strong> signature{{ run_needed|pluralize }} still need{{ run_needed|pluralize:"s," }} a run
+        (the Reproduction bar's <a href="{% url 'monitor_app:panda_segfaults' %}?reproduction=run_needed">run needed</a> selection).
+    </p>
+
+    {# Narrowing filter (monitor_app/narrowing_filter.py): one value per facet, rows are the intersection, every bar counts within the selection. #}
+    {% include 'monitor_app/_narrowing_filter.html' %}
+
+    <style>
+      /* The signature and configuration cells wrap inside a bound, so the
+         frame and the composed name do not set the table's width. */
+      #segfault-table td.sig-col { width: 20em; min-width: 17em; max-width: 20em; overflow-wrap: anywhere; }
+      #segfault-table td.cfg-col { width: 24em; min-width: 18em; max-width: 24em; overflow-wrap: anywhere; }
+      #segfault-table td.class-col { max-width: 7em; }
+      #segfault-table td.tasks-col { max-width: 6em; }
+    </style>
+    <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable" id="segfault-table" data-swf-order="0,desc">
+        <thead>
+            <tr>
+                <th>Last seen</th>
+                <th>Class</th>
+                <th>Signature</th>
+                <th>Configuration</th>
+                <th>Tasks</th>
+                <th>Crashes</th>
+                <th>Rate</th>
+                <th title="Time to death: minutes from job start to the crash, p10 / p50">TTD</th>
+                <th>Queues</th>
+                <th title="Distinct worker hosts among the crashed jobs">Hosts</th>
+                <th title="Crashed manifest rows with no delivered output in any attempt">Rows lost</th>
+                <th>Stage</th>
+                <th>Status</th>
+                <th title="Reruns of a crashed row as canary jobs: attempts still queued or running, and attempts ended; a trace-level row counts its members' attempts">Reproductions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rows %}
+            <tr data-nf="{{ r.nf_attr }}"{% if r.nf_hidden %} class="swf-nf-hidden"{% endif %}>
+                <td data-order="{{ r.last_seen|default:'' }}">{% with t=r.last_seen|fmt_dt %}{{ t|slice:":8" }}<br>{{ t|slice:"9:" }}{% endwith %}</td>
+                <td class="class-col">{{ r.class_label }}</td>
+                <td class="sig-col"><a href="{% url 'monitor_app:panda_segfault_detail' key=r.key %}">{{ r.key }}</a>{% if r.finding_anchor %} <a href="{% url 'monitor_app:panda_segfault_findings' %}#{{ r.finding_anchor }}" title="The curated finding for this crashing frame">finding</a>{% endif %}<br>
+                    exit {{ r.exit_code }}, {{ r.signal_name }}{% if r.frame %}; {{ r.frame }}{% endif %}</td>
+                <td class="cfg-col">{% if r.configuration.prod_task %}{{ r.configuration.prod_task }}{% else %}{{ r.task_names.0|default:'' }}{% endif %}
+                    {% if r.image %}<br>{{ r.image }}{% endif %}</td>
+                <td class="tasks-col" data-order="{{ r.tasks }}">{% if r.task_ids %}<a href="{% url 'monitor_app:panda_task_detail' jeditaskid=r.task_ids.0 %}">{{ r.task_ids.0 }}</a>{% if r.tasks > 1 %}<br>&amp; {{ r.tasks|add:"-1" }} other{{ r.tasks|add:"-1"|pluralize }}{% endif %}{% endif %}</td>
+                <td data-order="{{ r.crashes }}">{{ r.crashes }}</td>
+                <td data-order="{{ r.rate|default_if_none:'-1' }}">{{ r.rate_pct }}</td>
+                <td data-order="{{ r.minutes_p50|default_if_none:'-1' }}">{% if r.minutes_p50 is not None %}{{ r.minutes_p10 }} / {{ r.minutes_p50 }}{% endif %}</td>
+                <td>{% for s in r.sites %}{{ s.site }} ({{ s.crashes }}){% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
+                <td data-order="{{ r.hosts|default_if_none:'-1' }}">{{ r.hosts|default_if_none:'' }}</td>
+                <td data-order="{{ r.rows_lost|default_if_none:'-1' }}" title="{{ r.rows_lost_note }}">{% if r.rows_lost is not None %}{{ r.rows_lost }}{% if r.events_lost %}<br>{{ r.events_lost }} ev{% endif %}{% endif %}</td>
+                <td>{% for stage, n in r.stages.items %}{{ stage }} ({{ n }}){% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
+                <td>{{ r.status_label }}</td>
+                <td data-order="{{ r.repro_active }}{{ r.repro_ended|stringformat:'04d' }}">{{ r.repro_state_label }}{% if r.repro_active or r.repro_ended %}<br><a href="{% url 'monitor_app:panda_segfault_reproductions' %}?signature={{ r.key|urlencode }}">{% if r.repro_active %}{{ r.repro_active }} active{% endif %}{% if r.repro_active and r.repro_ended %}, {% endif %}{% if r.repro_ended %}{{ r.repro_ended }} ended{% endif %}</a>{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
