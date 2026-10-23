@@ -19,6 +19,10 @@ from django.db import connections
 from django.utils import timezone
 
 from monitor_app.short_names import short_name
+from monitor_app import error_corrections
+from monitor_app.panda.constants import ERROR_COMPONENTS
+from monitor_app.panda.error_labels import category_label
+from monitor_app.snapper_errors import _classify_sql
 
 logger = logging.getLogger(__name__)
 
@@ -244,20 +248,52 @@ class _Build:
         return out
 
     def top_failures(self):
-        """The last hour's failures per queue by error, largest first."""
-        out = {}
+        """The last hour's failures per queue by Snapper error category,
+        largest first: component x code, the job's first nonzero error
+        component in ERROR_COMPONENTS order (SNAPPER_ERRORS.md), labelled
+        from the code catalogs and read through the error-correction root
+        (ERROR_ATTRIBUTION.md), so a label a rule marks unreliable shows
+        its corrected reading. A failed job with no error code in any of
+        the seven components reads as such; nothing reads "unattributed"
+        (Torre, 2026-10-23: the OSG failures of 41039 and 41040 were DDM
+        200, the log-name collision, and the room called them that)."""
+        comp_case, code_case, diag_case = _classify_sql()
+        fields = ', '.join(f'"{c["code"]}", "{c["diag"]}"' for c in ERROR_COMPONENTS)
         sql = f'''
-            SELECT computingsite, exeerrorcode, piloterrorcode, COUNT(*) FROM (
-              SELECT computingsite, exeerrorcode, piloterrorcode FROM "{self.S}"."jobsactive4"
-               WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus = 'failed'
-              UNION ALL
-              SELECT computingsite, exeerrorcode, piloterrorcode FROM "{self.S}"."jobsarchived4"
-               WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus = 'failed') t
-            GROUP BY 1, 2, 3 ORDER BY 4 DESC'''
-        for site, exe, pilot, n in _rows(sql, (self.hour_ago, self.hour_ago)):
-            label = (f'payload exit {exe}' if exe else
-                     f'pilot error {pilot}' if pilot else 'unattributed')
-            out.setdefault(site, []).append((label, int(n)))
+            SELECT computingsite, component, code, MIN(diag), transexitcode, COUNT(*) FROM (
+              SELECT computingsite, transexitcode,
+                     CASE {comp_case} ELSE 'none' END AS component,
+                     CASE {code_case} ELSE 0 END AS code,
+                     CASE {diag_case} ELSE '' END AS diag
+                FROM (
+                  SELECT computingsite, transexitcode, {fields} FROM "{self.S}"."jobsactive4"
+                   WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus = 'failed'
+                  UNION ALL
+                  SELECT computingsite, transexitcode, {fields} FROM "{self.S}"."jobsarchived4"
+                   WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus = 'failed') j) t
+            GROUP BY 1, 2, 3, 5'''
+        cats = {}
+        for site, component, code, diag, exitcode, n in _rows(sql, (self.hour_ago, self.hour_ago)):
+            cat = cats.setdefault((site, component, int(code or 0)),
+                                  {'n': 0, 'diag': diag or '', 'exits': {}})
+            cat['n'] += int(n)
+            if exitcode not in (None, ''):
+                cat['exits'][str(exitcode)] = cat['exits'].get(str(exitcode), 0) + int(n)
+        out = {}
+        for (site, component, code), cat in cats.items():
+            if component == 'none':
+                label = 'failed with no error code in any component'
+            else:
+                label = category_label(component, code)
+                try:
+                    rule = error_corrections.match(component, code, cat['diag'], sites=[site])
+                    if rule is not None:
+                        label = error_corrections.correction(rule, cat['exits'])['label']
+                except Exception as e:  # a correction must never take the room down
+                    logger.error('error-correction read failed for %s %s: %s', component, code, e)
+            out.setdefault(site, []).append((label, cat['n']))
+        for site in out:
+            out[site].sort(key=lambda t: -t[1])
         return out
 
     def production_alarms(self):
@@ -1113,7 +1149,7 @@ FRONT_STATES = {
     'awaiting_observation': ('grey', 'waiting for its last submission to activate'),
     'idle_capacity': ('amber', 'capacity idle while work is queued: the queue is not '
                                'pulling it (worker supply or site, not the front)'),
-    'degraded': ('red', 'held, a gate is red'),
+    'degraded': ('red', 'holds new releases, a gate is red'),
     'half_open': ('amber', 'trying one task after a gate cleared'),
     'held': ('grey', 'held'),
     'oversize': ('amber', 'the next task alone is too large, waiting for the operator'),

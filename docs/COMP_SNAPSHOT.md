@@ -213,7 +213,13 @@ A queue's parts:
 - `canary`, the queue's canary verdict as the front reads it: `healthy`
   is green, `failing` red, `insufficient` and `unknown` grey.
 - `snapper_errors`: the last hour's failures by Snapper error category
-  (SNAPPER_ERRORS.md). The note names the top category with its count.
+  (SNAPPER_ERRORS.md): component x code, the job's first nonzero error
+  component over all seven, labelled from the code catalogs
+  (`panda/error_labels.category_label`) and read through the
+  error-correction root (ERROR_ATTRIBUTION.md), so a label a rule marks
+  unreliable shows its corrected reading. The note names the top category
+  with its count; no failure reads "unattributed" (23 October 2026: the
+  OSG failures were DDM 200, the log-name collision of 41039 and 41040).
   The part is `red` when one category accounts for more than half the
   ended jobs, the signature of an outage, and `amber` when the failures
   are more than a quarter of them.
