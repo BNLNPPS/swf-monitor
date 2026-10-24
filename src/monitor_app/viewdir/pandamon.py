@@ -2640,7 +2640,8 @@ def _node_declines_product():
         logger.error('node declines product carries an error: %s',
                      value['error'])
         return []
-    return value.get('nodes') or []
+    return [row for row in value.get('nodes') or []
+            if row.get('queue') not in settings.CANARY_CLOSED_QUEUES]
 
 
 def _exclusions_context():
@@ -2663,7 +2664,8 @@ def _exclusions_context():
 
     context = {
         'exclusion_as_of': osg_exclusions.AS_OF,
-        'exclusion_queues': ', '.join(osg_exclusions.QUEUES),
+        'exclusion_queues': ', '.join(q for q in osg_exclusions.QUEUES
+                                    if q not in settings.CANARY_CLOSED_QUEUES),
         'exclusion_totals': osg_exclusions.totals(),
     }
     report = latest('osgsub01') or {}
@@ -2704,8 +2706,9 @@ def _exclusions_context():
         'exclusion_reported_at': report.get('reported_at'),
         'exclusion_age_seconds': report.get('age_seconds'),
         'exclusion_file_modified': live.get('modified'),
-        'exclusion_queues': ', '.join(live.get('queues')
-                                      or osg_exclusions.QUEUES),
+        'exclusion_queues': ', '.join(q for q in (live.get('queues')
+                                      or osg_exclusions.QUEUES)
+                                    if q not in settings.CANARY_CLOSED_QUEUES),
         'exclusion_pool': (report.get('record') or {}).get('pool') or {},
     })
     return context
@@ -2924,7 +2927,8 @@ def epic_queues_list(request):
 
     # What the OSG submission excludes, and what the payload declined.
     declines_rows = sorted(
-        ({'queue': q, **d} for q, d in declines.items()),
+        ({'queue': q, **d} for q, d in declines.items()
+         if q not in settings.CANARY_CLOSED_QUEUES),
         key=lambda r: r['count'], reverse=True)
 
     return render(request, 'monitor_app/epic_queues_list.html', {
