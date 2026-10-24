@@ -364,6 +364,9 @@ shadow mode.
 
 ### Report and errors
 
+Queue labels use the shared short-name vocabulary; BNL_OSG_PanDA_1 reads
+OSG. Queue identifiers and links retain their canonical names.
+
 - `report.text`: a summary composed from the record on every build,
   without an LLM: the front, each live site's running and last-hour
   outcomes, and every non-green health part.

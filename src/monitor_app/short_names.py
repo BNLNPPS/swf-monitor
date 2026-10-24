@@ -7,6 +7,7 @@ unchanged, and the full name stays in the record and on detail pages.
 
 # A name whose short form no rule below gives.
 SHORT_NAMES = {
+    'BNL_OSG_PanDA_1': 'OSG',
     'IRISHEP-SSL-UCHICAGO': 'IRISHEP',
     'UNL-PATH': 'UNL',
     'UWM-Mortimer': 'UWM',

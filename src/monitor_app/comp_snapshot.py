@@ -1350,7 +1350,7 @@ def _front_board(ready, released):
         if not waiting and q['closed']:
             continue
         lines.append(
-            f"{q['queue']}: {q['state'] or '?'}"
+            f"{short_name(q['queue'])}: {q['state'] or '?'}"
             + (f", {q['committed_h']:.1f} h committed of {q['h_low']:g}-{q['h_high']:g} h"
                if isinstance(q['committed_h'], (int, float)) and q['h_low'] is not None else '')
             + (f"; {len(waiting)} ready, next {waiting[0]['task']}" if waiting else '')
@@ -1358,7 +1358,7 @@ def _front_board(ready, released):
     decided = {q['queue'] for q in queues}
     for queue in dict.fromkeys(i['queue'] for i in items if i['queue'] not in decided):
         waiting = [i for i in items if i['queue'] == queue]
-        lines.append(f"{queue or 'no queue yet'}: {len(waiting)} ready, next {waiting[0]['task']}"
+        lines.append(f"{short_name(queue) or 'no queue yet'}: {len(waiting)} ready, next {waiting[0]['task']}"
                      + (' (queue closed, held)' if queue in closed else ''))
     return {'items': items, 'queues': queues, 'cycle_at': state.get('cycle_at'),
             'detail': '. '.join(lines) + '.'}
@@ -1914,7 +1914,7 @@ def _report_items(front, sites, storage, alarms, assessment):
             if f.get('state') and f.get('state') not in ('supplied', 'fed'):
                 reason = FRONT_REASONS.get(f.get('reason'), '')
                 items.append({'level': level,
-                              'text': f"Front, {q['id']}: {words}{', ' + reason if reason else ''}",
+                              'text': f"Front, {short_name(q['id'])}: {words}{', ' + reason if reason else ''}",
                               'link': front.get('link')})
             for name, p in q['health']['parts'].items():
                 if p['level'] not in ('amber', 'red'):
