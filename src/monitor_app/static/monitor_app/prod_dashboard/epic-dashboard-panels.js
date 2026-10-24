@@ -96,8 +96,12 @@ document.querySelectorAll('.site .queuepillar.svgcolumn').forEach(pillar=>{
  const failures=pillar.dataset.failed===undefined?(numbers[2]||0):Number(pillar.dataset.failed);
  if((pillar.dataset.failed!==undefined||pillar.title.includes('finished'))&&failures>0){
   const failed=pillarRedHeight(value,height,failures/(finished+failures),6);
-  const clip=shade+'-red';
-  red='<defs><clipPath id="'+clip+'"><rect x="0" y="3" width="18" height="'+failed+'"/></clipPath></defs><g clip-path="url(#'+clip+')"><rect x="0" y="3" width="18" height="'+failed+'" fill="#f47c70"/><ellipse cx="9" cy="'+(3+failed)+'" rx="9" ry="3" fill="#f47c70"/></g>';
+  // Keep the curved front inside the measured red extent, so a small
+  // green remainder stays visible without clipping the curve flat.
+  const radius=Math.min(3,failed/2);
+  const center=3+failed-radius;
+  red=failed>=height-6?'<path d="'+body+'" fill="#f47c70"/>':
+   '<rect x="0" y="3" width="18" height="'+(failed-radius)+'" fill="#f47c70"/><ellipse cx="9" cy="'+center+'" rx="9" ry="'+radius+'" fill="#f47c70"/>';
   top='#f47c70';
  }
  setPillarOverflow(pillar,value>sitePillarScale);
