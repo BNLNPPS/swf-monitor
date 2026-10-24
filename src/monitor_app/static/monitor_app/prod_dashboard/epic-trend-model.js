@@ -8,6 +8,13 @@ function createEpicTrendModel() {
     ? null : Math.max(0, Number(value));
   const samePoint = (a, b) => a[0] === b[0] && a[1] === b[1];
 
+  function ceilingForPeak(peak) {
+    if (!(peak > 0)) return 1;
+    const step = 10 ** (Math.floor(Math.log10(peak)) - 1);
+    const rounded = Number((Math.ceil(peak / step) * step).toPrecision(2));
+    return rounded < peak ? Number((rounded + step).toPrecision(2)) : rounded;
+  }
+
   function append(paths, start, end = start) {
     let path = paths[paths.length - 1];
     if (!path || !samePoint(path[path.length - 1], start)) {
@@ -52,7 +59,7 @@ function createEpicTrendModel() {
       }
     }
     // A wholly zero or unavailable series needs a nonzero denominator.
-    const ceiling = peak || 1;
+    const ceiling = ceilingForPeak(peak);
     const curves = columns.map(column => ({key: column.key,
       color: palette[column.key] || column.color || palette.finished,
       ...trace(column.values || [], ceiling, count)}));
@@ -71,5 +78,5 @@ function createEpicTrendModel() {
     ], {count: times.length});
   }
 
-  return Object.freeze({palette, rateMultiplier, series, site});
+  return Object.freeze({palette, rateMultiplier, ceilingForPeak, series, site});
 }

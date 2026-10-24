@@ -47,7 +47,12 @@
       return;
     }
     const view = svg.viewBox.baseVal;
-    const width = view.width, bottom = view.height - 4, height = view.height - 10;
+    const width = view.width, bottom = view.height - 4, top = 18, height = bottom - top;
+    const grid = Array.from(svg.querySelectorAll(':scope > line'));
+    grid.forEach((line, i) => {
+      const y = top + height * (i + 1) / (grid.length + 1);
+      line.setAttribute('y1', y); line.setAttribute('y2', y);
+    });
     svg.querySelectorAll('polyline,polygon').forEach(node => node.remove());
     model.curves.forEach((curve, index) => {
       const points = segment => segment.map(([x, y]) => [width * x, bottom - height * y]);

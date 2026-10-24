@@ -38,8 +38,11 @@ quarter-hour completion bins to hourly rates. Task finish and fail
 columns retain JEDI input-file accounting; fail counts final failures
 after retries. Task rows extend downward without an internal scrollbar.
 
-Site plots use the actual peak of running, finished/hour and failed/hour
-as their common ceiling. Queued values retain their true scale: solid
+Site plots use the peak of running, finished/hour and failed/hour,
+rounded upward to two significant digits, as their common ceiling.
+The scale number sits directly below the running legend, in a reserved
+band above every curve and overflow dash. Queued values retain their
+true scale: solid
 within the range, dashed along the ceiling above it, with interpolated
 crossings. Gaps break both kinds of line. A wholly zero window uses a
 ceiling of one.
