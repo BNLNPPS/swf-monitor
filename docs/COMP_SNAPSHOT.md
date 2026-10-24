@@ -124,7 +124,7 @@ submitted through, and its queues and execute sites belong to OSG.
 
 | Site id | Name | Queues | Notes |
 |---|---|---|---|
-| `osg` | OSG | BNL_OSG_PanDA_1 | `execute_sites[]` from the jobs' pilot-reported glidein site; BNL_OSG_EPIC_PROD_1 left the floor on 2026-10-22, production having moved off it on 10-21 |
+| `osg` | OSG | BNL_OSG_PanDA_1 | `execute_sites[]` from the jobs' pilot-reported glidein site (PanDA keeps it in 36 characters, so a longer name arrives cut and is restored from the full names `short_names.py` knows: 'Center for Advanced Research Computing', not '...Computi'); BNL_OSG_EPIC_PROD_1 left the floor on 2026-10-22, production having moved off it on 10-21 |
 | `grex` | GREX | UM_GREX_PanDA_1 | University of Manitoba |
 | `compute-canada` | Compute Canada | ComputeCanada_PanDA_1 | not built: awaiting SFU's identity mapping at the CEs |
 | `nersc` | NERSC | NERSC_Perlmutter_epic, NERSC_Perlmutter_epic_es | |

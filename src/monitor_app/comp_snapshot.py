@@ -199,6 +199,22 @@ def _rows(sql, params=()):
         return cursor.fetchall()
 
 
+# PanDA keeps a job's destinationsite in 36 characters, so a longer
+# GLIDEIN_Site arrives cut ('Center for Advanced Research Computi').
+PANDA_SITE_CHARS = 36
+
+
+def _uncut_site(name):
+    """An execute site's full name: one PanDA cut at its 36 characters is
+    restored from the full names the short-name table knows; any other
+    name passes unchanged."""
+    from monitor_app.short_names import SHORT_NAMES
+    if not name or len(name) != PANDA_SITE_CHARS:
+        return name
+    full = [n for n in SHORT_NAMES if len(n) > PANDA_SITE_CHARS and n.startswith(name)]
+    return full[0] if len(full) == 1 else name
+
+
 def _task_physics(tasks):
     """What each PanDA task simulates, its tags read as physics: PCS's
     one-line summary of the task's physics configuration (process, beams,
@@ -663,7 +679,7 @@ class _Build:
             r_jobs, r_cores = running.get(name, (0, 0))
             e = ended.get(name, {'finished': 0, 'failed': 0,
                                  'finished_core_h': 0.0, 'failed_core_h': 0.0})
-            label = name or 'not reported'
+            label = _uncut_site(name) or 'not reported'
             out.append({
                 'id': re.sub(r'[^a-z0-9]+', '-', label.lower()).strip('-'),
                 'name': label,
