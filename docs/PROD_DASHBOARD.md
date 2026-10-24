@@ -136,7 +136,8 @@ the title-row count opens the day's production task list. Hover text
 carries the task's completion status, queue, end time and file outcomes.
 Done tasks are green; finished tasks with lost input files are amber.
 
-Arrivals at JLab over the last 12 hours appear below Completed tasks,
+Data arrivals, the science reaching JLab over the last 12 hours, appear
+below Completed tasks,
 one row per physics configuration, newest arrival first, from the
 snapshot's `arrivals` record (Torre Wenaus, 2026-10-24). A row reads the
 physics in short (`label`), the RECO files registered in the window and

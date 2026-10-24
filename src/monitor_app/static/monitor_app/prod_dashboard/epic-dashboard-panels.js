@@ -46,7 +46,7 @@ completedStrip.innerHTML='<div class="panelhead"><strong>Completed tasks · 24h<
 flightColumn.appendChild(completedStrip);
 const arrivalsStrip=document.createElement('section');
 arrivalsStrip.id='pc-arrivals';arrivalsStrip.className='panel';
-arrivalsStrip.innerHTML='<div class="panelhead"><strong>Arrivals at JLab · 12h</strong><span class="right small arrivals-count">—</span></div><div class="arrivals-list"></div>';
+arrivalsStrip.innerHTML='<div class="panelhead"><strong>Data arrivals · 12h</strong><span class="right small arrivals-count">—</span></div><div class="arrivals-list"></div>';
 flightColumn.appendChild(arrivalsStrip);
 const campaignStrip=document.createElement('div');
 campaignStrip.id='campaign-summary';campaignStrip.className='flowcell';
