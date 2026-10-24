@@ -34,52 +34,47 @@
   const aliases = {osg: 'OSG', grex: 'GREX', nersc: 'Perlmutter', google: 'Google',
     'compute-canada': 'Compute Canada', jlab: 'JLab'};
   const executorModel = document.querySelector('.exec').cloneNode(true);
+  const trendModel = createEpicTrendModel();
 
-  function plot(container, columns, times) {
+  function plot(container, model, times) {
     if (!container) return;
     const svg = container.querySelector('svg');
     if (!svg) return;
-    if (!times || !times.length) {
+    if (!times || !times.length || !model || !model.hasData) {
       svg.querySelectorAll('polyline,polygon').forEach(node => node.remove());
       text(container.querySelector('.chart-y-label'), '—');
       text(container.querySelector('.axis span:last-child'), '—');
       return;
     }
-    const palette = container.closest('.site')
-      ? ['#edf2f1', '#c4b6a2', '#7fce95', '#f47c70']
-      : ['#7fce95'];
     const view = svg.viewBox.baseVal;
     const width = view.width, bottom = view.height - 4, height = view.height - 10;
-    const peak = Math.max(1, ...columns.flat().filter(value => value != null));
-    const order = 10 ** Math.floor(Math.log10(peak));
-    const scale = [1, 2, 5, 10].map(n => n * order).find(n => n >= peak);
     svg.querySelectorAll('polyline,polygon').forEach(node => node.remove());
-    columns.forEach((values, index) => {
-      let segment = [];
-      function flush() {
-        if (!segment.length) return;
+    model.curves.forEach((curve, index) => {
+      const points = segment => segment.map(([x, y]) => [width * x, bottom - height * y]);
+      curve.solid.forEach(path => {
+        const segment = points(path);
         if (index === 0) {
           const fill = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
           fill.setAttribute('points', segment[0][0] + ',' + bottom + ' ' +
             segment.map(p => p.join(',')).join(' ') + ' ' + segment[segment.length - 1][0] + ',' + bottom);
-          fill.setAttribute('fill', palette[0] || '#7fce95');
+          fill.setAttribute('fill', curve.color);
           fill.setAttribute('opacity', '.23'); svg.appendChild(fill);
         }
+      });
+      function draw(path, overflow) {
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-        line.setAttribute('points', segment.map(p => p.join(',')).join(' '));
+        line.setAttribute('points', points(path).map(p => p.join(',')).join(' '));
         line.setAttribute('fill', 'none');
-        line.setAttribute('stroke', palette[index]);
+        line.setAttribute('stroke', curve.color);
         line.setAttribute('stroke-width', '1.7');
         line.setAttribute('vector-effect', 'non-scaling-stroke');
-        svg.appendChild(line); segment = [];
+        if (overflow) line.setAttribute('stroke-dasharray', '4 3');
+        svg.appendChild(line);
       }
-      values.forEach((value, i) => {
-        if (value == null) { flush(); return; }
-        segment.push([width * i / Math.max(1, times.length - 1), bottom - height * value / scale]);
-      });
-      flush();
+      curve.solid.forEach(path => draw(path, false));
+      curve.overflow.forEach(path => draw(path, true));
     });
-    text(container.querySelector('.chart-y-label'), number(scale));
+    text(container.querySelector('.chart-y-label'), number(model.ceiling));
     text(container.querySelector('.axis span:last-child'), et(times[times.length - 1]));
   }
 
@@ -136,10 +131,8 @@
       }
       if (node.firstElementChild && node.firstElementChild.tagName === 'A') node.firstElementChild.title = titles[i];
     });
-    if (trend) plot(panel.querySelector('.plot'), [trend.running, trend.queued,
-      trend.finished.map(n => n == null ? null : n * 4),
-      trend.failed.map(n => n == null ? null : n * 4)], current.trends.t);
-    else plot(panel.querySelector('.plot'), [], []);
+    if (trend) plot(panel.querySelector('.plot'), trendModel.site(trend, current.trends.t), current.trends.t);
+    else plot(panel.querySelector('.plot'), null, []);
   }
 
   function renderExecutors(sites) {
@@ -275,9 +268,12 @@
         (science.failed_1h == null ? 'muted' : science.failed_1h > 0 ? 'gold' : 'green');
       incomplete.dataset.drilldown = science.links && science.links.failed || '';
       text(incomplete, number(science.failed_1h) + ' incomplete');
-      if (science.flow) plot(document.querySelector('#storage .plot'),
-        [science.flow.files.map(n => n == null ? null : n * 4)], record.trends && record.trends.t);
-      else plot(document.querySelector('#storage .plot'), [], []);
+      if (science.flow) {
+        const times = record.trends && record.trends.t || [];
+        plot(document.querySelector('#storage .plot'), trendModel.series([
+          {key: 'files', values: science.flow.files.map(n => n == null ? null : n * trendModel.rateMultiplier)},
+        ], {count: times.length}), times);
+      } else plot(document.querySelector('#storage .plot'), null, []);
       const capacity = science.capacity;
       if (capacity) {
         const detail = document.querySelector('.science-storage .small');

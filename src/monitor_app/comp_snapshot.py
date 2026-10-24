@@ -469,7 +469,7 @@ class _Build:
                 'id': tid, 'at': at.isoformat() if at else None,
                 'level': ('red' if tid in alarmed else 'amber' if lost
                           else 'green' if running else 'grey'),
-                'title': str(tid),
+                'title': str(tid), 'name': name,
                 'counts': {'ungenerated': to_generate.get(tid, 0),
                            'queued': active - running, 'running': running,
                            'finished': done, 'failed': lost},

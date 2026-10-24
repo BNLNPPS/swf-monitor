@@ -85,7 +85,7 @@ report            {text, items: [{level, text, link}],
                    assessment: {verdict, level, at, link, campaign,
                                 title, narration}}
 live              {link, items: [{id, at, level, title, detail, link}]}
-tasks             {link, items: [{id, at, level, title, counts, detail, sites, queues, link}]}
+tasks             {link, items: [{id, name, at, level, title, counts, detail, sites, queues, link}]}
   counts          {ungenerated, queued, running, finished, failed}
 trends            {window_hours, bin_minutes, t[], sampled_at, source_as_of,
                    gaps[], sites[], link}
@@ -450,6 +450,7 @@ jobs running, starting or queued (the census's states) at a queue of
 the room shows, or rows JEDI has not yet made into jobs for such a queue.
 A task with neither is off the board. Newest first by `at`, the task's
 start (its creation before it starts), ISO UTC. `id` is the JEDI task id,
+`name` is the task's composed PanDA name, read from the same query;
 `link` the task's page; `tasks.link` lists the production tasks.
 
 The board is the tasks in flight. A line is the task id (`title`) and

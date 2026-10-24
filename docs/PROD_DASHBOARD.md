@@ -38,6 +38,12 @@ quarter-hour completion bins to hourly rates. Task finish and fail
 columns retain JEDI input-file accounting; fail counts final failures
 after retries. Task rows extend downward without an internal scrollbar.
 
+Site plots use the actual peak of running, finished/hour and failed/hour
+as their common ceiling. Queued values retain their true scale: solid
+within the range, dashed along the ceiling above it, with interpolated
+crossings. Gaps break both kinds of line. A wholly zero window uses a
+ceiling of one.
+
 Weekly average running cores appear on the active OSG and GREX title
 rows. They are time-weighted from Snapper's recorded running-core curves,
 excluding collection gaps and stale intervals. OSG includes its retired
@@ -105,6 +111,12 @@ unfinished payload registration in the same completion hour.
   tuned layout; `prod_hub_dashboard.html` embeds it.
 - `monitor_app/static/monitor_app/prod_dashboard/` contains the panel
   controls, live binding, drilldown helpers and weekly core averages.
+- `epic-trend-model.js` there supplies the ceiling, normalized solid and
+  overflow paths, and palette through `createEpicTrendModel()`. Its
+  `site(trend, times)` converts quarter-hour outcomes to hourly rates;
+  `series(columns, {count})` accepts displayed values, with
+  `overflow: true` on columns excluded from the ceiling. The dashboard and room
+  consume this same pure module; neither computes separate clipping.
 - `epic-pillar-model.js` there owns cylinder sizing, outcome fractions and
   curved red/green joins, with no DOM or startup side effects. Dashboard
   SVG and CSS adapters in `epic-pillars.js` use it. The
