@@ -43,6 +43,11 @@ ACCESS_LOG = os.path.join(LOG_DIR, 'panda_server_access_log')
 ERROR_LOG = os.path.join(LOG_DIR, 'panda_server_error_log')
 HTTPD_CONF = '/opt/panda/etc/panda/panda_server-httpd.conf'
 SERVER_CFG = '/etc/panda/panda_server.cfg'
+# The installed schedconfig overrides: each queue's PanDA status, a copy
+# the queue registry checks (swf-epicprod docs/QUEUE_REGISTRY.md).
+OVERRIDES = '/opt/panda/etc/panda/schedconfig/schedconfig-overrides.json'
+# The throttler's reading of a pool: '<vo>:any ...: <pool> (<queue>, ...): '
+POOL_LINE = re.compile(r'(wlcg|epic):any [^:]*: (\w+) \(([\w, ]+)\): ')
 UNITS = ('panda_httpd', 'panda_daemon', 'panda_jedi', 'panda_mcp')
 DEFAULT_STATE = os.path.expanduser('~/.swf-panda-server-reporter')
 POST_TIMEOUT_S = 30
@@ -411,9 +416,11 @@ def save_state(state_dir, state):
 
 
 def jedi_regulation():
-    """Bounded tail of runtime evidence emitted after the regulator's checks."""
+    """Bounded tail of runtime evidence emitted after the regulator's checks,
+    and each pool the throttler last read with its member queues."""
     path = os.path.join(LOG_DIR, 'panda-EpicProdJobThrottler.log')
     voices = {}
+    pools = {}
     try:
         with open(path, 'rb') as handle:
             handle.seek(0, os.SEEK_END)
@@ -425,16 +432,33 @@ def jedi_regulation():
             if match and stamp:
                 voices[match.group(1)] = {'at': stamp.group().replace(' ', 'T') + 'Z',
                                           'decision': match.group(2)}
-        return {'voices': voices}
+            pool = POOL_LINE.search(line)
+            if pool and stamp:
+                pools.setdefault(pool.group(1), {})[pool.group(2)] = {
+                    'members': [q.strip() for q in pool.group(3).split(',') if q.strip()],
+                    'at': stamp.group().replace(' ', 'T') + 'Z'}
+        return {'voices': voices, 'pools': pools}
     except OSError as exc:
-        return {'error': str(exc), 'voices': voices}
+        return {'error': str(exc), 'voices': voices, 'pools': pools}
+
+
+def queue_overrides():
+    """Each queue's status in the installed schedconfig overrides; None
+    where an entry sets none."""
+    try:
+        with open(OVERRIDES) as handle:
+            data = json.load(handle)
+    except (OSError, ValueError) as exc:
+        return {'error': 'cannot read {}: {}'.format(OVERRIDES, exc)}
+    return {'status': {queue: entry.get('status') for queue, entry in data.items()
+                       if isinstance(entry, dict)}}
 
 
 def collect(state):
     """The record this run delivers; ``state`` is advanced in place."""
     started = time.time()
     record = {'host': HOST, 'collected_at': now_iso(),
-              'reporter_version': '1.1'}
+              'reporter_version': '1.2'}
     positions = state.setdefault('positions', {})
     last_run = state.get('last_run_at')
     first_run = not last_run
@@ -458,6 +482,7 @@ def collect(state):
     record['processes'] = processes()
     record['database'] = database()
     record['jedi_regulation'] = jedi_regulation()
+    record['queue_overrides'] = queue_overrides()
     record['health'] = host_state()
     record['collect_seconds'] = round(time.time() - started, 2)
     state['last_run_at'] = record['collected_at']

@@ -936,6 +936,7 @@ def build():
     decisions = b.part('front', lambda: b.front_decisions(names), {})
     pool = b.part('osg_pool', b.osg_pool, None)
     pilots = b.part('pilots', b.pilots, {})
+    drift = b.part('queue_drift', _queue_drift, [])
     jlab_workers = (b.part('jlab_workers', b.jlab_worker_outcomes, None)
                     if 'JLAB_PanDA_1' in names else None)
 
@@ -1083,8 +1084,9 @@ def build():
         'sites': sites,
         'storage': storage,
         'report': {'text': _report_text(front, sites, storage),
-                   'items': _report_items(front, sites, storage, alarms,
-                                          b.part('assessment', _assessment_freshness, None)),
+                   'items': _drift_items(drift) + _report_items(
+                       front, sites, storage, alarms,
+                       b.part('assessment', _assessment_freshness, None)),
                    'assessment': b.part('daily_assessment', _latest_daily_assessment, None)},
         'live': b.part('live', _live_records, None),
         'tasks': b.part('tasks', lambda: b.floor_tasks(site_name, alarms, site_of), None),
@@ -1158,6 +1160,23 @@ def _released(since):
     return AppLog.objects.filter(app_name='epicprod', timestamp__gte=since,
                                  extra_data__action='front_decision',
                                  extra_data__outcome='fed').count()
+
+
+def _queue_drift():
+    """Where a host's copy of a queue's status disagrees with the queue
+    registry, from the host reporters' records (swf-epicprod
+    docs/QUEUE_REGISTRY.md, The drift check)."""
+    from monitor_app.host_reports import latest
+    from swf_epicprod import queues as registry
+    return registry.drift({key: latest(key) for key in registry.DRIFT_REPORTS})
+
+
+def _drift_items(drift):
+    """One red report line per disagreement: the copy must be put right."""
+    return [{'level': 'red',
+             'text': (f"Queue drift, {d['queue']}: {d['copy']} holds {d['holds']}, "
+                      f"the queue registry says {d['expected']}"),
+             'link': f'{PUBLIC}/panda/front/'} for d in drift or []]
 
 
 def _report_text(front, sites, storage):

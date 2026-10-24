@@ -311,6 +311,19 @@ def query(conf, sql):
     return rows
 
 
+def queue_status():
+    """Each queue's ``queueStatus`` in the harvester queue configuration, a
+    copy the queue registry checks (swf-epicprod docs/QUEUE_REGISTRY.md);
+    None where an entry sets none."""
+    try:
+        with open(QUEUE_CONFIG) as handle:
+            config = json.load(handle)
+    except (OSError, ValueError) as exc:
+        return {'error': 'cannot read {}: {}'.format(QUEUE_CONFIG, exc)}
+    return {'status': {queue: block.get('queueStatus') for queue, block in config.items()
+                       if isinstance(block, dict)}}
+
+
 def log_roots():
     """(logBaseURL, logDir) pairs from the queue configuration: a worker's
     log URL under a base URL is the file under that directory here."""
@@ -634,7 +647,7 @@ def not_finished(conf, until, cache):
 def collect(state):
     """The record this run delivers; ``state`` is advanced in place."""
     started = time.time()
-    record = {'host': HOST, 'collected_at': now_iso(), 'reporter_version': '1.4'}
+    record = {'host': HOST, 'collected_at': now_iso(), 'reporter_version': '1.5'}
     positions = state.setdefault('positions', {})
     last_run = state.get('last_run_at')
     first_run = not last_run
@@ -655,6 +668,7 @@ def collect(state):
     record['failed_calls'] = failed_calls(positions, first_run)
     record['daemons'] = daemons()
     record['processes'] = processes()
+    record['queue_status'] = queue_status()
     # The database window: since the previous run, or the last five
     # minutes on a first run. Harvester times are UTC.
     until = datetime.utcnow()

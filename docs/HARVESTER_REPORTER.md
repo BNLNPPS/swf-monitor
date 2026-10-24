@@ -122,3 +122,5 @@ worker counts. Recorded worker wall time includes startup and reporting
 delay; Condor slot-busy and execution time are stated separately. The page
 does not equate worker starts with useful payload capacity or diagnose a
 node from admission declines.
+
+Version 1.5 adds `queue_status`: each queue's `queueStatus` in the harvester queue configuration, the copy the queue registry's drift check compares (swf-epicprod QUEUE_REGISTRY.md).

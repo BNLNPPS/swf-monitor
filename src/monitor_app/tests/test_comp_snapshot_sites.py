@@ -50,3 +50,11 @@ def test_adopted_record_and_stripped_groups_keep_the_room_and_follow_a_change():
     assert sites['nersc']['queues'][0] == {'id': 'NERSC_Perlmutter_epic', 'status': None,
                                            'status_reason': ''}
     assert sites['elsewhere']['queues'][0]['status'] == 'off'
+
+
+def test_drift_is_a_red_report_line_naming_the_copy():
+    items = comp_snapshot._drift_items([{'queue': 'BNL_OSG_EPIC_PROD_1', 'copy': 'harvester on osgsub01-harvester',
+                                         'holds': 'online', 'expected': 'offline (retired)'}])
+    assert items[0]['level'] == 'red'
+    assert items[0]['text'].startswith('Queue drift, BNL_OSG_EPIC_PROD_1: harvester on osgsub01-harvester holds online')
+    assert comp_snapshot._drift_items([]) == []
