@@ -1,12 +1,37 @@
 """Worker-start cohorts and native pilot admission evidence."""
 from collections import Counter
 from datetime import timedelta
+import time
 
 from django.db import connections
 from django.utils import timezone
 
 from .cached_product import get_product
 from .host_reports import latest
+
+
+def osg_image_demand(memory_mb, cores):
+    """One indexed active-job aggregate; no history scans or per-job reads."""
+    queue = 'BNL_OSG_PanDA_1'
+    began = time.monotonic()
+    with connections['panda'].cursor() as cursor:
+        cursor.execute('''SELECT container_name,
+            COUNT(*) FILTER (WHERE jobstatus = 'activated'
+                AND COALESCE(minramcount, 0) <= %s
+                AND COALESCE(corecount, 1) <= %s) AS runnable,
+            COUNT(*) FILTER (WHERE jobstatus IN ('running','starting','sent')),
+            COUNT(*) FILTER (WHERE jobstatus = 'activated') AS activated
+            FROM doma_panda.jobsactive4
+            WHERE computingsite = %s
+              AND jobstatus IN ('activated','running','starting','sent')
+              AND prodsourcelabel IN ('managed','test','prod_test','install','user','panda')
+            GROUP BY container_name''', [memory_mb, cores, queue])
+        rows = [{'image': image or '', 'activated': runnable, 'running_jobs': running,
+                 'resource_ineligible': activated - runnable}
+                for image, runnable, running, activated in cursor.fetchall()]
+    return {'queue': queue, 'observed_at': timezone.now().strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'images': rows, 'query_ms': round(1000 * (time.monotonic() - began), 1),
+            'disk_check': 'pilot dispatcher uses actual free space; Condor reservation is not that limit'}
 
 
 def outcome(queue, status, exit_code):

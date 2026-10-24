@@ -332,6 +332,23 @@ def pilot_dispatch(template):
             result['error'] = 'pilot image binding is conflicting or unresolved'
         else:
             result.update(mode='bound', images=images)
+            allocation = re.search(r'(?m)^\+EpicprodImagePolicyFile\s*=\s*"([^"\n]+)"', text)
+            if allocation:
+                try:
+                    with open(allocation.group(1)) as handle:
+                        policy = json.load(handle)
+                    state_path = os.path.join(os.path.dirname(allocation.group(1)), 'allocation-state.json')
+                    with open(state_path) as handle:
+                        state = json.load(handle)
+                    until = datetime.strptime(state['valid_until'], '%Y-%m-%dT%H:%M:%SZ')
+                    if (state.get('mode') != 'active' or until <= datetime.utcnow()
+                            or state.get('images') != policy['images']
+                            or state.get('queue') != policy['queue']):
+                        raise ValueError('image allocator state is stale or disagrees with policy')
+                    result.update(images=policy['images'], allocation_policy=allocation.group(1),
+                                  allocation_observed_at=state['observed_at'])
+                except (OSError, ValueError, KeyError, TypeError) as exc:
+                    result.update(mode='unknown', error='image allocator unavailable: {}'.format(exc))
         return result
     executable = re.search(r'(?m)^executable\s*=\s*(\S+)\s*$', text)
     wrapper = re.search(r'EPICPROD_STANDARD_WRAPPER=([^\s"]+)', text)
@@ -683,7 +700,7 @@ def not_finished(conf, until, cache):
 def collect(state):
     """The record this run delivers; ``state`` is advanced in place."""
     started = time.time()
-    record = {'host': HOST, 'collected_at': now_iso(), 'reporter_version': '1.6'}
+    record = {'host': HOST, 'collected_at': now_iso(), 'reporter_version': '1.7'}
     positions = state.setdefault('positions', {})
     last_run = state.get('last_run_at')
     first_run = not last_run

@@ -1,10 +1,28 @@
 """Worker starts behind the production dashboard's slots/hour link."""
 from django.shortcuts import render
+from rest_framework.authentication import SessionAuthentication, TokenAuthentication
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 
 from monitor_app.models import PandaQueue
 from monitor_app.short_names import short_name
 from monitor_app.worker_admission import product, startup_evidence
 from swf_epicprod.regulation import RETIRED_QUEUES
+
+
+@api_view(['GET'])
+@authentication_classes([TokenAuthentication, SessionAuthentication])
+@permission_classes([IsAuthenticated])
+def osg_image_demand(request):
+    from monitor_app.worker_admission import osg_image_demand as collect
+    try:
+        limits = {key: int(request.GET[key]) for key in ('memory_mb', 'cores')}
+        if any(value < 1 or value > 2**31 - 1 for value in limits.values()):
+            raise ValueError('invalid limits')
+    except (KeyError, ValueError):
+        return Response({'detail': 'positive memory_mb and cores are required'}, status=400)
+    return Response(collect(**limits))
 
 
 def worker_admission(request):

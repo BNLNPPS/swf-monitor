@@ -1,4 +1,6 @@
 import importlib.util
+import json
+from datetime import datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -21,6 +23,25 @@ class WorkerAdmissionTests(SimpleTestCase):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
+
+    def test_multi_image_capability_requires_fresh_active_allocator(self):
+        reporter = self.reporter()
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            policy = root / 'image-policy.json'
+            state = root / 'allocation-state.json'
+            template = root / 'pilot.sdf'
+            policy.write_text(json.dumps({'images': ['/cvmfs/one', '/cvmfs/three'], 'queue': 'OSG'}))
+            template.write_text('environment = "EPICPROD_NATIVE_IMAGE=/cvmfs/one"\n'
+                                '+EpicprodImagePolicyFile = "' + str(policy) + '"\n')
+            record = {'mode': 'active', 'images': ['/cvmfs/one', '/cvmfs/three'],
+                      'queue': 'OSG', 'observed_at': '2026-10-24T00:00:00Z',
+                      'valid_until': (datetime.utcnow() + timedelta(minutes=5)).strftime('%Y-%m-%dT%H:%M:%SZ')}
+            state.write_text(json.dumps(record))
+            self.assertEqual(reporter.pilot_dispatch(str(template))['images'], ['/cvmfs/one', '/cvmfs/three'])
+            record['valid_until'] = '2020-01-01T00:00:00Z'
+            state.write_text(json.dumps(record))
+            self.assertEqual(reporter.pilot_dispatch(str(template))['mode'], 'unknown')
 
     def test_startup_evidence_includes_actual_slot_and_budget(self):
         reporter = self.reporter()

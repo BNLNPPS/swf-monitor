@@ -131,3 +131,13 @@ legacy ALRB launchers' dynamic image selection, or an explicit unknown
 with its reason. Each reading includes the template path and SHA-256.
 The registry's admission check reads this fresh host evidence; unavailable,
 unresolved or conflicting image bindings never imply compatibility.
+
+Version 1.7 follows an image allocator named by the native template's
+`EpicprodImagePolicyFile`. It advertises that policy's images only while
+the allocator's matching active state is fresh. Missing or expired state
+is unknown capability, so a stopped allocator cannot keep authorizing new
+work for an image it no longer supplies. The authenticated
+`/api/osg-image-demand/?memory_mb=4096&cores=1` read groups activated jobs
+by exact image in one query for the two-minute allocator. Disk selection
+remains the pilot dispatcher's actual-free-space check; a Condor disk
+reservation is not that free-space limit.
