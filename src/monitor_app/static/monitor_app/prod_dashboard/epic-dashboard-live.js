@@ -109,7 +109,7 @@
         weekly.dataset.overrideTitle = share.pools.join(' and ') + ' negotiator held our ' +
           'submitter at its fair-share limit in its last cycle (' + et(share.cycle_at) +
           '): no new slots there until our usage share falls; running pilots keep theirs.';
-        content.textContent = 'at fair share limit';
+        content.textContent = 'fair share limited';
         // the weekly average's own hover would show beside the throttle's
         if (weekly.hasAttribute('title')) {
           weekly.dataset.weeklyTitle = weekly.title;
