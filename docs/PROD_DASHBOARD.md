@@ -40,6 +40,10 @@ labels retained. `site.production_panel` controls the presentation independently
 of queue activity. Reported counts remain visible while inactive; missing
 trend samples remain unknown. The room places JLab's chart above its Rucio board.
 
+Display names match the authored site discs: Canada and Perlmutter. The
+shared short-name vocabulary also applies to cached site/trend names and
+report prose; internal site and queue identifiers retain their canonical keys.
+
 The Computing now, Work available and Campaign blocks consume
 `report.header`: display-ready values, labels, colours, details and links.
 The room places the same three blocks beneath the Production now title.

@@ -18,7 +18,7 @@ from urllib.parse import quote, urlencode
 from django.db import connections
 from django.utils import timezone
 
-from monitor_app.short_names import short_name
+from monitor_app.short_names import short_name, short_text
 from monitor_app import error_corrections
 from monitor_app.panda.constants import ERROR_COMPONENTS
 from monitor_app.panda.queries import INCOMPLETE_REGISTRATION_OUTCOMES
@@ -40,8 +40,8 @@ PUBLIC = 'https://epic-devcloud.org/prod'
 DEFAULT_SITES = [
     {'id': 'osg', 'name': 'OSG', 'execute_sites': True},
     {'id': 'grex', 'name': 'GREX'},
-    {'id': 'compute-canada', 'name': 'Compute Canada'},
-    {'id': 'nersc', 'name': 'NERSC'},
+    {'id': 'compute-canada', 'name': 'Canada'},
+    {'id': 'nersc', 'name': 'Perlmutter'},
     {'id': 'google', 'name': 'Google'},
     {'id': 'jlab', 'name': 'JLab'},
 ]
@@ -1141,6 +1141,7 @@ def _sites_config():
     out = []
     for g in [*groups, *({'id': s, 'name': s} for s in by_site if s not in {g['id'] for g in groups})]:
         site = {k: v for k, v in g.items() if k != 'queues'}
+        site['name'] = short_name(site.get('name') or site['id'])
         site['queues'] = [{'id': e['queue'], 'status': registry.ROOM_STATUS.get(e['status']),
                            'status_reason': e['reason']} for e in by_site.get(g['id'], [])]
         out.append(site)
@@ -2136,6 +2137,7 @@ def get_snapshot(refresh=False):
     status_by_queue = {q['id']: q for s in _sites_config() for q in s.get('queues', [])}
     cfg = SysConfig.get_config()
     for site in value['sites']:
+        site['name'] = short_name(site.get('name') or site['id'])
         site['queues'] = [dict(q, pilots=_pilot_display(q.get('pilots')))
                           for q in site.get('queues', [])]
         for queue in site['queues']:
@@ -2143,6 +2145,10 @@ def get_snapshot(refresh=False):
             if declared.get('status'):
                 queue['status'] = declared['status']
             queue['production_display'] = _production_display(queue['id'], queue['status'], cfg)
+            queue['status_reason'] = short_text(queue.get('status_reason'))
+            queue['health'] = dict(queue['health'], parts={
+                key: dict(part, note=short_text(part.get('note')))
+                for key, part in queue['health']['parts'].items()})
         primary = _primary_queue(site['queues'])
         site['status'] = primary['status'] if primary else 'off'
         site['status_label'] = site['status'].replace('_', ' ')
@@ -2159,6 +2165,9 @@ def get_snapshot(refresh=False):
                 share, (site.get('links') or {}).get('panda_queue')))
     trends = value.get('trends')
     if trends:
+        trends = dict(trends, sites=[dict(s, name=short_name(s.get('name')))
+                                    for s in trends.get('sites', [])])
+        value['trends'] = trends
         known = {s['id'] for s in trends.get('sites', [])}
         missing = [s for s in value['sites'] if s['id'] not in known]
         if missing:
@@ -2177,7 +2186,11 @@ def get_snapshot(refresh=False):
     except Exception:
         logger.exception('Dashboard campaign summary unavailable')
         value['campaign'] = None
-    value['report'] = dict(value.get('report') or {}, header=_report_header(value))
+    value['report'] = dict(value.get('report') or {}, header=_report_header(value),
+                          text=_report_text(value.get('pressure_front') or {}, value['sites'],
+                                            value.get('storage') or []))
+    value['report']['items'] = [dict(item, text=short_text(item.get('text')))
+                                for item in value['report'].get('items', [])]
     value['age_seconds'] = result.get('age_seconds')
     value['refreshing'] = result.get('refreshing')
     return value

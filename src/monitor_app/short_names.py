@@ -4,9 +4,12 @@ everywhere it is shortened (Torre Wenaus, 2026-10-22); templates use it as
 ``{{ name|short }}`` (swf_fmt). A name with no short form passes through
 unchanged, and the full name stays in the record and on detail pages.
 """
+import re
 
 # A name whose short form no rule below gives.
 SHORT_NAMES = {
+    'NERSC': 'Perlmutter',
+    'Compute Canada': 'Canada',
     'BNL_OSG_PanDA_1': 'OSG',
     'IRISHEP-SSL-UCHICAGO': 'IRISHEP',
     'UNL-PATH': 'UNL',
@@ -47,3 +50,9 @@ def short_name(name):
         if name.startswith(prefix) and len(name) > len(prefix):
             return name[len(prefix):]
     return name
+
+
+def short_text(value):
+    """Use display site names in prose, preserving internal identifiers."""
+    return re.sub(r'(?<!\w)(NERSC|Compute Canada)(?!\w)',
+                  lambda match: short_name(match.group()), str(value or ''))

@@ -115,6 +115,8 @@
   function renderSite(site, trend) {
     const panel = panels.get(aliases[site.id] || site.name);
     if (!panel) return;
+    panel.dataset.siteKey = aliases[site.id] || site.name;
+    text(panel.querySelector('.panelhead strong'), site.name);
     productionPanel(panel, site);
     const active = (site.queues || []).filter(q => q.production_display || q.status === 'live');
     const queues = active.length ? active : site.queues || [];

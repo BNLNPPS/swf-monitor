@@ -44,6 +44,10 @@ function linkDashboard(record) {
   }
   function link(element, destination, description) {
     if (!element) return;
+    for (const [key, site] of Object.entries(sites)) {
+      if (typeof description === 'string' && (description === key || description.startsWith(key + ':')))
+        description = site.name + description.slice(key.length);
+    }
     let anchor = element.tagName === 'A' ? element : element.querySelector(':scope > a.dashboard-drilldown');
     if (!anchor) {
       anchor = document.createElement('a');
