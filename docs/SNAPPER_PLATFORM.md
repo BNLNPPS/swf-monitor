@@ -349,6 +349,15 @@ recipients, and renotification window are edited on the alarms
 dashboard. Capcom carries nothing from this path: the alarm is the
 notice.
 
+Held submit workers raise a warning only when both the count and fraction
+cross their configured thresholds: at least 10 workers and at least 10%
+of the schedd's idle, running and held workers by default
+(`platform_submit_held_warn_min_workers`,
+`platform_submit_held_warn_fraction`). Missing population counts give an
+unknown verdict. Isolated holds remain in the worker record; the alarm
+clears on the next engine tick after a publication falls below either
+threshold. Production now reads the same alarm lifecycle.
+
 A `panda-platform` System Status collector reads the latest published
 component so the platform state enters the System page and the health
 lane without a second source.

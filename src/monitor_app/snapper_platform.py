@@ -85,6 +85,10 @@ CONFIG_DEFAULTS = {
     "platform_stale_warn_fraction": 0.25,
     "platform_stale_warn_tier_minutes": 60,
     "platform_volume_warn_percent": 90,
+    # Isolated held pilots are worker diagnostics. Raise a platform alarm
+    # only when both their count and share indicate impaired submission.
+    "platform_submit_held_warn_min_workers": 10,
+    "platform_submit_held_warn_fraction": 0.1,
     # Silence of a submit-host daemon that ticks regardless of demand.
     # Measured cadence on that host: seconds for the busiest, a few
     # minutes for the credential manager.
@@ -933,13 +937,22 @@ def assess(database, heartbeats, server, reporter_status, monitor_host,
             else "unknown")
     if submit_host:
         submit = _submit_host_projection(submit_host)
-        # Held workers are the submission side's own failure signal: a
-        # site refusing every submission holds them and nothing in the
-        # PanDA record says so. GREX held fifteen over thirteen hours
-        # with nothing raised.
-        held = (submit.get('workers') or {}).get('held')
-        verdict("submit_workers_held", bool(held),
-                known=held is not None)
+        # Require impact on submission: a few isolated holds in a working
+        # schedd must not become a persistent production alarm.
+        workers = submit.get('workers') or {}
+        counts = [workers.get(state) for state in ('idle', 'running', 'held')]
+        known = all(isinstance(n, int) and n >= 0 for n in counts)
+        total = sum(counts) if known else 0
+        held = workers.get('held')
+        min_held = int(thresholds.get(
+            "platform_submit_held_warn_min_workers",
+            CONFIG_DEFAULTS["platform_submit_held_warn_min_workers"]))
+        held_fraction = float(thresholds.get(
+            "platform_submit_held_warn_fraction",
+            CONFIG_DEFAULTS["platform_submit_held_warn_fraction"]))
+        verdict("submit_workers_held",
+                known and total > 0 and held >= min_held
+                and held / total >= held_fraction, known=known)
         # A submission daemon that has stopped writing is stopped.
         oldest = submit.get('daemon_oldest_log_seconds')
         verdict("submit_daemons",
