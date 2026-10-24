@@ -29,7 +29,9 @@ Tasks in flight, epicprod-live, Production now and Science data occupy
 the remaining columns. Site panes open by default; Open and Close act
 on every site pane.
 
-Site labels and reasons come from the feed. Google uses GREX's ordinary
+Site labels, reasons and phase colours come from the feed's `status_label`,
+`status_reason` and `status_level`: commissioning is blue and Perlmutter OFF
+is amber. Google uses GREX's ordinary
 production panel content: shared pillars, running and queued jobs, outcomes,
 pilot supply and trend history. Both displays select queues through the
 feed's `production_display` flag, preserving inactive JLab commissioning.

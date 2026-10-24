@@ -1,7 +1,7 @@
 (() => {
   const config = window.epicDashboard;
   const number = value => value == null ? '—' : Math.round(value).toLocaleString('en-US');
-  const color = level => ({green: 'green', amber: 'gold', red: 'red', grey: 'muted', warning: 'gold', error: 'red', critical: 'red'}[String(level).toLowerCase()] || 'muted');
+  const color = level => ({green: 'green', blue: 'blue', amber: 'gold', red: 'red', grey: 'muted', warning: 'gold', error: 'red', critical: 'red'}[String(level).toLowerCase()] || 'muted');
   const list = value => Array.isArray(value) ? value : value && value.items || [];
   const sumKnown = (rows, key) => !rows.length || rows.some(row => row[key] == null)
     ? null : rows.reduce((total, row) => total + row[key], 0);
@@ -127,12 +127,13 @@
       waiting, sum('harvester_slots_opened_1h')];
     panel.querySelectorAll('.metric b').forEach((node, i) => text(node, number(values[i])));
     const dot = panel.querySelector('.panelhead > .dot');
-    if (dot) dot.style.background = 'var(--' + color(site.health && site.health.level) + ')';
+    if (dot) dot.style.background = 'var(--' + color(site.status_level || (site.health && site.health.level)) + ')';
     const status = panel.querySelector('.site-status');
     if (status) {
       text(status, site.status_label || 'unknown');
       status.title = site.status_reason || '';
-      status.hidden = active.length > 0;
+      status.style.color = 'var(--' + color(site.status_level) + ')';
+      status.hidden = site.status === 'live' || !site.status_label;
     }
     const body = panel.querySelector('.site-body');
     if (body) {

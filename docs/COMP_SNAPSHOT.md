@@ -647,7 +647,12 @@ blocks for both displays. Each block has `id`, `title`, optional `subtitle`,
 (`text`, `link`, `detail`), `link` and `detail`. Display strings and CSS hex
 colours are composed by the feed.
 
-Sites carry `status_label` and `status_reason`. Each queue also carries
+Sites carry `status_label`, `status_level` and `status_reason`. Commissioning
+is labelled `COMMISSIONING` in blue; Perlmutter off is `OFF` in amber. Live
+sites have no redundant status label and use their health colour. The internal
+`not_built` state is displayed as `OFF`. These display fields apply to cached
+snapshots immediately and do not alter queue admission or worker controls.
+Each queue also carries
 `production_display`: true for live queues and the enabled, bounded Google
 commissioning queue, false for inactive commissioning queues such as JLab.
 Google uses the same production pillars, metrics and trend presentation as
