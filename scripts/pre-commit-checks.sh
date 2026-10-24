@@ -32,6 +32,7 @@ else
 fi
 
 python src/manage.py check 2>&1 | tail -1
+python scripts/check-dashboard-drawing.py
 
 FAIL=0
 for f in $HTML_CHANGED; do

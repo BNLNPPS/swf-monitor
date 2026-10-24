@@ -96,7 +96,21 @@ unfinished payload registration in the same completion hour.
   tuned layout; `prod_hub_dashboard.html` embeds it.
 - `monitor_app/static/monitor_app/prod_dashboard/` contains the panel
   controls, live binding, drilldown helpers and weekly core averages.
+- `epic-pillar-model.js` there owns cylinder sizing, outcome fractions and
+  curved red/green joins, with no DOM or startup side effects. Dashboard
+  SVG and CSS adapters in `epic-pillars.js` use it. The
+  computing-room publisher bundles this deployed module into its drawing
+  content, checking its pinned hash; the room supplies its existing Three.js presentation and scale.
 - `monitor_app/_prod_home_tabs.html` supplies the shared tab row.
+
+The development URL `static/epic-dashboard-design.html` embeds the same
+standalone document. It has no copied markup, styles or drawing scripts.
+The duplicate project-level dashboard scripts are removed. The pre-commit
+architectural check rejects a second document or pillar implementation.
+After changing the shared model, update its pinned hash in the room source,
+deploy dashboard static assets and run Etaverse's `publish_comp_room.sh` so
+both views receive the same revision. Publication refuses a missing module
+or a hash mismatch.
 
 The standalone route is a read-only `panda/` page, covered by
 swf-remote's existing catch-all. Deployment uses
