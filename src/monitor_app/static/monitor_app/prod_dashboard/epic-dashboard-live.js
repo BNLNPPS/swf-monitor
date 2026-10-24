@@ -95,6 +95,27 @@
     panel.querySelectorAll('.metric b').forEach((node, i) => text(node, number(values[i])));
     const dot = panel.querySelector('.panelhead > .dot');
     if (dot) dot.style.background = 'var(--' + color(site.health && site.health.level) + ')';
+    // While a pool's negotiator holds our submitter at its fair-share
+    // limit, that state stands in the weekly-cores place on the title row.
+    const weekly = panel.querySelector('.weekly-cores');
+    if (weekly && 'fair_share' in site) {
+      const share = site.fair_share;
+      const held = Boolean(share && share.limited);
+      const content = weekly.querySelector(':scope > a.dashboard-drilldown') || weekly;
+      if (!('linkTitle' in weekly.dataset)) weekly.dataset.linkTitle = content.title || '';
+      weekly.classList.toggle('fair-share', held);
+      if (held) {
+        weekly.dataset.override = '1';
+        content.textContent = 'fair-share limit';
+        content.title = share.pools.join(' and ') + ' negotiator held our submitter at its ' +
+          'fair-share limit in its last cycle (' + et(share.cycle_at) + '): no new slots there ' +
+          'until our usage share falls; running pilots keep theirs.';
+      } else {
+        delete weekly.dataset.override;
+        if (weekly.dataset.weeklyText) content.textContent = weekly.dataset.weeklyText;
+        content.title = weekly.dataset.linkTitle;
+      }
+    }
     const pillars = panel.querySelectorAll('.queuepillar.svgcolumn');
     const titles = [number(values[0]) + ' running; ' + number(values[1]) + ' finished, ' +
       number(values[2]) + ' failed in last 1h', number(values[3]) + ' queued',

@@ -23,6 +23,11 @@ SHORT_NAMES = {
     'OU-Sooner': 'OU',
     'FIU-IRCC': 'FIU',
     'ND_CAMLGPU': 'ND-CAML',
+    # the OSG pools our submit host negotiates in, by central manager
+    'cm-1.ospool.osg-htc.org': 'OSPool',
+    'cm-2.ospool.osg-htc.org': 'OSPool',
+    'jlab-cm.osg.chtc.io': 'JLab pool',
+    'scicollector901.jlab.org': 'JLab pool',
 }
 
 # Organisation prefixes a site name carries before the cluster's own name:

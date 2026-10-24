@@ -22,7 +22,7 @@ with respect to harvester, HTCondor, and the submit descriptions.
 
 ## Functions
 
-Each run posts one record.
+Each run posts one record; the account's cron runs it every two minutes.
 
 | Function | Source on the host | Fields delivered |
 |---|---|---|
@@ -33,6 +33,15 @@ Each run posts one record.
 | Pool composition | the same | slots per site, operating system, user-namespace and CVMFS availability |
 | Submission health | `condor_q` on the local schedd | workers idle, running and held per queue, with held reasons |
 | Idle pilots | `condor_q` and `condor_q -better-analyze` | per queue: idle pilots and the oldest one's age; for a queue with at least 100 idle, condor's match analysis of its oldest idle pilot (the pool's slots, those the pilot's requirements reject, those whose own requirements reject it, those willing, those that would match if drained, the last successful and failed match and the failure reason) |
+| Fair-share limit | `condor_status -pool <pool> -negotiator` for the schedd's collector and each pool it flocks to | per negotiator: the time of its last cycle and this schedd's submitters it held at their fair-share limit in that cycle; one small ad per negotiator |
+
+A submitter held at its fair-share limit gets no new slots in that pool
+until its usage share falls, whatever the pool's free slots would
+accept; its running pilots keep their slots. On 24 October the OSPool
+negotiator held `atlpan@osgsub01.sdcc.bnl.gov` (priority factor 2,500)
+while free UChicago, IRISHEP and SU-ITS slots matched the waiting
+pilots in both directions, and pilots stopped reaching every site
+where they did not already hold slots.
 
 The schedd keeps about an hour and a half of job history and half an
 hour of its log, so a stall in pilot starts outlasts condor's own

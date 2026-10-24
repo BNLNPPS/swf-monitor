@@ -46,6 +46,15 @@ small static seed; a lazy request uses the existing Snapper series
 product when the cached average is more than an hour old. The browser
 reuses the result for an hour and refreshes it while attended.
 
+While a pool's negotiator holds our OSG submitter at its fair-share
+limit, the OSG title row shows **fair-share limit** in yellow in place
+of the weekly average, and the weekly figure returns when the limit
+lifts. The hover names the pool and the time of the negotiation cycle.
+A held submitter gets no new slots in that pool, though its running
+pilots keep theirs. The reading is the OSG submit host reporter's
+negotiator query ([OSG_SUBMIT_REPORTER.md](OSG_SUBMIT_REPORTER.md)),
+carried as `fair_share` on the snapshot's OSG site.
+
 All displayed times use a 24-hour clock in Eastern Time. Hover details
 appear after a 150 ms pause. Daily assessment text is the record's
 narration, limited to two lines with the full text on hover; its title

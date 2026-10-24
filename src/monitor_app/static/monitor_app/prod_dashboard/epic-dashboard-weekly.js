@@ -68,8 +68,10 @@
     headers.forEach((label, name) => {
       const result = record.values[name];
       const content = label.querySelector('a') || label;
-      content.textContent = (result ? Math.round(result.value).toLocaleString('en-US') : '—') +
+      label.dataset.weeklyText = (result ? Math.round(result.value).toLocaleString('en-US') : '—') +
         ' avg cores/1wk';
+      // the live binding's fair-share state holds this place while it lasts
+      if (!label.dataset.override) content.textContent = label.dataset.weeklyText;
       label.title = result ? 'Time-weighted average running cores over the last week; ' +
         Math.round(result.coverage * 100) + '% recorded coverage.' +
         (name === 'OSG' ? ' Includes production on the retired OSG queue.' : '') :

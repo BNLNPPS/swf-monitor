@@ -707,9 +707,11 @@ class _Build:
         found = latest(OSG_SUBMIT_HOST)
         if not found:
             return None
-        pool = (found.get('record') or {}).get('pool') or {}
+        record = found.get('record') or {}
+        pool = record.get('pool') or {}
         return {'admitted': pool.get('slots_admitted'), 'total': pool.get('slots_total'),
-                'age_seconds': found.get('age_seconds')}
+                'age_seconds': found.get('age_seconds'),
+                'fair_share': _fair_share(record.get('negotiators'), found.get('age_seconds'))}
 
     def pilots(self):
         """Per queue, the pilot slots waiting at the site and running by
@@ -1257,6 +1259,7 @@ def build():
             'execute_sites': [],
         }
         if s.get('execute_sites'):
+            site['fair_share'] = (pool or {}).get('fair_share')
             live = [q['id'] for q in queues if q['status'] == 'live']
             if live:
                 site['execute_sites'] = b.part('execute_sites', lambda: b.execute_sites(live), [])
@@ -1366,6 +1369,22 @@ def _released(since):
     return AppLog.objects.filter(app_name='epicprod', timestamp__gte=since,
                                  extra_data__action='front_decision',
                                  extra_data__outcome='fed').count()
+
+
+def _fair_share(negotiators, age_seconds):
+    """Whether a pool's negotiator held our OSG submitter at its
+    fair-share limit in its last cycle, from the submit host reporter's
+    record (docs/OSG_SUBMIT_REPORTER.md). A held submitter gets no new
+    slots in that pool while it lasts, whatever its free slots accept.
+    None when the record lacks the reading or is stale."""
+    if (not isinstance(negotiators, dict) or not negotiators.get('negotiators')
+            or age_seconds is None or age_seconds > REPORT_STALE_SECONDS):
+        return None
+    held = [n for n in negotiators['negotiators'] if n.get('share_limited')]
+    return {'limited': bool(held),
+            'pools': sorted({short_name(n['pool']) for n in held}),
+            'cycle_at': max((n['cycle_at'] for n in held if n.get('cycle_at')), default=None),
+            'unread': sorted({short_name(p) for p in negotiators.get('errors') or {}})}
 
 
 def _queue_drift():

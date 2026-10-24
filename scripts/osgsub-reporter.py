@@ -313,6 +313,62 @@ def _append_analysis(state_dir, line):
               file=sys.stderr)
 
 
+NEGOTIATOR_TIMEOUT_S = 30
+
+
+def _config_value(name):
+    """One condor configuration value, or None when it is not defined."""
+    out, err = run(['condor_config_val', name], timeout=NEGOTIATOR_TIMEOUT_S)
+    return None if err else (out or '').strip() or None
+
+
+def negotiators():
+    """Each pool negotiator's last cycle, and this schedd's submitters it
+    held at their fair-share limit in that cycle. A held submitter gets
+    no new slots in that pool, whatever its free slots would accept:
+    on 10/24 the OSPool negotiator held atlpan@osgsub01 while free
+    UChicago slots matched our pilot both ways. One small ad per
+    negotiator, about 0.2 s a pool; the pools are the schedd's own
+    collector and the pools it flocks to."""
+    host = _config_value('FULL_HOSTNAME')
+    pools = []
+    for name in ('COLLECTOR_HOST', 'FLOCK_TO'):
+        for pool in (_config_value(name) or '').replace(',', ' ').split():
+            if pool not in pools:
+                pools.append(pool)
+    result = {'pools': pools, 'submitter_host': host, 'negotiators': [],
+              'errors': {}}
+    if not host:
+        result['errors']['FULL_HOSTNAME'] = 'not defined'
+        return result
+    seen = set()
+    for pool in pools:
+        out, err = run(['condor_status', '-pool', pool, '-negotiator', '-af',
+                        'Name', 'LastNegotiationCycleTime0',
+                        'LastNegotiationCycleSubmittersShareLimit0'],
+                       timeout=NEGOTIATOR_TIMEOUT_S)
+        if err:
+            result['errors'][pool] = err
+            continue
+        for line in (out or '').splitlines():
+            parts = line.split(None, 2)
+            if len(parts) < 2 or parts[0] in seen:
+                continue
+            seen.add(parts[0])
+            limited = [] if len(parts) < 3 or parts[2] == 'undefined' else [
+                s.strip() for s in parts[2].split(',')]
+            try:
+                cycle_at = datetime.utcfromtimestamp(int(parts[1])).strftime(
+                    '%Y-%m-%dT%H:%M:%SZ')
+            except ValueError:
+                cycle_at = None
+            result['negotiators'].append({
+                'name': parts[0], 'pool': pool, 'cycle_at': cycle_at,
+                'share_limited': [s for s in limited
+                                  if s.endswith('@' + host)]})
+    return result
+
+
 HARVESTER_LOG_DIR = '/var/log/harvester'
 
 
@@ -399,7 +455,7 @@ def health():
 def collect(with_pool=True, state_dir=DEFAULT_STATE):
     """The record this run delivers."""
     record = {'host': HOST, 'collected_at': now_iso(),
-              'reporter_version': '1.1'}
+              'reporter_version': '1.2'}
     started = time.time()
     record['submit_descriptions'] = submit_descriptions()
     record['queues'] = queue_map()
@@ -424,6 +480,7 @@ def collect(with_pool=True, state_dir=DEFAULT_STATE):
                               prod.get('excluded_site_nodes') or [])
         record['schedd'] = schedd()
         record['idle_analysis'] = idle_analysis(state_dir)
+        record['negotiators'] = negotiators()
     record['collect_seconds'] = round(time.time() - started, 2)
     return record
 
