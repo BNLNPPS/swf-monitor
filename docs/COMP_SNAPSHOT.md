@@ -373,15 +373,17 @@ OSG. Queue identifiers and links retain their canonical names.
 - `report.items`: what the room's floor cannot show, one line each as
   `{level, text, link}`, red first, then amber, then grey and green,
   with no per-site counts (the pillars carry those): why the front
-  feeds nothing (the pressure front with no ready task, each live
+  feeds nothing (the global front is off, each live
   queue's front decision in the words of CONTINUOUS_PRODUCTION.md's
   states and reasons), every amber or red health part with its note,
   every active alarm event (red; a ping, a dated obligation, amber),
-  storage parts not green, why each site that is not live is off, and
-  whether the scheduled campaign assessments arrived (the System
+  storage parts not green, and late or missing scheduled campaign
+  assessments (the System
   page's campaign-assessments row; the verdicts are held by corun-ai,
   which this build does not call). The text before the first ": " names
   what the line is about.
+  Routine off and commissioning states remain on the site boards. A global
+  empty-ready-buffer summary and healthy assessment acknowledgements are omitted.
 - `report.assessment`: the newest daily campaign assessment, from its
   `assessment_register` action record (swf-epicprod
   EPICPROD_ASSESSMENTS.md): the verdict, the verdict as a health level

@@ -1897,16 +1897,9 @@ def _report_items(front, sites, storage, alarms, assessment):
     if not front.get('enabled'):
         items.append({'level': 'red', 'text': 'Pressure front: off, nothing is fed',
                       'link': front.get('link')})
-    elif front.get('ready_tasks') == 0:
-        items.append({'level': 'grey', 'text': 'Pressure front: no task is ready to release',
-                      'link': front.get('link')})
     for s in sites:
         live = [q for q in s['queues'] if q['status'] == 'live']
         if not live:
-            reason = next((q['status_reason'] for q in s['queues'] if q['status_reason']), '')
-            items.append({'level': 'grey',
-                          'text': f"{s['name']}: {'off' if not reason else reason}",
-                          'link': (s.get('links') or {}).get('panda_queue')})
             continue
         for q in live:
             f = q.get('front') or {}
@@ -1957,9 +1950,10 @@ def _report_items(front, sites, storage, alarms, assessment):
         level = {'ok': 'green', 'green': 'green', 'warn': 'amber', 'warning': 'amber',
                  'amber': 'amber', 'fail': 'red', 'error': 'red', 'red': 'red'}.get(
                      assessment['status'], 'grey')
-        items.append({'level': level,
-                      'text': f"Campaign assessment: {assessment['summary']}",
-                      'link': f'{PUBLIC}/ai/assessments/?subject_type=campaign_task,campaign'})
+        if level in ('amber', 'red'):
+            items.append({'level': level,
+                          'text': f"Campaign assessment: {assessment['summary']}",
+                          'link': f'{PUBLIC}/ai/assessments/?subject_type=campaign_task,campaign'})
     items.sort(key=lambda i: LEVEL_ORDER.get(i['level'], 2))
     return items
 
