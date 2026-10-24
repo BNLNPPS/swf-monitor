@@ -1936,7 +1936,7 @@ def _report_items(front, sites, storage, alarms, assessment):
             text = f'Final failures {rate}, task {number} ({state}): {name}'
         elif due:
             days, date, what = due.groups()
-            text = f'Due {date} ({days} days): {what}'
+            text = f'Due {date}: {what}'
         else:
             text = f"{'Due' if ping else 'Alarm'}: {title.replace(' — ', ': ')}"
         items.append({'level': 'amber' if ping else 'red', 'text': text,
