@@ -53,7 +53,7 @@
   const source = document.currentScript.src;
   const headers = new Map();
   document.querySelectorAll('.site .panelhead').forEach(header => {
-    const name = header.querySelector('strong').textContent.trim();
+    const name = header.closest('.site').dataset.siteKey || header.querySelector('strong').textContent.trim();
     if (!(name in sites) || header.querySelector('.site-status')) return;
     const label = document.createElement('span');
     label.className = 'weekly-cores right small';
@@ -86,13 +86,13 @@
           if (stored) display(JSON.parse(stored));
         } catch (error) { console.warn('Weekly core cache unavailable:', error); }
         if (!current) {
-          const seed = await fetch(new URL('weekly-cores.json', source));
+          const seed = await fetch(window.epicDashboard.weeklyUrl);
           if (!seed.ok) throw new Error('Weekly core record: HTTP ' + seed.status);
           display(await seed.json());
         }
       }
       if (Date.now() - current.at < hour) return;
-      const url = new URL('../api/snapper/epicprod/series/', source);
+      const url = new URL(window.epicDashboard.historyUrl, document.baseURI);
       url.searchParams.set('focus', 'site');
       url.searchParams.set('window', '7d');
       url.searchParams.set('selection', Object.values(sites).flat()

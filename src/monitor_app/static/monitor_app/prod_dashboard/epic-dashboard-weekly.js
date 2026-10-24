@@ -53,7 +53,7 @@
   const source = document.currentScript.src;
   const headers = new Map();
   document.querySelectorAll('.site .panelhead').forEach(header => {
-    const name = header.querySelector('strong').textContent.trim();
+    const name = header.closest('.site').dataset.siteKey || header.querySelector('strong').textContent.trim();
     if (!(name in sites) || header.querySelector('.site-status')) return;
     const label = document.createElement('span');
     label.className = 'weekly-cores right small';

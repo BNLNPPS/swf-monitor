@@ -99,7 +99,7 @@ function linkDashboard() {
 
   document.querySelectorAll('.site').forEach(panel => {
     const title = panel.querySelector('.panelhead strong');
-    const name = title.textContent.trim();
+    const name = panel.dataset.siteKey || title.textContent.trim();
     if (!(name in queues)) return;
     link(title, history(name), name + ': last 12h');
     const weekly = panel.querySelector('.weekly-cores');

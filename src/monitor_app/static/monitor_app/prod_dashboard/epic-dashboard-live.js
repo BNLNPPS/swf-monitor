@@ -5,10 +5,10 @@
   const list = value => Array.isArray(value) ? value : value && value.items || [];
   const sumKnown = (rows, key) => !rows.length || rows.some(row => row[key] == null)
     ? null : rows.reduce((total, row) => total + row[key], 0);
-  const et = (value, date = false) => {
+  const et = (value, date = false, year = false) => {
     if (!value) return '';
     return new Intl.DateTimeFormat('en-US', {timeZone: 'America/New_York',
-      ...(date ? {month: 'short', day: '2-digit'} : {}),
+      ...(date ? {month: 'short', day: '2-digit', ...(year ? {year: 'numeric'} : {})} : {}),
       hour: '2-digit', minute: '2-digit', hourCycle: 'h23'}).format(new Date(value)) + ' ET';
   };
   function text(node, value) {
@@ -30,7 +30,7 @@
     return node;
   }
   const panels = new Map(Array.from(document.querySelectorAll('.site')).map(panel =>
-    [panel.querySelector('strong').textContent.trim(), panel]));
+    [panel.dataset.siteKey || panel.querySelector('strong').textContent.trim(), panel]));
   const aliases = {osg: 'OSG', grex: 'GREX', nersc: 'Perlmutter', google: 'Google',
     'compute-canada': 'Compute Canada', jlab: 'JLab'};
   const executorModel = document.querySelector('.exec').cloneNode(true);
@@ -310,7 +310,7 @@
     renderCampaign(record.campaign);
     renderSitePillars();
     renderExecutors(sites); renderTasks(record); renderStorage(record); renderReports(record);
-    text(document.getElementById('stamp'), et(record.observed_at, true));
+    text(document.getElementById('stamp'), et(record.observed_at, true, true));
     document.getElementById('stamp').classList.remove('red');
     document.body.classList.remove('record-error');
     linkDashboard();
