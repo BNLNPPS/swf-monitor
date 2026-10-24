@@ -440,6 +440,43 @@ class _Build:
                            if items else 'no production task is paused'),
                 'items': items}
 
+    def completed_tasks(self, site_name, hours=24):
+        """The production tasks that completed in the last ``hours``
+        (COMP_SNAPSHOT.md, Completed): done (every input file finished) or
+        finished (some lost), newest first, the completion time the
+        task's end time."""
+        since = self.now - timedelta(hours=hours)
+        sql = f'''SELECT t.jeditaskid, t.taskname, t.site, t.status,
+                         COALESCE(t.endtime, t.statechangetime),
+                         SUM(d.nfiles), SUM(d.nfilesfinished), SUM(d.nfilesfailed)
+                  FROM "{self.S}"."jedi_tasks" t
+                  LEFT JOIN "{self.S}"."jedi_datasets" d ON d.jeditaskid = t.jeditaskid
+                       AND d.masterid IS NULL AND d.type IN ('input', 'pseudo_input')
+                  WHERE t.status IN ('done', 'finished') AND t.processingtype = 'epicproduction'
+                    AND COALESCE(t.endtime, t.statechangetime) >= %s
+                  GROUP BY 1, 2, 3, 4, 5 ORDER BY 5 DESC, 1 DESC'''
+        items = []
+        for tid, name, queue, state, at, n, done, lost in _rows(
+                sql, (since.astimezone(dt_timezone.utc).replace(tzinfo=None),)):
+            if at is not None and at.tzinfo is None:
+                at = at.replace(tzinfo=dt_timezone.utc)  # PanDA stores UTC
+            local = at.astimezone(ZoneInfo('America/New_York')) if at else None
+            n, done, lost = int(n or 0), int(done or 0), int(lost or 0)
+            where = site_name.get(queue, queue) or 'no queue'
+            items.append({
+                'id': int(tid), 'name': name, 'queue': queue or '', 'status': state,
+                'at': at.isoformat() if at else None,
+                'link': f'{PUBLIC}/panda/tasks/{int(tid)}/',
+                'detail': (f"{int(tid)} {state} on {where}"
+                           + (f" ({queue})" if queue and queue != where else '')
+                           + (f" at {local:%m-%d %H:%M} ET" if local else '')
+                           + f"; {done:,} of {n:,} files done, {lost:,} lost. {name}")})
+        return {'tasks': len(items), 'window_hours': hours,
+                'link': f'{PUBLIC}/panda/tasks/?processingtype=epicproduction&days=1',
+                'detail': (f"{len(items)} task{'s' if len(items) != 1 else ''} completed in {hours} h"
+                           if items else f'no production task completed in {hours} h'),
+                'items': items}
+
     def opened(self):
         """Harvester workers per queue in the last hour: started (a slot
         opened: the pilot got a slot at the site) and submitted (sent to
@@ -1091,6 +1128,7 @@ def build():
         'live': b.part('live', _live_records, None),
         'tasks': b.part('tasks', lambda: b.floor_tasks(site_name, alarms, site_of), None),
         'paused': b.part('paused', lambda: b.paused_tasks(site_name), None),
+        'completed': b.part('completed', lambda: b.completed_tasks(site_name), None),
         'trends': b.part('trends', lambda: _trends(trend), None),
         'errors': b.errors,
     }

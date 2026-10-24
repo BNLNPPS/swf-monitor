@@ -509,6 +509,21 @@ included.
 PanDA records no reason for a pause; the task's page and the action
 stream carry who paused it when it was paused through our tools.
 
+### Completed
+
+`completed` lists the production tasks completed in the last 24 hours,
+for the dashboard's panel under the paused tasks (Torre Wenaus,
+2026-10-24): every `epicproduction` task whose PanDA status is `done`
+(every input file finished) or `finished` (some lost), trials included,
+by its end time.
+
+- `tasks`: the count; `window_hours`: 24; `link`: the day's production
+  task list; `detail`: the count in words.
+- `items`, newest first, each with `id`, `name`, `queue`, `status`,
+  `at` (ISO, the task's end time), `link` (the task's page) and
+  `detail`: the status, site and queue, when, and the input files done
+  and lost.
+
 ### Trends
 
 The floor's trend plots (Torre Wenaus, 2026-10-22): utilization in the
