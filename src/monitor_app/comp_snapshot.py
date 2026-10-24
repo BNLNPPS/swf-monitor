@@ -520,8 +520,9 @@ class _Build:
                            if items else 'no production task is paused'),
                 'items': items}
 
-    def pc_arrivals(self, site_name, hours=12):
-        """Science arriving at JLab over the last ``hours``, per physics
+    def pc_arrivals(self, site_name, hours=24):
+        """Science arriving at JLab over the last ``hours`` (24, as the
+        completed tasks; Torre Wenaus, 2026-10-24), per physics
         configuration (COMP_SNAPSHOT.md, Arrivals): the RECO files the
         finished production jobs registered and their events, from each
         job's payload report, grouped by task and the task's PC. Newest

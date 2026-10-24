@@ -200,7 +200,7 @@
     renderArrivals(record.arrivals);
   }
 
-  // Science reaching JLab over 12 hours, one row per physics configuration,
+  // Science reaching JLab over 24 hours, one row per physics configuration,
   // newest arrival first: its physics, files, last arrival and a bar of the
   // plan's delivered against target (bright green finished or target met,
   // blue incomplete); the detail is the row's title.

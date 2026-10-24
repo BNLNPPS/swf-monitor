@@ -530,14 +530,14 @@ by its end time.
 
 ### Arrivals
 
-`arrivals` is the science reaching JLab over the last 12 hours by physics
+`arrivals` is the science reaching JLab over the last 24 hours (the completed tasks' window) by physics
 configuration, for the dashboard's panel under the completed tasks
 (Torre Wenaus, 2026-10-24): the RECO files the finished production jobs
 registered and their events, from each job's payload report (the record the
 JLab Rucio pillar reads), grouped by task and the task's PC (`_task_pcs`, as
 for `completed`).
 
-- `pcs`, `files`, `events`, `window_hours` (12), `link` (the campaign view)
+- `pcs`, `files`, `events`, `window_hours` (24), `link` (the campaign view)
   and `detail` (the totals in words).
 - `items`, newest arrival first, each with `pc`, `physics` (PCS's one-line
   summary), `label` (the physics in a row's width: the summary without its
@@ -547,7 +547,7 @@ for `completed`).
   (ISO, the first and last registering job's end), `delivered_events` and
   `target_events` (the plan's, read from the stored completion record
   `prod_hub_campaign_completion` without building it), `link` (the PC's
-  page) and `detail`: the physics, the 12-hour files and events with their
+  page) and `detail`: the physics, the 24-hour files and events with their
   times, tasks and sites, and the plan's delivered against target.
 
 ### Trends
