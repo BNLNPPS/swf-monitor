@@ -2641,7 +2641,7 @@ def _node_declines_product():
                      value['error'])
         return []
     return [row for row in value.get('nodes') or []
-            if row.get('queue') not in settings.CANARY_CLOSED_QUEUES]
+            if row.get('site') not in settings.CANARY_CLOSED_QUEUES]
 
 
 def _exclusions_context():
