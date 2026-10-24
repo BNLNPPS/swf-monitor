@@ -24,11 +24,13 @@ def dashboard_document(request):
         'historyUrl': reverse('monitor_app:prod_dashboard_history'),
         'breakoutUrl': reverse('monitor_app:prod_dashboard'),
         'weeklyUrl': static('monitor_app/prod_dashboard/weekly-cores.json'),
+        'sitePanels': {'osg': 'OSG', 'grex': 'GREX', 'nersc': 'Perlmutter',
+                       'google': 'Google', 'compute-canada': 'Compute Canada', 'jlab': 'JLab'},
     }
     return render_to_string('monitor_app/prod_dashboard.html', {
         'dashboard_record': record,
         'dashboard_config': config,
-        'dashboard_version': '20261024-19',
+        'dashboard_version': '20261024-20',
     }, request=request)
 
 

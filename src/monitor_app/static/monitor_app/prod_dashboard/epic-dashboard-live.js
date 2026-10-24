@@ -31,8 +31,7 @@
   }
   const panels = new Map(Array.from(document.querySelectorAll('.site')).map(panel =>
     [panel.dataset.siteKey || panel.querySelector('strong').textContent.trim(), panel]));
-  const aliases = {osg: 'OSG', grex: 'GREX', nersc: 'Perlmutter', google: 'Google',
-    'compute-canada': 'Compute Canada', jlab: 'JLab'};
+  const aliases = config.sitePanels;
   const executorModel = document.querySelector('.exec').cloneNode(true);
   const trendModel = createEpicTrendModel();
 
@@ -138,7 +137,7 @@
       }
       if (node.firstElementChild && node.firstElementChild.tagName === 'A') node.firstElementChild.title = titles[i];
     });
-    if (trend) plot(panel.querySelector('.plot'), trendModel.site(trend, current.trends.t), current.trends.t);
+    if (trend) plot(panel.querySelector('.plot'), trendModel.site(trend, current.trends.t, current.trends.bin_minutes), current.trends.t);
     else plot(panel.querySelector('.plot'), null, []);
   }
 
@@ -278,7 +277,7 @@
       if (science.flow) {
         const times = record.trends && record.trends.t || [];
         plot(document.querySelector('#storage .plot'), trendModel.series([
-          {key: 'files', values: science.flow.files.map(n => n == null ? null : n * trendModel.rateMultiplier)},
+          {key: 'files', values: trendModel.hourly(science.flow.files, record.trends?.bin_minutes)},
         ], {count: times.length}), times);
       } else plot(document.querySelector('#storage .plot'), null, []);
       const capacity = science.capacity;
@@ -382,7 +381,7 @@
     text(document.getElementById('stamp'), et(record.observed_at, true, true));
     document.getElementById('stamp').classList.remove('red');
     document.body.classList.remove('record-error');
-    linkDashboard();
+    linkDashboard(record);
   }
   function failed(error) {
     console.error('Production dashboard update failed:', error);

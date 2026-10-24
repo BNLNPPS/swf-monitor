@@ -88,8 +88,8 @@ narration, limited to two lines with the full text on hover; its title
 row carries verdict, finished-job count and creation time.
 
 Main-site cut cylinders preserve the complete red segment's height.
-The compressed execution-site cylinders have no slash marks: their
-visible red and green segments show the hourly fail/finish proportions.
+The compressed execution-site cylinders have a single grey slant line:
+their visible red and green segments show the hourly fail/finish proportions.
 Their curved color boundary stays inside the measured red height,
 leaving a small green remainder visible.
 
@@ -124,6 +124,10 @@ A queue without Snapper history opens its queue details. Incomplete
 registrations are amber when nonzero and open the jobs with pending or
 unfinished payload registration in the same completion hour.
 
+Drilldown queue filters come from each snapshot site's queues. The site's
+primary queue page is also selected in the feed. The dashboard's panel-name
+mapping controls presentation only; it carries no queue catalogue.
+
 ## Implementation
 
 - `monitor_app/viewdir/prod_dashboard.py` renders the shared document and
@@ -134,7 +138,9 @@ unfinished payload registration in the same completion hour.
   controls, live binding, drilldown helpers and weekly core averages.
 - `epic-trend-model.js` there supplies the ceiling, normalized solid and
   overflow paths, and palette through `createEpicTrendModel()`. Its
-  `site(trend, times)` converts quarter-hour outcomes to hourly rates;
+  `hourly(values, binMinutes)` converts counts using the feed's bin duration,
+  shared by site and storage plots in both displays.
+  `site(trend, times, binMinutes)` uses that conversion for outcomes;
   `series(columns, {count})` accepts displayed values, with
   `overflow: true` on columns excluded from the ceiling. The dashboard and room
   consume this same pure module; neither computes separate clipping.

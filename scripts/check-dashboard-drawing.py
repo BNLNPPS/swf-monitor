@@ -27,6 +27,10 @@ assert 'createEpicTrendModel()' in live and 'trendModel.site(' in live, 'dashboa
 assert 'share.notice' in live and 'notice.text' in live and 'notice.detail' in live, 'fair-share notice must come from the feed'
 assert all('notice.' + field in live for field in ('text', 'level', 'detail', 'link')), 'fair-share adapter must use the complete notice'
 assert 'queue.pilots.waiting_current' in live, 'waiting pilots must use the feed-resolved count'
+assert 'trendModel.hourly(' in live and 'rateMultiplier' not in live, 'hourly conversion must use the shared trend model'
+links = (assets / 'epic-dashboard-links.js').read_text()
+assert 'record.sites' in links and 'site.queues' in links, 'drilldown queues must come from the feed'
+assert 'BNL_OSG_PanDA_1' not in links and 'UM_GREX_PanDA_1' not in links, 'drilldowns contain a second queue catalogue'
 assert not re.search(r"['\"](?:at fair share limit|fair share limited)['\"]", live), 'dashboard must not author a second fair-share notice'
 room_hash = root.parent / 'tjrepo/etaverse/scripts/audition/comp-room-pillar-model.sha256'
 if room_hash.exists():

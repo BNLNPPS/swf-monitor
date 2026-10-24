@@ -1,13 +1,9 @@
-function linkDashboard() {
+function linkDashboard(record) {
   const base = 'https://epic-devcloud.org/prod/';
-  const queues = {
-    OSG: ['BNL_OSG_PanDA_1'],
-    GREX: ['UM_GREX_PanDA_1'],
-    Perlmutter: ['NERSC_Perlmutter_epic', 'NERSC_Perlmutter_epic_es'],
-    Google: ['BNL_ePIC_GOOGLE', 'BNL_ePIC_GOOGLE_es'],
-    'Compute Canada': ['ComputeCanada_PanDA_1'],
-    JLab: ['JLAB_PanDA_1']
-  };
+  const sites = Object.fromEntries((record.sites || []).map(site =>
+    [window.epicDashboard.sitePanels[site.id] || site.name, site]));
+  const queues = Object.fromEntries(Object.entries(sites).map(([name, site]) =>
+    [name, (site.queues || []).map(queue => queue.id)]));
   function url(path, params = {}, hash = '') {
     const result = new URL(path, base);
     Object.entries(params).forEach(([key, value]) => {
@@ -21,7 +17,8 @@ function linkDashboard() {
     return url('snapper/epicprod/site/', {window, site: (queues[site] || []).join(',')});
   }
   function jobs(site, status, hours = 12, extra = {}) {
-    return url('panda/jobs/', {site: (site ? queues[site] || [] : Object.values(queues).flat()).join(','), status, hours, ...extra});
+    return url('panda/jobs/', {site: extra.taskid ? undefined :
+      (site ? queues[site] || [] : Object.values(queues).flat()).join(','), status, hours, ...extra});
   }
   function ended(site, status, extra = {}) {
     const end = new Date();
@@ -38,8 +35,9 @@ function linkDashboard() {
       ended_before: end.toISOString(), ...extra});
   }
   function queuePage(site, workers = false) {
-    const queue = (queues[site] || [])[0];
-    return url('panda/epic-queues/' + encodeURIComponent(queue) + '/', {}, workers ? 'workers' : '');
+    const destination = new URL(sites[site]?.links?.panda_queue || 'panda/epic-queues/', base);
+    if (workers) destination.hash = 'workers';
+    return destination.href;
   }
   function storage(params = {}) {
     return url('snapper/epicprod/storage/', {window: '12h', ...params});
@@ -133,7 +131,7 @@ function linkDashboard() {
     if (destination.pathname.endsWith('/panda/jobs/')) {
       destination.searchParams.delete('days');
       destination.searchParams.set('hours', '12');
-      destination.searchParams.set('site', queues.OSG.join(','));
+      destination.searchParams.set('site', (queues.OSG || []).join(','));
       anchor.href = destination.href;
     } else anchor.href = history('OSG');
   });
@@ -203,4 +201,3 @@ function linkDashboard() {
     link(element, assessment.href, 'Daily assessment'));
   if (typeof fitPausedTasks === 'function') fitPausedTasks();
 }
-linkDashboard();

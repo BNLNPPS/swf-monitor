@@ -3,7 +3,6 @@ function createEpicTrendModel() {
   const palette = Object.freeze({running: '#edf2f1', queued: '#c4b6a2',
     finished: '#7fce95', failed: '#f47c70', files: '#7fce95',
     incomplete: '#f47c70', bytes: '#6fcad2'});
-  const rateMultiplier = 4;
   const valueOf = value => value == null || !Number.isFinite(Number(value))
     ? null : Math.max(0, Number(value));
   const samePoint = (a, b) => a[0] === b[0] && a[1] === b[1];
@@ -66,17 +65,21 @@ function createEpicTrendModel() {
     return {ceiling, hasData, curves};
   }
 
-  function site(trend, times) {
-    const hourly = values => (values || []).map(value => {
-      const n = valueOf(value); return n == null ? null : n * rateMultiplier;
+  function hourly(values, binMinutes = 15) {
+    if (!(Number.isFinite(binMinutes) && binMinutes > 0)) throw new RangeError('Invalid trend bin duration');
+    return (values || []).map(value => {
+      const n = valueOf(value); return n == null ? null : n * 60 / binMinutes;
     });
+  }
+
+  function site(trend, times, binMinutes = 15) {
     return series([
       {key: 'running', values: trend.running},
       {key: 'queued', values: trend.queued, overflow: true},
-      {key: 'finished', values: hourly(trend.finished)},
-      {key: 'failed', values: hourly(trend.failed)},
+      {key: 'finished', values: hourly(trend.finished, binMinutes)},
+      {key: 'failed', values: hourly(trend.failed, binMinutes)},
     ], {count: times.length});
   }
 
-  return Object.freeze({palette, rateMultiplier, ceilingForPeak, series, site});
+  return Object.freeze({palette, hourly, ceilingForPeak, series, site});
 }
