@@ -144,8 +144,8 @@ physics in short (`label`), the RECO files registered in the window and
 the time of the last arrival, over a thin bar of the plan's delivered
 against target events: bright green when the configuration is finished,
 every task delivering to it in the window having ended or its target met
-(past the target counts as met; the hover gives the numbers), dull green
-while it still runs short of the target. Each row opens the PC's
+(past the target counts as met; the hover gives the numbers), blue while
+it is incomplete. Each row opens the PC's
 page; its hover text carries the full physics line, files and events,
 times, tasks, sites and the plan's delivered against target. The title-row
 count opens the campaign view. The panel grows downward with the number

@@ -203,7 +203,7 @@
   // Science reaching JLab over 12 hours, one row per physics configuration,
   // newest arrival first: its physics, files, last arrival and a bar of the
   // plan's delivered against target (bright green finished or target met,
-  // dull green running); the detail is the row's title.
+  // blue incomplete); the detail is the row's title.
   function renderArrivals(arrivals) {
     const count = document.querySelector('#pc-arrivals .arrivals-count');
     if (!count) return;
@@ -219,7 +219,7 @@
         if (pc.target_events) {
           const share = (pc.delivered_events || 0) / pc.target_events;
           const bar = element('span', 'arrival-bar');
-          // Bright green finished (target met counts), dull green running.
+          // Bright green finished (target met counts), blue incomplete.
           const fill = element('span', pc.state === 'finished' ? 'done' : 'running');
           fill.style.width = `${Math.min(100, Math.round(share * 100))}%`;
           bar.appendChild(fill);
