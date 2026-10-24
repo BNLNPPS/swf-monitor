@@ -23,6 +23,7 @@ SHORT_NAMES = {
     'WISC-PATH': 'WISC',
     'FANDM-ITS': 'F&M',
     'Colgate ITS': 'Colgate',
+    'Syracuse-OSPool': 'Syracuse',
     'SYRA-PATH': 'SYRA',
     'OU-Sooner': 'OU',
     'FIU-IRCC': 'FIU',
