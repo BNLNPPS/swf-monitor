@@ -400,6 +400,7 @@
         link.append(...node.childNodes); node.append(link);
       }
       link.href = item.link; link.title = item.detail || '';
+      link.dashboardDestination = item.link;
       node.title = item.detail || '';
     }
     for (const group of groups || []) {

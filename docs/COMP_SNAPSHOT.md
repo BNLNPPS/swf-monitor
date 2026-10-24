@@ -639,8 +639,6 @@ All links are on the public face (`https://epic-devcloud.org/prod/...`),
 and each was checked to answer 200 there on 2026-10-21, the storage
 and assessment links on 2026-10-22.
 
-## Regulation telemetry, 22 October 2026
-
 ## Shared board presentation
 
 `report.header` contains the Computing now, Work available and Campaign
@@ -662,6 +660,8 @@ identify its pending workers (`gke-pilots`). A missing or stale observation
 remains unknown. Runtime-file validation is distinct from successful worker
 or payload execution. Other commissioning queues retain inactive production
 activity semantics.
+
+## Regulation telemetry, 22 October 2026
 
 The 22 October regulation correction reads fixed ratio-zero waiting limits from the fresh Harvester database report. Ratio-derived limits retain the last applied adjuster observation, with its timestamp and `limit_source: adjuster`; the health note calls this the last applied limit. The adjuster skips that log line while the waiting queue is full, so an old event timestamp alone does not invalidate the value. The enclosing report must still be fresh, and a failed adjuster-log read is degraded. A limit never observed remains unknown. Missing or stale pilot evidence is amber when work waits, so another green component cannot conceal missing protection. The scheduled production notifier evaluates this record independently of browser requests.
 
