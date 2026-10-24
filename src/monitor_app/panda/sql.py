@@ -9,7 +9,7 @@ import logging
 
 from .constants import PANDA_SCHEMA, ERROR_COMPONENTS, JOB_STATUS_CATEGORIES
 from ..declared import job_declared
-from ..error_corrections import correction, match
+from ..error_corrections import reading
 
 logger = logging.getLogger(__name__)
 
@@ -134,10 +134,10 @@ def extract_errors(job_dict):
     exit_profile = {str(transexitcode).strip(): 1} if has_exit else {}
     for err in errors:
         try:
-            rule = match(err['component'], err['code'], err['diag'],
-                         sites=[job_dict.get('computingsite')])
-            if rule is not None:
-                err['correction'] = correction(rule, exit_profile)
+            interpreted = reading(err['component'], err['code'], err['diag'],
+                                  exit_profile, sites=[job_dict.get('computingsite')])
+            if interpreted is not None:
+                err['correction'] = interpreted
         except Exception as e:
             logger.error('error-correction decoration failed for job %s '
                          '%s:%s: %s', job_dict.get('pandaid'),

@@ -134,7 +134,7 @@ def correction(rule, exit_counts=None):
                           'count': n, 'rep_pandaid': rep,
                           'held': held})
     label = (modes[0]['reading'] if modes
-             else (rule.corrected_label
+             else (getattr(rule, 'corrected_label', '')
                    or 'unreliable label; payload failure of '
                       'undetermined mode'))
     return {
@@ -142,9 +142,69 @@ def correction(rule, exit_counts=None):
         'modes': modes,
         'unreliable_label': True,
         'grade': 'pilot mechanical fields (payload exit codes)',
-        'note': rule.note or '',
-        'evidence_url': rule.evidence_url or '',
+        'note': getattr(rule, 'note', '') or '',
+        'evidence_url': getattr(rule, 'evidence_url', '') or '',
     }
+
+
+def reading(component, code, diag, exit_counts=None, sites=None):
+    """Shared, evidence-bounded reading of a reported error.
+
+    Decode documented exits and explicit diagnostics. Unknown causes stay
+    unknown; a warning copied into a pilot label is not a causal verdict.
+    """
+    rule = match(component, code, diag, sites=sites)
+    if rule is not None:
+        return correction(rule, exit_counts)
+    try:
+        code = int(code)
+    except (TypeError, ValueError):
+        return None
+    diag = str(diag or '')
+    lower = diag.lower()
+    label = ''
+    if component in ('executor', 'transformation'):
+        label = exit_reading(code) or ''
+        if code == 1:
+            label = 'Payload failed (exit 1); exit code alone does not identify the cause'
+    elif component == 'pilot' and code in (1305, 1315):
+        modes = correction(None, exit_counts)
+        if modes['modes']:
+            modes['note'] = 'Payload exit codes take precedence over incidental wrapper warnings.'
+            return modes
+        if 'unknown groupid' in lower or 'bind mount' in lower:
+            label = 'Execution failure; container warning does not establish the payload cause'
+    elif component == 'ddm' and 'bytes mismatch' in lower:
+        kind = 'Log file' if '.log.tgz' in lower or '.log.tar' in lower else 'File'
+        label = kind + ' catalog registration refused: registered and submitted byte sizes differ'
+    elif component == 'pilot' and code == 1212:
+        label = ('Payload process killed by its memory limit' if 'out of memory' in lower
+                 else 'Pilot reported payload memory exhaustion')
+    elif component == 'pilot' and code == 1213:
+        label = 'Job stopped at its runtime limit'
+    elif component == 'pilot' and code == 1326:
+        label = 'Input staging failed: no allowed input replica found'
+        if 'allow_wan=false' in lower:
+            label += '; remote (WAN) access was disabled'
+    elif component == 'pilot' and code == 1152 and 'stage-out' in lower:
+        kind = 'Log' if '.log.tgz' in lower or '.log.tar' in lower else 'Output'
+        label = kind + ' transfer timed out during stage-out'
+    elif component == 'dispatcher' and code == 100 and 'lost heartbeat' in lower:
+        label = 'PanDA lost the job heartbeat; the reason contact stopped is unknown'
+    elif component in ('supervisor', 'taskbuffer') and 'disappeared from remote schedd' in lower:
+        label = 'Worker disappeared from the remote batch scheduler; Harvester cancelled it'
+        if 'while the job was starting' in lower:
+            label += ' before the payload started'
+        elif 'while the job was running' in lower:
+            label += ' while the payload was running'
+        label += '; underlying batch cause not reported'
+    elif component == 'taskbuffer' and code == 300 and re.search(r':\s*None\s*$', diag):
+        label = 'Batch worker ended while the job was running; batch reason was not recorded'
+    if not label:
+        return None
+    return {'label': label, 'modes': [], 'unreliable_label': False,
+            'grade': 'reported diagnostic or documented exit code',
+            'note': '', 'evidence_url': ''}
 
 
 def apply_to_summary(entries):
@@ -156,13 +216,11 @@ def apply_to_summary(entries):
     evidence = {}
     for entry in entries:
         try:
-            rule = match(entry.get('error_source'),
-                         entry.get('error_code'),
-                         entry.get('error_diag'),
-                         sites=entry.get('sites'))
-            if rule is not None:
-                entry['correction'] = correction(
-                    rule, entry.get('exit_counts') or {})
+            interpreted = reading(entry.get('error_source'),
+                                  entry.get('error_code'), entry.get('error_diag'),
+                                  entry.get('exit_counts'), sites=entry.get('sites'))
+            if interpreted is not None:
+                entry['correction'] = interpreted
             # Only generic payload labels receive representative-log evidence.
             # A witness explains its own job; it does not relabel every job
             # sharing an exit code or assign a payload cause to worker losses.

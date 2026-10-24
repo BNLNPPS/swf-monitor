@@ -2355,7 +2355,11 @@ def panda_errors_datatable_ajax(request):
 
     data = []
     for err in errors:
-        diag_url = reverse('monitor_app:panda_diagnostics_list') + f'?days={days}&error_source={err["error_source"]}'
+        diag_params = {key: value for key, value in request.GET.items()
+                       if key in ('site', 'execsite', 'taskid', 'status', 'hours',
+                                  'ended_after', 'ended_before')}
+        diag_params.update(days=days, error_source=err['error_source'], error_code=err['error_code'])
+        diag_url = reverse('monitor_app:panda_diagnostics_list') + '?' + urlencode(diag_params)
         users_str = ', '.join(err.get('users', [])[:5])
         if len(err.get('users', [])) > 5:
             users_str += f' (+{len(err["users"]) - 5})'
@@ -2393,7 +2397,9 @@ def panda_errors_datatable_ajax(request):
         if corr and not modes:
             modes = [{'reading': corr['label'],
                       'count': err.get('count', 0)}]
-        if modes:
+        if witness:
+            rows_out = [(diag_text, str(err.get('count', 0)))]
+        elif modes:
             rows_out = [(escape(m['reading']), str(m['count']))
                         for m in modes]
         else:
@@ -2416,10 +2422,13 @@ def panda_errors_datatable_ajax(request):
 # ── Diagnostics ──────────────────────────────────────────────────────────────
 
 def panda_diagnostics_list(request):
-    days = _get_days(request)
+    days = _get_jobs_days(request)
     context = {
         'table_title': 'PanDA Job Diagnostics',
-        'table_description': f'Failed jobs with error details from the last {days} days.',
+        'table_description': 'Up to 500 newest jobs matching the selected failure window and filters.',
+        'diagnostic_filters': {key: request.GET.get(key, '') for key in
+            ('username', 'site', 'taskid', 'execsite', 'status', 'error_source',
+             'error_code', 'ended_after', 'ended_before')},
         'ajax_url': reverse('monitor_app:panda_diagnostics_datatable_ajax'),
         'columns': DIAG_COLUMNS,
     }
@@ -2430,15 +2439,19 @@ def panda_diagnostics_list(request):
 def panda_diagnostics_datatable_ajax(request):
     dt = DataTablesProcessor(request, [c['name'] for c in DIAG_COLUMNS],
                              default_order_column=0, default_order_direction='desc')
-    days = _get_days(request)
+    days = _get_jobs_days(request)
     username = request.GET.get('username', '') or None
     site = request.GET.get('site', '') or None
     taskid = request.GET.get('taskid', '') or None
     error_source = request.GET.get('error_source', '') or None
 
+    ended_after, ended_before = _get_ended_window(request)
     result = diagnose_jobs(days=days, username=username, site=site,
                            taskid=taskid, error_component=error_source,
-                           limit=500)
+                           limit=500, execsite=request.GET.get('execsite') or None,
+                           ended_after=ended_after, ended_before=ended_before,
+                           status=request.GET.get('status') or None,
+                           error_code=request.GET.get('error_code'))
 
     if 'error' in result:
         return dt.create_response([], 0, 0)

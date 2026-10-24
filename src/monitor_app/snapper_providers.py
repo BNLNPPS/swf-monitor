@@ -3928,8 +3928,7 @@ def _errors_breakdown(data, ctx, window_from=None, window_to=None,
     # Diagnostic patterns aggregate live from the job records over the
     # same bounds; a single-task filter restricts the query itself,
     # a multi-task selection filters the aggregated rows.
-    from .error_corrections import correction as _correction
-    from .error_corrections import match as _match
+    from .error_corrections import reading as _error_reading
     patterns = []
     window_patterns = 0
     for (comp, code, _pattern, diag, count, rep, taskids,
@@ -3965,9 +3964,7 @@ def _errors_breakdown(data, ctx, window_from=None, window_to=None,
         # whose label a rule marks unreliable presents as its real
         # failure modes — one row per mode, each with its own count,
         # core-hours and a representative job of that mode.
-        rule = _match(comp, code, diag)
-        corr = (_correction(rule, exit_counts or {})
-                if rule is not None else None)
+        corr = _error_reading(comp, code, diag, exit_counts, sites=site_list)
         if corr and corr['modes']:
             for m in corr['modes']:
                 if len(patterns) < MAX_PATTERNS:

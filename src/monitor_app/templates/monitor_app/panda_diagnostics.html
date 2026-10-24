@@ -14,5 +14,5 @@
 </div>
 {% endblock %}
 
-{% block initial_filters %}{ days: '{{ days }}' }{% endblock %}
+{% block initial_filters %}{ days: '{{ days }}'{% for key, value in diagnostic_filters.items %}{% if value %}, '{{ key|escapejs }}': '{{ value|escapejs }}'{% endif %}{% endfor %} }{% endblock %}
 {% block default_order %}[[0, 'desc']]{% endblock %}

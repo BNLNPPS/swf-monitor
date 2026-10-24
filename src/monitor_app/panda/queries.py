@@ -724,29 +724,43 @@ def list_jobs(days=7, status=None, username=None, site=None,
 
 
 def diagnose_jobs(days=7, username=None, site=None, taskid=None,
-                  reqid=None, error_component=None, limit=None, before_id=None):
+                  reqid=None, error_component=None, limit=None, before_id=None,
+                  execsite=None, ended_after=None, ended_before=None,
+                  status=None, error_code=None):
     """Diagnose failed PanDA jobs with full error details."""
     # An explicit limit is always honored. The default is 500, or the
     # complete population when scoped to a specific task.
     if limit is None:
         limit = 100000 if taskid else 500
     cutoff = timezone.now() - timedelta(days=days)
-    where = [
-        '"modificationtime" >= %s',
-        # = ANY(array) rather than IN (tuple): psycopg3 adapts a Python
-        # tuple as a composite record literal, which breaks the SQL.
-        '"jobstatus" = ANY(%s)',
-    ]
-    params = [cutoff, list(FAULTY_STATUSES)]
+    selected = [value for value in str(status or '').split(',') if value]
+    if any(value not in FAULTY_STATUSES for value in selected):
+        return {'error': 'Diagnostics accepts only terminal failure statuses'}
+    where = ['"jobstatus" = ANY(%s)']
+    params = [selected or list(FAULTY_STATUSES)]
+    if ended_after is not None and ended_before is not None:
+        where.extend(['"endtime" > %s', '"endtime" <= %s'])
+        params.extend([ended_after, ended_before])
+    else:
+        where.append('"modificationtime" >= %s')
+        params.append(cutoff)
+    if execsite:
+        where.append('"destinationsite" = %s')
+        params.append(execsite)
 
     if username:
         clause, val = like_or_eq('produsername', username)
         where.append(clause)
         params.append(val)
     if site:
-        clause, val = like_or_eq('computingsite', site)
-        where.append(clause)
-        params.append(val)
+        sites = [value.strip() for value in site.split(',') if value.strip()]
+        if len(sites) > 1:
+            where.append('"computingsite" = ANY(%s)')
+            params.append(sites)
+        else:
+            clause, val = like_or_eq('computingsite', site)
+            where.append(clause)
+            params.append(val)
     if taskid:
         where.append('"jeditaskid" = %s')
         params.append(taskid)
@@ -756,7 +770,15 @@ def diagnose_jobs(days=7, username=None, site=None, taskid=None,
     if error_component:
         comp = next((c for c in ERROR_COMPONENTS if c['name'] == error_component), None)
         if comp:
-            where.append(f'"{comp["code"]}" != 0')
+            if error_code is not None:
+                try:
+                    value = int(error_code)
+                except (TypeError, ValueError):
+                    return {'error': 'Error code must be an integer'}
+                where.append(f'"{comp["code"]}" = %s')
+                params.append(value)
+            else:
+                where.append(f'"{comp["code"]}" != 0')
     if before_id:
         where.append('"pandaid" < %s')
         params.append(before_id)
