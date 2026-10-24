@@ -50,6 +50,9 @@ import urllib.parse
 import urllib.request
 
 RECORD_ATTEMPTS = 3
+# A payload canary's task priority: above the production band, so its one
+# job is dispatched ahead of the queue's production backlog.
+CANARY_TASK_PRIORITY = 1000
 RECORD_BACKOFF = 2          # seconds, multiplied by attempt number
 
 DEFAULT_PCLIENT_SETUP = os.path.expanduser("~/pclient/run/setup.sh")
@@ -803,9 +806,14 @@ def main():
                   if args.canary_mem_limit_mb else "")
         spec['exec'] = (f"{prefix}python3 evgen_job_dispatcher.py payload-canary "
                         f"{spec['csvBase']} {args.canary_stamp}")
+        # Above the production band: a canary is one job whose point is a
+        # prompt verdict. At its PCS task's priority it waited behind every
+        # older production job of the same priority on the queue (2,875 at
+        # 900 on BNL_OSG_PanDA_1, 2026-10-24: about 16 hours), and the
+        # queue's scheduled canary went stale with it.
         spec.update(site=args.canary_queue, processingType='canary',
                     prodSourceLabel='test', userName='canary', nJobs=1,
-                    maxAttempt=1, skipScout=True)
+                    maxAttempt=1, skipScout=True, taskPriority=CANARY_TASK_PRIORITY)
         if args.canary_out_rse:
             spec['env'] = dict(spec.get('env') or {}, OUT_RSE=args.canary_out_rse)
             _log(f"canary outputs to {args.canary_out_rse}")
