@@ -516,7 +516,7 @@ def admission_declines(conf, until, cache):
     for worker, batch, queue, started, ended, batch_log in rows:
         seen.add(worker)
         evidence = cache.get(worker)
-        if evidence is None and reads < 400:
+        if evidence is None and reads < 4000:
             reads += 1
             evidence = admission_evidence(batch_log, roots)
             if evidence:
@@ -542,7 +542,8 @@ def admission_declines(conf, until, cache):
     for worker in list(cache):
         if worker not in seen:
             del cache[worker]
-    ranked = sorted(groups.values(), key=lambda row: -row['count'])
+    ranked = sorted((row for row in groups.values() if row['required_s'] is not None),
+                    key=lambda row: -row['count'])
     return {'hours': 1, 'since': floor, 'until': until, 'declined': len(rows),
             'classified': sum(row['count'] for row in ranked if row['required_s'] is not None),
             'repeated_slot_starts': sum(max(0, row['count']-1) for row in ranked if row['slot'] != 'unknown'),

@@ -112,7 +112,7 @@ cancelled SIGTERM stops from unexpected worker errors. Admission telemetry
 covers one hour: remaining and required lifetime from launcher stderr,
 execution queue and host from startup, exact slot identity and measured
 slot-busy/execution seconds from the Condor event log. Repeated refusals are
-grouped by slot and admission floor. Up to 400 new startup records are read
+grouped by slot and admission floor. Up to 4,000 new startup records are read
 per run, with parsed evidence cached until it leaves the hour. Missing logs
 remain unclassified; evidence coverage is reported.
 
