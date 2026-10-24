@@ -1923,7 +1923,7 @@ def _report_items(front, sites, storage, alarms, assessment):
                         q['links'].get('canary') if name == 'canary' else
                         q['links'].get('snapper'))
                 items.append({'level': p['level'],
-                              'text': f"{q['id']} {PART_NAMES.get(name, name)}: {p['note']}",
+                              'text': f"{short_name(q['id'])} {PART_NAMES.get(name, name)}: {p['note']}",
                               'link': link})
     seen = set()
     for a in alarms or []:  # newest first
