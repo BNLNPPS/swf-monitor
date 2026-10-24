@@ -106,7 +106,7 @@
       weekly.classList.toggle('fair-share', held);
       if (held) {
         weekly.dataset.override = '1';
-        content.textContent = 'fair-share limit';
+        content.textContent = 'at fair share limit';
         content.title = share.pools.join(' and ') + ' negotiator held our submitter at its ' +
           'fair-share limit in its last cycle (' + et(share.cycle_at) + '): no new slots there ' +
           'until our usage share falls; running pilots keep theirs.';
