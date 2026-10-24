@@ -42,7 +42,7 @@ for(const id of ['report','tasks']){const panel=document.getElementById(id);if(p
 if(pausedStrip)flightColumn.appendChild(pausedStrip);
 const campaignStrip=document.createElement('div');
 campaignStrip.id='campaign-summary';campaignStrip.className='flowcell';
-campaignStrip.innerHTML='<div class="label campaign-title">Campaign —</div><div class="campaign-since small">deliv since —</div><div class="campaign-totals"><b class="green campaign-events">—</b> events <b class="green campaign-bytes">—</b> TB</div><div class="campaign-configs small">— physics configs</div>';
+campaignStrip.innerHTML='<div class="label campaign-title">Campaign —</div><div class="campaign-since small">delivered since —</div><div class="campaign-totals"><b class="green campaign-events">—</b> events <b class="green campaign-bytes">—</b> TB</div><div class="campaign-configs small">— physics configs</div>';
 document.getElementById('flow').appendChild(campaignStrip);
 document.getElementById('flow').appendChild(document.getElementById('daily-assessment'));
 

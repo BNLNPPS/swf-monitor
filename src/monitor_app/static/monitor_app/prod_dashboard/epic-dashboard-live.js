@@ -280,7 +280,7 @@
       since = new Intl.DateTimeFormat('en-US', {month: 'short', day: 'numeric',
         timeZone: 'UTC'}).format(new Date(campaign.delivered_since + 'T00:00:00Z'));
     }
-    text(strip.querySelector('.campaign-since'), 'deliv since ' + since);
+    text(strip.querySelector('.campaign-since'), 'delivered since ' + since);
     text(strip.querySelector('.campaign-events'), campaign.events == null ? '—' : number(campaign.events / 1e6) + 'M');
     text(strip.querySelector('.campaign-bytes'), campaign.bytes == null ? '—' : number(campaign.bytes / 1e12));
     text(strip.querySelector('.campaign-configs'), number(campaign.configurations) + ' physics configs');
