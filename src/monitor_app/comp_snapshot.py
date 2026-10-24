@@ -564,10 +564,15 @@ class _Build:
         for key, b in by_pc.items():
             plan = progress.get(b['pc']) or {}
             delivered, target = plan.get('delivered_events'), plan.get('target')
+            # Finished for this view (Torre Wenaus, 2026-10-24): every task
+            # delivering in the window has ended, or the target is met; past
+            # the target is met, not a fault, and the detail says by how much.
+            met = bool(target) and delivered is not None and delivered >= target
+            finished = met or not b['running']
             sites = ', '.join(sorted(s for s in b['sites'] if s))
             items.append({
                 'pc': b['pc'] or '', 'physics': b['physics'], 'label': _physics_label(b['physics']),
-                'state': 'running' if b['running'] else 'finished',
+                'state': 'finished' if finished else 'running',
                 'files': b['files'],
                 'events': b['events'], 'tasks': sorted(b['tasks']), 'sites': sorted(s for s in b['sites'] if s),
                 'first_at': b['first'].isoformat() if b['first'] else None,
@@ -587,7 +592,7 @@ class _Build:
                            + (f" at {sites}" if sites else '') + '.'
                            + (f" Delivered {delivered:,} of {target:,} events ({100 * delivered / target:.0f}%)."
                               if delivered is not None and target else '')
-                           + (' Still running.' if b['running'] else ' Finished.'))})
+                           + (' Target met.' if met else ' Finished.' if finished else ' Still running.'))})
         items.sort(key=lambda i: i['last_at'] or '', reverse=True)
         files = sum(i['files'] for i in items)
         events = sum(i['events'] for i in items)

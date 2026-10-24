@@ -542,8 +542,8 @@ for `completed`).
 - `items`, newest arrival first, each with `pc`, `physics` (PCS's one-line
   summary), `label` (the physics in a row's width: the summary without its
   generator and requester tail, units or repeated nucleus), `state`
-  (`finished` when every task delivering to it in the window has ended,
-  else `running`), `files`, `events`, `tasks`, `sites`, `first_at` and `last_at`
+  (`finished` when every task delivering to it in the window has ended or
+  the plan's target is met, past it included, else `running`), `files`, `events`, `tasks`, `sites`, `first_at` and `last_at`
   (ISO, the first and last registering job's end), `delivered_events` and
   `target_events` (the plan's, read from the stored completion record
   `prod_hub_campaign_completion` without building it), `link` (the PC's
