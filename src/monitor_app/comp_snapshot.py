@@ -215,13 +215,13 @@ def _uncut_site(name):
     return full[0] if len(full) == 1 else name
 
 
-def _task_physics(tasks):
-    """What each PanDA task simulates, its tags read as physics: PCS's
-    one-line summary of the task's physics configuration (process, beams,
-    Q², generator, sample, background, requesters). ``tasks`` is a set of
-    (jeditaskid, taskname); a task PCS links nowhere is found by the
-    composed identity its name carries, and one PCS does not know is left
-    out. Local reads only."""
+def _task_pcs(tasks):
+    """Each PanDA task's physics configuration as PCS records it:
+    ``{jeditaskid: (pc label, one-line physics)}``, the line PCS's summary
+    (process, beams, Q², generator, sample, background, requesters).
+    ``tasks`` is a set of (jeditaskid, taskname); a task PCS links nowhere
+    is found by the composed identity its name carries, and one PCS does
+    not know is left out. Local reads only."""
     try:
         from pcs.models import Dataset, PandaTasks
         from pcs.name_tokens import logical_name_from_physical_name
@@ -234,14 +234,35 @@ def _task_physics(tasks):
                  .select_related(*(f'prod_task__dataset__{r}' for r in related))):
         ds = link.prod_task.dataset if link.prod_task.dataset_id else None
         if ds is not None and ds.physics_config_id:
-            out[link.jedi_task_id] = summary(ds.physics_config)
+            out[link.jedi_task_id] = (ds.physics_config.label, summary(ds.physics_config))
     for tid, name in tasks:
         if tid in out:
             continue
         ds = (Dataset.objects.filter(composed_name=logical_name_from_physical_name(name or ''))
               .select_related(*related).first())
         if ds is not None and ds.physics_config_id:
-            out[tid] = summary(ds.physics_config)
+            out[tid] = (ds.physics_config.label, summary(ds.physics_config))
+    return out
+
+
+def _task_physics(tasks):
+    """What each PanDA task simulates, its tags read as physics:
+    ``{jeditaskid: one-line physics}`` (_task_pcs)."""
+    return {tid: line for tid, (_pc, line) in _task_pcs(tasks).items()}
+
+
+def _plan_progress():
+    """The campaign plan's delivered and target events per physics
+    configuration, from the stored completion record
+    (``prod_hub_campaign_completion``) as it stands: never built here."""
+    from monitor_app.models import CachedProduct
+    row = CachedProduct.objects.filter(key='prod_hub_campaign_completion').values('value').first()
+    out = {}
+    for entry in ((row or {}).get('value') or []):
+        for pc in entry.get('pcs') or []:
+            if pc.get('pc'):
+                out[pc['pc']] = {'target': pc.get('target'),
+                                 'delivered_events': pc.get('delivered_events')}
     return out
 
 
@@ -484,6 +505,76 @@ class _Build:
                 'link': f'{PUBLIC}/panda/tasks/?status=paused&processingtype=epicproduction&days={days}',
                 'detail': (f"{len(items)} task{'s' if len(items) != 1 else ''} paused: {listed}"
                            if items else 'no production task is paused'),
+                'items': items}
+
+    def pc_arrivals(self, site_name, hours=12):
+        """Science arriving at JLab over the last ``hours``, per physics
+        configuration (COMP_SNAPSHOT.md, Arrivals): the RECO files the
+        finished production jobs registered and their events, from each
+        job's payload report, grouped by task and the task's PC. Newest
+        arrival first. Each PC carries its physics in words and the plan's
+        delivered and target events, read from the stored completion
+        record without building it."""
+        since = (self.now - timedelta(hours=hours)).astimezone(dt_timezone.utc).replace(tzinfo=None)
+        sql = f'''SELECT j.jeditaskid, t.taskname, j.computingsite, COUNT(*),
+                         SUM(COALESCE((m.metadata::jsonb -> 'payload' -> 'outputs' -> 'reco' ->> 'events')::bigint, 0)),
+                         MIN(j.endtime), MAX(j.endtime)
+                  FROM "{self.S}"."jobsarchived4" j
+                  JOIN "{self.S}"."jedi_tasks" t ON t.jeditaskid = j.jeditaskid
+                  LEFT JOIN "{self.S}"."metatable" m ON m.pandaid = j.pandaid
+                  WHERE j.endtime >= %s AND j.processingtype = 'epicproduction'
+                    AND j.jobstatus = 'finished' AND j.jobmetrics LIKE %s
+                  GROUP BY 1, 2, 3'''
+        rows = _rows(sql, (since, '%payloadRegistration=registered%'))
+        pcs = _task_pcs({(int(r[0]), r[1]) for r in rows})
+        progress = _plan_progress()
+        by_pc = {}
+        for tid, name, queue, files, events, first, last in rows:
+            pc, physics = pcs.get(int(tid), (None, ''))
+            key = pc or f'task {int(tid)}'
+            b = by_pc.setdefault(key, {'pc': pc, 'physics': physics, 'files': 0, 'events': 0,
+                                       'tasks': set(), 'sites': set(), 'first': None, 'last': None})
+            b['files'] += int(files or 0)
+            b['events'] += int(events or 0)
+            b['tasks'].add(int(tid))
+            b['sites'].add(site_name.get(queue, queue) or queue or '')
+            first, last = _aware(first), _aware(last)
+            b['first'] = min(x for x in (b['first'], first) if x) if (b['first'] or first) else None
+            b['last'] = max(x for x in (b['last'], last) if x) if (b['last'] or last) else None
+        et = ZoneInfo('America/New_York')
+        items = []
+        for key, b in by_pc.items():
+            plan = progress.get(b['pc']) or {}
+            delivered, target = plan.get('delivered_events'), plan.get('target')
+            sites = ', '.join(sorted(s for s in b['sites'] if s))
+            items.append({
+                'pc': b['pc'] or '', 'physics': b['physics'], 'files': b['files'],
+                'events': b['events'], 'tasks': sorted(b['tasks']), 'sites': sorted(s for s in b['sites'] if s),
+                'first_at': b['first'].isoformat() if b['first'] else None,
+                'last_at': b['last'].isoformat() if b['last'] else None,
+                'delivered_events': delivered, 'target_events': target,
+                'link': (f"{PUBLIC}/pcs/config/{b['pc']}/" if b['pc']
+                         else f"{PUBLIC}/panda/tasks/{min(b['tasks'])}/"),
+                'detail': (f"{b['pc'] or key}: {b['physics'] or 'physics not recorded in PCS'}. "
+                           f"{b['files']:,} RECO file{'s' if b['files'] != 1 else ''}, "
+                           f"{b['events']:,} events in {hours} h"
+                           + (f", at {b['last'].astimezone(et):%H:%M} ET"
+                              if b['first'] and b['first'] == b['last'] else
+                              f", {b['first'].astimezone(et):%H:%M} to {b['last'].astimezone(et):%H:%M} ET"
+                              if b['first'] and b['last'] else '')
+                           + f", from task{'s' if len(b['tasks']) != 1 else ''} "
+                           + ', '.join(str(t) for t in sorted(b['tasks']))
+                           + (f" at {sites}" if sites else '') + '.'
+                           + (f" Delivered {delivered:,} of {target:,} events ({100 * delivered / target:.0f}%)."
+                              if delivered is not None and target else ''))})
+        items.sort(key=lambda i: i['last_at'] or '', reverse=True)
+        files = sum(i['files'] for i in items)
+        events = sum(i['events'] for i in items)
+        return {'pcs': len(items), 'files': files, 'events': events, 'window_hours': hours,
+                'link': f'{PUBLIC}/snapper/epicprod/campaign/',
+                'detail': (f"{len(items)} physics configuration{'s' if len(items) != 1 else ''} "
+                           f"received {files:,} RECO files, {events:,} events at JLab in {hours} h"
+                           if items else f'no science arrived at JLab in {hours} h'),
                 'items': items}
 
     def completed_tasks(self, site_name, hours=24):
@@ -1178,6 +1269,7 @@ def build():
         'tasks': b.part('tasks', lambda: b.floor_tasks(site_name, alarms, site_of), None),
         'paused': b.part('paused', lambda: b.paused_tasks(site_name), None),
         'completed': b.part('completed', lambda: b.completed_tasks(site_name), None),
+        'arrivals': b.part('arrivals', lambda: b.pc_arrivals(site_name), None),
         'trends': b.part('trends', lambda: _trends(trend), None),
         'errors': b.errors,
     }
