@@ -40,6 +40,10 @@ const flightColumn=document.createElement('div');flightColumn.id='flight-column'
 for(const id of ['report','tasks']){const panel=document.getElementById(id);if(panel)flightColumn.appendChild(panel);}
 
 if(pausedStrip)flightColumn.appendChild(pausedStrip);
+const completedStrip=document.createElement('section');
+completedStrip.id='completed-tasks';completedStrip.className='panel';
+completedStrip.innerHTML='<div class="panelhead"><strong>Completed tasks · 24h</strong><span class="right small completed-count">—</span></div><div class="completed-list"></div>';
+flightColumn.appendChild(completedStrip);
 const campaignStrip=document.createElement('div');
 campaignStrip.id='campaign-summary';campaignStrip.className='flowcell';
 campaignStrip.innerHTML='<div class="label campaign-title">Campaign —</div><div class="campaign-since small">delivered since —</div><div class="campaign-totals"><b class="green campaign-events">—</b> events <b class="green campaign-bytes">—</b> TB</div><div class="campaign-configs small">— physics configs</div>';

@@ -189,6 +189,15 @@
       task.title || task.id, task.detail));
     document.querySelector('#paused-top .paused-list').replaceChildren(...paused);
     fitPausedTasks();
+    const completed = record.completed;
+    const count = document.querySelector('#completed-tasks .completed-count');
+    count.replaceChildren(completed && completed.link
+      ? anchor(completed.link, '', number(completed.tasks), completed.detail)
+      : document.createTextNode(number(completed && completed.tasks)));
+    const finished = list(completed).map(task => anchor(task.link,
+      'completed-task ' + (task.status === 'done' ? 'green' : 'gold'), task.id, task.detail));
+    document.querySelector('#completed-tasks .completed-list').replaceChildren(...(finished.length
+      ? finished : [element('span', 'small muted', completed ? 'None' : 'Unavailable')]));
   }
 
   function renderStorage(record) {

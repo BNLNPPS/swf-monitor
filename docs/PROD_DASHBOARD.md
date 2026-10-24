@@ -115,3 +115,9 @@ queue and hour: start-cohort outcomes, current workers and payload jobs,
 pre-job refusal evidence, repeated slot matches and measured time costs.
 Individual expected declines stay below the dashboard's error threshold;
 aggregate admission churn remains visible on the summary page.
+
+Completed tasks for the last 24 hours appear below Paused tasks, from
+the snapshot's `completed` record. Each task ID opens its task page;
+the title-row count opens the day's production task list. Hover text
+carries the task's completion status, queue, end time and file outcomes.
+Done tasks are green; finished tasks with lost input files are amber.
