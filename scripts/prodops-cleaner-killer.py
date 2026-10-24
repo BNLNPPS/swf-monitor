@@ -150,6 +150,25 @@ def reap_duplicates():
 
 # -- 2. liveness -------------------------------------------------------------
 
+# The agent's start-up, to its first pong, took under two minutes after the
+# 2026-10-24 deploys; the cron runs every two minutes.
+STARTUP_GRACE_S = 120
+
+
+def started_seconds_ago():
+    """Seconds since the unit last entered active, or None when unknown."""
+    p = _run(["systemctl", "show", "-p", "ActiveEnterTimestampMonotonic", "--value", UNIT])
+    try:
+        started_us = int(p.stdout.strip())
+        with open("/proc/uptime") as handle:
+            uptime_s = float(handle.read().split()[0])
+    except (ValueError, OSError, IndexError):
+        return None
+    if started_us <= 0:
+        return None
+    return uptime_s - started_us / 1e6
+
+
 def liveness():
     try:
         import stomp
@@ -209,6 +228,15 @@ def liveness():
     if st.stdout.strip() == str(EXIT_DELIBERATE):
         log.info(f"liveness: no pong, but '{UNIT}' exited deliberately "
                  f"(code {EXIT_DELIBERATE}) — leaving it stopped")
+        return
+    # A unit that (re)started moments ago may not answer yet: a deploy restarts
+    # the agent, and a check landing seconds later restarted it a second time
+    # and raised the restart-loop alarm (2026-10-24 09:30Z). Within the grace
+    # the next run, two minutes on, checks again.
+    age = started_seconds_ago()
+    if age is not None and age < STARTUP_GRACE_S:
+        log.info(f"liveness: no pong, but '{UNIT}' started {age:.0f}s ago, within the "
+                 f"{STARTUP_GRACE_S}s startup grace — checking again next run")
         return
     log.warning(f"liveness: no pong in {PING_TIMEOUT}s — restarting unit '{UNIT}'")
     # reset-failed first: a unit that tripped the start-limit burst sits in
