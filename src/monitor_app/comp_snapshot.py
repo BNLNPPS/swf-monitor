@@ -1443,7 +1443,7 @@ FRONT_STATES = {
     'half_open': ('amber', 'trying one task after a gate cleared'),
     'held': ('grey', 'held'),
     'oversize': ('amber', 'the next task alone is too large, waiting for the operator'),
-    'no_work': ('grey', 'no eligible task in the ready buffer'),
+    'no_work': ('amber', 'no eligible task in the ready buffer'),
 }
 FRONT_REASONS = {
     'queue_off': 'its feed is off', 'front_off': 'the front is off',
@@ -1457,9 +1457,8 @@ PART_NAMES = {'prod_activity': 'jobs', 'canary': 'canary',
               'snapper_errors': 'failures', 'pilot_supply': 'pilot supply'}
 LEVEL_ORDER = {'red': 0, 'amber': 1, 'grey': 2, 'green': 3}
 # The alarm engine's titles: 'task 40962 (failed) final-failure rate 100.0% —
-# <task name>' and a ping's 'due in 7 days (2026-10-28): <what>'.
+# <task name>'.
 TASK_ALARM_RE = re.compile(r'^task (\d+) \(([^)]*)\) final-failure rate ([\d.]+%) — (.*)$')
-DUE_RE = re.compile(r'^due in (\d+) days? \((\d{4}-\d\d-\d\d)\): (.*)$')
 
 
 def _active_alarms():
@@ -1920,6 +1919,10 @@ def _report_items(front, sites, storage, alarms, assessment):
                               'link': link})
     seen = set()
     for a in alarms or []:  # newest first
+        # Future obligations stay on the alarm dashboard; overdue pings
+        # escalate to alarm severity and then belong in Production now.
+        if a.get('severity') == 'ping':
+            continue
         title = a['title']
         # one line per task: the failure-rate alarms fire per task, and
         # several alarms (and older events) can name the same one
@@ -1928,18 +1931,12 @@ def _report_items(front, sites, storage, alarms, assessment):
         if key in seen:
             continue
         seen.add(key)
-        # a ping is a dated obligation, an alarm only once overdue (PINGS.md)
-        ping = a.get('severity') == 'ping'
-        due = DUE_RE.match(title) if ping else None
         if task:
             number, state, rate, name = task.groups()
             text = f'Final failures {rate}, task {number} ({state}): {name}'
-        elif due:
-            days, date, what = due.groups()
-            text = f'Due {date}: {what}'
         else:
-            text = f"{'Due' if ping else 'Alarm'}: {title.replace(' — ', ': ')}"
-        items.append({'level': 'amber' if ping else 'red', 'text': text,
+            text = f"Alarm: {title.replace(' — ', ': ')}"
+        items.append({'level': 'red', 'text': text,
                       'link': f"{PUBLIC}/alarms/events/{a['id']}/"})
     for st in storage:
         for name, p in st['health']['parts'].items():
