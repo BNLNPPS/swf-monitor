@@ -197,6 +197,36 @@
       'completed-task ' + (task.status === 'done' ? 'green' : 'gold'), task.id, task.detail));
     document.querySelector('#completed-tasks .completed-list').replaceChildren(...(finished.length
       ? finished : [element('span', 'small muted', completed ? 'None' : 'Unavailable')]));
+    renderArrivals(record.arrivals);
+  }
+
+  // Science reaching JLab over 12 hours, one row per physics configuration,
+  // newest arrival first: its physics, files, last arrival and a bar of the
+  // plan's delivered against target; the detail is the row's title.
+  function renderArrivals(arrivals) {
+    const count = document.querySelector('#pc-arrivals .arrivals-count');
+    if (!count) return;
+    const files = arrivals ? `${number(arrivals.files)} files` : '—';
+    count.replaceChildren(arrivals && arrivals.link
+      ? anchor(arrivals.link, '', files, arrivals.detail) : document.createTextNode(files));
+    const rows = [...list(arrivals)].sort((a, b) => String(b.last_at || '').localeCompare(String(a.last_at || '')))
+      .map(pc => {
+        const row = anchor(pc.link, 'arrival-row', undefined, pc.detail);
+        row.append(element('span', 'arrival-label', pc.label || pc.pc),
+          element('span', 'arrival-files green', number(pc.files)),
+          element('span', 'arrival-time muted', et(pc.last_at).replace(' ET', '')));
+        if (pc.target_events) {
+          const share = (pc.delivered_events || 0) / pc.target_events;
+          const bar = element('span', 'arrival-bar');
+          const fill = element('span', share > 1 ? 'over' : '');
+          fill.style.width = `${Math.min(100, Math.round(share * 100))}%`;
+          bar.appendChild(fill);
+          row.appendChild(bar);
+        }
+        return row;
+      });
+    document.querySelector('#pc-arrivals .arrivals-list').replaceChildren(...(rows.length
+      ? rows : [element('span', 'small muted', arrivals ? 'None' : 'Unavailable')]));
   }
 
   function renderStorage(record) {

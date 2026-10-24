@@ -135,3 +135,14 @@ the snapshot's `completed` record. Each task ID opens its task page;
 the title-row count opens the day's production task list. Hover text
 carries the task's completion status, queue, end time and file outcomes.
 Done tasks are green; finished tasks with lost input files are amber.
+
+Arrivals at JLab over the last 12 hours appear below Completed tasks,
+one row per physics configuration, newest arrival first, from the
+snapshot's `arrivals` record (Torre Wenaus, 2026-10-24). A row reads the
+physics in short (`label`), the RECO files registered in the window and
+the time of the last arrival, over a thin bar of the plan's delivered
+against target events, amber past the target. Each row opens the PC's
+page; its hover text carries the full physics line, files and events,
+times, tasks, sites and the plan's delivered against target. The title-row
+count opens the campaign view. The panel grows downward with the number
+of configurations receiving data.
