@@ -1439,8 +1439,6 @@ FRONT_STATES = {
     'supplied': ('green', 'enough work queued, nothing to feed'),
     'fed': ('green', 'fed a task in its last cycle'),
     'awaiting_observation': ('grey', 'waiting for its last submission to activate'),
-    'idle_capacity': ('amber', 'capacity idle while work is queued: the queue is not '
-                               'pulling it (worker supply or site, not the front)'),
     'degraded': ('red', 'holds new releases, a gate is red'),
     'half_open': ('amber', 'trying one task after a gate cleared'),
     'held': ('grey', 'held'),
