@@ -1,4 +1,11 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ePIC production dashboard</title>
-<style>html,body{margin:0;width:100%;height:100%;background:#060b10}iframe{display:block;width:100%;height:100%;border:0}</style></head>
-<body><iframe src="../panda/dashboard/" title="ePIC production dashboard"></iframe></body></html>
+<style>html,body{margin:0;background:#060b10;color:#edf2f1;font:14px Arial,sans-serif}</style></head>
+<body><script>
+(() => {
+  fetch(new URL('../panda/dashboard/', location.href), {credentials:'same-origin', cache:'no-store'})
+    .then(response => { if (!response.ok) throw new Error('Dashboard HTTP ' + response.status); return response.text(); })
+    .then(html => { document.open(); document.write(html); document.close(); })
+    .catch(error => { console.error(error); document.body.textContent = 'Dashboard unavailable. Reload to retry.'; });
+})();
+</script></body></html>

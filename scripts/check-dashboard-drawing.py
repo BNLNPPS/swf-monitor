@@ -11,8 +11,8 @@ assert model.is_file(), 'canonical pillar module missing'
 for name in ('epic-dashboard-panels.js', 'epic-dashboard-links.js', 'epic-dashboard-weekly.js'):
     assert not (root / 'src/static' / name).exists(), f'duplicate dashboard source: {name}'
 entry = (root / 'src/static/epic-dashboard-design.html').read_text()
-assert '<iframe src="../panda/dashboard/"' in entry, 'development URL must use the canonical dashboard'
-assert '<svg' not in entry and '<script' not in entry, 'development URL contains a second dashboard implementation'
+assert "fetch(new URL('../panda/dashboard/'" in entry and 'document.write(html)' in entry, 'development URL must load the canonical dashboard'
+assert '<svg' not in entry and entry.count('<script>') == 1 and len(entry) < 1500, 'development URL contains a second dashboard implementation'
 template = (root / 'src/monitor_app/templates/monitor_app/prod_dashboard.html').read_text()
 assert template.count("static 'monitor_app/prod_dashboard/epic-pillars.js'") == 1
 assert template.count("static 'monitor_app/prod_dashboard/epic-pillar-model.js'") == 1

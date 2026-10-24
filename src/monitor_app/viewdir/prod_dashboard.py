@@ -6,7 +6,6 @@ from django.shortcuts import render
 from django.template.loader import render_to_string
 from django.templatetags.static import static
 from django.urls import reverse
-from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from monitor_app.comp_snapshot import get_snapshot
 
@@ -33,7 +32,6 @@ def dashboard_document(request):
     }, request=request)
 
 
-@xframe_options_sameorigin
 def prod_dashboard(request):
     """The full-page dashboard, without application navigation headers."""
     from django.http import HttpResponse

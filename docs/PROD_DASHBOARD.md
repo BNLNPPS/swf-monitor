@@ -103,7 +103,7 @@ unfinished payload registration in the same completion hour.
   content, checking its pinned hash; the room supplies its existing Three.js presentation and scale.
 - `monitor_app/_prod_home_tabs.html` supplies the shared tab row.
 
-The development URL `static/epic-dashboard-design.html` embeds the same
+The development URL `static/epic-dashboard-design.html` loads the same
 standalone document. It has no copied markup, styles or drawing scripts.
 The duplicate project-level dashboard scripts are removed. The pre-commit
 architectural check rejects a second document or pillar implementation.
