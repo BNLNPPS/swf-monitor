@@ -376,7 +376,7 @@ OSG. Queue identifiers and links retain their canonical names.
   feeds nothing (the global front is off, each live
   queue's front decision in the words of CONTINUOUS_PRODUCTION.md's
   states and reasons), every amber or red health part with its note,
-  every active alarm event (red),
+  every active alarm event (red) and approaching deadline ping (amber),
   storage parts not green, and late or missing scheduled campaign
   assessments (the System
   page's campaign-assessments row; the verdicts are held by corun-ai,
@@ -386,8 +386,9 @@ OSG. Queue identifiers and links retain their canonical names.
   empty-ready-buffer summary and healthy assessment acknowledgements are omitted.
   A live queue below its target work depth with no eligible ready task is
   amber: the front would release suitable work if it were available.
-  Future-deadline pings stay on the alarm dashboard; they enter this report
-  if they become overdue and escalate to alarm severity.
+  The alarm engine selects approaching pings using each ping's configured
+  lead time. Their report text shows the due date without the recorded
+  title's stale countdown. Overdue pings escalate to red alarm severity.
 - `report.assessment`: the newest daily campaign assessment, from its
   `assessment_register` action record (swf-epicprod
   EPICPROD_ASSESSMENTS.md): the verdict, the verdict as a health level

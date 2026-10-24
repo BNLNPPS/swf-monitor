@@ -1459,6 +1459,7 @@ LEVEL_ORDER = {'red': 0, 'amber': 1, 'grey': 2, 'green': 3}
 # The alarm engine's titles: 'task 40962 (failed) final-failure rate 100.0% —
 # <task name>'.
 TASK_ALARM_RE = re.compile(r'^task (\d+) \(([^)]*)\) final-failure rate ([\d.]+%) — (.*)$')
+DUE_RE = re.compile(r'^due in (\d+) days? \((\d{4}-\d\d-\d\d)\): (.*)$')
 
 
 def _active_alarms():
@@ -1919,10 +1920,6 @@ def _report_items(front, sites, storage, alarms, assessment):
                               'link': link})
     seen = set()
     for a in alarms or []:  # newest first
-        # Future obligations stay on the alarm dashboard; overdue pings
-        # escalate to alarm severity and then belong in Production now.
-        if a.get('severity') == 'ping':
-            continue
         title = a['title']
         # one line per task: the failure-rate alarms fire per task, and
         # several alarms (and older events) can name the same one
@@ -1931,12 +1928,19 @@ def _report_items(front, sites, storage, alarms, assessment):
         if key in seen:
             continue
         seen.add(key)
+        # The alarm engine selects approaching pings by their lead time.
+        # Their recorded title's countdown ages; display the due date.
+        ping = a.get('severity') == 'ping'
+        due = DUE_RE.match(title) if ping else None
         if task:
             number, state, rate, name = task.groups()
             text = f'Final failures {rate}, task {number} ({state}): {name}'
+        elif due:
+            _days, date, what = due.groups()
+            text = f'Due {date}: {what}'
         else:
-            text = f"Alarm: {title.replace(' — ', ': ')}"
-        items.append({'level': 'red', 'text': text,
+            text = f"{'Due' if ping else 'Alarm'}: {title.replace(' — ', ': ')}"
+        items.append({'level': 'amber' if ping else 'red', 'text': text,
                       'link': f"{PUBLIC}/alarms/events/{a['id']}/"})
     for st in storage:
         for name, p in st['health']['parts'].items():
