@@ -57,15 +57,20 @@ function fitPausedTasks(){
  if(!pausedStrip)return;
  const list=pausedStrip.querySelector('.paused-list');
  const tasks=Array.from(list.querySelectorAll('.pausechip'));
+ list.style.removeProperty('grid-template-columns');
+ list.style.display='flex';list.style.flexWrap='wrap';list.style.width='100%';
+ list.style.fontSize='11px';list.style.gap='.4em 1.1em';
+ tasks.forEach(task=>{task.style.fontSize='inherit';task.style.lineHeight='1.3';task.style.whiteSpace='nowrap';});
  if(!tasks.length)return;
- const columns=tasks.length<=8?Math.min(4,tasks.length):Math.ceil(tasks.length/2);
- list.style.gridTemplateColumns='repeat('+columns+',max-content)';
- list.style.fontSize='11px';
- list.style.gap='.27em .9em';
- tasks.forEach(task=>{task.style.fontSize='inherit';task.style.lineHeight='1.3';});
- const width=pausedStrip.clientWidth;
- const needed=list.scrollWidth;
- if(width>0&&needed>width)list.style.fontSize=(11*width/needed)+'px';
+ const rows=()=>new Set(tasks.map(task=>task.offsetTop)).size;
+ if(rows()>2){
+  let low=1,high=11;
+  for(let i=0;i<10;i++){
+   const size=(low+high)/2;list.style.fontSize=size+'px';
+   if(rows()>2)high=size;else low=size;
+  }
+  list.style.fontSize=low+'px';
+ }
 }
 fitPausedTasks();
 addEventListener('resize',fitPausedTasks);
