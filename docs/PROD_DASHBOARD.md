@@ -29,6 +29,11 @@ Tasks in flight, epicprod-live, Production now and Science data occupy
 the remaining columns. Site panes open by default; Open and Close act
 on every site pane.
 
+Production now keeps its standard 182-pixel height. Its notices use
+10-pixel text and scroll below the fixed title, leaving Science data
+visible below it. Every notice in the snapshot is accessible; there is
+no separate inactive-site footer.
+
 Cylinder height represents running jobs on one 2,500-job scale. A compact
 execution-site cylinder retains its fixed height and shows the shared
 slash break when the value exceeds its display range. The green and red

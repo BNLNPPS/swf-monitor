@@ -313,13 +313,12 @@
       return row;
     });
     document.querySelector('#events .board').replaceChildren(...rows);
-    const issues = list(record.report).slice(0, 5).map(item => {
+    const issues = list(record.report).map(item => {
       const row = anchor(item.link || config.snapshotUrl, 'issue', undefined, item.text);
       const dot = element('span', 'dot'); dot.style.background = 'var(--' + color(item.level) + ')';
       row.append(dot, element('span', '', item.text)); return row;
     });
-    const idle = document.querySelector('#report .idle');
-    document.querySelector('#report .issues').replaceChildren(...issues, ...(idle ? [idle] : []));
+    document.querySelector('#report .issues').replaceChildren(...issues);
     const assessment = record.report && record.report.assessment;
     if (assessment) {
       const fields = ['assessment-created', 'assessment-verdict', 'assessment-finished']
