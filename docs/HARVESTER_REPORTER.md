@@ -124,3 +124,10 @@ does not equate worker starts with useful payload capacity or diagnose a
 node from admission declines.
 
 Version 1.5 adds `queue_status`: each queue's `queueStatus` in the harvester queue configuration, the copy the queue registry's drift check compares (swf-epicprod QUEUE_REGISTRY.md).
+
+Version 1.6 adds `queue_status.pilot_dispatch`, read from each queue's
+actual `submitter.templateFile`: native pilots' exact bound image, known
+legacy ALRB launchers' dynamic image selection, or an explicit unknown
+with its reason. Each reading includes the template path and SHA-256.
+The registry's admission check reads this fresh host evidence; unavailable,
+unresolved or conflicting image bindings never imply compatibility.

@@ -32,6 +32,7 @@ import argparse
 import ast
 import configparser
 import glob
+import hashlib
 import json
 import os
 import re
@@ -311,6 +312,39 @@ def query(conf, sql):
     return rows
 
 
+def pilot_dispatch(template):
+    """Dispatch capability from the actual submit template, never queue history."""
+    result = {'mode': 'unknown', 'images': [], 'source': template or ''}
+    try:
+        with open(template) as handle:
+            text = handle.read()
+    except (OSError, TypeError) as exc:
+        result['error'] = 'pilot template unreadable: {}'.format(exc)
+        return result
+    result['sha256'] = hashlib.sha256(text.encode()).hexdigest()
+    images = re.findall(r'(?m)^\+EpicprodNativeImage\s*=\s*"([^"\n]+)"', text)
+    images += re.findall(r'(?:^|[\s"])EPICPROD_NATIVE_IMAGE=([^\s"]+)', text)
+    if images:
+        images += re.findall(r'(?m)^\+SingularityImage\s*=\s*"([^"\n]+)"', text)
+    images = sorted(set(images))
+    if images:
+        if len(images) != 1 or any(c in images[0] for c in '{}$'):
+            result['error'] = 'pilot image binding is conflicting or unresolved'
+        else:
+            result.update(mode='bound', images=images)
+        return result
+    executable = re.search(r'(?m)^executable\s*=\s*(\S+)\s*$', text)
+    wrapper = re.search(r'EPICPROD_STANDARD_WRAPPER=([^\s"]+)', text)
+    legacy = ('bnlpanda.runpilot2-wrapper.sh', 'epicprod-multipilot.sh')
+    if (executable and os.path.basename(executable.group(1)) in legacy
+            and (not wrapper or os.path.basename(wrapper.group(1)) == legacy[0])
+            and 'EpicprodNative' not in text and 'EPICPROD_NATIVE_' not in text):
+        result['mode'] = 'any'
+    else:
+        result['error'] = 'pilot launcher image capability is not established'
+    return result
+
+
 def queue_status():
     """Each queue's ``queueStatus`` in the harvester queue configuration, a
     copy the queue registry checks (swf-epicprod docs/QUEUE_REGISTRY.md);
@@ -320,8 +354,10 @@ def queue_status():
             config = json.load(handle)
     except (OSError, ValueError) as exc:
         return {'error': 'cannot read {}: {}'.format(QUEUE_CONFIG, exc)}
-    return {'status': {queue: block.get('queueStatus') for queue, block in config.items()
-                       if isinstance(block, dict)}}
+    blocks = {q: b for q, b in config.items() if isinstance(b, dict)}
+    return {'status': {q: b.get('queueStatus') for q, b in blocks.items()},
+            'pilot_dispatch': {q: pilot_dispatch((b.get('submitter') or {}).get('templateFile'))
+                               for q, b in blocks.items()}}
 
 
 def log_roots():
@@ -647,7 +683,7 @@ def not_finished(conf, until, cache):
 def collect(state):
     """The record this run delivers; ``state`` is advanced in place."""
     started = time.time()
-    record = {'host': HOST, 'collected_at': now_iso(), 'reporter_version': '1.5'}
+    record = {'host': HOST, 'collected_at': now_iso(), 'reporter_version': '1.6'}
     positions = state.setdefault('positions', {})
     last_run = state.get('last_run_at')
     first_run = not last_run

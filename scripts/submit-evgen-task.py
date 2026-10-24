@@ -107,6 +107,26 @@ DISPATCHER_SCRIPT = os.path.join(HERE, "evgen_job_dispatcher.py")
 MANAGE_PY = os.path.join(os.path.dirname(HERE), "src", "manage.py")
 
 
+def _check_destination_image(args, spec):
+    """Revalidate the final site/image after canary and trial overrides."""
+    try:
+        raw = _api_get(args.swf_monitor_url, '/pcs/api/prod-tasks/command/',
+                       {'name': args.task_name, 'fmt': 'admission',
+                        'site': spec.get('site') or '',
+                        'container': spec.get('containerImage') or ''}, args.token)
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode('utf-8', errors='replace')
+        try:
+            detail = json.loads(body).get('detail') or body[:500]
+        except ValueError:
+            detail = body[:500]
+        raise ValueError(f'destination admission refused: {detail}') from exc
+    result = json.loads(raw)
+    if (result.get('allowed') is not True or result.get('site') != spec.get('site')
+            or result.get('container_image') != spec.get('containerImage')):
+        raise ValueError(result.get('detail') or 'destination image admission was not confirmed')
+
+
 def _payload_dir():
     """The epicprod payload as installed in this interpreter's swf_epicprod
     package (frozen into the deployed venv at deploy), shipped whole in the
@@ -968,7 +988,8 @@ def main():
     from swf_epicprod.regulation import require_task_destination
     try:
         require_task_destination(spec.get('site'))
-    except ValueError as exc:
+        _check_destination_image(args, spec)
+    except Exception as exc:
         _log(f"ERROR: {exc}")
         _record_submission_failure(args, str(exc))
         return 2
