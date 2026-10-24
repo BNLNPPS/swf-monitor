@@ -2291,6 +2291,69 @@ def panda_segfault_diagnose(request, key):
     return JsonResponse({'queued': True, 'key': key})
 
 
+# The tasks an error row names its input samples for, most failures first.
+ERROR_SAMPLE_TASKS = 3
+
+
+def _task_samples(taskids):
+    """Each JEDI task's input sample as PCS records it, below ``/EVGEN/``:
+    ``{40856: 'DIS/BeAGLE1.03.02-3.1/eAu/9x100/q2_10to100'}``, the first
+    of its paths with the count of any others. An internal-EVGEN task
+    names the sample its jobs generate; a task PCS does not know is left
+    out. Local reads only (ProdTask.evgen_paths, with the tag scan done
+    once for the page)."""
+    taskids = {int(t) for t in taskids if t}
+    if not taskids:
+        return {}
+    try:
+        from pcs.commands import internal_evgen_sample
+        from pcs.models import (PandaTasks, evgen_paths_by_tags, evgen_paths_for,
+                                evgen_paths_for_tags)
+    except ImportError:
+        return {}
+    out, by_tags = {}, None
+    for link in (PandaTasks.objects.filter(jedi_task_id__in=taskids)
+                 .select_related('prod_task__dataset', 'prod_task__prod_config')):
+        task = link.prod_task
+        try:
+            paths = evgen_paths_for(task.inputs, task.input_source_location)
+            if not paths and task.dataset_id:
+                cfg = task.get_effective_config()
+                if str((cfg.get('data') or {}).get('workflow_mode') or '') == 'internal_evgen':
+                    paths = [internal_evgen_sample(task)[0]]
+                else:
+                    if by_tags is None:
+                        by_tags = evgen_paths_by_tags()
+                    paths = evgen_paths_for_tags(task.dataset, by_tags)
+        except Exception:  # noqa: BLE001 - a sample name is a courtesy, never a failure
+            logger.warning('error summary: no sample for task %s', link.jedi_task_id, exc_info=True)
+            continue
+        if paths:
+            first = str(paths[0])
+            first = first[len('/EVGEN/'):] if first.startswith('/EVGEN/') else first.lstrip('/')
+            out[link.jedi_task_id] = first + (f' (+{len(paths) - 1})' if len(paths) > 1 else '')
+    return out
+
+
+def _error_samples_html(task_counts, samples):
+    """The muted line under an error row naming its tasks' samples:
+    ``Input: 40856 DIS/BeAGLE1.03.02-3.1/eAu/9x100/q2_10to100``, each task
+    linked, at most ERROR_SAMPLE_TASKS of them."""
+    parts = []
+    for tc in task_counts[:ERROR_SAMPLE_TASKS]:
+        taskid = tc.get('taskid')
+        if not taskid:
+            continue
+        url = reverse('monitor_app:panda_task_detail', kwargs={'jeditaskid': taskid})
+        sample = samples.get(int(taskid))
+        parts.append(f'<a href="{url}">{taskid}</a>' + (f' {escape(sample)}' if sample else ''))
+    if not parts:
+        return ''
+    more = len(task_counts) - ERROR_SAMPLE_TASKS
+    tail = f' (+{more} more)' if more > 0 else ''
+    return f'<div class="text-muted small">Input: {"; ".join(parts)}{tail}</div>'
+
+
 def panda_errors_datatable_ajax(request):
     from ..cached_product import get_product
 
@@ -2352,6 +2415,8 @@ def panda_errors_datatable_ajax(request):
     from ..error_corrections import apply_to_summary
     apply_to_summary(errors)
     total = len(errors)
+    samples = _task_samples(tc['taskid'] for err in errors
+                            for tc in (err.get('task_counts') or [])[:ERROR_SAMPLE_TASKS])
 
     data = []
     for err in errors:
@@ -2404,6 +2469,11 @@ def panda_errors_datatable_ajax(request):
                         for m in modes]
         else:
             rows_out = [(diag_text, str(err.get('count', 0)))]
+        # What the failing jobs ran on: each task's input sample, so the
+        # row names the generator and sample, not only a task number.
+        sample_html = _error_samples_html(err.get('task_counts') or [], samples)
+        if sample_html:
+            rows_out = [(text + sample_html, count) for text, count in rows_out]
         for cell_text, cell_count in rows_out:
             data.append([
                 f'<a href="{diag_url}">{err["error_source"]}</a>',
