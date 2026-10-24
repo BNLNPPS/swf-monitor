@@ -540,7 +540,8 @@ for `completed`).
 - `pcs`, `files`, `events`, `window_hours` (12), `link` (the campaign view)
   and `detail` (the totals in words).
 - `items`, newest arrival first, each with `pc`, `physics` (PCS's one-line
-  summary), `files`, `events`, `tasks`, `sites`, `first_at` and `last_at`
+  summary), `label` (the physics in a row's width: the summary without its
+  generator and requester tail, units or repeated nucleus), `files`, `events`, `tasks`, `sites`, `first_at` and `last_at`
   (ISO, the first and last registering job's end), `delivered_events` and
   `target_events` (the plan's, read from the stored completion record
   `prod_hub_campaign_completion` without building it), `link` (the PC's

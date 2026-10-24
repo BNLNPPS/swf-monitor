@@ -251,6 +251,16 @@ def _task_physics(tasks):
     return {tid: line for tid, (_pc, line) in _task_pcs(tasks).items()}
 
 
+def _physics_label(line):
+    """The physics in a row's width: PCS's summary without its tail
+    (generator, sample, requesters), the nucleus its beam species already
+    names, and the units ('DIS Au197 eAu 9x100 GeV Q² 10–100 · beagle ...'
+    -> 'DIS eAu 9x100 Q² 10–100')."""
+    import re
+    head = (line or '').split(' · ', 1)[0].replace('_', ' ').replace(' GeV', '')
+    return re.sub(r'\b[A-Z][a-z]?\d{1,3}\s(?=e[A-Z])', '', head).strip()
+
+
 def _plan_progress():
     """The campaign plan's delivered and target events per physics
     configuration, from the stored completion record
@@ -548,7 +558,8 @@ class _Build:
             delivered, target = plan.get('delivered_events'), plan.get('target')
             sites = ', '.join(sorted(s for s in b['sites'] if s))
             items.append({
-                'pc': b['pc'] or '', 'physics': b['physics'], 'files': b['files'],
+                'pc': b['pc'] or '', 'physics': b['physics'], 'label': _physics_label(b['physics']),
+                'files': b['files'],
                 'events': b['events'], 'tasks': sorted(b['tasks']), 'sites': sorted(s for s in b['sites'] if s),
                 'first_at': b['first'].isoformat() if b['first'] else None,
                 'last_at': b['last'].isoformat() if b['last'] else None,
