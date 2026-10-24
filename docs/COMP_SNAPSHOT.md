@@ -654,6 +654,12 @@ Google uses the same production pillars, metrics and trend presentation as
 GREX. The standard Google queue remains off. Controller and runtime
 diagnostics remain in the controller record and operator views.
 
+`site.production_panel` is true for each standard site group, including
+inactive Canada, Perlmutter and JLab. It selects the shared panel geometry
+and reported counts independently of operational activity. Every site has
+a trend row on the shared axis; missing samples are null. Queue activity
+flags, admission and pilot controls are unchanged by panel availability.
+
 GKE worker evidence comes from `gke_pilot_runtime`, published by the
 credentialed controller. `pilots.waiting_current` and `waiting_source`
 identify its pending workers (`gke-pilots`). A missing or stale observation

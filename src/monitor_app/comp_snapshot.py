@@ -1653,7 +1653,7 @@ def _trend_series(sites):
     holds no sample."""
     from snapper_ai.products import series_product
 
-    live = [(s, [q['id'] for q in s['queues'] if q.get('production_display', q['status'] == 'live')])
+    live = [(s, [q['id'] for q in s['queues'] if q['status'] != 'not_built'])
             for s in sites]
     live = [(s, queues) for s, queues in live if queues]
     if not live:
@@ -2146,6 +2146,7 @@ def get_snapshot(refresh=False):
         primary = _primary_queue(site['queues'])
         site['status'] = primary['status'] if primary else 'off'
         site['status_label'] = site['status'].replace('_', ' ')
+        site['production_panel'] = True
         site['status_reason'] = (primary or {}).get('status_reason') or site['status_label']
         if primary:
             site['links'] = dict(primary['links'])
@@ -2159,8 +2160,7 @@ def get_snapshot(refresh=False):
     trends = value.get('trends')
     if trends:
         known = {s['id'] for s in trends.get('sites', [])}
-        missing = [s for s in value['sites'] if s['id'] not in known
-                   and any(q.get('production_display') for q in s['queues'])]
+        missing = [s for s in value['sites'] if s['id'] not in known]
         if missing:
             empty = [None] * len(trends.get('t') or [])
             value['trends'] = dict(trends, sites=[*trends.get('sites', []), *(

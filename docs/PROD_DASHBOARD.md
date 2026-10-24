@@ -34,7 +34,11 @@ production panel content: shared pillars, running and queued jobs, outcomes,
 pilot supply and trend history. Both displays select queues through the
 feed's `production_display` flag, preserving inactive JLab commissioning.
 Google's standard queue remains off. ES runtime and controller diagnostics
-remain in operator views.
+remain in operator views. Canada, Perlmutter and JLab use the same standard
+panel content in their existing dashboard positions, with inactive status
+labels retained. `site.production_panel` controls the presentation independently
+of queue activity. Reported counts remain visible while inactive; missing
+trend samples remain unknown. The room places JLab's chart above its Rucio board.
 
 The Computing now, Work available and Campaign blocks consume
 `report.header`: display-ready values, labels, colours, details and links.

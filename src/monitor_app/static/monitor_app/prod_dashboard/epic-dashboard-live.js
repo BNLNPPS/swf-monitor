@@ -37,7 +37,7 @@
   const productionModel = panels.get(aliases.grex);
 
   function productionPanel(panel, site) {
-    if (panel.querySelector('.queuebody') || !site.queues?.some(q => q.production_display)) return;
+    if (panel.querySelector('.queuebody') || !site.production_panel) return;
     const body = panel.querySelector('.site-body');
     if (!body || !productionModel) return;
     const content = productionModel.querySelector('.queuebody').cloneNode(true);
@@ -51,8 +51,6 @@
     });
     body.replaceWith(content);
     const heading = panel.querySelector('.panelhead');
-    const status = heading.querySelector('.site-status');
-    if (status) status.hidden = true;
     if (!heading.querySelector(':scope > .dot'))
       heading.insertBefore(productionModel.querySelector('.panelhead > .dot').cloneNode(true), heading.querySelector('strong'));
     heading.querySelector('strong').style.fontSize = getComputedStyle(productionModel.querySelector('.panelhead strong')).fontSize;
@@ -132,6 +130,7 @@
     if (status) {
       text(status, site.status_label || 'unknown');
       status.title = site.status_reason || '';
+      status.hidden = active.length > 0;
     }
     const body = panel.querySelector('.site-body');
     if (body) {
