@@ -102,18 +102,18 @@
       const share = site.fair_share;
       const held = Boolean(share && share.limited);
       const content = weekly.querySelector(':scope > a.dashboard-drilldown') || weekly;
-      if (!('linkTitle' in weekly.dataset)) weekly.dataset.linkTitle = content.title || '';
       weekly.classList.toggle('fair-share', held);
       if (held) {
         weekly.dataset.override = '1';
+        // the link pass after each render takes this as the hover text
+        weekly.dataset.overrideTitle = share.pools.join(' and ') + ' negotiator held our ' +
+          'submitter at its fair-share limit in its last cycle (' + et(share.cycle_at) +
+          '): no new slots there until our usage share falls; running pilots keep theirs.';
         content.textContent = 'at fair share limit';
-        content.title = share.pools.join(' and ') + ' negotiator held our submitter at its ' +
-          'fair-share limit in its last cycle (' + et(share.cycle_at) + '): no new slots there ' +
-          'until our usage share falls; running pilots keep theirs.';
       } else {
         delete weekly.dataset.override;
+        delete weekly.dataset.overrideTitle;
         if (weekly.dataset.weeklyText) content.textContent = weekly.dataset.weeklyText;
-        content.title = weekly.dataset.linkTitle;
       }
     }
     const pillars = panel.querySelectorAll('.queuepillar.svgcolumn');
