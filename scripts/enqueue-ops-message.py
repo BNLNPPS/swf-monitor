@@ -11,6 +11,9 @@ Usage:
     enqueue-ops-message.py association_sweep --created-by backfill --extra days=30
     enqueue-ops-message.py assess_refresh --queue /queue/canary.ops \
         --namespace canary --created-by hourly_cron
+    enqueue-ops-message.py payload_canary --queue /queue/canary.ops \
+        --namespace canary --extra task=<PCS task> --extra queue=<queue> \
+        --extra payload_ref=<branch> --json switches='["EPICPROD_SWITCH_X=1"]'
 """
 
 import argparse
@@ -91,6 +94,9 @@ def main():
                         help="requester recorded in the action stream")
     parser.add_argument('--extra', action='append', default=[],
                         help="extra key=value message fields (int if numeric)")
+    parser.add_argument('--json', action='append', default=[], dest='json_fields',
+                        help="extra key=<JSON> message fields, for a list or an "
+                             "object, e.g. switches='[\"EPICPROD_SWITCH_X=1\"]'")
     parser.add_argument('--queue', default=OPS_QUEUE,
                         help="destination queue (default: the epicprod ops queue)")
     parser.add_argument('--namespace', default='prodops',
@@ -104,6 +110,14 @@ def main():
         if not key or not value:
             sys.exit(f"bad --extra {item!r}, need key=value")
         msg[key] = int(value) if value.isdigit() else value
+    for item in args.json_fields:
+        key, _, value = item.partition('=')
+        try:
+            msg[key] = json.loads(value)
+        except ValueError as e:
+            sys.exit(f"bad --json {item!r}: {e}")
+        if not key:
+            sys.exit(f"bad --json {item!r}, need key=<JSON>")
 
     body = json.dumps(msg)
     for attempt, delay in enumerate(RETRY_DELAYS + (None,), start=1):
