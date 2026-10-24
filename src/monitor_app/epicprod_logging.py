@@ -85,6 +85,16 @@ ACTION_DEFAULTS = {
         'description': "One cycle of the pressure front over the regulated "
                        "queues, with each queue's state.",
     },
+    # OSG pool throttles (docs/OSG_SUBMIT_REPORTER.md, Fair-share limit)
+    'osg_throttle': {
+        'sublevel': 'high', 'live': True,
+        'description': "A pool our OSG pilots run in held our submitter at "
+                       "its fair-share limit, so it gives our pilots no new "
+                       "slots (state held, warning), or released it after "
+                       "three consecutive clear readings (state lifted); "
+                       "read from each pool negotiator's last cycle by the "
+                       "OSG submit host reporter.",
+    },
     # the node guard (site-canary docs/NODE_GUARD.md)
     'node_guard_decision': {
         'sublevel': 'normal', 'live': True,

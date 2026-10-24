@@ -54,6 +54,7 @@ BOARD_LABELS = {
     'es_closeout_cycle': 'ES close-out', 'snapper_capture': 'Snapper capture',
     'file_events_measure': 'File events', 'credential_expiry_check': 'Credential expiry',
     'panda_sandbox_keepalive': 'Sandbox keepalive',
+    'osg_throttle': 'OSG throttle',
 }
 OPERATION_LABELS = {'reassign': 'Move', 'pause': 'Pause', 'resume': 'Resume',
                     'retry': 'Retry', 'finish': 'Finish', 'kill': 'Kill',

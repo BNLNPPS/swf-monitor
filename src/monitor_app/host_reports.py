@@ -110,6 +110,14 @@ def host_report(request, host):
     )
     logger.info('host report stored for %s (%d bytes) from %s',
                 host, size, getattr(request.user, 'username', '?'))
+    if host == 'osgsub01':
+        # a pool's throttle on our pilots is an incident (osg_throttle.py);
+        # reading it never fails the ingest
+        try:
+            from .osg_throttle import observe
+            observe(record, getattr(request.user, 'username', ''))
+        except Exception:
+            logger.exception('OSG throttle reading failed for the %s record', host)
     return Response({'host': host, 'stored': True, 'reported_at': now,
                      'bytes': size},
                     status=status.HTTP_201_CREATED)

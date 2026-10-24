@@ -43,6 +43,15 @@ while free UChicago, IRISHEP and SU-ITS slots matched the waiting
 pilots in both directions, and pilots stopped reaching every site
 where they did not already hold slots.
 
+The ingest compares each record's reading with the state kept in
+`PersistentState` (`monitor_app/osg_throttle.py`). A pool's first hold
+records one `osg_throttle` incident at warning level; its lift is
+recorded once the pool has released our submitter for three consecutive
+records, so a limit that flips between negotiation cycles is one
+incident. `#epicprod-live` carries both through its live subscription,
+and the `capcom` subscription (filter `state` held) delivers the hold
+to the operator's feed ([NOTICE_ROUTING.md](NOTICE_ROUTING.md)).
+
 The schedd keeps about an hour and a half of job history and half an
 hour of its log, so a stall in pilot starts outlasts condor's own
 record of it. The reporter therefore also appends each run's idle
