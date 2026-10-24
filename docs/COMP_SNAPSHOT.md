@@ -113,8 +113,12 @@ errors[]          {part, error}
 
 ### Sites and queues
 
-The grouping is the SysConfig key `comp.sites`, seeded with the layout
-below, so a site or queue is added or regrouped without a deploy. OSG is
+The site groups are the SysConfig key `comp.sites` (id, name, order,
+flags), seeded with the layout below, so a site is added or regrouped
+without a deploy. Each site's queues, and their status, are the queue
+registry's (swf-epicprod docs/QUEUE_REGISTRY.md): a queue belongs to the
+site its entry names, in the registry's order, and a retired queue leaves
+the room. OSG is
 a site of its own, not BNL's: BNL is only the conduit its pilots are
 submitted through, and its queues and execute sites belong to OSG.
 
@@ -127,9 +131,12 @@ submitted through, and its queues and execute sites belong to OSG.
 | `google` | Google | BNL_ePIC_GOOGLE, BNL_ePIC_GOOGLE_es | |
 | `jlab` | JLab | JLAB_PanDA_1 | not live: waiting for JLab's CE to route our jobs |
 
-A queue's `status` is `live`, `off` (in PanDA, not taking production),
-`not_live` (defined, not yet running work) or `not_built` (not in PanDA
-yet). `status_reason` says why when the status is not `live`.
+A queue's `status` is `live`, `off` (in PanDA, not taking production:
+the registry's `off` or `commissioning`), `not_live` (defined, not yet
+running work) or `not_built` (the registry's `not_built`, or not in PanDA
+yet). A registry status of `production` leaves the reading to PanDA.
+`status_reason` says why when the status is not `live`: the registry's
+reason.
 
 Per queue, from the PanDA database:
 
@@ -440,7 +447,7 @@ The room's task board, beside the live screen (Torre Wenaus,
 2026-10-22): exactly the production tasks in flight on the floor, those
 not finished in JEDI (done, finished, failed, broken, aborted) that have
 jobs running, starting or queued (the census's states) at a queue of
-`comp.sites`, or rows JEDI has not yet made into jobs for such a queue.
+the room shows, or rows JEDI has not yet made into jobs for such a queue.
 A task with neither is off the board. Newest first by `at`, the task's
 start (its creation before it starts), ISO UTC. `id` is the JEDI task id,
 `link` the task's page; `tasks.link` lists the production tasks.

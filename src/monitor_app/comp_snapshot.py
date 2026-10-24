@@ -32,26 +32,18 @@ TTL_SECONDS = 60
 SCHEMA = 'comp-snapshot/1'
 PUBLIC = 'https://epic-devcloud.org/prod'
 
-# The room's grouping, seeded into SysConfig ``comp.sites`` on first read
-# so a site or queue is added or regrouped without a deploy. A queue's
-# ``status`` here overrides what PanDA says: an operator's word that a
-# queue is off or not yet built.
+# The room's site groups, seeded into SysConfig ``comp.sites`` on first
+# read so a site is added or regrouped without a deploy. Each site's queues
+# and their status are the queue registry's (swf-epicprod
+# docs/QUEUE_REGISTRY.md): a status there other than production overrides
+# what PanDA says, and a retired queue leaves the room.
 DEFAULT_SITES = [
-    {'id': 'osg', 'name': 'OSG', 'execute_sites': True,
-     'queues': [{'id': 'BNL_OSG_PanDA_1'}]},
-    {'id': 'grex', 'name': 'GREX',
-     'queues': [{'id': 'UM_GREX_PanDA_1'}]},
-    {'id': 'compute-canada', 'name': 'Compute Canada',
-     'queues': [{'id': 'ComputeCanada_PanDA_1', 'status': 'not_built',
-                 'status_reason': 'awaiting SFU identity mapping at the CEs'}]},
-    {'id': 'nersc', 'name': 'NERSC',
-     'queues': [{'id': 'NERSC_Perlmutter_epic', 'status': 'off'},
-                {'id': 'NERSC_Perlmutter_epic_es', 'status': 'off'}]},
-    {'id': 'google', 'name': 'Google',
-     'queues': [{'id': 'BNL_ePIC_GOOGLE', 'status': 'off'},
-                {'id': 'BNL_ePIC_GOOGLE_es', 'status': 'off'}]},
-    {'id': 'jlab', 'name': 'JLab',
-     'queues': [{'id': 'JLAB_PanDA_1', 'status': 'off'}]},
+    {'id': 'osg', 'name': 'OSG', 'execute_sites': True},
+    {'id': 'grex', 'name': 'GREX'},
+    {'id': 'compute-canada', 'name': 'Compute Canada'},
+    {'id': 'nersc', 'name': 'NERSC'},
+    {'id': 'google', 'name': 'Google'},
+    {'id': 'jlab', 'name': 'JLab'},
 ]
 
 # GREX runs eight pilots per Slurm worker (2026-10-20).
@@ -907,9 +899,22 @@ class _Build:
 
 
 def _sites_config():
+    """The site groups of ``comp.sites``, each with its queues from the
+    queue registry in the registry's order, shown with the registry's
+    status; a registry site with no group is shown under its own id."""
     from monitor_app.models import SysConfig
+    from swf_epicprod import queues as registry
     value = SysConfig.get_setting('comp.sites', DEFAULT_SITES)
-    return value if isinstance(value, list) else DEFAULT_SITES
+    groups = [g for g in (value if isinstance(value, list) else DEFAULT_SITES)
+              if isinstance(g, dict) and g.get('id')]
+    by_site = registry.room_queues()
+    out = []
+    for g in [*groups, *({'id': s, 'name': s} for s in by_site if s not in {g['id'] for g in groups})]:
+        site = {k: v for k, v in g.items() if k != 'queues'}
+        site['queues'] = [{'id': e['queue'], 'status': registry.ROOM_STATUS.get(e['status']),
+                           'status_reason': e['reason']} for e in by_site.get(g['id'], [])]
+        out.append(site)
+    return out
 
 
 def build():
@@ -1209,10 +1214,6 @@ FRONT_REASONS = {
 PART_NAMES = {'prod_activity': 'jobs', 'canary': 'canary',
               'snapper_errors': 'failures', 'pilot_supply': 'pilot supply'}
 LEVEL_ORDER = {'red': 0, 'amber': 1, 'grey': 2, 'green': 3}
-# Queues production no longer uses, left out of the report by name (Torre,
-# 2026-10-22): BNL_OSG_EPIC_PROD_1 since production moved to BNL_OSG_PanDA_1
-# on 2026-10-21 (swf-epicprod OSG_SUBMISSION.md).
-NOT_IN_PRODUCTION = ('BNL_OSG_EPIC_PROD_1',)
 # The alarm engine's titles: 'task 40962 (failed) final-failure rate 100.0% —
 # <task name>' and a ping's 'due in 7 days (2026-10-28): <what>'.
 TASK_ALARM_RE = re.compile(r'^task (\d+) \(([^)]*)\) final-failure rate ([\d.]+%) — (.*)$')
@@ -1667,8 +1668,6 @@ def _report_items(front, sites, storage, alarms, assessment):
             continue
         for q in live:
             f = q.get('front') or {}
-            if q['id'] in NOT_IN_PRODUCTION:
-                continue
             level, words = FRONT_STATES.get(f.get('state'), ('grey', f.get('state') or ''))
             if f.get('state') and f.get('state') not in ('supplied', 'fed'):
                 reason = FRONT_REASONS.get(f.get('reason'), '')

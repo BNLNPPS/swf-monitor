@@ -1827,10 +1827,11 @@ def list_queues(vo=None, status=None, state=None, search=None):
     where = []
     params = []
 
-    if RETIRED_QUEUES:
-        placeholders = ', '.join(['%s'] * len(RETIRED_QUEUES))
+    retired = list(RETIRED_QUEUES)  # one reading of the live registry view
+    if retired:
+        placeholders = ', '.join(['%s'] * len(retired))
         where.append(f'"panda_queue" NOT IN ({placeholders})')
-        params.extend(RETIRED_QUEUES)
+        params.extend(retired)
 
     if vo:
         where.append(""""data"->>'vo_name' = %s""")
