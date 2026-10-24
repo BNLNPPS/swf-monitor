@@ -65,3 +65,40 @@ class PandaErrorDistributionTests(SimpleTestCase):
             views['site_counts'],
             [{'site': 'BNL_ePIC_GOOGLE', 'count': 5703}],
         )
+
+
+class PandaErrorScopeTests(SimpleTestCase):
+    def test_execution_queue_filters_patterns_and_status_counts(self):
+        from unittest.mock import MagicMock, patch
+        from monitor_app.panda.queries import error_summary
+        cursor = MagicMock()
+        cursor.fetchall.return_value = []
+        conn = MagicMock()
+        conn.cursor.return_value.__enter__.return_value = cursor
+        with patch('monitor_app.panda.queries.connections', {'panda': conn}), \
+                patch('monitor_app.panda.queries._declared_failures', return_value=None):
+            result = error_summary(site='BNL_OSG_PanDA_1',
+                                   execsite='OSG_US_FSU_HNPGRID', status='failed')
+        self.assertNotIn('error', result)
+        self.assertEqual(result['filters']['execsite'], 'OSG_US_FSU_HNPGRID')
+        self.assertEqual(cursor.execute.call_count, 2)
+        for call in cursor.execute.call_args_list:
+            sql, params = call.args
+            self.assertEqual(sql.count('AND "destinationsite" = %s'), 2)
+            self.assertEqual(params.count('OSG_US_FSU_HNPGRID'), 2)
+            self.assertEqual(params.count('BNL_OSG_PanDA_1'), 2)
+
+    def test_multi_queue_filter_is_applied_in_sql(self):
+        from unittest.mock import MagicMock, patch
+        from monitor_app.panda.queries import error_summary
+        cursor = MagicMock()
+        cursor.fetchall.return_value = []
+        conn = MagicMock()
+        conn.cursor.return_value.__enter__.return_value = cursor
+        with patch('monitor_app.panda.queries.connections', {'panda': conn}), \
+                patch('monitor_app.panda.queries._declared_failures', return_value=None):
+            error_summary(site='NERSC_Perlmutter_epic,NERSC_Perlmutter_epic_es')
+        for call in cursor.execute.call_args_list:
+            sql, params = call.args
+            self.assertEqual(sql.count('AND "computingsite" IN (%s, %s)'), 2)
+            self.assertEqual(params.count('NERSC_Perlmutter_epic_es'), 2)

@@ -1948,7 +1948,7 @@ def panda_task_detail(request, jeditaskid):
 # ── Error summary ────────────────────────────────────────────────────────────
 
 def panda_errors_list(request):
-    days = _get_days(request)
+    days = _get_jobs_days(request)
     ended_after, ended_before = _get_ended_window(request)
     if ended_after is not None:
         et = ZoneInfo(settings.TIME_ZONE)
@@ -1959,12 +1959,16 @@ def panda_errors_list(request):
     else:
         description = (
             f'Top error patterns across failed jobs in the last {days} days.')
+    scope = request.GET.get('execsite') or request.GET.get('site') or ''
+    if scope:
+        description += f' Queue: {escape(scope)}.'
     context = {
         'table_title': 'PanDA Error Summary',
         'table_description': description,
         'ajax_url': reverse('monitor_app:panda_errors_datatable_ajax'),
         'columns': ERROR_COLUMNS,
         'selected_site': request.GET.get('site', ''),
+        'selected_execsite': request.GET.get('execsite', ''),
         'selected_error_source': request.GET.get('error_source', ''),
         # Default excludes closed (workflow disposals, not actual
         # errors); the chips show every state present with its count.
@@ -2290,10 +2294,11 @@ def panda_errors_datatable_ajax(request):
 
     dt = DataTablesProcessor(request, [c['name'] for c in ERROR_COLUMNS],
                              default_order_column=3, default_order_direction='desc')
-    days = _get_days(request)
+    days = _get_jobs_days(request)
     ended_after, ended_before = _get_ended_window(request)
     username = request.GET.get('username', '') or None
     site = request.GET.get('site', '') or None
+    execsite = request.GET.get('execsite', '') or None
     error_source = request.GET.get('error_source', '') or None
     # Terminal-state filter, one status or CSV. The default excludes
     # closed: the server disposed of those jobs for workflow reasons,
@@ -2307,12 +2312,12 @@ def panda_errors_datatable_ajax(request):
     # full faulty-job population (multi-second under failure churn), so
     # requests serve the stored summary and rebuilds run behind them.
     product = get_product(
-        f'panda_errors:v6:{days}:{username or ""}:{site or ""}'
+        f'panda_errors:v7:{days}:{username or ""}:{site or ""}:{execsite or ""}'
         f':{error_source or ""}:{status or ""}:{int(classified)}:'
         f'{taskid or ""}:'
         f'{ended_after.isoformat() if ended_after else ""}:'
         f'{ended_before.isoformat() if ended_before else ""}',
-        lambda: error_summary(days=days, username=username, site=site,
+        lambda: error_summary(days=days, username=username, site=site, execsite=execsite,
                               error_source=error_source, limit=200,
                               taskid=taskid,
                               ended_after=ended_after,

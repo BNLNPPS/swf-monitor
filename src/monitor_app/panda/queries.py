@@ -1234,7 +1234,7 @@ def _declared_failures(conn, time_filter, time_params, dest_join, destse_params,
 def error_summary(days=10, username=None, site=None, destinationse=None,
                   taskid=None, error_source=None, limit=20,
                   ended_after=None, ended_before=None, status=None,
-                  classified=False):
+                  classified=False, execsite=None):
     """Aggregate error summary across failed PanDA jobs, ranked by frequency."""
     # When scoped to a specific task, return all error patterns
     if taskid:
@@ -1274,11 +1274,20 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
             filters += ' AND "produsername" = %s'
         extra_params.append(username)
     if site:
-        if '%' in site:
+        sites = [value.strip() for value in site.split(',') if value.strip()]
+        if len(sites) > 1:
+            placeholders = ', '.join(['%s'] * len(sites))
+            filters += f' AND "computingsite" IN ({placeholders})'
+            extra_params.extend(sites)
+        elif '%' in site:
             filters += ' AND "computingsite" LIKE %s'
+            extra_params.append(site)
         else:
             filters += ' AND "computingsite" = %s'
-        extra_params.append(site)
+            extra_params.append(site)
+    if execsite:
+        filters += ' AND "destinationsite" = %s'
+        extra_params.append(execsite)
     destse_filter = ''
     destse_params = []
     if destinationse:
@@ -1552,6 +1561,7 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
             "days": days,
             "username": username,
             "site": site,
+            "execsite": execsite,
             "taskid": taskid,
             "error_source": error_source,
             "status": ','.join(status_list) if status_list else None,

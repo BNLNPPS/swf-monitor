@@ -70,7 +70,11 @@ initial record does not expose the design's captured figures.
 Links open queue-specific Snapper history, filtered job lists, task
 pages, the production front, storage history, live logs and individual
 assessment or alarm records. Hourly completion links compute their
-ending interval when opened. Queued links use the queue's not-started
+ending interval when opened. Failure counts open the error summary for
+the selected queue and hour; task failure counts select that task. Error
+summaries apply execution-queue filters in SQL, including their status
+totals. Site plot legends follow the metric order: running, finish, fail,
+queued. Queued links use the queue's not-started
 status set. In-flight task IDs open all of that task's job history,
 with server-side task filtering and pagination. The jobs title and
 completion chart follow task and execute-site filters; a whole-queue

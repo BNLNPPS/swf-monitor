@@ -30,6 +30,13 @@ function linkDashboard() {
       ended_before: end.toISOString(), ...extra
     });
   }
+  function errors(site, extra = {}) {
+    const end = new Date();
+    return url('panda/errors/', {site: (site ? queues[site] || [] : []).join(','),
+      status: 'failed', hours: 1,
+      ended_after: new Date(end.getTime() - 3600000).toISOString(),
+      ended_before: end.toISOString(), ...extra});
+  }
   function queuePage(site, workers = false) {
     const queue = (queues[site] || [])[0];
     return url('panda/epic-queues/' + encodeURIComponent(queue) + '/', {}, workers ? 'workers' : '');
@@ -103,10 +110,10 @@ function linkDashboard() {
     link(panel.querySelector('.site-body'), queuePage(name), name + ': queue details');
     const metrics = panel.querySelectorAll('.metric');
     const destinations = [
-      jobs(name, 'running', 48), () => ended(name, 'finished'), () => ended(name, 'failed'),
+      jobs(name, 'running', 48), () => ended(name, 'finished'), () => errors(name),
       jobs(name, 'queued', 720), queuePage(name, true), queuePage(name, true)
     ];
-    const descriptions = ['Running jobs', 'Jobs finished in the last hour', 'Jobs failed in the last hour',
+    const descriptions = ['Running jobs', 'Jobs finished in the last hour', 'Error breakdown for jobs failed in the last hour',
       'Queued jobs', 'Harvester workers and pilot supply', 'Harvester workers and slots'];
     metrics.forEach((metric, i) => link(metric, destinations[i], name + ': ' + descriptions[i]));
     const plot = panel.querySelector('.plot');
@@ -143,9 +150,11 @@ function linkDashboard() {
       if (!cell.textContent.trim()) return;
       const column = index + 1;
       const destination = column === 2 ? jobs('', 'running', 2160, {taskid: task}) :
-        column === 3 ? jobs('', 'queued', 2160, {taskid: task}) : detail;
+        column === 3 ? jobs('', 'queued', 2160, {taskid: task}) :
+        column === 6 ? url('panda/errors/', {taskid: task, days: 'all', status: 'failed'}) : detail;
       const description = column === 2 ? 'Running jobs for task ' + task :
-        column === 3 ? 'Queued jobs for task ' + task : 'Task ' + task + ': input files';
+        column === 3 ? 'Queued jobs for task ' + task :
+        column === 6 ? 'Error breakdown for task ' + task : 'Task ' + task + ': input files';
       link(cell, destination, description);
     });
   });
