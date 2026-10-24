@@ -212,7 +212,7 @@ html,body{margin:0;overflow-x:hidden}
 
 #daily-assessment .assessment-title>span:not(:first-child){font-size:10px;line-height:13px;font-weight:400;letter-spacing:normal;text-transform:none}
 
-#right-column{position:absolute;left:940px;top:71px;right:10px;height:calc(var(--screen-height,650px) - 81px);display:flex;flex-direction:column;gap:6px;align-items:stretch}
+#right-column{position:absolute;left:940px;top:71px;right:10px;max-height:calc(var(--screen-height,650px) - 81px);display:flex;flex-direction:column;gap:6px;align-items:stretch}
 #right-column #events,#right-column #storage{width:100%;min-width:0;height:auto;max-height:none;flex:none}
 #right-column #storage .storagemain{grid-template-columns:120px minmax(0,1fr)}
 #right-column #storage .plot,#right-column #storage .plot svg{width:100%;min-width:0}
@@ -237,7 +237,7 @@ html,body{margin:0;overflow-x:hidden}
 .main{grid-template-rows:max-content 66px max-content 182px}
 #executors{height:auto}
 
-#right-column #report{position:static;left:auto;top:auto;width:100%;max-width:none;height:0;min-height:0;max-height:none;overflow:hidden;display:flex;flex-direction:column;flex:1 1 0}
+#right-column #report{position:static;left:auto;top:auto;width:100%;max-width:none;height:auto;min-height:0;max-height:none;overflow:hidden;display:flex;flex-direction:column;flex:0 1 auto}
 #right-column #report .panelhead{flex:none}
 #right-column #report .issues{width:100%;min-height:0;flex:1;overflow-y:auto}
 #right-column #report .issue{font-size:10px;line-height:13px}

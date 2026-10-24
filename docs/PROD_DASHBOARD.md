@@ -29,12 +29,12 @@ Tasks in flight, epicprod-live, Production now and Science data occupy
 the remaining columns. Site panes open by default; Open and Close act
 on every site pane.
 
-The right column fits the visible viewport using the existing screen-height
-measurement. Production now fills the space between the live board and
-Storage; Storage ends at the bottom gutter. Notice text scrolls within
-Production now, so changing notices does not move Storage off screen or
-leave unused space beneath it. Notices use 10-pixel text, and every notice
-is accessible. There is no separate inactive-site footer.
+The right column is bounded by the visible viewport using the existing
+screen-height measurement. Production now wraps its notices without growing
+to fill unused space. When the notices would push Storage off screen, their
+body scrolls within the available height. Storage follows directly below.
+Notices use 10-pixel text, and every notice is accessible. There is no
+separate inactive-site footer.
 
 Cylinder height represents running jobs on one 2,500-job scale. A compact
 execution-site cylinder retains its fixed height and shows the shared
