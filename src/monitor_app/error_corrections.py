@@ -40,7 +40,7 @@ EXIT_READINGS = {
     139: 'payload segfault',
     134: 'payload abort',
     137: 'payload killed',
-    143: 'payload terminated',
+    143: 'payload stopped by SIGTERM (15); reason not established',
     78: 'payload Rucio output registration failure',
     65: 'payload validation failure',
 }

@@ -386,7 +386,7 @@ def median(values):
     return values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2.0
 
 
-def harvester_db(since, until, cache):
+def harvester_db(since, until, cache, admission_cache=None):
     """The harvester's launch limits per queue, its workers now, the workers
     that ended in (since, until], the workers that did not finish over the
     last REASON_HOURS with the batch system's reason for each, and its
@@ -441,6 +441,11 @@ def harvester_db(since, until, cache):
         out['workers_ended'] = {'error': '{}: {}'.format(exc.__class__.__name__, exc)}
 
     try:
+        out['admission_declines'] = admission_declines(conf, until, admission_cache if admission_cache is not None else {})
+    except Exception as exc:
+        out['admission_declines'] = {'error': '{}: {}'.format(exc.__class__.__name__, exc)}
+
+    try:
         out['not_finished'] = not_finished(conf, until, cache)
     except Exception as exc:                                  # noqa: BLE001
         out['not_finished'] = {'error': '{}: {}'.format(exc.__class__.__name__, exc)}
@@ -461,6 +466,88 @@ def harvester_db(since, until, cache):
     except Exception as exc:                                  # noqa: BLE001
         out['service_metrics'] = {'error': '{}: {}'.format(exc.__class__.__name__, exc)}
     return out
+
+
+def admission_evidence(batch_log, roots):
+    """Bounded local startup evidence. No remote fetch and no secrets copied."""
+    path = local_log(batch_log, roots)
+    if not path:
+        return {}
+    stem = os.path.splitext(path)[0]
+    texts = {}
+    for suffix in ('.err', '.out', '.log'):
+        try:
+            with open(stem + suffix, 'rb') as handle:
+                handle.seek(max(0, os.path.getsize(stem + suffix) - 16384))
+                texts[suffix] = handle.read().decode('utf-8', 'replace')
+        except OSError:
+            texts[suffix] = ''
+    err, out, event = texts['.err'], texts['.out'], texts['.log']
+    budget = re.search(r'glidein life (-?\d+) s is under the (\d+) s a job needs; no job taken', err)
+    if not budget:
+        return {}
+    site = re.search(r'execution queue=(.*?); minimum=', err)
+    host = re.search(r'ePIC native pilot: image .*?, host ([^, ]+)', out)
+    slot = re.search(r'Message from starter on (\S+):', event)
+    if not slot:
+        slot = re.search(r'SlotName:\s*(\S+)', event)
+    busy = re.search(r'TimeSlotBusy \(s\)\s*:\s*(\d+)', event)
+    execute = re.search(r'TimeExecute \(s\)\s*:\s*(\d+)', event)
+    return {'reason': 'Insufficient remaining glidein lifetime; no job taken',
+            'remaining_s': int(budget.group(1)), 'required_s': int(budget.group(2)),
+            'execution_queue': site.group(1) if site else None,
+            'node': host.group(1) if host else None,
+            'slot': slot.group(1) if slot else None,
+            'busy_s': int(busy.group(1)) if busy else None,
+            'execute_s': int(execute.group(1)) if execute else None}
+
+
+def admission_declines(conf, until, cache):
+    """Native OSG pre-job exit-73 refusals over one hour, including repeat slots."""
+    floor = (datetime.strptime(until, '%Y-%m-%d %H:%M:%S')
+             - timedelta(hours=1)).strftime('%Y-%m-%d %H:%M:%S')
+    rows = query(conf, ("SELECT workerID, batchID, computingSite, startTime, endTime, "
+        "JSON_UNQUOTE(JSON_EXTRACT(workAttributes, '$.batchLog')) FROM work_table "
+        "WHERE computingSite='BNL_OSG_PanDA_1' AND nativeExitCode=73 "
+        "AND startTime>'{}' AND startTime<='{}' ORDER BY endTime DESC").format(floor, until))
+    roots = log_roots()
+    groups, samples, seen, reads = {}, [], set(), 0
+    busy_total, execute_total, measured = 0, 0, 0
+    for worker, batch, queue, started, ended, batch_log in rows:
+        seen.add(worker)
+        evidence = cache.get(worker)
+        if evidence is None and reads < 400:
+            reads += 1
+            evidence = admission_evidence(batch_log, roots)
+            if evidence:
+                cache[worker] = evidence
+        evidence = evidence or {}
+        key = (evidence.get('execution_queue') or 'unknown', evidence.get('node') or 'unknown',
+               evidence.get('slot') or 'unknown', evidence.get('required_s'))
+        group = groups.setdefault(key, {'execution_queue': key[0], 'node': key[1], 'slot': key[2],
+            'count': 0, 'remaining_min_s': None, 'remaining_max_s': None,
+            'required_s': evidence.get('required_s'), 'batch_log': batch_log})
+        group['count'] += 1
+        remaining = evidence.get('remaining_s')
+        if remaining is not None:
+            group['remaining_min_s'] = remaining if group['remaining_min_s'] is None else min(remaining, group['remaining_min_s'])
+            group['remaining_max_s'] = remaining if group['remaining_max_s'] is None else max(remaining, group['remaining_max_s'])
+        if evidence.get('busy_s') is not None:
+            measured += 1
+            busy_total += evidence['busy_s']
+            execute_total += evidence.get('execute_s') or 0
+        if len(samples) < 20:
+            samples.append(dict(evidence, workerid=int(worker), batchid=batch,
+                                queue=queue, started=started, ended=ended, batch_log=batch_log))
+    for worker in list(cache):
+        if worker not in seen:
+            del cache[worker]
+    ranked = sorted(groups.values(), key=lambda row: -row['count'])
+    return {'hours': 1, 'since': floor, 'until': until, 'declined': len(rows),
+            'classified': sum(row['count'] for row in ranked if row['required_s'] is not None),
+            'repeated_slot_starts': sum(max(0, row['count']-1) for row in ranked if row['slot'] != 'unknown'),
+            'busy_s': busy_total, 'execute_s': execute_total, 'busy_measured_workers': measured,
+            'placements': ranked[:60], 'placements_total': len(ranked), 'samples': samples}
 
 
 def workers_ended(conf, since, until):
@@ -494,13 +581,18 @@ def not_finished(conf, until, cache):
     rows = query(conf, (
         "SELECT workerID, batchID, computingSite, status, nativeStatus, endTime, "
         "LEFT(diagMessage, 300), JSON_UNQUOTE(JSON_EXTRACT(workAttributes, '$.batchLog')), "
-        "nodeID, computingElement FROM work_table "
+        "nodeID, computingElement, nativeExitCode FROM work_table "
         "WHERE endTime > '{}' AND endTime <= '{}' AND (status <> 'finished' "
         "OR (nativeExitCode IS NOT NULL AND nativeExitCode <> 0)) ORDER BY endTime DESC"
     ).format(floor, until))
     roots = log_roots()
     sites, logs_read, log_errors, seen = {}, 0, 0, set()
-    for worker, batch, site, status, native, ended, diag, batch_log, node, ce in rows:
+    for worker, batch, site, status, native, ended, diag, batch_log, node, ce, exit_code in rows:
+        # Native OSG exit 73 is the launcher's deliberate pre-job refusal.
+        # It belongs in admission telemetry, below the operational error feed.
+        if (site == 'BNL_OSG_PanDA_1' and str(exit_code) == '73') or (
+                status == 'cancelled' and str(exit_code) in ('143', '-15')):
+            continue
         seen.add(worker)
         reason = cache.get(worker)
         if reason is None:
@@ -534,14 +626,14 @@ def not_finished(conf, until, cache):
         reasons = sorted(s['reasons'].values(), key=lambda e: -e['count'])
         s['reasons'] = reasons[:REASONS_KEEP]
         s['reasons_dropped'] = max(0, len(reasons) - REASONS_KEEP)
-    return {'hours': REASON_HOURS, 'sites': sites, 'workers': len(rows),
+    return {'hours': REASON_HOURS, 'sites': sites, 'workers': sum(v['workers'] for v in sites.values()),
             'condor_logs_read': logs_read, 'condor_log_errors': log_errors}
 
 
 def collect(state):
     """The record this run delivers; ``state`` is advanced in place."""
     started = time.time()
-    record = {'host': HOST, 'collected_at': now_iso(), 'reporter_version': '1.3'}
+    record = {'host': HOST, 'collected_at': now_iso(), 'reporter_version': '1.4'}
     positions = state.setdefault('positions', {})
     last_run = state.get('last_run_at')
     first_run = not last_run
@@ -575,7 +667,7 @@ def collect(state):
     # worker IDs the mysql client returns.
     cache = state.setdefault('reasons', {})
     record['harvester_db'] = harvester_db(since.strftime('%Y-%m-%d %H:%M:%S'),
-                                          until.strftime('%Y-%m-%d %H:%M:%S'), cache)
+                                          until.strftime('%Y-%m-%d %H:%M:%S'), cache, state.setdefault('admission', {}))
     record['collect_seconds'] = round(time.time() - started, 2)
     state['last_run_at'] = record['collected_at']
     return record

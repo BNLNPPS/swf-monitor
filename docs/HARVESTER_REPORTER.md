@@ -104,3 +104,21 @@ reporter.
 ## Regulation telemetry, 22 October 2026
 
 Version 1.3 adds actual worker starts, job-demand cache update times, and the ratio/minimum/maximum fields of the worker limit. OSG reporting runs every minute; other hosts keep their existing cadence.
+
+## Admission telemetry
+
+Version 1.4 separates native OSG exit-73 pre-job refusals and recorded
+cancelled SIGTERM stops from unexpected worker errors. Admission telemetry
+covers one hour: remaining and required lifetime from launcher stderr,
+execution queue and host from startup, exact slot identity and measured
+slot-busy/execution seconds from the Condor event log. Repeated refusals are
+grouped by slot and admission floor. Up to 400 new startup records are read
+per run, with parsed evidence cached until it leaves the hour. Missing logs
+remain unclassified; evidence coverage is reported.
+
+The dashboard's slots/hour link opens `/panda/worker-starts/`, which combines
+this evidence with a cached worker-start cohort and current payload-job and
+worker counts. Recorded worker wall time includes startup and reporting
+delay; Condor slot-busy and execution time are stated separately. The page
+does not equate worker starts with useful payload capacity or diagnose a
+node from admission declines.

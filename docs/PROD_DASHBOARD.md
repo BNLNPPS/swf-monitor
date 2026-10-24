@@ -108,3 +108,10 @@ green, failed red. Gaps split a curve into segments without changing
 its color. The hourly outcome curves are rates from fifteen-minute
 bins. Site histories use the live 90-second series cache. Missing data
 is shown as unavailable rather than retaining captured design values.
+
+The slots/hour figure counts Harvester worker starts, including declined
+starts. Its number and cylinder open the worker-admission summary for that
+queue and hour: start-cohort outcomes, current workers and payload jobs,
+pre-job refusal evidence, repeated slot matches and measured time costs.
+Individual expected declines stay below the dashboard's error threshold;
+aggregate admission churn remains visible on the summary page.

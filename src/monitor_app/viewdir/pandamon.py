@@ -2805,6 +2805,8 @@ def _reported_harvester(queue_name):
                            if isinstance(db.get('workers_now'), dict) else None,
             'ended': ((db.get('workers_ended') or {}).get('sites') or {}).get(queue_name),
             'not_finished': nf_site,
+            'admission_declines': db.get('admission_declines')
+                                  if queue_name == 'BNL_OSG_PanDA_1' else None,
             'not_finished_hours': not_finished.get('hours'),
             'db_error': db.get('error'),
         }

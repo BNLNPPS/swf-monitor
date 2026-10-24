@@ -59,7 +59,7 @@ function fitPausedTasks(){
  const tasks=Array.from(list.querySelectorAll('.pausechip'));
  list.style.removeProperty('grid-template-columns');
  list.style.display='flex';list.style.flexWrap='wrap';list.style.width='100%';
- list.style.fontSize='11px';list.style.gap='.4em 1.1em';
+ list.style.fontSize='11px';list.style.gap='.4em .65em';
  tasks.forEach(task=>{task.style.fontSize='inherit';task.style.lineHeight='1.3';task.style.whiteSpace='nowrap';});
  if(!tasks.length)return;
  const rows=()=>new Set(tasks.map(task=>task.offsetTop)).size;

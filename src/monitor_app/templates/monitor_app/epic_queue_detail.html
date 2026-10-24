@@ -291,6 +291,11 @@
                     <td>{% for status, n in harvester.ended.by_status.items %}{{ n }} {{ status }}{% if not forloop.last %}, {% endif %}{% endfor %}{% if harvester.ended.median_finished_run_s is not None %};
                         the finished ran {{ harvester.ended.median_finished_run_s|fmt_duration }} (median){% endif %}</td></tr>
                 {% endif %}
+                {% if harvester.admission_declines.declined %}
+                <tr><td class="fw-bold">Admission declines</td><td>{{ harvester.admission_declines.declined }} pre-job refusals in the last hour;
+                    <a href="{% url 'monitor_app:worker_admission' %}?site={{ queue_name|urlencode }}">starts, reasons and repeated wasted starts</a>.
+                    Expected refusals are separate from worker errors.</td></tr>
+                {% endif %}
                 {% if harvester.limits or harvester.not_finished %}
                 <tr><td class="fw-bold{% if harvester.not_finished %} text-danger{% endif %}">Workers that did not finish, last {{ harvester.not_finished_hours|default:"24" }} h</td>
                     <td style="word-break: break-word">{% if harvester.not_finished %}{{ harvester.not_finished.workers }}, by the batch system's reason:

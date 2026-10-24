@@ -126,6 +126,7 @@ from .viewdir.system_status import (
 from .viewdir.analysis import analysis_view
 from .viewdir.panda_census import panda_queue_census_json
 from .viewdir.comp_snapshot import comp_snapshot_json
+from .viewdir.worker_admission import worker_admission
 from .viewdir.prod_dashboard import prod_dashboard
 from .viewdir.snapper_api import snapper_series as dashboard_history
 from .viewdir.panda_node_guard import (panda_node_guard, panda_node_guard_json,
@@ -337,6 +338,7 @@ urlpatterns = [
     path('panda/diagnostics/', panda_diagnostics_list, name='panda_diagnostics_list'),
     path('panda/diagnostics/datatable/', panda_diagnostics_datatable_ajax, name='panda_diagnostics_datatable_ajax'),
     path('panda/node-declines/', panda_node_declines, name='panda_node_declines'),
+    path('panda/worker-starts/', worker_admission, name='worker_admission'),
     path('panda/epic-queues/', epic_queues_list, name='epic_queues_list'),
     path('panda/epic-queues/<str:queue_name>/', epic_queue_detail, name='epic_queue_detail'),
     path('panda/epic-queues/<str:queue_name>/description/', epic_queue_description_update,
