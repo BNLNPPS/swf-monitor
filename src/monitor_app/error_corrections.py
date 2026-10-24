@@ -153,6 +153,7 @@ def apply_to_summary(entries):
     error_diag, and optionally exit_counts. Decoration must never take
     a page down: a failure on one entry is logged and that entry keeps
     its raw label."""
+    evidence = {}
     for entry in entries:
         try:
             rule = match(entry.get('error_source'),
@@ -162,6 +163,24 @@ def apply_to_summary(entries):
             if rule is not None:
                 entry['correction'] = correction(
                     rule, entry.get('exit_counts') or {})
+            # Only generic payload labels receive representative-log evidence.
+            # A witness explains its own job; it does not relabel every job
+            # sharing an exit code or assign a payload cause to worker losses.
+            if (entry.get('error_source'), entry.get('error_code')) in {('executor', 1), ('pilot', 1305)}:
+                from .epicprod_inventory import cached_payload_log_parts, diagnosis_from_log_texts
+                for sample in (entry.get('site_task_counts') or [])[:3]:
+                    job = sample.get('representative_pandaid')
+                    task = sample.get('taskid')
+                    if not job or not task:
+                        continue
+                    if job not in evidence:
+                        parts = cached_payload_log_parts(task, job)
+                        evidence[job] = diagnosis_from_log_texts([p['text'] for p in parts]) if parts else {}
+                    diagnosis = evidence[job]
+                    if diagnosis.get('operation') == 'invalid_event_record':
+                        entry['payload_evidence'] = {'pandaid': job, 'taskid': task,
+                            'summary': diagnosis['failure_summary'], 'grade': 'payload log'}
+                        break
         except Exception as e:
             logger.error('error-correction decoration failed for '
                          '%s:%s: %s', entry.get('error_source'),

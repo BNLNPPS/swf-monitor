@@ -166,3 +166,30 @@ Local checksum deadbeef does not match remote checksum cafebabe
         self.assertEqual(diagnosis['cause_layer'], 'unknown')
         self.assertEqual(diagnosis['cause_entity'], '')
         self.assertEqual(diagnosis['cause_confidence'], 'unresolved')
+
+
+class InputRecordEvidenceTests(SimpleTestCase):
+    def test_invalid_event_record_beats_unrelated_group_warning(self):
+        diagnosis = diagnosis_from_log_texts([
+            'WARNING: group: unknown groupid 13200140',
+            'Input FATAL +++ Stable particle (PDG: 2212 ) with daughters! check your MC record\nDDSim ERROR Simulation failed!'])
+        self.assertEqual(diagnosis['operation'], 'invalid_event_record')
+        self.assertEqual(diagnosis['cause_layer'], 'input')
+        self.assertIn('DDSim', diagnosis['failure_summary'])
+        self.assertIn('2212', diagnosis['failure_summary'])
+
+    def test_sample_evidence_does_not_relabel_worker_losses(self):
+        from unittest.mock import patch
+        from monitor_app.error_corrections import apply_to_summary
+        sample = [{'taskid': 40856, 'representative_pandaid': 5864566}]
+        entries = [{'error_source': 'executor', 'error_code': 1, 'count': 131,
+                    'site_task_counts': sample},
+                   {'error_source': 'supervisor', 'error_code': 4101, 'count': 21,
+                    'site_task_counts': sample}]
+        with patch('monitor_app.error_corrections._rules', return_value=[]), \
+             patch('monitor_app.epicprod_inventory.cached_payload_log_parts', return_value=[
+                 {'text': 'Input FATAL +++ Stable particle (PDG: 2212 ) with daughters!'}]):
+            apply_to_summary(entries)
+        self.assertEqual(entries[0]['payload_evidence']['pandaid'], 5864566)
+        self.assertEqual(entries[0]['count'], 131)
+        self.assertNotIn('payload_evidence', entries[1])

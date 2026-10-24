@@ -1478,21 +1478,24 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
     count_params = []
     for table in ['jobsactive4', 'jobsarchived4']:
         count_parts.append(f"""
-            SELECT j."jobstatus", COUNT(*)
+            SELECT j."jobstatus", j."jeditaskid", COUNT(*)
             FROM "{PANDA_SCHEMA}"."{table}" j
             {dest_join}
             WHERE {time_filter}
               AND j."jobstatus" IN ('failed','cancelled','closed')
               AND ({any_nonzero})
               {filters}
-            GROUP BY 1
+            GROUP BY 1, 2
         """)
         count_params.extend(destse_params + time_params + extra_params)
     status_counts = {}
+    task_counts = {}
     try:
         with conn.cursor() as cursor:
             cursor.execute(' UNION ALL '.join(count_parts), count_params)
-            for job_status, job_count in cursor.fetchall():
+            for job_status, job_taskid, job_count in cursor.fetchall():
+                if job_taskid and (not status_list or job_status in status_list):
+                    task_counts[int(job_taskid)] = task_counts.get(int(job_taskid), 0) + int(job_count or 0)
                 status_counts[str(job_status)] = (
                     status_counts.get(str(job_status)) or 0
                 ) + int(job_count or 0)
@@ -1555,6 +1558,9 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
         # restriction applied — the basis of the status filter chips,
         # and the visibility of whatever the filter excludes.
         "status_counts": status_counts,
+        "task_counts": [{"taskid": task, "count": count}
+                        for task, count in sorted(task_counts.items(),
+                                                  key=lambda item: (-item[1], item[0]))],
         # The failures under a declared downtime, per declaration.
         "declared": declared,
         "filters": {
@@ -1792,10 +1798,17 @@ QUEUE_SUMMARY_FIELDS = [
 
 
 def list_queues(vo=None, status=None, state=None, search=None):
-    """List PanDA queues from schedconfig_json with summary fields."""
+    """List current PanDA queues from schedconfig_json with summary fields."""
+    from swf_epicprod.regulation import RETIRED_QUEUES
+
     conn = connections['panda']
     where = []
     params = []
+
+    if RETIRED_QUEUES:
+        placeholders = ', '.join(['%s'] * len(RETIRED_QUEUES))
+        where.append(f'"panda_queue" NOT IN ({placeholders})')
+        params.extend(RETIRED_QUEUES)
 
     if vo:
         where.append(""""data"->>'vo_name' = %s""")

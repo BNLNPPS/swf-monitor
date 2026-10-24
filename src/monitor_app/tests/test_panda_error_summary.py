@@ -102,3 +102,20 @@ class PandaErrorScopeTests(SimpleTestCase):
             sql, params = call.args
             self.assertEqual(sql.count('AND "computingsite" IN (%s, %s)'), 2)
             self.assertEqual(params.count('NERSC_Perlmutter_epic_es'), 2)
+
+
+class ErrorTaskFacetTests(SimpleTestCase):
+    def test_task_counts_come_from_jobs_not_overlapping_error_patterns(self):
+        from unittest.mock import MagicMock, patch
+        from monitor_app.panda.queries import error_summary
+        cursor = MagicMock()
+        cursor.fetchall.side_effect = [[], [('failed', 40856, 131),
+                                           ('failed', 40856, 21),
+                                           ('closed', 41000, 9)]]
+        conn = MagicMock()
+        conn.cursor.return_value.__enter__.return_value = cursor
+        with patch('monitor_app.panda.queries.connections', {'panda': conn}), \
+                patch('monitor_app.panda.queries._declared_failures', return_value=None):
+            result = error_summary(status='failed')
+        self.assertEqual(result['task_counts'], [{'taskid': 40856, 'count': 152}])
+        self.assertEqual(result['status_counts'], {'failed': 152, 'closed': 9})

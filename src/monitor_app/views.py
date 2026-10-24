@@ -3154,10 +3154,10 @@ def panda_queues_datatable_ajax(request):
     dt = DataTablesProcessor(request, columns, default_order_column=0, default_order_direction='asc')
     
     # Build base queryset
-    queryset = PandaQueue.objects.all()
+    queryset = PandaQueue.objects.exclude(queue_name__in=django_settings.CANARY_CLOSED_QUEUES)
     
     # Get counts and apply search/pagination
-    records_total = PandaQueue.objects.count()
+    records_total = queryset.count()
     search_fields = ['queue_name', 'site', 'status', 'queue_type']
     queryset = dt.apply_search(queryset, search_fields)
     records_filtered = queryset.count()
@@ -3352,7 +3352,7 @@ def rucio_endpoint_json(request, endpoint_name):
 def panda_queues_all_json(request):
     """Display JSON view of all PanDA queue configurations."""
     queues_data = {}
-    for queue in PandaQueue.objects.all().order_by('queue_name'):
+    for queue in PandaQueue.objects.exclude(queue_name__in=django_settings.CANARY_CLOSED_QUEUES).order_by('queue_name'):
         queues_data[queue.queue_name] = queue.config_data
     
     import json

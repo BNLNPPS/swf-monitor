@@ -285,3 +285,9 @@ supported, not confirmed. Every summary states the processing lost.
   [pilot3 PR #212](https://github.com/PanDAWMS/pilot3/pull/212)
   (merged and deployed on the ePIC pilot 2026-08-25); optionally a
   server-side lift of the failed-job metadata discard.
+
+Generic payload-exit patterns can show a representative job’s cached
+payload-log diagnosis, with its job link and explicit sample scope. DDSim
+rejecting a stable particle with daughters is an input-record failure.
+The witness does not assert that every job with the same exit code has
+the same cause. Reading the summary never fetches remote logs.

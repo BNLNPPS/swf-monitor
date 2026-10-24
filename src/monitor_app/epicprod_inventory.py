@@ -777,7 +777,18 @@ def diagnosis_from_log_texts(log_texts, job=None, worker=None):
     cause_layer = transfer['cause_layer']
     cause_entity = transfer['cause_entity']
     cause_confidence = transfer['cause_confidence']
-    if operation:
+    invalid_record = re.search(
+        r'Input\s+FATAL[^\n]*Stable particle \(PDG:\s*(\d+)[^\n]*with daughters',
+        combined_log_text)
+    if invalid_record:
+        phase = 'simulation'
+        operation = 'invalid_event_record'
+        cause_layer = 'input'
+        cause_entity = 'PDG ' + invalid_record.group(1)
+        cause_confidence = 'confirmed'
+        failure_summary = ('DDSim rejected input event: stable particle ('
+                           + cause_entity + ') has daughter particles')
+    elif operation:
         phase = 'output_registration'
         failure_summary = transfer['failure_summary']
     elif timeline:

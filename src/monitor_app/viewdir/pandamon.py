@@ -1028,8 +1028,8 @@ def panda_tasks_list(request):
         # The retry's target queue choices: the cached PanDA queue
         # inventory, the names the retry validator accepts.
         'panda_queue_names': list(
-            PandaQueue.objects.order_by('queue_name')
-            .values_list('queue_name', flat=True)),
+            PandaQueue.objects.exclude(queue_name__in=settings.CANARY_CLOSED_QUEUES)
+            .order_by('queue_name').values_list('queue_name', flat=True)),
         # A Move's targets: the production queues (front.queues).
         'production_queues': _production_queues(),
         'table_description': f'JEDI tasks from the last {days} days.',
@@ -1969,6 +1969,8 @@ def panda_errors_list(request):
         'columns': ERROR_COLUMNS,
         'selected_site': request.GET.get('site', ''),
         'selected_execsite': request.GET.get('execsite', ''),
+        'task_filter_parameters': [(key, value) for key, values in request.GET.lists()
+                                   if key != 'taskid' for value in values],
         'selected_error_source': request.GET.get('error_source', ''),
         # Default excludes closed (workflow disposals, not actual
         # errors); the chips show every state present with its count.
@@ -2312,7 +2314,7 @@ def panda_errors_datatable_ajax(request):
     # full faulty-job population (multi-second under failure churn), so
     # requests serve the stored summary and rebuilds run behind them.
     product = get_product(
-        f'panda_errors:v7:{days}:{username or ""}:{site or ""}:{execsite or ""}'
+        f'panda_errors:v8:{days}:{username or ""}:{site or ""}:{execsite or ""}'
         f':{error_source or ""}:{status or ""}:{int(classified)}:'
         f'{taskid or ""}:'
         f'{ended_after.isoformat() if ended_after else ""}:'
@@ -2336,6 +2338,7 @@ def panda_errors_datatable_ajax(request):
         # population, and the selection this response was built under.
         'status_counts': result.get('status_counts') or {},
         'status_selected': status,
+        'task_counts': result.get('task_counts') or [],
         # The failures under a declared downtime, per declaration.
         'declared': result.get('declared'),
     }
@@ -2344,6 +2347,10 @@ def panda_errors_datatable_ajax(request):
         return dt.create_response([], 0, 0, extra=product_extra)
 
     errors = result.get('errors', [])
+    # A newly fetched representative log can explain a stored pattern
+    # immediately, without rescanning the job population.
+    from ..error_corrections import apply_to_summary
+    apply_to_summary(errors)
     total = len(errors)
 
     data = []
@@ -2361,6 +2368,12 @@ def panda_errors_datatable_ajax(request):
         # Bootstrap shows as the one immediate tooltip. An inner
         # title= span would add a second, delayed native floater.
         diag_text = escape(err.get('error_diag', '') or '')
+        witness = err.get('payload_evidence')
+        if witness:
+            witness_url = reverse('monitor_app:panda_job_detail', args=[witness['pandaid']])
+            diag_text = (f'{escape(witness["summary"])} '
+                         f'(<a href="{witness_url}">sample {witness["pandaid"]}</a>)'
+                         f'<div class="text-muted small">Reported: {diag_text}</div>')
         # The correction root: a label a rule marks unreliable renders
         # its corrected reading first, the reported text beneath it.
         # Average run time before this error ended the job; patterns

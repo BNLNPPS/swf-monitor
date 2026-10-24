@@ -255,6 +255,8 @@ Use it for:
   `analytics/` and `assessment/` under either flag (they serve the web views
   and the MCP campaign-status tool). The ops agent imports the same package
   but picks up new code only at its restart, which is the full deploy.
+- site-canary web views and templates only; scheduler, policy, models and
+  agent changes require a full deploy
 - Static asset changes only when explicitly adding `--static`
 
 Do not use it for:

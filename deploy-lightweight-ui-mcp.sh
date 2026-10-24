@@ -217,6 +217,20 @@ esac
 log "Syncing snapper_ai lightweight paths (snapper-ai -> deployed venv)..."
 rsync "${RSYNC_ARGS[@]}" --exclude 'migrations/' --exclude 'tests/' "$SNAPPER_ROOT/snapper_ai/" "$TARGET_SNAPPER/"
 
+# The canary web presentation is independent of its scheduler and agent.
+# Sync only its views and templates; every other canary change takes a full deploy.
+if [[ "$DO_UI" == true ]]; then
+    CANARY_ROOT="/data/wenauseic/github/site-canary"
+    TARGET_CANARY=$(cd "$CURRENT_DIR" && "$CURRENT_DIR/.venv/bin/python" -c "import canary, os; print(os.path.dirname(canary.__file__))")
+    case "$TARGET_CANARY" in
+        "$CURRENT_DIR"/.venv/*) ;;
+        *) echo "ERROR: deployed canary resolves outside the deployed venv: $TARGET_CANARY" >&2; exit 1 ;;
+    esac
+    log "Syncing canary web views and templates..."
+    rsync "${RSYNC_ARGS[@]}" "$CANARY_ROOT/canary/store/views.py" "$TARGET_CANARY/store/views.py"
+    rsync "${RSYNC_ARGS[@]}" "$CANARY_ROOT/canary/store/templates/" "$TARGET_CANARY/store/templates/"
+fi
+
 log "Syncing ai lightweight paths..."
 rsync "${RSYNC_ARGS[@]}" "${AI_EXCLUDES[@]}" "$SRC_DIR/ai/" "$TARGET_SRC/ai/"
 

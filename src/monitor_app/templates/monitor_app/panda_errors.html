@@ -12,12 +12,14 @@
     {% endif %}
     {% endfor %}
 </div>
-{% if selected_taskid %}
-<div style="margin-bottom:1em;">
-    <strong>Task filter:</strong> {{ selected_taskid }}
-    <a href="?{{ clear_task_query }}" class="btn btn-sm btn-secondary ms-2">Clear task filter</a>
-</div>
-{% endif %}
+<div class="mb-2" id="panda-errors-task-chips"><strong>Task:</strong> <span class="text-muted">loading…</span></div>
+<form method="get" class="d-flex align-items-center gap-2 mb-3">
+    {% for key, value in task_filter_parameters %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
+    <label for="panda-errors-taskid">Task ID:</label>
+    <input id="panda-errors-taskid" name="taskid" type="number" min="1" class="form-control form-control-sm" style="width:9em;" value="{{ selected_taskid }}">
+    <button class="btn btn-sm btn-secondary" type="submit">Filter</button>
+    {% if selected_taskid %}<a href="?{{ clear_task_query }}" class="btn btn-sm btn-secondary">All tasks</a>{% endif %}
+</form>
 <!-- Terminal-state filter: chips self-discover from the window's
      per-status totals (filled from the table response); closed is
      excluded by default — workflow disposals, not actual errors —
@@ -39,6 +41,20 @@
 // element — raw statements only, no script tags.
 $('#main-table').on('xhr.dt', function (e, settings, json) {
     if (!json || !json.status_counts) { return; }
+    const tasks = document.getElementById('panda-errors-task-chips');
+    if (tasks && json.task_counts) {
+        tasks.replaceChildren();
+        const label = document.createElement('strong'); label.textContent = 'Task: '; tasks.appendChild(label);
+        json.task_counts.forEach(function (item) {
+            const link = document.createElement('a');
+            const url = new URL(window.location); url.searchParams.set('taskid', item.taskid);
+            link.href = url.toString();
+            link.className = 'btn btn-sm me-1 ' + (String(currentFilters.taskid || '') === String(item.taskid) ? 'btn-primary' : 'btn-secondary');
+            link.textContent = item.taskid + ' (' + item.count.toLocaleString() + ' jobs)';
+            tasks.appendChild(link);
+        });
+        if (!json.task_counts.length) tasks.appendChild(document.createTextNode('none in this selection'));
+    }
     const box = document.getElementById('panda-errors-status-chips');
     if (!box) { return; }
     const selected = String(json.status_selected || '')
