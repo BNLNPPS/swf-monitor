@@ -66,10 +66,17 @@ While a pool's negotiator holds our OSG submitter at its fair-share
 limit, the OSG title row shows **fair share limited** in yellow in place
 of the weekly average, and the weekly figure returns when the limit
 lifts. The hover names the pool and the time of the negotiation cycle.
-A held submitter gets no new slots in that pool, though its running
-pilots keep theirs. The reading is the OSG submit host reporter's
+The notice means our submitter reached its fair-share limit during the
+last reported negotiation cycle. Existing pilots keep their slots;
+later cycles may grant more. The reading is the OSG submit host reporter's
 negotiator query ([OSG_SUBMIT_REPORTER.md](OSG_SUBMIT_REPORTER.md)),
 carried as `fair_share` on the snapshot's OSG site.
+
+The feed owns the fair-share notice in `site.fair_share.notice`: its
+text, severity, hover detail and live queue link. The dashboard and room
+display those fields without local wording. A cleared or unavailable
+fair-share state has no notice. The adapter is applied when the cached
+record is read, so wording changes do not wait for a census rebuild.
 
 All displayed times use a 24-hour clock in Eastern Time. Hover details
 appear after a 150 ms pause. Daily assessment text is the record's

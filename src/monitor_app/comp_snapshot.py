@@ -1371,11 +1371,31 @@ def _released(since):
                                  extra_data__outcome='fed').count()
 
 
+def _fair_share_notice(share, link):
+    """The notice shared by every display of the pool's fair-share state."""
+    if not share or not share.get('limited'):
+        return None
+    pools = ' and '.join(share.get('pools') or ['Pool'])
+    cycle = share.get('cycle_at')
+    when = ''
+    if cycle:
+        try:
+            at = datetime.fromisoformat(cycle.replace('Z', '+00:00'))
+            when = f" ({at.astimezone(ZoneInfo('America/New_York')):%Y-%m-%d %H:%M:%S} ET)"
+        except (TypeError, ValueError):
+            logger.warning('Unusable fair-share cycle time: %r', cycle)
+    return {
+        'text': 'fair share limited', 'level': 'amber', 'link': link,
+        'detail': (f'{pools}: fair-share limit reached in the last reported '
+                   f'negotiation cycle{when}. Existing pilots keep their slots; '
+                   'later cycles may grant more.'),
+    }
+
+
 def _fair_share(negotiators, age_seconds):
     """Whether a pool's negotiator held our OSG submitter at its
     fair-share limit in its last cycle, from the submit host reporter's
-    record (docs/OSG_SUBMIT_REPORTER.md). A held submitter gets no new
-    slots in that pool while it lasts, whatever its free slots accept.
+    record (docs/OSG_SUBMIT_REPORTER.md).
     None when the record lacks the reading or is stale."""
     if (not isinstance(negotiators, dict) or not negotiators.get('negotiators')
             or age_seconds is None or age_seconds > REPORT_STALE_SECONDS):
@@ -2003,6 +2023,11 @@ def get_snapshot(refresh=False):
         dict(item, short=short_name(item.get('name')))
         for item in site.get('execute_sites', [])
     ]) for site in value.get('sites', [])]
+    for site in value['sites']:
+        if isinstance(site.get('fair_share'), dict):
+            share = site['fair_share']
+            site['fair_share'] = dict(share, notice=_fair_share_notice(
+                share, (site.get('links') or {}).get('panda_queue')))
     if value.get('observed_at'):
         value['storage'] = [dict(row, links=dict(row.get('links') or {},
             failed=incomplete_registration_link(value['observed_at'])))

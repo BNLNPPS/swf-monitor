@@ -103,7 +103,7 @@ function linkDashboard() {
     if (!(name in queues)) return;
     link(title, history(name), name + ': last 12h');
     const weekly = panel.querySelector('.weekly-cores');
-    link(weekly, history(name, '7d'), weekly && weekly.dataset.overrideTitle ||
+    link(weekly, weekly && weekly.dataset.overrideLink || history(name, '7d'), weekly && weekly.dataset.overrideTitle ||
       name + ': running cores · last 7d');
     const status = panel.querySelector('.site-status');
     link(status, name === 'Perlmutter' ? url('panda/front/', {}, 'nersc-allocation') : queuePage(name),

@@ -113,6 +113,14 @@ errors[]          {part, error}
 
 ### Sites and queues
 
+`site.fair_share` carries the submit host's latest negotiator reading.
+Its `notice` is null when not limited; otherwise it is
+`{text, level, detail, link}`: the canonical wording, severity, hover
+explanation and live queue page. Dashboard and room consume this notice
+without composing their own text. The same formatter adds it when a
+stored snapshot is read, so cached measurements cannot retain obsolete
+notice wording. A stale or unavailable negotiator record has no notice.
+
 The site groups are the SysConfig key `comp.sites` (id, name, order,
 flags), seeded with the layout below, so a site is added or regrouped
 without a deploy. Each site's queues, and their status, are the queue
