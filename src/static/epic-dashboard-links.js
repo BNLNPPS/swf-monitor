@@ -158,6 +158,12 @@ function linkDashboard() {
       link(cell, destination, description);
     });
   });
+  const campaign = document.getElementById('campaign-summary');
+  if (campaign) {
+    const plan = url('pcs/plan/', {campaign: campaign.dataset.campaign || ''});
+    link(campaign.querySelector('.campaign-title'), plan, 'Campaign production plan');
+    link(campaign.querySelector('.campaign-configs'), plan, 'Physics configurations in this campaign');
+  }
   link(document.querySelector('#paused-top .panelhead strong'), url('panda/tasks/', {status: 'paused', days: 90}),
     'Paused production tasks');
   document.querySelectorAll('#paused-top .pausechip').forEach(chip => {

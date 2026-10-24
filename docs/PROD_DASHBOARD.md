@@ -17,7 +17,11 @@ pass through the existing swf-remote proxy.
 ## Display
 
 The layout carries production supply, processing and science data across
-the top, with the daily assessment and paused tasks. OSG and GREX have
+the top, with the primary campaign summary and daily assessment. Paused
+tasks appear below Tasks in flight. The campaign summary reads the same
+cached completion product as Nav: first delivery date, delivered events
+and bytes, and the number of physics configurations for the current
+campaign. OSG and GREX have
 running, queued, pilot and hourly outcome figures, cylinders and
 12-hour history. OSG execution sites have their own compact strip.
 Perlmutter, Google, Compute Canada and JLab follow in two columns.

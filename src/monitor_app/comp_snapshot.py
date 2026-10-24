@@ -1734,6 +1734,24 @@ def incomplete_registration_link(observed_at):
     })
 
 
+def _dashboard_campaign():
+    """Current campaign, from the same cached completion product as Nav."""
+    from pcs.models import Campaign
+    from monitor_app.cached_product import get_product
+    from swf_epicprod.analytics.completion import completion_product_value
+
+    name = Campaign.objects.filter(lifecycle='current').values_list('name', flat=True).first()
+    if not name:
+        return None
+    product = get_product('prod_hub_campaign_completion', completion_product_value,
+                          ttl_seconds=600)
+    row = next((row for row in product['value'] or [] if row['campaign'] == name), {})
+    totals = row.get('overall') or {}
+    return {'id': name, 'delivered_since': totals.get('delivered_since'),
+            'events': totals.get('delivered_events'), 'bytes': totals.get('bytes'),
+            'configurations': totals.get('configurations')}
+
+
 def get_snapshot(refresh=False):
     """The stored record, rebuilt behind the request when older than the
     TTL (docs/CACHED_PRODUCTS.md)."""
@@ -1754,6 +1772,11 @@ def get_snapshot(refresh=False):
             failed=incomplete_registration_link(value['observed_at'])))
             if row.get('id') == 'jlab-rucio' else row
             for row in value.get('storage', [])]
+    try:
+        value['campaign'] = _dashboard_campaign()
+    except Exception:
+        logger.exception('Dashboard campaign summary unavailable')
+        value['campaign'] = None
     value['age_seconds'] = result.get('age_seconds')
     value['refreshing'] = result.get('refreshing')
     return value

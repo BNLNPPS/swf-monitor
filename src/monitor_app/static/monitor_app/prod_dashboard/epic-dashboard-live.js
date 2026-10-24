@@ -271,6 +271,22 @@
     }
   }
 
+  function renderCampaign(campaign) {
+    campaign = campaign || {};
+    const strip = document.getElementById('campaign-summary');
+    text(strip.querySelector('.campaign-title'), 'Campaign ' + (campaign.id || '—'));
+    let since = '—';
+    if (campaign.delivered_since) {
+      since = new Intl.DateTimeFormat('en-US', {month: 'short', day: 'numeric',
+        timeZone: 'UTC'}).format(new Date(campaign.delivered_since + 'T00:00:00Z'));
+    }
+    text(strip.querySelector('.campaign-since'), 'deliv since ' + since);
+    text(strip.querySelector('.campaign-events'), campaign.events == null ? '—' : number(campaign.events / 1e6) + 'M');
+    text(strip.querySelector('.campaign-bytes'), campaign.bytes == null ? '—' : number(campaign.bytes / 1e12));
+    text(strip.querySelector('.campaign-configs'), number(campaign.configurations) + ' physics configs');
+    strip.dataset.campaign = campaign.id || '';
+  }
+
   let current = null;
   function render(record) {
     if (!record || record.error) throw new Error(record && record.error || 'Production record missing');
@@ -289,6 +305,7 @@
       if (panel.querySelector('.metric') && !sites.some(site => (aliases[site.id] || site.name) === name))
         renderSite({name, queues: [], health: {level: 'grey'}}, null);
     });
+    renderCampaign(record.campaign);
     renderSitePillars();
     renderExecutors(sites); renderTasks(record); renderStorage(record); renderReports(record);
     text(document.getElementById('stamp'), et(record.observed_at, true));
