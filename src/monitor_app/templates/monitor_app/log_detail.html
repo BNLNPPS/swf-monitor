@@ -1,139 +1,84 @@
 {% extends 'base.html' %}
 {% load swf_fmt humanize %}
 
-{% block title %}Log Entry #{{ log.id }}{% endblock %}
+{% block title %}{{ detail.title }} · Log {{ log.id }}{% endblock %}
 
 {% block content %}
-<div class="container-fluid mt-4">
-    <h2>Log Entry #{{ log.id }}</h2>
-
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5 class="mb-0">Log Information</h5>
-        </div>
-        <div class="card-body">
-            <table class="table table-striped">
-                <tbody>
-                    <tr>
-                        <th style="width: 200px;">Timestamp</th>
-                        <td>{{ log.timestamp|fmt_dt }} <span class="text-muted">({{ log.timestamp|naturaltime }})</span></td>
-                    </tr>
-                    <tr>
-                        <th>Level</th>
-                        <td class="{{ log.levelname|state_class }}" title="{{ log.levelname|state_title }}">{{ log.levelname }}</td>
-                    </tr>
-                    {% if action_description %}
-                    <tr>
-                        <th>Action</th>
-                        <td><strong>{{ log.extra_data.action }}</strong> — {{ action_description }}</td>
-                    </tr>
-                    {% endif %}
-                    <tr>
-                        <th>Application</th>
-                        <td><a href="{% url 'monitor_app:log_list' %}?app_name={{ log.app_name }}">{{ log.app_name }}</a></td>
-                    </tr>
-                    <tr>
-                        <th>Instance</th>
-                        <td>
-                            {% if agent_exists %}
-                            <a href="{% url 'monitor_app:agent_detail' log.instance_name %}">{{ log.instance_name }}</a>
-                            {% else %}
-                            {{ log.instance_name }}
-                            {% endif %}
-                            (<a href="{% url 'monitor_app:log_list' %}?instance_name={{ log.instance_name }}">logs</a>)
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
+<style>
+  .log-detail { padding: .6rem 1rem 1.5rem; }
+  .log-heading, .log-meta { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; }
+  .log-heading { justify-content: space-between; margin-bottom: .4rem; }
+  .log-heading h2 { margin: 0; font-size: 1.5rem; }
+  .log-state { display: inline-block; border-radius: .25rem; padding: .15rem .5rem; font-weight: 600; }
+  .log-meta { margin-bottom: 1rem; }
+  .log-summary { border-left: .25rem solid #6c757d; padding: .1rem 1rem; margin: 0 0 1rem; }
+  .log-summary h3, .log-detail h3 { font-size: 1.1rem; margin: 0 0 .4rem; }
+  .log-prose, .log-value-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .log-prose { margin: 0; line-height: 1.6; }
+  .log-passage { margin-bottom: 1rem; }
+  .log-fields { display: grid; grid-template-columns: minmax(9rem, 14rem) minmax(0, 1fr); gap: .4rem 1rem; margin: 0 0 1rem; }
+  .log-fields dt, .log-fields dd { margin: 0; overflow-wrap: anywhere; }
+  .log-fields .log-fields { margin-bottom: 0; }
+  .log-value-list { margin: 0; padding-left: 1.25rem; }
+  .log-technical { border-top: 1px solid #8886; padding-top: .75rem; margin-top: 1.25rem; }
+  .log-technical > summary { cursor: pointer; font-weight: 600; margin-bottom: .75rem; }
+  .log-technical pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  @media (max-width: 575px) {
+    .log-fields { grid-template-columns: 1fr; gap: .15rem; }
+    .log-fields dd { margin-bottom: .6rem; }
+  }
+</style>
+<article class="container-fluid log-detail">
+  <header>
+    <div class="log-heading">
+      <h2>{{ detail.title }} {% if detail.state %}<span class="log-state {{ detail.state|state_class }}">{{ detail.state|state_label }}</span>{% endif %}</h2>
+      <a href="{% url 'monitor_app:log_list' %}?app_name={{ log.app_name|urlencode }}&amp;instance_name={{ log.instance_name|urlencode }}" class="btn btn-secondary btn-sm">Back to logs</a>
     </div>
-
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5 class="mb-0">Message</h5>
-        </div>
-        <div class="card-body">
-            <pre class="mb-0" style="white-space: pre-wrap; word-wrap: break-word;">{{ log.message }}</pre>
-        </div>
+    <div class="log-meta">
+      <span>{{ log.timestamp|fmt_dt }} ({{ log.timestamp|naturaltime }})</span>
+      <span class="log-state {{ log.levelname|state_class }}" title="{{ log.levelname|state_title }}">{{ log.levelname }}</span>
+      <a href="{% url 'monitor_app:log_list' %}?app_name={{ log.app_name|urlencode }}">{{ log.app_name }}</a>
+      {% if agent_exists %}<a href="{% url 'monitor_app:agent_detail' log.instance_name %}">{{ log.instance_name }}</a>{% else %}<span>{{ log.instance_name }}</span>{% endif %}
+      {% if detail.subject %}<span>{{ detail.subject_type }}: {{ detail.subject }}</span>{% endif %}
+      {% if detail.username %}<span>By {{ detail.username }}</span>{% endif %}
+      {% if detail.duration %}<span>{{ detail.duration }}</span>{% endif %}
+      <span>Log {{ log.id }}</span>
     </div>
+  </header>
 
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5 class="mb-0">Source Location</h5>
-        </div>
-        <div class="card-body">
-            <table class="table table-striped">
-                <tbody>
-                    <tr>
-                        <th style="width: 200px;">Module</th>
-                        <td>{{ log.module }}</td>
-                    </tr>
-                    <tr>
-                        <th>Function</th>
-                        <td>{{ log.funcname }}</td>
-                    </tr>
-                    <tr>
-                        <th>Line</th>
-                        <td>{{ log.lineno }}</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
+  <section class="log-summary" aria-labelledby="log-summary-title">
+    <h3 id="log-summary-title">Summary</h3>
+    <p class="log-prose">{{ detail.summary|urlize }}</p>
+  </section>
 
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5 class="mb-0">Process Information</h5>
-        </div>
-        <div class="card-body">
-            <table class="table table-striped">
-                <tbody>
-                    <tr>
-                        <th style="width: 200px;">Process ID</th>
-                        <td>{{ log.process }}</td>
-                    </tr>
-                    <tr>
-                        <th>Thread ID</th>
-                        <td>{{ log.thread }}</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
+  {% for passage in detail.passages %}
+  <section class="log-passage">
+    <h3>{{ passage.label }}</h3>
+    <p class="log-prose">{{ passage.text|urlize }}</p>
+  </section>
+  {% endfor %}
 
-    {% if log.extra_data %}
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5 class="mb-0">Extra Data</h5>
-        </div>
-        <div class="card-body">
-            <table class="table table-striped">
-                <tbody>
-                    {% for key, value in log.extra_data.items %}
-                    <tr>
-                        <th style="width: 200px;">{{ key }}</th>
-                        <td>
-                            {% if key == 'execution_id' and value %}
-                                <a href="{% url 'monitor_app:workflow_execution_detail' value %}">{{ value }}</a>
-                            {% elif key == 'run_id' and value %}
-                                <a href="{% url 'monitor_app:run_detail' value %}">{{ value }}</a>
-                            {% else %}
-                                {{ value }}
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-    {% endif %}
+  {% if detail.fields %}
+  <section aria-labelledby="log-findings-title">
+    <h3 id="log-findings-title">Reported details</h3>
+    <dl class="log-fields">
+      {% for item in detail.fields %}
+      <dt>{{ item.label }}</dt>
+      <dd>{% include 'monitor_app/_log_value.html' with value=item.value only %}</dd>
+      {% endfor %}
+    </dl>
+  </section>
+  {% endif %}
 
-    <div class="mb-4">
-        <a href="{% url 'monitor_app:log_list' %}?app_name={{ log.app_name }}&instance_name={{ log.instance_name }}" class="btn btn-secondary">
-            &larr; Back to Logs
-        </a>
-    </div>
-
-</div>
+  <details class="log-technical">
+    <summary>Technical details and original record</summary>
+    {% if action_description %}<h3>About this action</h3><p>{{ action_description }}</p>{% endif %}
+    <dl class="log-fields">
+      <dt>Original message</dt><dd class="log-value-text">{{ log.message }}</dd>
+      <dt>Source</dt><dd>{{ log.module }} · {{ log.funcname }} · line {{ log.lineno }}</dd>
+      <dt>Process / thread</dt><dd>{{ log.process }} / {{ log.thread }}</dd>
+    </dl>
+    {% if log.extra_data %}<h3>Recorded data</h3><pre>{{ detail.raw_data }}</pre>{% endif %}
+  </details>
+</article>
 {% endblock %}
