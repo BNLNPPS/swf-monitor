@@ -139,8 +139,8 @@ submitted through, and its queues and execute sites belong to OSG.
 | `google` | Google | BNL_ePIC_GOOGLE, BNL_ePIC_GOOGLE_es | |
 | `jlab` | JLab | JLAB_PanDA_1 | not live: waiting for JLab's CE to route our jobs |
 
-A queue's `status` is `live`, `off` (in PanDA, not taking production:
-the registry's `off` or `commissioning`), `not_live` (defined, not yet
+A queue's `status` is `live`, `commissioning` (accepting placed trials),
+`off` (in PanDA, not taking production), `not_live` (defined, not yet
 running work) or `not_built` (the registry's `not_built`, or not in PanDA
 yet). A registry status of `production` leaves the reading to PanDA.
 `status_reason` says why when the status is not `live`: the registry's
@@ -640,6 +640,28 @@ and each was checked to answer 200 there on 2026-10-21, the storage
 and assessment links on 2026-10-22.
 
 ## Regulation telemetry, 22 October 2026
+
+## Shared board presentation
+
+`report.header` contains the Computing now, Work available and Campaign
+blocks for both displays. Each block has `id`, `title`, optional `subtitle`,
+`metrics` (`value`, `label`, `colour`, `link`, `detail`), optional `footer`
+(`text`, `link`, `detail`), `link` and `detail`. Display strings and CSS hex
+colours are composed by the feed.
+
+Sites carry `status_label` and `status_reason`. Google ES commissioning
+also supplies `site.board` (`title`, `items`, `link`), whose rows have
+`text`, `level`, `detail` and `link`. The list reports the configured worker
+limit, CPUs per worker, GKE workers, PanDA jobs and registered output files.
+The standard Google queue remains off; site links select the commissioning
+ES queue before an off queue. The board is omitted after commissioning.
+
+GKE worker evidence comes from `gke_pilot_runtime`, published by the
+credentialed controller. `pilots.waiting_current` and `waiting_source`
+identify its pending workers (`gke-pilots`). A missing or stale observation
+remains unknown. Runtime-file validation is distinct from successful worker
+or payload execution. Other commissioning queues retain inactive production
+activity semantics.
 
 The 22 October regulation correction reads fixed ratio-zero waiting limits from the fresh Harvester database report. Ratio-derived limits retain the last applied adjuster observation, with its timestamp and `limit_source: adjuster`; the health note calls this the last applied limit. The adjuster skips that log line while the waiting queue is full, so an old event timestamp alone does not invalidate the value. The enclosing report must still be fresh, and a failed adjuster-log read is degraded. A limit never observed remains unknown. Missing or stale pilot evidence is amber when work waits, so another green component cannot conceal missing protection. The scheduled production notifier evaluates this record independently of browser requests.
 

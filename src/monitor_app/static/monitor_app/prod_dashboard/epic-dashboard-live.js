@@ -37,6 +37,15 @@
 
   function plot(container, model, times) {
     if (!container) return;
+    const legendKeys = {running: 'running', 'finish/1h': 'finished',
+      'fail/1h': 'failed', queued: 'queued'};
+    container.querySelectorAll('.plotkey span').forEach(label => {
+      const marker = label.querySelector('i');
+      if (!marker) return;
+      const key = legendKeys[label.textContent.trim()];
+      if (!key) throw new Error('Unknown trend legend: ' + label.textContent);
+      marker.style.background = trendModel.palette[key];
+    });
     const svg = container.querySelector('svg');
     if (!svg) return;
     if (!times || !times.length || !model || !model.hasData) {
@@ -94,6 +103,27 @@
     panel.querySelectorAll('.metric b').forEach((node, i) => text(node, number(values[i])));
     const dot = panel.querySelector('.panelhead > .dot');
     if (dot) dot.style.background = 'var(--' + color(site.health && site.health.level) + ')';
+    const status = panel.querySelector('.site-status');
+    if (status) {
+      text(status, site.status_label || 'unknown');
+      status.title = site.status_reason || '';
+    }
+    const body = panel.querySelector('.site-body');
+    if (body) {
+      if (site.board) {
+        body.dataset.siteBoard = '1';
+        const title = anchor(site.board.link, '', site.board.title);
+        title.style.display = 'block'; title.style.fontWeight = 'bold';
+        body.replaceChildren(title, ...list(site.board).map(item => {
+          const row = anchor(item.link || site.board.link, color(item.level), item.text, item.detail);
+          row.style.display = 'block'; row.style.marginTop = '4px';
+          return row;
+        }));
+      } else {
+        delete body.dataset.siteBoard;
+        text(body, site.status_reason || site.status_label || 'Status unavailable');
+      }
+    }
     // While a pool's negotiator holds our submitter at its fair-share
     // limit, that state stands in the weekly-cores place on the title row.
     const weekly = panel.querySelector('.weekly-cores');
@@ -341,20 +371,60 @@
     }
   }
 
-  function renderCampaign(campaign) {
-    campaign = campaign || {};
+  function renderCampaign(group) {
+    group = group || {};
     const strip = document.getElementById('campaign-summary');
-    text(strip.querySelector('.campaign-title'), 'Campaign ' + (campaign.id || '—'));
-    let since = '—';
-    if (campaign.delivered_since) {
-      since = new Intl.DateTimeFormat('en-US', {month: 'short', day: 'numeric',
-        timeZone: 'UTC'}).format(new Date(campaign.delivered_since + 'T00:00:00Z'));
+    const metrics = group.metrics || [];
+    text(strip.querySelector('.campaign-title'), group.title || 'Campaign —');
+    text(strip.querySelector('.campaign-since'), group.subtitle || '');
+    text(strip.querySelector('.campaign-events'), metrics[0]?.value || '—');
+    text(strip.querySelector('.campaign-bytes'), metrics[1]?.value || '—');
+    const totals = strip.querySelector('.campaign-totals');
+    totals.replaceChildren(...metrics.flatMap((item, i) => {
+      const value = element('b', 'green ' + (i ? 'campaign-bytes' : 'campaign-events'), item.value);
+      value.style.color = item.colour;
+      return [value, document.createTextNode(' ' + item.label + ' ')];
+    }));
+    text(strip.querySelector('.campaign-configs'), group.footer?.text || '');
+    strip.dataset.campaign = current.campaign?.id || '';
+  }
+
+  function renderHeader(groups, linksOnly = false) {
+    const cells = document.querySelectorAll('#flow > .flowcell');
+    const targets = {computing: cells[1], work: cells[2], campaign: document.getElementById('campaign-summary')};
+    function bind(node, item) {
+      if (!node || !item) return;
+      let link = node.querySelector(':scope > a.dashboard-drilldown');
+      if (!link) {
+        link = anchor(item.link, 'dashboard-drilldown');
+        link.append(...node.childNodes); node.append(link);
+      }
+      link.href = item.link; link.title = item.detail || '';
+      node.title = item.detail || '';
     }
-    text(strip.querySelector('.campaign-since'), 'delivered since ' + since);
-    text(strip.querySelector('.campaign-events'), campaign.events == null ? '—' : number(campaign.events / 1e6) + 'M');
-    text(strip.querySelector('.campaign-bytes'), campaign.bytes == null ? '—' : number(campaign.bytes / 1e12));
-    text(strip.querySelector('.campaign-configs'), number(campaign.configurations) + ' physics configs');
-    strip.dataset.campaign = campaign.id || '';
+    for (const group of groups || []) {
+      const cell = targets[group.id];
+      if (!cell) continue;
+      if (group.id === 'campaign') {
+        if (!linksOnly) renderCampaign(group);
+        bind(cell.querySelector('.campaign-title'), group);
+        bind(cell.querySelector('.campaign-configs'), group.footer);
+        ['.campaign-events', '.campaign-bytes'].forEach((selector, i) => bind(cell.querySelector(selector), group.metrics[i]));
+      } else {
+        if (!linksOnly) text(cell.querySelector('.label'), group.title);
+        bind(cell.querySelector('.label'), group);
+        cell.querySelectorAll('.flowrow > div').forEach((node, i) => {
+          const item = group.metrics[i];
+          if (!item) return;
+          if (!linksOnly) {
+            const value = node.querySelector('b');
+            text(value, item.value); value.style.color = item.colour;
+            text(node.querySelector('span'), item.label);
+          }
+          bind(node, item);
+        });
+      }
+    }
   }
 
   let current = null;
@@ -365,8 +435,8 @@
     const sum = key => sumKnown(sites.flatMap(site => site.queues || []), key);
     const storage = (record.storage || []).find(row => row.id === 'jlab-rucio') || {};
     const front = record.pressure_front || {};
-    const values = [[front.ready_tasks, front.released_1h], [sum('running'), sum('finished_1h')],
-      [sum('queued'), sum('ungenerated')], [storage.arrived_1h, storage.bytes_1h == null ? null : storage.bytes_1h / 1e9]];
+    const values = [[front.ready_tasks, front.released_1h], null,
+      null, [storage.arrived_1h, storage.bytes_1h == null ? null : storage.bytes_1h / 1e9]];
     document.querySelectorAll('#flow > .flowcell').forEach((cell, i) => {
       if (values[i]) cell.querySelectorAll('.flowrow b').forEach((node, j) => text(node, number(values[i][j])));
     });
@@ -375,13 +445,14 @@
       if (panel.querySelector('.metric') && !sites.some(site => (aliases[site.id] || site.name) === name))
         renderSite({name, queues: [], health: {level: 'grey'}}, null);
     });
-    renderCampaign(record.campaign);
+    renderHeader(record.report?.header);
     renderSitePillars();
     renderExecutors(sites); renderTasks(record); renderStorage(record); renderReports(record);
     text(document.getElementById('stamp'), et(record.observed_at, true, true));
     document.getElementById('stamp').classList.remove('red');
     document.body.classList.remove('record-error');
     linkDashboard(record);
+    renderHeader(record.report?.header, true);
   }
   function failed(error) {
     console.error('Production dashboard update failed:', error);

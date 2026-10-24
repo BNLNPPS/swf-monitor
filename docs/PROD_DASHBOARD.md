@@ -29,6 +29,17 @@ Tasks in flight, epicprod-live, Production now and Science data occupy
 the remaining columns. Site panes open by default; Open and Close act
 on every site pane.
 
+Site labels and reasons come from the feed. During Google Event Service
+commissioning, its pane renders `site.board`, the same titled list used by
+the room: commissioning status, configured worker limit, controller-observed
+worker state, PanDA jobs and registered outputs. Worker counts and CPUs per
+worker have explicit units. Runtime-file verification does not establish that
+a payload has completed. The standard Google queue remains off.
+
+The Computing now, Work available and Campaign blocks consume
+`report.header`: display-ready values, labels, colours, details and links.
+The room places the same three blocks beneath the Production now title.
+
 The right column is bounded by the visible viewport using the existing
 screen-height measurement. Production now wraps its notices without growing
 to fill unused space. When the notices would push Storage off screen, their
@@ -48,7 +59,8 @@ after retries. Task rows extend downward without an internal scrollbar.
 Site plots use the peak of running, finished/hour and failed/hour,
 rounded upward to two significant digits, as their common ceiling.
 The scale number sits directly below the running legend, in a reserved
-band above every curve and overflow dash. Queued values retain their
+band above every curve and overflow dash. Legend markers and curves use
+the same shared palette. Queued values retain their
 true scale: solid
 within the range, dashed along the ceiling above it, with interpolated
 crossings. Gaps break both kinds of line. A wholly zero window uses a

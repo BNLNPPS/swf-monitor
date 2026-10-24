@@ -28,6 +28,7 @@ assert 'share.notice' in live and 'notice.text' in live and 'notice.detail' in l
 assert all('notice.' + field in live for field in ('text', 'level', 'detail', 'link')), 'fair-share adapter must use the complete notice'
 assert 'queue.pilots.waiting_current' in live, 'waiting pilots must use the feed-resolved count'
 assert 'trendModel.hourly(' in live and 'rateMultiplier' not in live, 'hourly conversion must use the shared trend model'
+assert 'marker.style.background = trendModel.palette[key]' in live, 'plot legend markers must use the shared palette'
 links = (assets / 'epic-dashboard-links.js').read_text()
 assert 'record.sites' in links and 'site.queues' in links, 'drilldown queues must come from the feed'
 assert 'BNL_OSG_PanDA_1' not in links and 'UM_GREX_PanDA_1' not in links, 'drilldowns contain a second queue catalogue'

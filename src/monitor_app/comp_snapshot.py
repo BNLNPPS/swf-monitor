@@ -1115,6 +1115,12 @@ class _Build:
         ]
 
 
+def _primary_queue(queues):
+    return max(queues, key=lambda q: (
+        {'live': 3, 'commissioning': 2, 'off': 1}.get(q['status'], 0),
+        q.get('running') or 0), default=None)
+
+
 def _sites_config():
     """The site groups of ``comp.sites``, each with its queues from the
     queue registry in the registry's order, shown with the registry's
@@ -1257,14 +1263,12 @@ def build():
             'id': s['id'], 'name': s['name'],
             'capacity': site_capacity, 'capacity_source': site_source,
             'in_use': sum(q['in_use'] for q in queues),
-            'status': 'live' if any(q['status'] == 'live' for q in queues) else
-                      (queues[0]['status'] if queues else 'off'),
+            'status': (_primary_queue(queues) or {}).get('status', 'off'),
             'health': {'level': _worst(q['health']['level'] for q in queues),
                        'parts': {q['id']: q['health']['level'] for q in queues}},
             # a site's links are those of its busiest live queue: for the
             # OSG pool, the queue production runs on
-            'links': (dict(max((q for q in queues if q['status'] == 'live'),
-                               key=lambda q: q['running'], default=queues[0])['links'])
+            'links': (dict(_primary_queue(queues)['links'])
                       if queues else {'panda_queue': None}),
             'queues': queues,
             'execute_sites': [],
@@ -2019,6 +2023,128 @@ def _dashboard_campaign():
             'configurations': totals.get('configurations')}
 
 
+def _google_board(site, storage):
+    """Commissioning evidence from the controller's stored observation."""
+    from monitor_app.models import CachedProduct, SysConfig
+    from swf_epicprod.gke_pilots import CAPABILITY_KEY
+
+    queue = next((q for q in site['queues'] if q['id'] == 'BNL_ePIC_GOOGLE_es'), None)
+    if not queue or queue['status'] != 'commissioning':
+        return None
+    cfg = SysConfig.get_config()
+    limit = int(cfg.get('gke_pilots.max_pods') or 0)
+    cpus = int(cfg.get('gke_pilots.cpu') or 14)
+    enabled = bool(cfg.get('gke_pilots.enabled'))
+    row = CachedProduct.objects.filter(key=CAPABILITY_KEY).first()
+    cap = (row.value or {}) if row else {}
+    age = ((timezone.now() - row.built_at).total_seconds()
+           if row and row.built_at else None)
+    fresh = (age is not None and 0 <= age <= REPORT_STALE_SECONDS
+             and cap.get('queue') == queue['id'])
+    workers = cap.get('workers') if fresh else None
+    latest = (workers or {}).get('latest') or {}
+    state = 'red' if fresh and latest.get('failed') else 'amber'
+    link = queue['links']['panda_queue']
+    details = (f"Event Service commissioning; controller {'enabled' if enabled else 'disabled'}; "
+               f"limit {limit} worker{'s' if limit != 1 else ''}, {cpus} CPUs per worker.")
+    items = [{'text': 'Commissioning', 'level': 'amber', 'detail': details, 'link': link},
+             {'text': f'Limit: {limit} worker' + ('s' if limit != 1 else '') + f' · {cpus} CPUs/worker',
+              'level': 'amber', 'detail': details, 'link': link}]
+    observed = row.built_at.isoformat() if row and row.built_at else None
+    if workers is not None:
+        pending, running = workers.get('pending'), workers.get('running')
+        worker_text = f'Workers: {pending} pending · {running} running'
+        items.append({'text': worker_text, 'level': state,
+                      'detail': f'GKE observation {observed}; worker counts, distinct from PanDA jobs.',
+                      'link': link})
+        if latest:
+            items.append({'text': f"Latest worker: {latest.get('reason') or latest.get('phase')}",
+                          'level': 'red' if latest.get('failed') else 'grey',
+                          'detail': f"{latest.get('name')}: {latest.get('phase')}. {latest.get('detail') or ''}",
+                          'link': link})
+        queue['pilots'] = {'report': 'gke-pilots', 'waiting': pending,
+                           'waiting_current': pending, 'waiting_source': 'gke-pilots',
+                           'running': running, 'limit': limit,
+                           'per_slot': 1, 'report_age_seconds': round(age, 1),
+                           'report_stale_seconds': REPORT_STALE_SECONDS,
+                           'limit_source': 'controller', 'error': None}
+    else:
+        worker_text = 'Workers: unknown'
+        items.append({'text': worker_text, 'level': 'amber',
+                      'detail': ('GKE worker observation is missing or stale; awaiting the next controller cycle.'),
+                      'link': link})
+        queue['pilots'] = None
+    jobs = f"Jobs: {queue.get('running', 0)} running · {queue.get('queued', 0)} queued"
+    items.append({'text': jobs, 'level': 'grey', 'detail': 'PanDA jobs; each ES job can use multiple CPUs.',
+                  'link': queue['links']['running']})
+    science = next((s for s in storage if s['id'] == 'jlab-rucio'), {})
+    arrived = next((s for s in science.get('by_site', []) if s['site'] == site['id']), {})
+    files = arrived.get('arrived_1h', 0) if science.get('arrived_1h') is not None else None
+    items.append({'text': f'Outputs: {files:,} registered files/1h' if files is not None else 'Outputs: unknown',
+                  'level': 'green' if files else 'amber',
+                  'detail': 'JLab registrations reported by finished production jobs in the last hour.',
+                  'link': f"{PUBLIC}/panda/jobs/?site={queue['id']}&status=finished&days=1"})
+    verified = fresh and cap.get('mode') == 'bound'
+    items.append({'text': 'Runtime files verified' if verified else 'Runtime files: unknown',
+                  'level': 'green' if verified else 'amber',
+                  'detail': (f"Observed {observed}; {', '.join(cap.get('images') or [])}; "
+                             f"{cap.get('error') or cap.get('reason') or ''}"), 'link': link})
+    queue['health'] = _health({'status': _part('amber', 'commissioning', details),
+                               'gke_workers': _part(state, None, worker_text)})
+    queue['status_reason'] = details
+    site['health'] = {'level': _worst(q['health']['level'] for q in site['queues']),
+                      'parts': {q['id']: q['health']['level'] for q in site['queues']}}
+    site['status_reason'] = details
+    return {'title': 'Google · Event Service', 'items': items, 'link': link}
+
+
+def _report_header(record):
+    """Display-ready header blocks shared by the dashboard and room."""
+    queues = [q for site in record.get('sites', []) for q in site.get('queues', [])]
+
+    def total(key):
+        return (sum(q[key] for q in queues)
+                if queues and all(q.get(key) is not None for q in queues) else None)
+
+    def number(value, divisor=1, suffix=''):
+        return f'{int(value / divisor + 0.5):,}{suffix}' if value is not None else '—'
+
+    def metric(value, label, colour, link, detail):
+        return {'value': value, 'label': label, 'colour': colour, 'link': link, 'detail': detail}
+
+    jobs = f'{PUBLIC}/panda/jobs/'
+    front = f'{PUBLIC}/panda/front/#ready'
+    campaign = record.get('campaign') or {}
+    plan = f"{PUBLIC}/pcs/plan/?campaign={quote(campaign.get('id') or '')}"
+    since = campaign.get('delivered_since')
+    if since:
+        date = datetime.fromisoformat(str(since))
+        since = f"{date.strftime('%b')} {date.day}"
+    return [
+        {'id': 'computing', 'title': 'Computing now', 'link': jobs,
+         'detail': 'Production jobs running and finished in the last hour.',
+         'metrics': [metric(number(total('running')), 'running', '#edf2f1',
+                            jobs + '?status=running&days=2', 'Running PanDA jobs'),
+                     metric(number(total('finished_1h')), 'finish/1h', '#7fce95',
+                            jobs + '?status=finished&days=1', 'Jobs finished in the last hour')]},
+        {'id': 'work', 'title': 'Work available', 'link': front,
+         'detail': 'Queued jobs and input work not yet generated into jobs.',
+         'metrics': [metric(number(total('queued')), 'queued', '#a79b8f',
+                            jobs + '?status=queued&days=30', 'Jobs waiting to start'),
+                     metric(number(total('ungenerated')), 'to generate', '#9cabb5',
+                            front, 'Input work not yet generated into jobs')]},
+        {'id': 'campaign', 'title': 'Campaign ' + (campaign.get('id') or '—'),
+         'subtitle': 'delivered since ' + (since or '—'), 'link': plan,
+         'detail': 'Campaign delivery recorded in the production plan.',
+         'metrics': [metric(number(campaign.get('events'), 1e6, 'M'), 'events', '#7fce95',
+                            plan, 'Delivered events'),
+                     metric(number(campaign.get('bytes'), 1e12), 'TB', '#7fce95',
+                            plan, 'Delivered data in decimal terabytes')],
+         'footer': {'text': number(campaign.get('configurations')) + ' physics configs',
+                    'link': plan, 'detail': 'Physics configurations in the current campaign'}},
+    ]
+
+
 def get_snapshot(refresh=False):
     """The stored record, rebuilt behind the request when older than the
     TTL (docs/CACHED_PRODUCTS.md)."""
@@ -2034,9 +2160,22 @@ def get_snapshot(refresh=False):
         dict(item, short=short_name(item.get('name')))
         for item in site.get('execute_sites', [])
     ]) for site in value.get('sites', [])]
+    status_by_queue = {q['id']: q for s in _sites_config() for q in s.get('queues', [])}
     for site in value['sites']:
         site['queues'] = [dict(q, pilots=_pilot_display(q.get('pilots')))
                           for q in site.get('queues', [])]
+        for queue in site['queues']:
+            declared = status_by_queue.get(queue['id']) or {}
+            if declared.get('status'):
+                queue['status'] = declared['status']
+        primary = _primary_queue(site['queues'])
+        site['status'] = primary['status'] if primary else 'off'
+        site['status_label'] = site['status'].replace('_', ' ')
+        site['status_reason'] = (primary or {}).get('status_reason') or site['status_label']
+        if primary:
+            site['links'] = dict(primary['links'])
+        if site['id'] == 'google':
+            site['board'] = _google_board(site, value.get('storage') or [])
         if isinstance(site.get('fair_share'), dict):
             share = site['fair_share']
             site['fair_share'] = dict(share, notice=_fair_share_notice(
@@ -2051,6 +2190,7 @@ def get_snapshot(refresh=False):
     except Exception:
         logger.exception('Dashboard campaign summary unavailable')
         value['campaign'] = None
+    value['report'] = dict(value.get('report') or {}, header=_report_header(value))
     value['age_seconds'] = result.get('age_seconds')
     value['refreshing'] = result.get('refreshing')
     return value

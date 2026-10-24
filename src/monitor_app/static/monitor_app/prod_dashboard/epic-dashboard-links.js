@@ -106,7 +106,8 @@ function linkDashboard(record) {
     const status = panel.querySelector('.site-status');
     link(status, name === 'Perlmutter' ? url('panda/front/', {}, 'nersc-allocation') : queuePage(name),
       name + ': queue status');
-    link(panel.querySelector('.site-body'), queuePage(name), name + ': queue details');
+    const body = panel.querySelector('.site-body');
+    if (!body?.dataset.siteBoard) link(body, queuePage(name), name + ': queue details');
     const metrics = panel.querySelectorAll('.metric');
     const destinations = [
       jobs(name, 'running', 48), () => ended(name, 'finished'), () => errors(name),
