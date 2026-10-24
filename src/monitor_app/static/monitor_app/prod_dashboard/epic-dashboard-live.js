@@ -254,19 +254,21 @@
     document.querySelector('#report .issues').replaceChildren(...issues, ...(idle ? [idle] : []));
     const assessment = record.report && record.report.assessment;
     if (assessment) {
-      const fields = document.querySelectorAll('#daily-assessment .assessment-title > span');
+      const fields = ['assessment-created', 'assessment-verdict', 'assessment-finished']
+        .map(name => document.querySelector('#daily-assessment .' + name));
       const verdict = assessment.verdict || 'unknown';
       text(fields[1], verdict.charAt(0).toUpperCase() + verdict.slice(1));
-      fields[1].className = color(assessment.level);
+      fields[1].className = 'assessment-verdict ' + color(assessment.level);
       const count = (assessment.narration || '').match(/finished\s+([\d,]+)\s+jobs/i);
       text(fields[2], count ? count[1] + ' jobs finished' : '');
-      text(fields[3], et(assessment.at, true));
+      text(fields[0], et(assessment.at, true));
       const link = anchor(assessment.link, '', assessment.narration || '', assessment.narration);
       document.querySelector('#daily-assessment .assessment-text').replaceChildren(link);
     } else {
-      const fields = document.querySelectorAll('#daily-assessment .assessment-title > span');
-      text(fields[1], 'Unavailable'); fields[1].className = 'muted';
-      [fields[2], fields[3], document.querySelector('#daily-assessment .assessment-text')]
+      const fields = ['assessment-created', 'assessment-verdict', 'assessment-finished']
+        .map(name => document.querySelector('#daily-assessment .' + name));
+      text(fields[1], 'Unavailable'); fields[1].className = 'assessment-verdict muted';
+      [fields[0], fields[2], document.querySelector('#daily-assessment .assessment-text')]
         .forEach(node => text(node, ''));
     }
   }
