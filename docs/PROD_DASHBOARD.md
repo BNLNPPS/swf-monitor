@@ -29,12 +29,12 @@ Tasks in flight, epicprod-live, Production now and Science data occupy
 the remaining columns. Site panes open by default; Open and Close act
 on every site pane.
 
-Site labels and reasons come from the feed. During Google Event Service
-commissioning, its pane renders `site.board`, the same titled list used by
-the room: commissioning status, configured worker limit, controller-observed
-worker state, PanDA jobs and registered outputs. Worker counts and CPUs per
-worker have explicit units. Runtime-file verification does not establish that
-a payload has completed. The standard Google queue remains off.
+Site labels and reasons come from the feed. Google uses GREX's ordinary
+production panel content: shared pillars, running and queued jobs, outcomes,
+pilot supply and trend history. Both displays select queues through the
+feed's `production_display` flag, preserving inactive JLab commissioning.
+Google's standard queue remains off. ES runtime and controller diagnostics
+remain in operator views.
 
 The Computing now, Work available and Campaign blocks consume
 `report.header`: display-ready values, labels, colours, details and links.

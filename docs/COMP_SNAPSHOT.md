@@ -647,19 +647,18 @@ blocks for both displays. Each block has `id`, `title`, optional `subtitle`,
 (`text`, `link`, `detail`), `link` and `detail`. Display strings and CSS hex
 colours are composed by the feed.
 
-Sites carry `status_label` and `status_reason`. Google ES commissioning
-also supplies `site.board` (`title`, `items`, `link`), whose rows have
-`text`, `level`, `detail` and `link`. The list reports the configured worker
-limit, CPUs per worker, GKE workers, PanDA jobs and registered output files.
-The standard Google queue remains off; site links select the commissioning
-ES queue before an off queue. The board is omitted after commissioning.
+Sites carry `status_label` and `status_reason`. Each queue also carries
+`production_display`: true for live queues and the enabled, bounded Google
+commissioning queue, false for inactive commissioning queues such as JLab.
+Google uses the same production pillars, metrics and trend presentation as
+GREX. The standard Google queue remains off. Controller and runtime
+diagnostics remain in the controller record and operator views.
 
 GKE worker evidence comes from `gke_pilot_runtime`, published by the
 credentialed controller. `pilots.waiting_current` and `waiting_source`
 identify its pending workers (`gke-pilots`). A missing or stale observation
-remains unknown. Runtime-file validation is distinct from successful worker
-or payload execution. Other commissioning queues retain inactive production
-activity semantics.
+remains unknown. Trend rows include displayed commissioning queues; bins
+without samples remain null.
 
 ## Regulation telemetry, 22 October 2026
 

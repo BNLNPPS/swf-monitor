@@ -34,6 +34,29 @@
   const aliases = config.sitePanels;
   const executorModel = document.querySelector('.exec').cloneNode(true);
   const trendModel = createEpicTrendModel();
+  const productionModel = panels.get(aliases.grex);
+
+  function productionPanel(panel, site) {
+    if (panel.querySelector('.queuebody') || !site.queues?.some(q => q.production_display)) return;
+    const body = panel.querySelector('.site-body');
+    if (!body || !productionModel) return;
+    const content = productionModel.querySelector('.queuebody').cloneNode(true);
+    content.querySelectorAll('linearGradient[id]').forEach(gradient => {
+      const previous = gradient.id;
+      gradient.id = site.id + '-' + previous;
+      content.querySelectorAll('[fill]').forEach(node => {
+        if (node.getAttribute('fill') === 'url(#' + previous + ')')
+          node.setAttribute('fill', 'url(#' + gradient.id + ')');
+      });
+    });
+    body.replaceWith(content);
+    const heading = panel.querySelector('.panelhead');
+    const status = heading.querySelector('.site-status');
+    if (status) status.hidden = true;
+    if (!heading.querySelector(':scope > .dot'))
+      heading.insertBefore(productionModel.querySelector('.panelhead > .dot').cloneNode(true), heading.querySelector('strong'));
+    heading.querySelector('strong').style.fontSize = getComputedStyle(productionModel.querySelector('.panelhead strong')).fontSize;
+  }
 
   function plot(container, model, times) {
     if (!container) return;
@@ -94,7 +117,9 @@
   function renderSite(site, trend) {
     const panel = panels.get(aliases[site.id] || site.name);
     if (!panel) return;
-    const queues = site.queues || [];
+    productionPanel(panel, site);
+    const active = (site.queues || []).filter(q => q.production_display || q.status === 'live');
+    const queues = active.length ? active : site.queues || [];
     const sum = key => sumKnown(queues, key);
     const pilots = queues.map(queue => queue.pilots && queue.pilots.waiting_current);
     const waiting = pilots.some(value => value != null) ? pilots.reduce((n, value) => n + (value || 0), 0) : null;
@@ -110,19 +135,7 @@
     }
     const body = panel.querySelector('.site-body');
     if (body) {
-      if (site.board) {
-        body.dataset.siteBoard = '1';
-        const title = anchor(site.board.link, '', site.board.title);
-        title.style.display = 'block'; title.style.fontWeight = 'bold';
-        body.replaceChildren(title, ...list(site.board).map(item => {
-          const row = anchor(item.link || site.board.link, color(item.level), item.text, item.detail);
-          row.style.display = 'block'; row.style.marginTop = '4px';
-          return row;
-        }));
-      } else {
-        delete body.dataset.siteBoard;
-        text(body, site.status_reason || site.status_label || 'Status unavailable');
-      }
+      text(body, site.status_reason || site.status_label || 'Status unavailable');
     }
     // While a pool's negotiator holds our submitter at its fair-share
     // limit, that state stands in the weekly-cores place on the title row.
