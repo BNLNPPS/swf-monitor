@@ -520,9 +520,13 @@ by its end time.
 - `tasks`: the count; `window_hours`: 24; `link`: the day's production
   task list; `detail`: the count in words.
 - `items`, newest first, each with `id`, `name`, `queue`, `status`,
-  `at` (ISO, the task's end time), `link` (the task's page) and
-  `detail`: the status, site and queue, when, and the input files done
-  and lost.
+  `at` (ISO, the task's end time), `physics`, `link` (the task's page)
+  and `detail`: the status, site and queue, when, the input files done
+  and lost, and the physics. `physics` reads the task's tags as physics:
+  PCS's one-line summary of its physics configuration
+  (`pcs.physics_config.summary`: process, beams, Q², generator, sample,
+  background, requesters), found through the task's PCS link or the
+  composed identity its name carries; empty for a task PCS does not know.
 
 ### Trends
 

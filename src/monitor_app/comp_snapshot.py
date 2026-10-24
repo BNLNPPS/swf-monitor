@@ -199,6 +199,36 @@ def _rows(sql, params=()):
         return cursor.fetchall()
 
 
+def _task_physics(tasks):
+    """What each PanDA task simulates, its tags read as physics: PCS's
+    one-line summary of the task's physics configuration (process, beams,
+    Q², generator, sample, background, requesters). ``tasks`` is a set of
+    (jeditaskid, taskname); a task PCS links nowhere is found by the
+    composed identity its name carries, and one PCS does not know is left
+    out. Local reads only."""
+    try:
+        from pcs.models import Dataset, PandaTasks
+        from pcs.name_tokens import logical_name_from_physical_name
+        from pcs.physics_config import summary
+    except ImportError:
+        return {}
+    related = ('physics_config__physics_tag', 'physics_config__background_tag')
+    out = {}
+    for link in (PandaTasks.objects.filter(jedi_task_id__in={t for t, _ in tasks})
+                 .select_related(*(f'prod_task__dataset__{r}' for r in related))):
+        ds = link.prod_task.dataset if link.prod_task.dataset_id else None
+        if ds is not None and ds.physics_config_id:
+            out[link.jedi_task_id] = summary(ds.physics_config)
+    for tid, name in tasks:
+        if tid in out:
+            continue
+        ds = (Dataset.objects.filter(composed_name=logical_name_from_physical_name(name or ''))
+              .select_related(*related).first())
+        if ds is not None and ds.physics_config_id:
+            out[tid] = summary(ds.physics_config)
+    return out
+
+
 class _Build:
     def __init__(self):
         from monitor_app.panda.census import PANDA_SCHEMA
@@ -456,21 +486,24 @@ class _Build:
                     AND COALESCE(t.endtime, t.statechangetime) >= %s
                   GROUP BY 1, 2, 3, 4, 5 ORDER BY 5 DESC, 1 DESC'''
         items = []
-        for tid, name, queue, state, at, n, done, lost in _rows(
-                sql, (since.astimezone(dt_timezone.utc).replace(tzinfo=None),)):
+        rows = _rows(sql, (since.astimezone(dt_timezone.utc).replace(tzinfo=None),))
+        physics = _task_physics({(int(r[0]), r[1]) for r in rows})
+        for tid, name, queue, state, at, n, done, lost in rows:
             if at is not None and at.tzinfo is None:
                 at = at.replace(tzinfo=dt_timezone.utc)  # PanDA stores UTC
             local = at.astimezone(ZoneInfo('America/New_York')) if at else None
             n, done, lost = int(n or 0), int(done or 0), int(lost or 0)
             where = site_name.get(queue, queue) or 'no queue'
+            what = physics.get(int(tid), '')
             items.append({
                 'id': int(tid), 'name': name, 'queue': queue or '', 'status': state,
-                'at': at.isoformat() if at else None,
+                'at': at.isoformat() if at else None, 'physics': what,
                 'link': f'{PUBLIC}/panda/tasks/{int(tid)}/',
                 'detail': (f"{int(tid)} {state} on {where}"
                            + (f" ({queue})" if queue and queue != where else '')
                            + (f" at {local:%m-%d %H:%M} ET" if local else '')
-                           + f"; {done:,} of {n:,} files done, {lost:,} lost. {name}")})
+                           + f"; {done:,} of {n:,} files done, {lost:,} lost."
+                           + (f" {what}." if what else '') + f" {name}")})
         return {'tasks': len(items), 'window_hours': hours,
                 'link': f'{PUBLIC}/panda/tasks/?processingtype=epicproduction&days=1',
                 'detail': (f"{len(items)} task{'s' if len(items) != 1 else ''} completed in {hours} h"
