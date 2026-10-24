@@ -88,7 +88,7 @@
     if (!panel) return;
     const queues = site.queues || [];
     const sum = key => sumKnown(queues, key);
-    const pilots = queues.map(queue => queue.pilots && queue.pilots.waiting);
+    const pilots = queues.map(queue => queue.pilots && queue.pilots.waiting_current);
     const waiting = pilots.some(value => value != null) ? pilots.reduce((n, value) => n + (value || 0), 0) : null;
     const values = [sum('running'), sum('finished_1h'), sum('failed_1h'), sum('queued'),
       waiting, sum('harvester_slots_opened_1h')];

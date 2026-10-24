@@ -26,6 +26,7 @@ live = (assets / 'epic-dashboard-live.js').read_text()
 assert 'createEpicTrendModel()' in live and 'trendModel.site(' in live, 'dashboard trends must consume the shared model'
 assert 'share.notice' in live and 'notice.text' in live and 'notice.detail' in live, 'fair-share notice must come from the feed'
 assert all('notice.' + field in live for field in ('text', 'level', 'detail', 'link')), 'fair-share adapter must use the complete notice'
+assert 'queue.pilots.waiting_current' in live, 'waiting pilots must use the feed-resolved count'
 assert not re.search(r"['\"](?:at fair share limit|fair share limited)['\"]", live), 'dashboard must not author a second fair-share notice'
 room_hash = root.parent / 'tjrepo/etaverse/scripts/audition/comp-room-pillar-model.sha256'
 if room_hash.exists():

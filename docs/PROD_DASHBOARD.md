@@ -78,6 +78,10 @@ display those fields without local wording. A cleared or unavailable
 fair-share state has no notice. The adapter is applied when the cached
 record is read, so wording changes do not wait for a census rebuild.
 
+Waiting-pilot figures use the feed's `pilots.waiting_current`, resolved
+from the submitter's idle queue where reported and otherwise Harvester.
+Both displays use that field; the raw readings remain available for diagnosis.
+
 All displayed times use a 24-hour clock in Eastern Time. Hover details
 appear after a 150 ms pause. Daily assessment text is the record's
 narration, limited to two lines with the full text on hover; its title

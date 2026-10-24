@@ -164,7 +164,11 @@ Per queue, from the PanDA database:
   a queue no harvester reports. `waiting` is the slots submitted and not
   yet started (an evicted pilot back in the batch queue included),
   `running` the slots running, `per_slot` the pilots in one slot (8 at
-  GREX, 1 elsewhere). `limit` is the waiting limit harvester last
+  GREX, 1 elsewhere). `waiting_current` is the canonical display count:
+  the schedd's count when reported, otherwise Harvester's. `waiting_source`
+  identifies that choice. The dashboard and room consume this resolved
+  count; `waiting` and `waiting_schedd` retain the raw readings for diagnosis.
+  `limit` is the waiting limit harvester last
   applied, from its worker-adjuster log, and `limit_at` when it logged
   it: harvester computes the limit from its running slots under the
   queue's ratio, floor and cap, and the configured `nQueueLimitWorker`

@@ -144,6 +144,17 @@ def effective_waiting_limit(config, applied, now):
     return None
 
 
+def _pilot_display(pilots):
+    """Resolve the waiting count once while preserving both raw readings."""
+    if not isinstance(pilots, dict):
+        return pilots
+    schedd = pilots.get('waiting_schedd')
+    waiting = schedd if schedd is not None else pilots.get('waiting')
+    return dict(pilots, waiting_current=waiting,
+                waiting_source=('schedd' if schedd is not None else
+                                'harvester' if waiting is not None else None))
+
+
 def _pilot_supply_part(p, queued, started_1h, submitted_1h):
     """Whether pilots keep reaching the queue (docs/COMP_SNAPSHOT.md, Pilot
     supply). Harvester holds new pilots back against its own count of
@@ -768,7 +779,7 @@ class _Build:
                 if p['report'] == f'{OSG_SUBMIT_HOST}-harvester':
                     p['waiting_schedd'] = int((idle.get(q) or {}).get('idle') or 0)
                     p['schedd_age_seconds'] = found.get('age_seconds')
-        return out
+        return {q: _pilot_display(p) for q, p in out.items()}
 
     def execute_sites(self, queues):
         sql = f'''SELECT COALESCE(NULLIF(destinationsite, ''), ''), COUNT(*),
@@ -2024,6 +2035,8 @@ def get_snapshot(refresh=False):
         for item in site.get('execute_sites', [])
     ]) for site in value.get('sites', [])]
     for site in value['sites']:
+        site['queues'] = [dict(q, pilots=_pilot_display(q.get('pilots')))
+                          for q in site.get('queues', [])]
         if isinstance(site.get('fair_share'), dict):
             share = site['fair_share']
             site['fair_share'] = dict(share, notice=_fair_share_notice(
