@@ -199,6 +199,9 @@ def _rows(sql, params=()):
         return cursor.fetchall()
 
 
+# A PanDA task status after which the task delivers nothing more.
+TASK_ENDED = ('done', 'finished', 'failed', 'broken', 'aborted', 'exhausted')
+
 # PanDA keeps a job's destinationsite in 36 characters, so a longer
 # GLIDEIN_Site arrives cut ('Center for Advanced Research Computi').
 PANDA_SITE_CHARS = 36
@@ -526,7 +529,7 @@ class _Build:
         delivered and target events, read from the stored completion
         record without building it."""
         since = (self.now - timedelta(hours=hours)).astimezone(dt_timezone.utc).replace(tzinfo=None)
-        sql = f'''SELECT j.jeditaskid, t.taskname, j.computingsite, COUNT(*),
+        sql = f'''SELECT j.jeditaskid, t.taskname, t.status, j.computingsite, COUNT(*),
                          SUM(COALESCE((m.metadata::jsonb -> 'payload' -> 'outputs' -> 'reco' ->> 'events')::bigint, 0)),
                          MIN(j.endtime), MAX(j.endtime)
                   FROM "{self.S}"."jobsarchived4" j
@@ -534,16 +537,21 @@ class _Build:
                   LEFT JOIN "{self.S}"."metatable" m ON m.pandaid = j.pandaid
                   WHERE j.endtime >= %s AND j.processingtype = 'epicproduction'
                     AND j.jobstatus = 'finished' AND j.jobmetrics LIKE %s
-                  GROUP BY 1, 2, 3'''
+                  GROUP BY 1, 2, 3, 4'''
         rows = _rows(sql, (since, '%payloadRegistration=registered%'))
         pcs = _task_pcs({(int(r[0]), r[1]) for r in rows})
         progress = _plan_progress()
         by_pc = {}
-        for tid, name, queue, files, events, first, last in rows:
+        for tid, name, status, queue, files, events, first, last in rows:
             pc, physics = pcs.get(int(tid), (None, ''))
             key = pc or f'task {int(tid)}'
             b = by_pc.setdefault(key, {'pc': pc, 'physics': physics, 'files': 0, 'events': 0,
-                                       'tasks': set(), 'sites': set(), 'first': None, 'last': None})
+                                       'tasks': set(), 'sites': set(), 'first': None, 'last': None,
+                                       'running': False})
+            # A configuration is finished when every task delivering to it
+            # in the window has ended (Torre Wenaus, 2026-10-24: green on
+            # the dashboard is for finished).
+            b['running'] = b['running'] or status not in TASK_ENDED
             b['files'] += int(files or 0)
             b['events'] += int(events or 0)
             b['tasks'].add(int(tid))
@@ -559,6 +567,7 @@ class _Build:
             sites = ', '.join(sorted(s for s in b['sites'] if s))
             items.append({
                 'pc': b['pc'] or '', 'physics': b['physics'], 'label': _physics_label(b['physics']),
+                'state': 'running' if b['running'] else 'finished',
                 'files': b['files'],
                 'events': b['events'], 'tasks': sorted(b['tasks']), 'sites': sorted(s for s in b['sites'] if s),
                 'first_at': b['first'].isoformat() if b['first'] else None,
@@ -577,7 +586,8 @@ class _Build:
                            + ', '.join(str(t) for t in sorted(b['tasks']))
                            + (f" at {sites}" if sites else '') + '.'
                            + (f" Delivered {delivered:,} of {target:,} events ({100 * delivered / target:.0f}%)."
-                              if delivered is not None and target else ''))})
+                              if delivered is not None and target else '')
+                           + (' Still running.' if b['running'] else ' Finished.'))})
         items.sort(key=lambda i: i['last_at'] or '', reverse=True)
         files = sum(i['files'] for i in items)
         events = sum(i['events'] for i in items)

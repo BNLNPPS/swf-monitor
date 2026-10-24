@@ -141,7 +141,9 @@ one row per physics configuration, newest arrival first, from the
 snapshot's `arrivals` record (Torre Wenaus, 2026-10-24). A row reads the
 physics in short (`label`), the RECO files registered in the window and
 the time of the last arrival, over a thin bar of the plan's delivered
-against target events, amber past the target. Each row opens the PC's
+against target events: green when the configuration is finished (every task
+delivering to it in the window has ended), blue while one still runs, amber
+when it runs past the target. Green is kept for finished. Each row opens the PC's
 page; its hover text carries the full physics line, files and events,
 times, tasks, sites and the plan's delivered against target. The title-row
 count opens the campaign view. The panel grows downward with the number
