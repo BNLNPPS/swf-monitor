@@ -72,10 +72,11 @@
         ' avg cores/1wk';
       // the live binding's fair-share state holds this place while it lasts
       if (!label.dataset.override) content.textContent = label.dataset.weeklyText;
-      label.title = result ? 'Time-weighted average running cores over the last week; ' +
+      label.dataset.weeklyTitle = result ? 'Time-weighted average running cores over the last week; ' +
         Math.round(result.coverage * 100) + '% recorded coverage.' +
         (name === 'OSG' ? ' Includes production on the retired OSG queue.' : '') :
         'No recorded running-core history for this queue.';
+      if (!label.dataset.override) label.title = label.dataset.weeklyTitle;
     });
   }
   async function load() {
@@ -107,7 +108,10 @@
       catch (error) { console.warn('Weekly core cache write failed:', error); }
     } catch (error) {
       console.error('Weekly average running cores unavailable:', error);
-      headers.forEach(label => { label.title = error.message; });
+      headers.forEach(label => {
+        label.dataset.weeklyTitle = error.message;
+        if (!label.dataset.override) label.title = error.message;
+      });
     } finally { pending = false; }
   }
   function attend() {

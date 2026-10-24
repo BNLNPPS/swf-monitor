@@ -110,10 +110,16 @@
           'submitter at its fair-share limit in its last cycle (' + et(share.cycle_at) +
           '): no new slots there until our usage share falls; running pilots keep theirs.';
         content.textContent = 'at fair share limit';
+        // the weekly average's own hover would show beside the throttle's
+        if (weekly.hasAttribute('title')) {
+          weekly.dataset.weeklyTitle = weekly.title;
+          weekly.removeAttribute('title');
+        }
       } else {
         delete weekly.dataset.override;
         delete weekly.dataset.overrideTitle;
         if (weekly.dataset.weeklyText) content.textContent = weekly.dataset.weeklyText;
+        if (weekly.dataset.weeklyTitle) weekly.title = weekly.dataset.weeklyTitle;
       }
     }
     const pillars = panel.querySelectorAll('.queuepillar.svgcolumn');
