@@ -118,8 +118,9 @@ leaving a small green remainder visible.
 ## Task resources
 
 The task resource panel occupies the left column below the site panels.
-It plots reported peak memory, scratch disk and scratch file counts over
-the preceding twelve hours, with one colour per task across all three
+It selects EIC production jobs (PanDA source label managed), excluding
+test and canary jobs. It plots reported peak memory, scratch disk and
+scratch file counts over the preceding twelve hours, with one colour per task across all three
 plots. Hovering a curve gives the task name and window peak; hovering a
 point gives its time bin, peak and reporting coverage. Each curve links
 to the task. Memory and disk use GiB; file counts are integers.
@@ -132,8 +133,17 @@ scratchPeakMB in MiB, and files read scratchPeakFiles. Missing telemetry
 is a gap; a plot with no measurements says “No reported peaks”. Coverage
 counts and build time remain visible.
 
+Each resource scale follows the usual individual production-job peaks.
+Values above the upper quartile plus three interquartile ranges are excluded from scale
+selection; for a constant central population the limit is three times
+that value. The largest remaining peak sets the rounded ceiling. Extreme
+values retain their true measurements, with marked points at the ceiling
+and a top-of-plot annotation giving the largest value and point count.
+Its hover lists every affected task, value and time. Sparse records with
+fewer than four observations use the full observed range.
+
 The read-only panda/dashboard/resources.json endpoint serves the shared
-task_resource_peaks:v1 cached product with a sixty-second lifetime. The
+task_resource_peaks:v2 cached product with a sixty-second lifetime. The
 first fill runs in the background; the panel displays its building state.
 The query reads EIC jobs from the active and recent archive tables and
 deduplicates PanDA job IDs. The dashboard refreshes it with the existing
