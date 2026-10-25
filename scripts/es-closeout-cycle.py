@@ -36,8 +36,21 @@ def main():
                     help='judge and print, close and record nothing')
     ap.add_argument('--created-by', default='es-closeout',
                     help='who runs the cycle (the records carry it)')
+    ap.add_argument('--records-only', action='store_true',
+                    help='refresh running harness snapshots without closing jobs')
     args = ap.parse_args()
     try:
+        from monitor_app.payload_reports import refresh_running_es_records
+        if not args.dry_run:
+            try:
+                filed = refresh_running_es_records()
+                print('RECORDS ' + json.dumps({'filed': filed}))
+            except Exception as exc:  # noqa: BLE001
+                print(f'ERROR: snapshot refresh: {type(exc).__name__}: {exc}', file=sys.stderr)
+                if args.records_only:
+                    return 1
+        if args.records_only:
+            return 0
         decisions, summary = run_cycle(dry_run=args.dry_run, created_by=args.created_by)
     except Exception as exc:  # noqa: BLE001
         print(f'ERROR: {type(exc).__name__}: {exc}', file=sys.stderr)
