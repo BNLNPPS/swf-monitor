@@ -11,6 +11,11 @@ The heatmap uses an explicit fixed 0–100% scale: red at zero, amber at
 50%, and green at 100%. Dark labels remain readable on the light fills;
 higher efficiency is always greener.
 
+Hovering a trend line or marker identifies its site in a high-contrast
+floater with the nearest measured period's efficiency and ended core-hours.
+Line hover respects missing periods and hidden legend entries; it never
+reports an interpolated percentage as a measurement.
+
 ## Measurement
 
 The source is PanDA's active and archived job tables. Finished, failed,

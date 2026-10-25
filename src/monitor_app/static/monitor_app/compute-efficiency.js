@@ -7,6 +7,7 @@
   const hours = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1000 ? (n / 1000).toFixed(1) + 'k' : number(n);
   const iso = d => d.toISOString().slice(0, 10);
   let loading = false, timer, snapshot, selected = null;
+  let trendHoverBound = false;
 
   function periods(start, end, bucket) {
     const at = new Date(start + 'T00:00:00Z'), last = new Date(end + 'T00:00:00Z'), out = [];
@@ -18,6 +19,54 @@
       else at.setUTCDate(at.getUTCDate() + 7);
     }
     return out;
+  }
+
+  function bindTrendHover(plot) {
+    if (trendHoverBound) return;
+    trendHoverBound = true;
+    // Plotly's scatter hover targets samples, so widely spaced monthly
+    // points leave most of a line without a hover target.
+    plot.on('plotly_beforehover', () => false);
+    let frame;
+    plot.addEventListener('mousemove', event => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const {xaxis: xa, yaxis: ya} = plot._fullLayout;
+        const box = plot.getBoundingClientRect();
+        const x = event.clientX - box.left - xa._offset;
+        const y = event.clientY - box.top - ya._offset;
+        let closest = null, distance = 12 * 12;
+        if (!event.buttons && x >= 0 && x <= xa._length && y >= 0 && y <= ya._length) {
+          plot._fullData.forEach((trace, curveNumber) => {
+            if (trace.visible !== true) return;
+            let previous = null;
+            trace.x.forEach((stamp, index) => {
+              const value = trace.y[index];
+              if (value == null) {previous = null; return;}
+              const point = {x: xa.d2p(stamp), y: ya.d2p(value), index};
+              if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {previous = null; return;}
+              const start = previous || point;
+              const dx = point.x - start.x, dy = point.y - start.y;
+              const length = dx * dx + dy * dy;
+              const t = length ? Math.max(0, Math.min(1, ((x - start.x) * dx + (y - start.y) * dy) / length)) : 0;
+              const squared = (x - start.x - t * dx) ** 2 + (y - start.y - t * dy) ** 2;
+              if (squared < distance) {
+                distance = squared;
+                // Show a real period's values, never an interpolated measurement.
+                closest = {curveNumber, pointNumber: t < 0.5 ? start.index : index};
+              }
+              previous = point;
+            });
+          });
+        }
+        if (closest) Plotly.Fx.hover(plot, [closest]);
+        else Plotly.Fx.unhover(plot);
+      });
+    });
+    plot.addEventListener('mouseleave', () => {
+      cancelAnimationFrame(frame);
+      Plotly.Fx.unhover(plot);
+    });
   }
 
   function render(data) {
@@ -81,12 +130,14 @@
       connectgaps: false, visible: selected && selected !== site ? 'legendonly' : true,
       customdata: stamps.map(stamp => byCell.get(site + '/' + stamp)?.ended || 0),
       line: {width: 2}, marker: {size: 6},
-      hovertemplate: names.get(site) + '<br>%{x}<br>%{y:.1f}%<br>%{customdata:,.1f} ended core-h<extra></extra>'}));
+      hovertemplate: '<b>' + names.get(site) + '</b><br>%{x}<br>%{y:.1f}%<br>%{customdata:,.1f} ended core-h<extra></extra>'}));
     Plotly.react(node('trends'), lines, {...layout,
       title: {text: 'Efficiency trends' + (selected ? ' · ' + names.get(selected) : ''), x: 0.02},
       margin: {l: 65, r: 20, t: 55, b: 110}, height: 490,
+      hovermode: 'closest', hoverlabel: {bgcolor: '#fff', font: {color: '#17232c', size: 13}, namelength: -1},
       xaxis: {title: 'Job end period (UTC)'}, yaxis: {title: 'Successful core-hours (%)', range: [0, 100]},
-      legend: {orientation: 'h', y: -0.22}}, {responsive: true, displaylogo: false});
+      legend: {orientation: 'h', y: -0.22}}, {responsive: true, displaylogo: false})
+      .then(() => bindTrendHover(node('trends')));
   }
 
   function schedule(delay) {
