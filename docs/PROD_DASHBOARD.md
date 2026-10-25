@@ -152,17 +152,20 @@ renderer and shared trend geometry.
 
 ## Live record and links
 
-Compute efficiency sits directly below Storage in the right column. The
-large figure covers jobs ended in the preceding 24 hours. A compact trend
-and one average per month since May provide historical context; the
-current month is marked with an asterisk. Each average divides summed
-successful-job core-hours by all ended-job core-hours, including failed,
-closed and cancelled jobs. Running jobs and idle pilots are excluded.
-Hover gives the sample hours and job counts, and each reading opens the
-full efficiency history. Missing or low-volume readings remain unknown.
-The current reading refreshes through the shared minute cache; monthly
-history uses its existing hourly cache. The panel follows Storage without
-changing the positions or available heights of the existing panels.
+Production compute sits directly below Storage in the right column. Its
+three plots show efficiency, total core-hours/day and productive average
+cores, with OSG, Perlmutter and GREX curves in each. Each plot has an
+overall last-24-hour figure and one overall monthly average since May.
+The current month is marked with an asterisk. All three use ended-job
+walltime times cores, without processor-performance weighting. Efficiency
+is the successful fraction; core-hours/day includes failed work;
+productive average cores is successful core-hours divided by elapsed hours.
+Running jobs and idle pilots are excluded. Monthly rates use calendar time,
+including days with no completions, through the observation timestamp.
+Hover gives the site, sample hours and job counts. Missing or low-volume
+efficiency readings remain unknown. Current readings use the shared minute
+cache; monthly history uses its existing hourly cache. The panel follows
+Storage without changing existing panel positions or available heights.
 
 The dashboard reads the shared comp snapshot, `comp_snapshot:v1`,
 through `panda/comp/snapshot.json` ([COMP_SNAPSHOT.md](COMP_SNAPSHOT.md)).

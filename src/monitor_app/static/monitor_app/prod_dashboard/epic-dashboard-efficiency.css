@@ -9,3 +9,12 @@
 .efficiency-chart{display:block;margin:0 4px;height:49px}
 .efficiency-chart svg{display:block;width:100%;height:49px;overflow:visible}
 .efficiency-updated{display:block;padding:2px 8px 5px;line-height:14px}
+.efficiency-legend{display:flex;gap:10px;padding:5px 8px;font-size:11px;line-height:15px}
+.efficiency-metric{border-top:1px solid #293c46;padding-top:4px}
+.efficiency-title{padding:0 8px;font-size:12px;line-height:16px;font-weight:600}
+.efficiency-scale{float:right;color:var(--muted);font-size:11px;font-weight:400}
+.efficiency-metric .efficiency-current{padding-top:1px}
+.efficiency-metric .efficiency-current b{font-size:22px;line-height:26px}
+.efficiency-metric .efficiency-chart,.efficiency-metric .efficiency-chart svg{height:58px}
+.efficiency-caption{font-size:11px;line-height:14px;color:var(--muted);padding:0 8px 4px}
+.efficiency-chart svg:has(.efficiency-series:hover) .efficiency-series:not(:hover){opacity:.2}

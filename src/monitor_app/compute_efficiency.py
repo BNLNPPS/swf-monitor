@@ -10,11 +10,14 @@ from .panda.queries import PANDA_SCHEMA, execute_site_key_sql, execute_site_labe
 from .short_names import short_name
 
 PRODUCT_KEY = 'compute_efficiency:v1'
-CURRENT_KEY = 'compute_efficiency_current:v1'
+CURRENT_KEY = 'compute_efficiency_current:v2'
 START = date(2026, 5, 1)
 TTL = 3600
 INCIDENT_TASK = 40856
 MIN_HOURS = 50
+DASHBOARD_SITES = (('osg', 'OSG', '#6fcad2'),
+                   ('perlmutter', 'Perlmutter', '#e3b954'),
+                   ('grex', 'GREX', '#7fce95'))
 
 
 def query_days(start, end):
@@ -96,10 +99,31 @@ def _hours_summary(rows):
             'efficiency': 100 * finished / ended if ended >= MIN_HOURS else None}
 
 
+def _delivery_summary(rows, days):
+    summary = _hours_summary(rows)
+    measured = days > 0 and summary['jobs'] > summary['missing']
+    return {**summary, 'days': days,
+            'core_hours_per_day': summary['ended'] / days if measured else None,
+            'productive_cores': summary['finished'] / (days * 24) if measured else None}
+
+
+def _dashboard_site(row):
+    if row[2]:
+        return 'osg'
+    if row[1].startswith('NERSC_Perlmutter_'):
+        return 'perlmutter'
+    if row[1] == 'UM_GREX_PanDA_1':
+        return 'grex'
+    return None
+
+
 def build_current():
     end = datetime.now(timezone.utc)
     start = end - timedelta(hours=24)
-    return {**_hours_summary(query_days(start, end)),
+    rows = query_days(start, end)
+    sites = {sid: _delivery_summary([row for row in rows if _dashboard_site(row) == sid], 1)
+             for sid, _, _ in DASHBOARD_SITES}
+    return {**_delivery_summary(rows, 1), 'sites': sites,
             'start': start.isoformat(), 'end': end.isoformat()}
 
 
@@ -108,21 +132,34 @@ def current_product():
 
 
 def dashboard_data(value, current):
-    """One global ratio per month; combine core-hours rather than percentages."""
-    today = datetime.now(timezone.utc).date()
+    """Global averages and three site histories over the same ended-job sample."""
+    now = datetime.now(timezone.utc)
+    today = now.date()
+    through = datetime.fromisoformat(value['through']) if value.get('through') else now
+    through = min(through.astimezone(timezone.utc), now)
     grouped = defaultdict(list)
     for row in value.get('daily', []):
         day = date.fromisoformat(row[0])
         if START <= day <= today:
             grouped[str(day.replace(day=1))].append(row)
     months = []
+    sites = [{'id': sid, 'label': label, 'color': color, 'months': []}
+             for sid, label, color in DASHBOARD_SITES]
     month = START
     while month <= today:
-        months.append({'period': str(month), 'label': month.strftime('%b'),
-                       'partial': month.year == today.year and month.month == today.month,
-                       **_hours_summary(grouped[str(month)])})
-        month = date(month.year + (month.month == 12), month.month % 12 + 1, 1)
-    return {'current': current, 'months': months, 'minimum_hours': MIN_HOURS,
+        following = date(month.year + (month.month == 12), month.month % 12 + 1, 1)
+        begin = datetime.combine(month, datetime.min.time(), tzinfo=timezone.utc)
+        end = min(datetime.combine(following, datetime.min.time(), tzinfo=timezone.utc), through)
+        days = max(0, (end - begin).total_seconds() / 86400)
+        period = {'period': str(month), 'label': month.strftime('%b'),
+                  'partial': month.year == today.year and month.month == today.month}
+        rows = grouped[str(month)]
+        months.append({**period, **_delivery_summary(rows, days)})
+        for site in sites:
+            site['months'].append({**period, **_delivery_summary(
+                [row for row in rows if _dashboard_site(row) == site['id']], days)})
+        month = following
+    return {'current': current, 'months': months, 'sites': sites, 'minimum_hours': MIN_HOURS,
             'history_through': value.get('through')}
 
 

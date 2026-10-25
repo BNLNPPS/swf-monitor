@@ -2,12 +2,24 @@
   const config = window.epicDashboard;
   const column = document.getElementById('right-column');
   if (!config?.efficiencyUrl || !column) return;
+  const trendModel = createEpicTrendModel();
+  const compact = value => value >= 1000 ? (value / 1000).toFixed(1) + 'k' : Math.round(value).toLocaleString('en-US');
+  const metrics = [
+    {key: 'efficiency', label: 'Efficiency', unit: '%', format: value => value.toFixed(1) + '%', ceiling: 100},
+    {key: 'core_hours_per_day', label: 'Core-hours / day', unit: 'core-h/day', format: compact},
+    {key: 'productive_cores', label: 'Productive avg cores', unit: 'cores', format: value => Math.round(value).toLocaleString('en-US')},
+  ];
+  const reading = (metric, row) => row?.[metric.key] == null ? '—' : metric.format(row[metric.key]);
   const panel = document.createElement('section');
   panel.id = 'compute-efficiency'; panel.className = 'panel';
-  panel.innerHTML = '<div class="panelhead"><strong><a class="efficiency-link">Compute efficiency</a></strong></div>' +
-    '<div class="efficiency-current"><a class="efficiency-link"><b>—</b></a><span>last 24 hours</span></div>' +
-    '<a class="efficiency-chart efficiency-link" title="Monthly core-hour-weighted efficiency · fixed 0–100% scale"><svg viewBox="0 0 240 60" preserveAspectRatio="none" role="img" aria-label="Monthly compute efficiency since May"></svg></a>' +
-    '<div class="efficiency-months"></div><span class="efficiency-updated" role="status">Loading…</span>';
+  panel.innerHTML = '<div class="panelhead"><strong><a class="efficiency-link">Production compute</a></strong></div>' +
+    '<div class="efficiency-legend"></div>' + metrics.map(metric =>
+      '<section class="efficiency-metric" data-key="' + metric.key + '">' +
+      '<div class="efficiency-title">' + metric.label + '<span class="efficiency-scale"></span></div>' +
+      '<div class="efficiency-current"><a class="efficiency-link"><b>—</b></a><span>all sites · last 24h</span></div>' +
+      '<a class="efficiency-chart efficiency-link"><svg viewBox="0 0 240 70" preserveAspectRatio="none" role="img"></svg></a>' +
+      '<div class="efficiency-months"></div><div class="efficiency-caption">All-site monthly averages</div></section>'
+    ).join('') + '<span class="efficiency-updated" role="status">Loading…</span>';
   column.appendChild(panel);
   panel.querySelectorAll('.efficiency-link').forEach(link => {
     link.href = config.efficiencyHistoryUrl; link.target = '_blank'; link.rel = 'noopener';
@@ -29,41 +41,65 @@
   }
   function render(data) {
     const current = data.current;
-    const value = panel.querySelector('.efficiency-current b');
-    value.textContent = percent(current?.efficiency);
-    value.title = current ? detail(current) + '\nWindow: ' + et(current.start) + ' – ' + et(current.end) +
-      '\nSuccessful-job core-hours / all ended-job core-hours; running jobs and idle pilots excluded.' : 'Building last-24-hour reading';
-    const cells = panel.querySelector('.efficiency-months');
-    const chart = panel.querySelector('svg');
     const months = data.months || [];
-    cells.style.setProperty('--months', Math.max(1, months.length));
-    cells.replaceChildren(); chart.replaceChildren();
-    [5, 30, 55].forEach(y => chart.append(svg('line', {x1: 0, x2: 240, y1: y, y2: y,
-      stroke: '#334652', 'stroke-width': 1})));
-    let segment = [];
-    function line() {
-      if (segment.length > 1) chart.append(svg('polyline', {points: segment.join(' '),
-        fill: 'none', stroke: '#6fcad2', 'stroke-width': 1.8, 'vector-effect': 'non-scaling-stroke'}));
-      segment = [];
-    }
-    months.forEach((row, i) => {
-      const cell = document.createElement('a');
-      cell.href = config.efficiencyHistoryUrl; cell.target = '_blank'; cell.rel = 'noopener';
-      cell.title = row.period.slice(0, 7) + (row.partial ? ' · month to date' : '') + '\n' + detail(row);
-      const label = document.createElement('span'); label.textContent = row.label + (row.partial ? '*' : '');
-      const reading = document.createElement('b'); reading.textContent = percent(row.efficiency);
-      cell.append(label, reading); cells.append(cell);
-      if (row.efficiency == null) { line(); return; }
-      const x = (i + .5) * 240 / months.length, y = 55 - row.efficiency / 2;
-      segment.push(x + ',' + y);
-      const dot = svg('circle', {cx: x, cy: y, r: 2.4, fill: row.partial ? '#e3b954' : '#6fcad2'});
-      dot.setAttribute('title', cell.title);
-      const title = svg('title', {}); title.textContent = cell.title;
-      dot.append(title); chart.append(dot);
+    const sites = data.sites || [];
+    panel.querySelector('.efficiency-legend').replaceChildren(...sites.map(site => {
+      const label = document.createElement('span'); label.textContent = '━ ' + site.label;
+      label.style.color = site.color;
+      label.title = site.label + ' · last 24h\n' + metrics.map(metric =>
+        metric.label + ': ' + reading(metric, current?.sites?.[site.id])).join('\n');
+      return label;
+    }));
+    metrics.forEach(metric => {
+      const block = panel.querySelector('[data-key="' + metric.key + '"]');
+      const value = block.querySelector('.efficiency-current b');
+      value.textContent = reading(metric, current);
+      value.title = current ? detail(current) + '\nWindow: ' + et(current.start) + ' – ' + et(current.end) +
+        '\nEnded-job walltime × cores; no processor-strength weights.' : 'Building last-24-hour reading';
+      const cells = block.querySelector('.efficiency-months');
+      const chart = block.querySelector('svg');
+      cells.style.setProperty('--months', Math.max(1, months.length));
+      cells.replaceChildren(); chart.replaceChildren();
+      const model = trendModel.series(sites.map(site => ({key: site.id, color: site.color,
+        values: site.months.map(row => row[metric.key])})), {count: months.length});
+      const ceiling = metric.ceiling || model.ceiling;
+      block.querySelector('.efficiency-scale').textContent = '0–' + metric.format(ceiling);
+      [12, 37, 62].forEach(y => chart.append(svg('line', {x1: 0, x2: 240, y1: y, y2: y,
+        stroke: '#334652', 'stroke-width': 1})));
+      const step = 240 / Math.max(1, months.length);
+      const x = position => step / 2 + position * (240 - step);
+      const y = fraction => 62 - fraction * 50;
+      model.curves.forEach((curve, index) => {
+        const site = sites[index];
+        const group = svg('g', {class: 'efficiency-series'});
+        curve.solid.forEach(path => {
+          if (path.length < 2) return;
+          group.append(svg('polyline', {points: path.map(point =>
+            x(point[0]) + ',' + y(point[1] * model.ceiling / ceiling)).join(' '),
+            fill: 'none', stroke: curve.color, 'stroke-width': 2, 'vector-effect': 'non-scaling-stroke',
+            title: site.label + '\n' + site.months.map(row => row.label + ': ' + reading(metric, row)).join('\n')}));
+        });
+        site.months.forEach((row, i) => {
+          if (row[metric.key] == null) return;
+          const title = site.label + ' · ' + row.period.slice(0, 7) + (row.partial ? ' · month to date' : '') +
+            '\n' + metric.label + ': ' + reading(metric, row) + '\n' + detail(row);
+          group.append(svg('circle', {cx: (i + .5) * step, cy: y(row[metric.key] / ceiling),
+            r: 2.6, fill: curve.color, title}));
+        });
+        chart.append(group);
+      });
+      months.forEach(row => {
+        const cell = document.createElement('a');
+        cell.href = config.efficiencyHistoryUrl; cell.target = '_blank'; cell.rel = 'noopener';
+        cell.title = 'All sites · ' + row.period.slice(0, 7) + (row.partial ? ' · month to date' : '') +
+          '\n' + detail(row) + '\nAveraged over ' + row.days.toFixed(2) + ' calendar days';
+        const label = document.createElement('span'); label.textContent = row.label + (row.partial ? '*' : '');
+        const amount = document.createElement('b'); amount.textContent = reading(metric, row);
+        cell.append(label, amount); cells.append(cell);
+      });
+      chart.setAttribute('aria-label', metric.label + ' monthly since May: ' + sites.map(site =>
+        site.label + ': ' + site.months.map(row => row.label + ' ' + reading(metric, row)).join(', ')).join('; '));
     });
-    line();
-    chart.setAttribute('aria-label', 'Monthly compute efficiency, 0–100%: ' + months.map(row =>
-      row.label + (row.partial ? ' month to date ' : ' ') + percent(row.efficiency)).join('; '));
     stamp.classList.remove('red');
     stamp.textContent = current ? 'As of ' + et(current.end) + ' · *month to date' : 'Building last-24-hour reading…';
     stamp.title = data.history_built_at ? 'Monthly history updated ' + et(data.history_built_at) : 'Monthly history is building';

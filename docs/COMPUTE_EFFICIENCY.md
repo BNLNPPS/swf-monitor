@@ -6,13 +6,23 @@ It contains a site-by-period heatmap with core-hour volumes and selectable
 trend lines. The PanDA hub and the dashboard's Computing now heading link
 to this history.
 
-The dashboard's compact panel below Storage shows overall efficiency for
-the preceding 24 hours, followed by one overall monthly average since May
-and a fixed 0–100% trend. All averages divide summed successful core-hours
-by summed ended core-hours. The current month is marked as partial.
-Hover gives the underlying hours and job counts; the panel links to this
-history. Its last-24-hour reading uses exact UTC timestamps and the shared
-`compute_efficiency_current:v1` cached product, refreshed every minute.
+The dashboard's panel below Storage has three monthly plots, each with
+OSG, Perlmutter and GREX curves: efficiency, total core-hours per day,
+and productive average cores. Each plot also shows an overall reading
+for the preceding 24 hours and one overall monthly average since May.
+OSG combines execution sites and retired queues; Perlmutter combines its
+historical queues. Hover identifies each curve and its measured values.
+
+All three metrics use the same ended-job sample. Efficiency divides summed
+successful core-hours by all ended core-hours. Total core-hours per day
+includes failed work and divides by calendar days, including days with
+no completions. Productive average cores divides successful core-hours
+by elapsed hours; it equals core-hours/day times efficiency divided by 24.
+No processor-performance weights are applied. The partial current month
+uses elapsed time through the history's observation timestamp.
+
+The last-24-hour reading uses exact UTC timestamps and the shared
+`compute_efficiency_current:v2` cached product, refreshed every minute.
 Monthly values read the retained hourly history. Dashboard requests serve
 cached results and start stale or initial builds in the background.
 

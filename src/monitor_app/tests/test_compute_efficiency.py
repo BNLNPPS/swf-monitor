@@ -30,6 +30,27 @@ class ComputeEfficiencyTests(SimpleTestCase):
         self.assertEqual(end - start, timedelta(hours=24))
         self.assertIsNotNone(start.tzinfo)
         self.assertEqual((result['efficiency'], result['jobs']), (9, 40))
+        self.assertEqual(result['core_hours_per_day'], 1000)
+        self.assertEqual(result['productive_cores'], 90 / 24)
+
+    def test_site_delivery_counts_failed_hours_and_uses_elapsed_calendar_days(self):
+        rows = [
+            ['2026-05-01', 'BNL_OSG_EPIC_PROD_1', True, 'site:A', 240, 480, 10, 0],
+            ['2026-05-02', 'BNL_OSG_PanDA_1', True, 'site:B', 120, 240, 5, 0],
+            ['2026-05-02', 'NERSC_Perlmutter_epic_test', False, '', 240, 960, 20, 0],
+            ['2026-05-02', 'UM_GREX_PanDA_1', False, '', 480, 480, 20, 0],
+        ]
+        result = dashboard_data({'daily': rows, 'through': '2026-05-16T12:00:00+00:00'}, None)
+        sites = {site['id']: site['months'][0] for site in result['sites']}
+        self.assertEqual(sites['osg']['ended'], 720)
+        self.assertEqual(sites['perlmutter']['efficiency'], 25)
+        self.assertEqual(sites['grex']['efficiency'], 100)
+        for row in [result['months'][0], *sites.values()]:
+            self.assertEqual(row['days'], 15.5)
+            self.assertAlmostEqual(row['core_hours_per_day'], row['ended'] / 15.5)
+            self.assertAlmostEqual(row['productive_cores'], row['finished'] / (15.5 * 24))
+            self.assertAlmostEqual(row['productive_cores'],
+                                   row['core_hours_per_day'] * row['efficiency'] / 100 / 24)
 
     def data(self, rows, **options):
         with patch('monitor_app.compute_efficiency._queue_labels', return_value={
