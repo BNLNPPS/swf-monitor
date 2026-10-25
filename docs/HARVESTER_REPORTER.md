@@ -148,3 +148,11 @@ work for an image it no longer supplies. The authenticated
 by exact image in one query for the two-minute allocator. Disk selection
 remains the pilot dispatcher's actual-free-space check; a Condor disk
 reservation is not that free-space limit.
+
+Version 1.8 adds `health.volumes` for `/`, `/var`, `/data`, and `/tmp`:
+total and unprivileged available bytes, percent used, and filesystem device
+identity. The `host_disk_space` alarm reads these reports alongside the OSG
+submit and PanDA server reporters. It warns at 90% used, naming the host,
+filesystem and remaining space, before scheduler or log writes fail.
+Aliases of the same filesystem are counted once. Missing or stale disk
+readings raise a monitoring incident instead of implying recovery.

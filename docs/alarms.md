@@ -87,3 +87,23 @@ auth block. `/prod/alarms/...` is a proxy to monitor.
 
 Old `swf-remote` alarm files are intentionally retained for rollback/reference.
 Do not delete them as part of routine monitor-side alarm work.
+
+## Production host disk headroom
+
+The `host_disk_space` detector reads the existing host reports for
+`osgsub01`, `pandaharvester01`, `pandaharvester02`, and `pandaserver01`.
+It raises one incident per host at `warn_used_percent` (default 90), with
+the affected filesystem, percent used and GiB available to the service
+account. This complements the platform alarm's existing monitor-host
+volume check. The reporter cadence is two minutes on the OSG submit host
+and five minutes on the other hosts; the alarm engine runs every five
+minutes. Reports older than `stale_after_minutes` (default 15), missing
+measurements and failed reads remain visible as monitoring incidents.
+Fresh readings below the threshold clear the incident automatically.
+
+Configuration is an ordinary alarm entry, `alarm_host_disk_space`.
+Detection is active with email off by default; events appear in Alarms
+and Production now through the existing shared feed. Only an explicit
+operator decision enables email. This prevents the 25 October OSG failure
+mode: `/var` and `/data` share a volume which filled, preventing HTCondor
+from starting even though the root volume still had free space.

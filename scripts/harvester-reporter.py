@@ -717,10 +717,29 @@ def not_finished(conf, until, cache):
             'condor_logs_read': logs_read, 'condor_log_errors': log_errors}
 
 
+def disk_health():
+    """Local service volumes, before log or scheduler writes run out of room."""
+    volumes = {}
+    for mount in ('/', '/var', '/data', '/tmp'):
+        try:
+            st = os.statvfs(mount)
+            total = st.f_blocks * st.f_frsize
+            free = st.f_bavail * st.f_frsize
+            volumes[mount] = {
+                'device': os.stat(mount).st_dev,
+                'total_bytes': total, 'free_bytes': free,
+                'used_percent': round(100.0 * (total - free) / total, 1)
+                if total else None}
+        except OSError as exc:
+            volumes[mount] = {'error': str(exc)}
+    return {'volumes': volumes}
+
+
 def collect(state):
     """The record this run delivers; ``state`` is advanced in place."""
     started = time.time()
-    record = {'host': HOST, 'collected_at': now_iso(), 'reporter_version': '1.7'}
+    record = {'host': HOST, 'collected_at': now_iso(), 'reporter_version': '1.8',
+              'health': disk_health()}
     positions = state.setdefault('positions', {})
     last_run = state.get('last_run_at')
     first_run = not last_run
