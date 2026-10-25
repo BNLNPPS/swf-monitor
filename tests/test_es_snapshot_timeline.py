@@ -55,6 +55,16 @@ class SnapshotTimelineTest(unittest.TestCase):
         self.assertIsNone(es['preempted'])
         self.assertFalse(es['live'])
 
+    def test_lost_worker_observation_outlives_stale_panda_endtime(self):
+        es = es_record_report(self.record, 'finished')
+        job = dict(self.job, endtime='1970-01-01T00:16:55Z')
+        timeline = es_slot_timeline(job, es)
+        self.assertEqual(timeline['wall_s'], 300)
+        self.assertGreaterEqual(timeline['tail_idle_s'], 0)
+        self.assertLessEqual(timeline['busy_fraction'], 1)
+        self.assertTrue(all(u['end_s'] <= timeline['wall_s']
+                            for row in timeline['rows'] for u in row['units']))
+
 
 if __name__ == '__main__':
     unittest.main()

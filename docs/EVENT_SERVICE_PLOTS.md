@@ -14,6 +14,9 @@ awaiting an output close retain their separate states; they are not marked lost.
 The page displays the observation age and warns after two five-minute collection intervals.
 A terminal job without a normal harness-end marker retains the shipped record's
 cut, interrupted units and unshipped output. Registered closes remain saved.
+That last independent observation also supplies the timeline end when PanDA's
+archived end time precedes shipped payload activity, as can happen when a job
+is reaped after losing its heartbeat.
 
 The report transport and range accounting are documented in swf-epicprod
 `docs/JOB_REPORTING.md` and `docs/NODE_EVENT_DISPATCHER.md`.

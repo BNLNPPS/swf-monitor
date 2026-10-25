@@ -3748,7 +3748,9 @@ def es_slot_timeline(job, es):
     # later gave up on its heartbeat.
     cut = (es.get('preempted') or {}).get('at')
     if cut and (es.get('preempted') or {}).get('real'):
-        t1 = min(t1, float(cut))
+        # A reaped job can retain an endtime from its last heartbeat,
+        # earlier than payload activity independently shipped afterward.
+        t1 = float(cut)
     nslots = int(es.get('slots') or 0) or 1
     units = []
     for status, key in (('done', 'ranges_done'), ('failed', 'ranges_failed'),
