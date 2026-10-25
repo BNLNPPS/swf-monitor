@@ -7,6 +7,10 @@ trend lines. The PanDA hub and the dashboard's Computing now heading link
 to this history. The live dashboard's layout and individual metric links
 are unchanged.
 
+The heatmap uses an explicit fixed 0–100% scale: red at zero, amber at
+50%, and green at 100%. Dark labels remain readable on the light fills;
+higher efficiency is always greener.
+
 ## Measurement
 
 The source is PanDA's active and archived job tables. Finished, failed,

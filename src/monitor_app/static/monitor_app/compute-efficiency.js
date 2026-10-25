@@ -55,13 +55,14 @@
         customdata[i][j] = c ? [c.finished, c.ended, c.jobs, c.missing] : [0, 0, 0, 0];
         if (c?.efficiency != null) annotations.push({x: x[j], y: names.get(site), xref: 'x', yref: 'y',
           text: Math.round(c.efficiency) + '%<br><span style="font-size:10px">' + hours(c.ended) + ' core-h</span>',
-          showarrow: false, font: {size: 12, color: c.efficiency < 25 || c.efficiency > 80 ? '#fff' : '#17232c'}});
+          showarrow: false, font: {size: 12, color: '#17232c'}});
       });
     });
     const layout = {paper_bgcolor: 'transparent', plot_bgcolor: '#ededed', font: {family: 'Arial, sans-serif'},
       margin: {l: 160, r: 70, t: 60, b: 65}, autosize: true};
     Plotly.react(node('heatmap'), [{type: 'heatmap', x, y: sites.map(s => names.get(s)), z, customdata,
-      zmin: 0, zmax: 100, colorscale: 'RdYlBu', xgap: 1, ygap: 1, hoverongaps: false,
+      zmin: 0, zmax: 100, colorscale: [[0, '#e59ca0'], [0.5, '#f4e8ad'], [1, '#79bf91']],
+      xgap: 1, ygap: 1, hoverongaps: false,
       colorbar: {title: '%'}, hovertemplate: '%{y}<br>%{x}<br>%{z:.1f}% successful core-hours' +
         '<br>%{customdata[0]:,.1f} successful / %{customdata[1]:,.1f} ended core-h' +
         '<br>%{customdata[2]:,} ended jobs · %{customdata[3]:,} missing timings<extra></extra>'}],
