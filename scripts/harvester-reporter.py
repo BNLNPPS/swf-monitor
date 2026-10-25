@@ -327,6 +327,26 @@ def pilot_dispatch(template):
     if images:
         images += re.findall(r'(?m)^\+SingularityImage\s*=\s*"([^"\n]+)"', text)
     images = sorted(set(images))
+    mode = re.search(r'(?m)^\+EpicprodNativeMode\s*=\s*"([^"\n]+)"', text)
+    if mode and mode.group(1) == 'per-job':
+        try:
+            if ('EPICPROD_NATIVE_DISPATCH=per-job' not in text
+                    or 'EPICPROD_NATIVE_NESTING=on' not in text):
+                raise ValueError('per-job mode lacks dispatch or payload-launch configuration')
+            inputs = re.search(r'(?m)^transfer_input_files\s*=\s*(.*)$', text)
+            launchers = [p.strip() for p in inputs.group(1).split(',')
+                         if os.path.basename(p.strip()) == 'epic-native-pilot.sh'] if inputs else []
+            if len(launchers) != 1:
+                raise ValueError('per-job launcher is not uniquely established')
+            with open(launchers[0]) as handle:
+                launcher = handle.read()
+            if 'EPICPROD_NATIVE_DISPATCH' not in launcher or 'unset PILOT_CONTAINER_NAME' not in launcher:
+                raise ValueError('launcher does not implement per-job dispatch')
+            result.update(mode='any', images=[], bootstrap_images=images,
+                          launcher_sha256=hashlib.sha256(launcher.encode()).hexdigest())
+        except (OSError, ValueError) as exc:
+            result['error'] = 'per-job dispatch unavailable: {}'.format(exc)
+        return result
     if images:
         if len(images) != 1 or any(c in images[0] for c in '{}$'):
             result['error'] = 'pilot image binding is conflicting or unresolved'

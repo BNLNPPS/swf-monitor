@@ -43,6 +43,27 @@ class WorkerAdmissionTests(SimpleTestCase):
             state.write_text(json.dumps(record))
             self.assertEqual(reporter.pilot_dispatch(str(template))['mode'], 'unknown')
 
+    def test_per_job_dispatch_requires_a_launcher_that_implements_it(self):
+        reporter = self.reporter()
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            launcher = root / 'epic-native-pilot.sh'
+            template = root / 'pilot.sdf'
+            template.write_text('environment = "EPICPROD_NATIVE_IMAGE=/cvmfs/bootstrap '
+                                'EPICPROD_NATIVE_DISPATCH=per-job EPICPROD_NATIVE_NESTING=on"\n'
+                                '+EpicprodNativeMode = "per-job"\n'
+                                'transfer_input_files = ' + str(launcher) + '\n')
+            launcher.write_text('old launcher without dispatch support')
+            self.assertEqual(reporter.pilot_dispatch(str(template))['mode'], 'unknown')
+            launcher.write_text('case ${EPICPROD_NATIVE_DISPATCH:-bound} in\n'
+                                'per-job) unset PILOT_CONTAINER_NAME;;\nesac\n')
+            result = reporter.pilot_dispatch(str(template))
+            self.assertEqual(result['mode'], 'any')
+            self.assertEqual(result['bootstrap_images'], ['/cvmfs/bootstrap'])
+            self.assertEqual(result['images'], [])
+            template.write_text(template.read_text().replace('NESTING=on', 'NESTING=off'))
+            self.assertEqual(reporter.pilot_dispatch(str(template))['mode'], 'unknown')
+
     def test_startup_evidence_includes_actual_slot_and_budget(self):
         reporter = self.reporter()
         with TemporaryDirectory() as tmp:

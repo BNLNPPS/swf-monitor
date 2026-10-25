@@ -1,5 +1,12 @@
 # Harvester host reporter
 
+Pilot dispatch capabilities distinguish an image-bound OSG pilot from a
+batch pilot that launches each payload in its requested image. A native
+`per-job` template is reported as unrestricted only when its environment
+enables per-job dispatch and container launching, and its transferred
+launcher implements omission of the dispatch-image filter. The bootstrap
+image is retained separately in `bootstrap_images`.
+
 A reporter on each harvester host (pandaharvester01, pandaharvester02, osgsub01) delivers to swf-monitor
 what only that host knows about how its queues get work: when the harvester
 last asked PanDA for jobs for each queue, how many it asked for and got, and
