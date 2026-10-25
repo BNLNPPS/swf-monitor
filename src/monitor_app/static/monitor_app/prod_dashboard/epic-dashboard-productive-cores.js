@@ -9,7 +9,7 @@
     '<span class="right small productive-range" role="status">Loading…</span></div>' +
     '<div class="productive-legend"></div>' +
     '<svg class="productive-main-chart" viewBox="0 0 650 230" role="img" aria-label="Daily productive average cores by production site"></svg>' +
-    '<div class="ready-queue"><div class="ready-queue-heading"><strong>Ready tasks · daily average</strong>' +
+    '<div class="ready-queue"><div class="ready-queue-heading"><strong>Pressure front ready tasks</strong>' +
     '<span class="right small ready-queue-status"></span></div>' +
     '<svg viewBox="0 0 650 88" role="img" aria-label="Daily average production ready queue"></svg></div>';
   resources.before(panel);
@@ -43,6 +43,7 @@
     const first = days.findIndex(day => day.ready_tasks > 0);
     const values = days.map((day, index) => first < 0 || index < first ? null : day.ready_tasks);
     const model = trendModel.series([{key: 'ready', color: '#6fcad2', values}], {count: days.length});
+    const ceiling = Math.max(2, 2 * Math.ceil(model.ceiling / 2));
     const y = fraction => 61 - fraction * 53;
     readyChart.replaceChildren();
     const amount = n => n.toLocaleString('en-US', {maximumFractionDigits: 1});
@@ -50,10 +51,10 @@
       readyChart.append(svg('line', {x1: x(0), x2: x(1), y1: y(fraction), y2: y(fraction),
         stroke: '#344651', 'stroke-width': 1}));
       readyChart.append(svg('text', {x: 42, y: y(fraction) + 4, fill: '#c4d0d8',
-        'font-size': 12, 'text-anchor': 'end'}, amount(model.ceiling * fraction)));
+        'font-size': 12, 'text-anchor': 'end'}, number(ceiling * fraction)));
     });
     model.curves[0].solid.forEach(path => {
-      const points = path.map(point => x(point[0]) + ',' + y(point[1]));
+      const points = path.map(point => x(point[0]) + ',' + y(point[1] * model.ceiling / ceiling));
       readyChart.append(svg('polygon', {points: x(path[0][0]) + ',61 ' + points.join(' ') + ' ' +
         x(path[path.length - 1][0]) + ',61', fill: '#6fcad2', 'fill-opacity': .15}));
       readyChart.append(svg('polyline', {points: points.join(' '), fill: 'none', stroke: '#6fcad2',
@@ -63,7 +64,7 @@
     days.forEach((day, index) => {
       if (values[index] == null) return;
       const position = index / Math.max(1, days.length - 1);
-      readyChart.append(svg('circle', {cx: x(position), cy: y(values[index] / model.ceiling),
+      readyChart.append(svg('circle', {cx: x(position), cy: y(values[index] / ceiling),
         r: 1.8, fill: '#6fcad2'}));
       readyChart.append(svg('rect', {x: Math.max(49, x(position) - width / 2), y: 5,
         width: index === 0 || index === days.length - 1 ? width / 2 : width, height: 57,

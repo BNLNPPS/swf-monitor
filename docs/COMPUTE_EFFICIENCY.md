@@ -32,10 +32,11 @@ days; hourly refreshes reread seven days and preserve older daily values
 from Snapper. Immutable system snaps retain each accepted history. The
 same hourly scheduled producer refreshes both compute products.
 
-A shallow **Ready tasks · daily average** plot below productive cores uses
+A shallow **Pressure front ready tasks** plot below productive cores uses
 the identical 90-day date positions. Its cyan line begins on the first
 nonzero daily mean; earlier dates remain blank. Later measured zero days
-remain visible, while unrecorded intervals stay missing. The source is the
+remain visible, while unrecorded intervals stay missing. Its Y-axis ticks
+are whole numbers; hover retains fractional daily means. The source is the
 production front's ready-task depth and cycle records in the action stream,
 not PanDA jobs waiting for a worker. A day's value is the time-weighted mean
 over its recorded coverage, which hover reports in hours. Queue decisions
