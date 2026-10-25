@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import sys
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'alarms'))
 from swf_alarms.alarms import host_disk_space as alarm
@@ -45,6 +45,13 @@ class HostDiskSpaceTests(unittest.TestCase):
         health = reporter.disk_health()
         self.assertGreater(health['volumes']['/']['total_bytes'], 0)
         self.assertIn('free_bytes', health['volumes']['/'])
+        actual = reporter.os.statvfs
+        def without_data(path):
+            if path == '/data':
+                raise FileNotFoundError(path)
+            return actual(path)
+        with patch.object(reporter.os, 'statvfs', side_effect=without_data):
+            self.assertNotIn('/data', reporter.disk_health()['volumes'])
 
 
 if __name__ == '__main__':

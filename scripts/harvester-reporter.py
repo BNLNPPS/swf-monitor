@@ -730,6 +730,10 @@ def disk_health():
                 'total_bytes': total, 'free_bytes': free,
                 'used_percent': round(100.0 * (total - free) / total, 1)
                 if total else None}
+        except FileNotFoundError as exc:
+            # /data is a separate service volume only on hosts that have it.
+            if mount != '/data':
+                volumes[mount] = {'error': str(exc)}
         except OSError as exc:
             volumes[mount] = {'error': str(exc)}
     return {'volumes': volumes}
