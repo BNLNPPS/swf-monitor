@@ -12,6 +12,14 @@
         <div class="col-md-4 mb-3">
             <div class="card h-100">
                 <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:compute_efficiency' %}" class="text-decoration-none">Compute efficiency</a></strong></p>
+                    <p class="card-text">Successful core-hours by site and month or week, with OSG execution-site history.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
                     <p class="mb-2"><strong><a href="{% url 'monitor_app:panda_activity' %}" class="text-decoration-none">Activity</a></strong></p>
                     <p class="card-text">Overview of PanDA production activity with job and task counts by status, user, and site.</p>
                 </div>

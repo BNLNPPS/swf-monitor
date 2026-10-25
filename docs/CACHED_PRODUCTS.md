@@ -63,6 +63,7 @@ variant.
 
 | Key | Builder | TTL |
 |---|---|---|
+| `compute_efficiency:v1` | retained daily successful/ended core-hours (`monitor_app.compute_efficiency`), refreshed hourly with monthly full reconciliation | 3600 s |
 | `panda_errors:v2:<days>:<user>:<site>:<source>` | PanDA error summary aggregation | 300 s |
 | `panda_tasks_window:<days>` | PanDA tasks list full-window aggregation | 120 s |
 | `prod_hub_corun_counts` | corun-ai assessment/narrative counts | 600 s |

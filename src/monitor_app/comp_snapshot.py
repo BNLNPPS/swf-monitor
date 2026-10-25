@@ -2094,8 +2094,8 @@ def _report_header(record):
         date = datetime.fromisoformat(str(since))
         since = f"{date.strftime('%b')} {date.day}"
     return [
-        {'id': 'computing', 'title': 'Computing now', 'link': jobs,
-         'detail': 'Production jobs running and finished in the last hour.',
+        {'id': 'computing', 'title': 'Computing now', 'link': f'{PUBLIC}/compute-efficiency/',
+         'detail': 'Compute efficiency history by site and month or week.',
          'metrics': [metric(number(total('running')), 'running', '#edf2f1',
                             jobs + '?status=running&days=2', 'Running PanDA jobs'),
                      metric(number(total('finished_1h')), 'finish/1h', '#7fce95',

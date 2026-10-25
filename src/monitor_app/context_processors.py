@@ -264,10 +264,16 @@ def _active_nav(request):
             'panda_diagnostics_datatable_ajax',
         },
         'sites': namespace == 'monitor_app' and url_name in {
+            'compute_efficiency',
+            'compute_efficiency_data',
             'compute_usage',
             'compute_usage_data',
             'epic_queues_list',
             'epic_queue_detail',
+        },
+        'compute_efficiency': namespace == 'monitor_app' and url_name in {
+            'compute_efficiency',
+            'compute_efficiency_data',
         },
         'compute_usage': namespace == 'monitor_app' and url_name in {
             'compute_usage',

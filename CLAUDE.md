@@ -68,6 +68,7 @@ the old paths here. This repo's docs cover the platform services:
 - `SNAPPER.md`, `SNAPPER_ERRORS.md`, `SNAPPER_PLATFORM.md`, `SNAPPER_STORAGE.md`, `SNAPPER_CATALOG.md`, `PANDA_SERVER_REPORTER.md` — Snapper operations in SWF; the error-state component and errors view; the platform-health component, Platform view, and the pandaserver01 reporter; the Storage view over the storage record; the JLab Rucio catalog component and Catalog view. All four are in production.
 - `ERROR_ATTRIBUTION.md` — correcting unreliable PanDA error labels at a single service root: rule lifetimes, evidence grades, representative-job digs, payload/pilot channels.
 - `CACHED_PRODUCTS.md` — uniform long-build caching: serve stored, rebuild behind, Update button; use this, never a new hand-rolled cache.
+- `COMPUTE_EFFICIENCY.md` — retained successful-job core-hour history, site heatmap and month/week trends, and scheduled refresh.
 - `INCLUSIVE_FILTER.md` — the two house facet filters: the inclusive filter (every value stays listed, selections widen, one URL key `f`) for views that assemble a set, and the narrowing filter (one parameter per facet, the intersection, every bar counted within the selection) for the operations views; pages switch to them one at a time.
 - `PRODUCTION_DEPLOYMENT.md` — deploying swf-monitor.
 - `API_REFERENCE.md` — REST API surface.

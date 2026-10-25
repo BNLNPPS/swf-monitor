@@ -2251,6 +2251,18 @@ UNRESOLVED_LABEL = 'unresolved (bare hostname)'
 SITE_KEY_PREFIX = 'site:'
 
 
+def execute_site_key_sql():
+    """Shared execution-site key for rows exposing host and dest_site."""
+    return (
+        "CASE WHEN COALESCE(dest_site, '') <> '' THEN 'site:' || dest_site "
+        "WHEN host ~ '^(osgsub|pandaharvester)' THEN 'submit-host' "
+        "WHEN host ~* '^fc[0-9]{4,6}([.]|$)' THEN 'site:ComputeCanada-Fir' "
+        "WHEN host LIKE '%%.cnaf.infn.it' THEN 'site:CNAF' "
+        "WHEN host ~* '^CRUSH-OSG' THEN 'site:SU-ITS' "
+        r"ELSE COALESCE(substring(host from '([^.]+\.[^.]+)$'), '') END"
+    )
+
+
 def execute_site_label(key):
     """Site label for the execute-site key the breakdown query derives:
     'site:<name>' for the pilot-reported glidein site (used verbatim),
@@ -2488,11 +2500,7 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
             # host; else the last two labels of the execute host
             # ("<slot>@<host>" or "<host>"); else '' for a bare hostname.
             host_expr = 'regexp_replace(COALESCE("modificationhost", \'\'), \'^.*@\', \'\')'
-            key_expr = (
-                "CASE WHEN COALESCE(dest_site, '') <> '' THEN 'site:' || dest_site "
-                "WHEN host ~ '^(osgsub|pandaharvester)' THEN 'submit-host' "
-                r"ELSE COALESCE(substring(host from '([^.]+\.[^.]+)$'), '') END"
-            )
+            key_expr = execute_site_key_sql()
             pool_where = base_where + ' AND "computingsite" = ANY(%s)'
             pool_params = base_params + [pool_queues]
             sql = f"""

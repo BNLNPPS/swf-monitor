@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block title %}Compute efficiency - epicprod{% endblock %}
+{% block content %}
+<div class="container-fluid mt-3" id="efficiency-page" data-url="{% url 'monitor_app:compute_efficiency_data' %}">
+  <div class="d-flex flex-wrap align-items-baseline gap-3 mb-2">
+    <h1 class="h3 mb-0">Compute efficiency</h1>
+    <a href="{% url 'monitor_app:compute_usage' %}">Site compute usage</a>
+    <span class="small text-muted ms-auto" id="efficiency-freshness">Loading history…</span>
+    <button class="btn btn-secondary btn-sm" id="efficiency-update" type="button">Update</button>
+  </div>
+  <p class="text-muted mb-3">Successful-job core-hours / all ended-job core-hours. Includes failed, closed and cancelled jobs; excludes running jobs and pilot idle time. Periods use UTC job end dates.</p>
+  <form class="d-flex flex-wrap align-items-end gap-3 mb-3" id="efficiency-controls">
+    <label class="small">From<input class="form-control form-control-sm" type="date" id="efficiency-start" min="{{ history_start }}" value="{{ default_start }}" required></label>
+    <label class="small">Through<input class="form-control form-control-sm" type="date" id="efficiency-end" min="{{ history_start }}" max="{{ today }}" value="{{ today }}" required></label>
+    <label class="small">Period<select class="form-select form-select-sm" id="efficiency-bucket"><option value="month">Month</option><option value="week">Week</option></select></label>
+    <label class="small">Sites<select class="form-select form-select-sm" id="efficiency-sites"><option value="10">Top 10 by core-hours</option><option value="20" selected>Top 20 by core-hours</option><option value="0">All sites</option></select></label>
+    <label class="small mb-1"><input type="checkbox" id="efficiency-exclude"> Exclude task 40856</label>
+  </form>
+  <div id="efficiency-status" class="small text-muted mb-2" role="status"></div>
+  <div id="efficiency-error" class="alert alert-danger" role="alert" hidden></div>
+  <section class="card mb-3"><div class="card-body p-2"><div id="efficiency-heatmap" style="min-height:340px"></div></div></section>
+  <section class="card mb-3"><div class="card-body p-2"><div id="efficiency-trends" style="height:490px"></div></div></section>
+  <p class="small text-muted">Cells below 50 core-hours are blank; the current period is partial. Hover for hours and job counts; click a heatmap row to focus its trend. Click legend entries to select lines. OSG execution sites use pilot-reported names, with worker-host inference for older jobs.</p>
+</div>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script src="{% static 'monitor_app/compute-efficiency.js' %}?v=1"></script>
+{% endblock %}
