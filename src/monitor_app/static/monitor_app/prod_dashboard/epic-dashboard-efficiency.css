@@ -17,5 +17,4 @@
 .efficiency-metric .efficiency-current b{font-size:22px;line-height:26px}
 .efficiency-metric .efficiency-chart,.efficiency-metric .efficiency-chart svg{height:70px}
 .efficiency-metric .efficiency-months{padding-left:34px}
-.efficiency-caption{font-size:11px;line-height:14px;color:var(--muted);padding:0 8px 4px}
 .efficiency-chart svg:has(.efficiency-series:hover) .efficiency-series:not(:hover){opacity:.2}

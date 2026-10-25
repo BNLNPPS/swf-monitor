@@ -18,7 +18,7 @@
       '<div class="efficiency-title">' + metric.label + '</div>' +
       '<div class="efficiency-current"><a class="efficiency-link"><b>—</b></a><span>all sites · last 24h</span></div>' +
       '<a class="efficiency-chart efficiency-link"><svg viewBox="0 0 240 70" preserveAspectRatio="none" role="img"></svg></a>' +
-      '<div class="efficiency-caption">All-site averages below · coloured curves by site</div><div class="efficiency-months"></div></section>'
+      '<div class="efficiency-months"></div></section>'
     ).join('') + '<span class="efficiency-updated" role="status">Loading…</span>';
   column.appendChild(panel);
   panel.querySelectorAll('.efficiency-link').forEach(link => {

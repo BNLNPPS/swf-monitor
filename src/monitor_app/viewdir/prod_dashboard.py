@@ -34,7 +34,7 @@ def dashboard_document(request):
     return render_to_string('monitor_app/prod_dashboard.html', {
         'dashboard_record': record,
         'dashboard_config': config,
-        'dashboard_version': '20261025-efficiency-3',
+        'dashboard_version': '20261025-efficiency-4',
     }, request=request)
 
 
