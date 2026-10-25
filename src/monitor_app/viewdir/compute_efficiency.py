@@ -32,6 +32,12 @@ def compute_efficiency_data(request):
         return JsonResponse({'error': str(exc)}, status=400)
     try:
         cached = efficiency.product(refresh=request.GET.get('refresh') == '1')
+        if request.GET.get('summary') == '1':
+            current = efficiency.current_product()
+            result = efficiency.dashboard_data(cached.get('value') or {}, current.get('value'))
+            result.update(built_at=current['built_at'], refreshing=current.get('refreshing'),
+                          history_built_at=cached['built_at'])
+            return JsonResponse(result, status=200 if result['current'] else 202)
     except Exception:
         logger.exception('compute efficiency history refresh failed')
         return JsonResponse({'error': 'History update failed; the failure is recorded in the server log.'}, status=500)

@@ -1,0 +1,11 @@
+#compute-efficiency{position:absolute;top:100%;left:0;right:0;margin-top:6px;overflow:visible}
+#compute-efficiency .panelhead{height:26px}
+.efficiency-current{display:flex;align-items:baseline;gap:8px;padding:5px 8px 0}
+.efficiency-current b{font-size:25px;line-height:29px;font-variant-numeric:tabular-nums;color:var(--cyan)}
+.efficiency-current span,.efficiency-updated{font-size:11px;color:var(--muted)}
+.efficiency-months{display:grid;grid-template-columns:repeat(var(--months,6),minmax(0,1fr));padding:0 4px 3px;text-align:center;gap:0}
+.efficiency-months span{display:block;font-size:11px;line-height:15px;color:var(--muted)}
+.efficiency-months b{display:block;font-size:12px;line-height:16px;font-weight:500;font-variant-numeric:tabular-nums}
+.efficiency-chart{display:block;margin:0 4px;height:49px}
+.efficiency-chart svg{display:block;width:100%;height:49px;overflow:visible}
+.efficiency-updated{display:block;padding:2px 8px 5px;line-height:14px}

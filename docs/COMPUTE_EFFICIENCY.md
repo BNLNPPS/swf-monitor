@@ -4,8 +4,17 @@ The Sites menu's **Compute efficiency** page (`panda/compute-efficiency/`) shows
 successful-job core-hours divided by the core-hours of all ended jobs.
 It contains a site-by-period heatmap with core-hour volumes and selectable
 trend lines. The PanDA hub and the dashboard's Computing now heading link
-to this history. The live dashboard's layout and individual metric links
-are unchanged.
+to this history.
+
+The dashboard's compact panel below Storage shows overall efficiency for
+the preceding 24 hours, followed by one overall monthly average since May
+and a fixed 0–100% trend. All averages divide summed successful core-hours
+by summed ended core-hours. The current month is marked as partial.
+Hover gives the underlying hours and job counts; the panel links to this
+history. Its last-24-hour reading uses exact UTC timestamps and the shared
+`compute_efficiency_current:v1` cached product, refreshed every minute.
+Monthly values read the retained hourly history. Dashboard requests serve
+cached results and start stale or initial builds in the background.
 
 The heatmap uses an explicit fixed 0–100% scale: red at zero, amber at
 50%, and green at 100%. Dark labels remain readable on the light fills;

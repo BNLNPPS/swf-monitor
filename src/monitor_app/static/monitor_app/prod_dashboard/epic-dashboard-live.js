@@ -619,6 +619,7 @@
   async function update() {
     if (loading) return;
     loading = true;
+    window.epicDashboardEfficiency?.update();
     updateResources();
     try {
       const response = await fetch(config.snapshotUrl, {cache: 'no-store'});
