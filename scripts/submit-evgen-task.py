@@ -321,6 +321,10 @@ def _assemble_sandbox(spec, proxy_path, root, payload_dir=None, token_path=None,
     env = dict(spec.get('env') or {})
     if spec.get('workerProxy'):
         env['X509_USER_PROXY'] = 'worker-proxy'
+        # ES closes start in a clean container and source this file again.
+        # Retain the pilot identity so tokens.py can request write tokens;
+        # the pilot's X.509 identity alone need not have output-door access.
+        env['PILOT_X509_USER_PROXY'] = '${PWD}/worker-proxy'
     elif token_path:
         env['BEARER_TOKEN_FILE'] = TOKEN_SANDBOX_NAME
     elif not ship_proxy:

@@ -1,6 +1,8 @@
 import importlib.util
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -47,6 +49,19 @@ class NativeWorkerProxy(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual((sandbox / 'worker-proxy').read_text(), 'PRIVATE_PROXY_FIXTURE')
             self.assertEqual((sandbox / 'worker-proxy').stat().st_mode & 0o777, 0o600)
+            # The close starts with --cleanenv, then sources the environment
+            # file: both credentials must resolve in that new process.
+            check = subprocess.run(
+                ['/bin/bash', '-c',
+                 'source environment-native-test.sh\nexec "$1" -c "$2"',
+                 'close-test', sys.executable,
+                 'import os,json;print(json.dumps({k:os.path.realpath(os.environ[k]) '
+                 'for k in ["X509_USER_PROXY","PILOT_X509_USER_PROXY"]}))'],
+                cwd=sandbox, env={'PATH': os.environ['PATH']},
+                capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(check.stdout), {
+                'X509_USER_PROXY': str(sandbox / 'worker-proxy'),
+                'PILOT_X509_USER_PROXY': str(sandbox / 'worker-proxy')})
             args = json.loads((work / 'es_work/es_summary.json').read_text())['args']
             self.assertIn('CANARY_OUTPUT_DATASET=TEST/canary/native-test', args)
             self.assertIn('CANARY_LIFETIME_S=604800', args)
