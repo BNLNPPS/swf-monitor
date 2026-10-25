@@ -45,6 +45,11 @@ DEFAULT_SITES = [
     {'id': 'google', 'name': 'Google'},
     {'id': 'jlab', 'name': 'JLab'},
 ]
+INACTIVE_SITE_LABELS = {
+    'nersc': 'No allocation',
+    'compute-canada': 'Authentication block',
+    'jlab': 'Cybersecurity block',
+}
 
 # GREX runs eight pilots per Slurm worker (2026-10-20).
 from swf_epicprod.regulation import PILOTS_PER_WORKER
@@ -2164,6 +2169,8 @@ def get_snapshot(refresh=False):
             'live': '', 'commissioning': 'COMMISSIONING', 'off': 'OFF',
             'not_built': 'OFF', 'not_live': 'OFF',
         }.get(site['status'], site['status'].replace('_', ' ').upper())
+        if site['status'] != 'live':
+            site['status_label'] = INACTIVE_SITE_LABELS.get(site['id'], site['status_label'])
         site['status_level'] = (
             'blue' if site['status'] == 'commissioning' else
             'amber' if site['id'] == 'nersc' and site['status'] == 'off' else
