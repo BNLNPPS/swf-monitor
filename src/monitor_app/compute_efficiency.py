@@ -102,8 +102,10 @@ def display_data(value, start, end, bucket='month', exclude=False):
         if not start <= day <= end:
             continue
         queue, pool, execution = row[1:4]
+        # These historical test/GPU/ES queues used the same physical system.
+        family = 'NERSC_Perlmutter_epic' if queue.startswith('NERSC_Perlmutter_') else queue
         name = short_name(execute_site_label(execution)) if pool else (
-            labels.get(queue) or short_name(queue))
+            labels.get(family) or short_name(queue))
         sid = ('osg:' if pool else 'queue:') + str(name)
         label = 'OSG · ' + str(name) if pool else str(name)
         period = (day.replace(day=1) if bucket == 'month' else day - timedelta(days=day.weekday()))

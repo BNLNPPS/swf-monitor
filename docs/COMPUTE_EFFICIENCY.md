@@ -22,7 +22,8 @@ OSG queues are split by recorded execution site. Historical jobs without
 that field use the existing worker-host site mapping; Fir and CNAF host
 patterns are recognized explicitly. Unknown sites remain visible. Site
 names use the shared short-name vocabulary. Retired queues remain in
-historical accounting. Month and week totals sum the underlying hours;
+historical accounting. Perlmutter's historical test, GPU and Event Service
+queues share one site. Month and week totals sum the underlying hours;
 they never average percentages. Cells below 50 core-hours are blank.
 The current period is marked partial. An optional view excludes task
 40856 to separate that incident from the complete record.

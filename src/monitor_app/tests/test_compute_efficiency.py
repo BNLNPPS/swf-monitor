@@ -9,7 +9,8 @@ from monitor_app.compute_efficiency import build, display_data, merge_days
 
 class ComputeEfficiencyTests(SimpleTestCase):
     def data(self, rows, **options):
-        with patch('monitor_app.compute_efficiency._queue_labels', return_value={'grex': 'GREX'}):
+        with patch('monitor_app.compute_efficiency._queue_labels', return_value={
+                'grex': 'GREX', 'NERSC_Perlmutter_epic': 'Perlmutter'}):
             return display_data({'daily': rows}, date(2026, 5, 1), date(2026, 6, 30), **options)
 
     def test_ratio_uses_summed_hours_and_preserves_real_zero(self):
@@ -50,6 +51,14 @@ class ComputeEfficiencyTests(SimpleTestCase):
         self.assertEqual(result['sites'][0]['label'], 'OSG · Fir')
         self.assertEqual(result['cells'][0]['period'], '2026-05-04')
         self.assertEqual(result['cells'][0]['efficiency'], 50)
+
+    def test_historical_perlmutter_queues_form_one_site(self):
+        result = self.data([
+            ['2026-06-01', 'NERSC_Perlmutter_epic', False, '', 10, 100, 10, 0, 0, 0, 0, 0],
+            ['2026-06-02', 'NERSC_Perlmutter_epic_test', False, '', 900, 1000, 50, 0, 0, 0, 0, 0],
+        ])
+        self.assertEqual(result['sites'], [{'id': 'queue:Perlmutter', 'label': 'Perlmutter'}])
+        self.assertAlmostEqual(result['cells'][0]['efficiency'], 100 * 910 / 1100)
 
     def test_refresh_removes_obsolete_recent_rows_but_retains_history(self):
         old = [['2026-05-01', 'historic'], ['2026-06-01', 'removed']]
