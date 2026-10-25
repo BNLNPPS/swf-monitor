@@ -3606,10 +3606,10 @@ def task_harness_rollup(jeditaskid, limit=2000):
         with conn.cursor() as cursor:
             cursor.execute(
                 f'SELECT j."pandaid", m."metadata", j."starttime", j."endtime", '
-                f'j."jobstatus", j."actualcorecount", j."corecount" FROM ('
-                f'SELECT "pandaid", "starttime", "endtime", "jobstatus", "actualcorecount", "corecount" '
+                f'j."jobstatus", j."actualcorecount", j."corecount", j."piloterrorcode" FROM ('
+                f'SELECT "pandaid", "starttime", "endtime", "jobstatus", "actualcorecount", "corecount", "piloterrorcode" '
                 f'FROM "{PANDA_SCHEMA}"."jobsactive4" WHERE "jeditaskid" = %s UNION '
-                f'SELECT "pandaid", "starttime", "endtime", "jobstatus", "actualcorecount", "corecount" '
+                f'SELECT "pandaid", "starttime", "endtime", "jobstatus", "actualcorecount", "corecount", "piloterrorcode" '
                 f'FROM "{PANDA_SCHEMA}"."jobsarchived4" WHERE "jeditaskid" = %s) j '
                 f'LEFT JOIN "{PANDA_SCHEMA}"."metatable" m ON j."pandaid" = m."pandaid" '
                 f'ORDER BY j."pandaid" DESC LIMIT %s',
@@ -3636,7 +3636,7 @@ def task_harness_rollup(jeditaskid, limit=2000):
     heads, tails = [], []
     plots = []
     seen = set()
-    for pandaid, raw, jstart, jend, status, actual_cores, cores in rows:
+    for pandaid, raw, jstart, jend, status, actual_cores, cores, pilot_error in rows:
         if pandaid in seen:
             continue
         seen.add(pandaid)
@@ -3647,7 +3647,7 @@ def task_harness_rollup(jeditaskid, limit=2000):
         es = metadata.get('es') if isinstance(metadata, dict) else None
         if not isinstance(es, dict):
             record = ((filed.get(pandaid) or {}).get('es_record') or {}).get('record')
-            es = es_record_report(record, status)
+            es = es_record_report(record, status, loss_confirmed=pilot_error == 1256)
         if not isinstance(es, dict):
             continue
         jobs += 1
@@ -3726,7 +3726,7 @@ def es_slot_timeline(job, es):
     lanes, which is what the slots did since each runs one unit at a
     time. None when the job has no start and end."""
     start, end = job.get('starttime'), job.get('endtime')
-    if not end and es.get('observed_at'):
+    if es.get('observed_at') and (not end or es.get('live') or es.get('incomplete')):
         end = datetime_from_epoch(es['observed_at'])
     if not start or not end:
         return None
@@ -3819,6 +3819,7 @@ def es_slot_timeline(job, es):
         'cut_s': round(float(cut) - t0, 1) if cut else None,
         'cut_real': bool((es.get('preempted') or {}).get('real')),
         'live': bool(es.get('live')),
+        'incomplete': bool(es.get('incomplete')),
         'observed_at': datetime_from_epoch(es['observed_at']).isoformat() if es.get('observed_at') else None,
         'snapshot_stale': bool(es.get('live') and es.get('observed_at') and
                                timezone.now().timestamp() - float(es['observed_at']) > ES_SNAPSHOT_STALE_S),
@@ -4039,27 +4040,27 @@ def allocation_of_job(pandaid):
     return (row[0], int(row[1])) if row else None
 
 
-def es_from_shipped_record(pandaid, job_status=None):
+def es_from_shipped_record(pandaid, job_status=None, *, loss_confirmed=False):
     """The ``es`` block of a job that ended without its final report, from
     the record the harness shipped off the node as it went (swf-epicprod
     payload/es/es_record.py), as the sweep filed it under
-    ``EpicProdJob.data['es_record']``. The record's last write is the cut:
-    the units then in flight were cut off, the units finished and not yet
-    in a close that stood never left the node, and a close running at the
-    cut is lost with them. None when no record was filed."""
+    ``EpicProdJob.data['es_record']``. A confirmed worker loss makes the
+    last observation the cut; otherwise it remains an incomplete snapshot.
+    None when no record was filed."""
     from ..models import EpicProdJob
     job = EpicProdJob.objects.filter(pandaid=int(pandaid)).only('data').first()
     rec = ((job.data or {}).get('es_record') or {}).get('record') if job else None
-    return es_record_report(rec, job_status)
+    return es_record_report(rec, job_status, loss_confirmed=loss_confirmed)
 
 
-def es_record_report(rec, job_status):
-    """Normalize a snapshot; only an ended job can have lost its node."""
+def es_record_report(rec, job_status, *, loss_confirmed=False):
+    """A missing final record alone does not establish worker loss."""
     if not isinstance(rec, dict) or not rec.get('written_at'):
         return None
     cut = float(rec['written_at'])
     terminal = job_status in ('finished', 'failed', 'closed', 'cancelled')
-    lost = terminal and not rec.get('ended_at')
+    lost = terminal and not rec.get('ended_at') and loss_confirmed
+    incomplete = terminal and not rec.get('ended_at') and not lost
     interrupted = [dict(u, status='interrupted', ended_at=cut,
                         wall_s=round(cut - float(u.get('started_at') or cut), 1))
                    for u in rec.get('in_flight') or []]
@@ -4079,6 +4080,7 @@ def es_record_report(rec, job_status):
         'kind': 'event_service', 'stamp': rec.get('stamp'), 'slots': rec.get('slots'),
         'started_at': rec.get('started_at'), 'ended_at': rec.get('ended_at'),
         'observed_at': cut, 'live': not terminal and not rec.get('ended_at'),
+        'incomplete': incomplete,
         'payload_version': rec.get('payload_version', ''),
         'ranges_done': rec.get('done') or [], 'ranges_failed': rec.get('failed') or [],
         'ranges_interrupted': interrupted if lost else [],
@@ -4124,7 +4126,8 @@ def es_harness_report(conn, pandaid, job=None):
             return None
     es = metadata.get('es') if isinstance(metadata, dict) else None
     if not isinstance(es, dict):
-        es = es_from_shipped_record(pandaid, (job or {}).get('jobstatus'))
+        es = es_from_shipped_record(pandaid, (job or {}).get('jobstatus'),
+                                   loss_confirmed=(job or {}).get('piloterrorcode') == 1256)
         if es is None:
             return None
         metadata = {'payload_version': es.get('payload_version', '')}

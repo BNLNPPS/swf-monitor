@@ -12,8 +12,10 @@ changing PanDA job state. The hourly report sweep retains ended jobs' records.
 A running timeline ends at the snapshot timestamp. In-flight units and units
 awaiting an output close retain their separate states; they are not marked lost.
 The page displays the observation age and warns after two five-minute collection intervals.
-A terminal job without a normal harness-end marker retains the shipped record's
-cut, interrupted units and unshipped output. Registered closes remain saved.
+A terminal job without a normal harness-end marker is an incomplete observation.
+The worker-loss code 1256 is required before a shipped snapshot marks a cut,
+interrupted units or output lost on the node. Missing final metadata alone does
+not establish that outcome. Registered closes remain saved.
 That last independent observation also supplies the timeline end when PanDA's
 archived end time precedes shipped payload activity, as can happen when a job
 is reaped after losing its heartbeat.

@@ -1,3 +1,6 @@
 {% if tl.observed_at %}
+{% if tl.incomplete %}
+<div class="alert alert-warning py-2 mt-2"><strong>Incomplete observation.</strong> Reporting stopped before a final harness record arrived. This plot shows only the recorded interval; the full run duration and the outcome of work still active here are unconfirmed.</div>
+{% endif %}
 <p class="mb-2">{% if tl.live %}Running at the snapshot.{% endif %} Harness snapshot <span data-relative-time="{{ tl.observed_at }}">{{ tl.observed_at }}</span>.{% if tl.snapshot_stale %} <strong class="text-warning">Snapshot is stale; the plot ends at the last observation.</strong>{% endif %}</p>
 {% endif %}
