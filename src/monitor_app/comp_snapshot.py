@@ -2089,6 +2089,13 @@ def _report_header(record):
     front = f'{PUBLIC}/panda/front/#ready'
     campaign = record.get('campaign') or {}
     plan = f"{PUBLIC}/pcs/plan/?campaign={quote(campaign.get('id') or '')}"
+    thread_count = total('processing_threads')
+    thread_value = number(thread_count)
+    thread_detail = 'Payload processing threads in running production jobs'
+    known_threads = total('processing_known_threads')
+    if thread_count is None and known_threads:
+        thread_value = '≥' + number(known_threads)
+        thread_detail += '; lower bound because some jobs have no fresh payload-thread measurement'
     since = campaign.get('delivered_since')
     if since:
         date = datetime.fromisoformat(str(since))
@@ -2096,8 +2103,8 @@ def _report_header(record):
     return [
         {'id': 'computing', 'title': 'Computing now', 'link': f'{PUBLIC}/panda/compute-efficiency/',
          'detail': 'Compute efficiency history by site and month or week.',
-         'metrics': [metric(number(total('running')), 'running', '#edf2f1',
-                            jobs + '?status=running&days=2', 'Running PanDA jobs'),
+         'metrics': [metric(thread_value, 'running threads', '#edf2f1',
+                            jobs + '?status=running&days=2', thread_detail),
                      metric(number(total('finished_1h')), 'finish/1h', '#7fce95',
                             jobs + '?status=finished&days=1', 'Jobs finished in the last hour')]},
         {'id': 'work', 'title': 'Work available', 'link': front,
@@ -2170,6 +2177,31 @@ def get_snapshot(refresh=False):
             share = site['fair_share']
             site['fair_share'] = dict(share, notice=_fair_share_notice(
                 share, (site.get('links') or {}).get('panda_queue')))
+    from monitor_app.processing_activity import product as processing_product
+    try:
+        activity = processing_product()
+        measured = activity.get('value') or {}
+        fresh = activity.get('age_seconds') is not None and activity['age_seconds'] <= 120
+        for site in value['sites']:
+            for queue in site['queues']:
+                row = (measured.get('queues') or {}).get(queue['id'], {})
+                queue['processing_threads'] = row.get('threads', 0) if fresh else None
+                queue['processing_known_threads'] = row.get('known_threads', 0) if fresh else None
+                queue['processing_unknown_jobs'] = row.get('unknown_jobs', 0) if fresh else None
+            counts = [q['processing_threads'] for q in site['queues']]
+            site['processing_threads'] = sum(counts) if all(n is not None for n in counts) else None
+            for executor in site.get('execute_sites', []):
+                matches = [r for name, r in (measured.get('executors') or {}).items()
+                           if (_uncut_site(name) or 'not reported') == executor['name']]
+                executor['processing_threads'] = (sum(r['known_threads'] for r in matches)
+                    if fresh and not any(r['unknown_jobs'] for r in matches) else None)
+        value['processing_observed_at'] = measured.get('observed_at')
+    except Exception:
+        logger.exception('Payload processing activity unavailable')
+        for site in value['sites']:
+            site['processing_threads'] = None
+            for queue in site['queues']:
+                queue['processing_threads'] = None
     trends = value.get('trends')
     if trends:
         trends = dict(trends, sites=[dict(s, name=short_name(s.get('name')))

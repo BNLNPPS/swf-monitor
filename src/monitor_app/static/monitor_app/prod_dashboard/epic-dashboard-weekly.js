@@ -70,13 +70,12 @@
       const content = label.querySelector('a') || label;
       label.dataset.weeklyText = (result ? Math.round(result.value).toLocaleString('en-US') : '—') +
         ' avg cores/1wk';
-      // the live binding's fair-share state holds this place while it lasts
-      if (!label.dataset.override) content.textContent = label.dataset.weeklyText;
+      content.textContent = label.dataset.weeklyText;
       label.dataset.weeklyTitle = result ? 'Time-weighted average running cores over the last week; ' +
         Math.round(result.coverage * 100) + '% recorded coverage.' +
         (name === 'OSG' ? ' Includes production on the retired OSG queue.' : '') :
         'No recorded running-core history for this queue.';
-      if (!label.dataset.override) label.title = label.dataset.weeklyTitle;
+      label.title = label.dataset.weeklyTitle;
     });
   }
   async function load() {
@@ -110,7 +109,7 @@
       console.error('Weekly average running cores unavailable:', error);
       headers.forEach(label => {
         label.dataset.weeklyTitle = error.message;
-        if (!label.dataset.override) label.title = error.message;
+        label.title = error.message;
       });
     } finally { pending = false; }
   }

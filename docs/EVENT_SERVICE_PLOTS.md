@@ -16,6 +16,10 @@ A terminal job without a normal harness-end marker is an incomplete observation.
 The worker-loss code 1256 is required before a shipped snapshot marks a cut,
 interrupted units or output lost on the node. Missing final metadata alone does
 not establish that outcome. Registered closes remain saved.
+The close summary separates started, saved, unfinished and failed closes.
+Its duration median includes completed closes only. An unfinished close carries
+its elapsed time at the observation, and new payload snapshots identify its
+current merge, validation or registration stage.
 That last independent observation also supplies the timeline end when PanDA's
 archived end time precedes shipped payload activity, as can happen when a job
 is reaped after losing its heartbeat.

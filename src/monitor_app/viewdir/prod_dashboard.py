@@ -29,13 +29,15 @@ def dashboard_document(request):
         'taskUrl': reverse('monitor_app:panda_task_detail', args=[0]),
         'breakoutUrl': reverse('monitor_app:prod_dashboard'),
         'weeklyUrl': static('monitor_app/prod_dashboard/weekly-cores.json'),
+        'pillarScales': {'OSG': 2500, 'GREX': 2500, 'Google': 100},
+        'siteNodeCaps': {'Google': 5},
         'sitePanels': {'osg': 'OSG', 'grex': 'GREX', 'nersc': 'Perlmutter',
                        'google': 'Google', 'compute-canada': 'Compute Canada', 'jlab': 'JLab'},
     }
     return render_to_string('monitor_app/prod_dashboard.html', {
         'dashboard_record': record,
         'dashboard_config': config,
-        'dashboard_version': '20261025-daily-cores-1',
+        'dashboard_version': '20261025-pillar-scales-1',
     }, request=request)
 
 

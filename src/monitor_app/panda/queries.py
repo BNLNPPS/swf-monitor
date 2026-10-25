@@ -3631,6 +3631,7 @@ def task_harness_rollup(jeditaskid, limit=2000):
     unit_walls, unit_events, spe = [], [], []
     done = failed = events_done = 0
     closes, close_walls, close_events, close_failed = 0, [], 0, 0
+    close_saved, close_unfinished = 0, 0
     deadline_marks = 0
     busy_s = allocated_s = 0.0
     heads, tails = [], []
@@ -3687,10 +3688,13 @@ def task_harness_rollup(jeditaskid, limit=2000):
                 continue
             closes += 1
             if c.get('ok'):
+                close_saved += 1
                 close_events += int(c.get('events') or 0)
+            elif c.get('running'):
+                close_unfinished += 1
             elif not c.get('running'):
                 close_failed += 1
-            if c.get('wall_s') is not None:
+            if not c.get('running') and c.get('wall_s') is not None:
                 close_walls.append(float(c['wall_s']))
     if not jobs:
         return None
@@ -3703,6 +3707,7 @@ def task_harness_rollup(jeditaskid, limit=2000):
         'unit_wall_p90_s': round(walls[min(len(walls) - 1, int(0.9 * len(walls)))], 1) if walls else None,
         's_per_event_median': round(_median(spe), 2) if spe else None,
         'closes': closes, 'closes_failed': close_failed, 'close_events': close_events,
+        'closes_saved': close_saved, 'closes_unfinished': close_unfinished,
         'close_wall_median_s': _median(close_walls),
         'deadline_marks': deadline_marks,
         'capped': len(rows) >= limit,
@@ -4074,7 +4079,10 @@ def es_record_report(rec, job_status, *, loss_confirmed=False):
     closes = [dict(c, units=per_close.get(int(c.get('index') or 0), []))
               for c in rec.get('closes') or []] + [
         {'index': c.get('index'), 'ok': False, 'running': not lost,
-         'outcome': 'cut off' if lost else 'running', 'units': list(c.get('units') or []),
+         'outcome': ('cut off' if lost else 'unfinished at last snapshot' if incomplete
+                     else (c.get('progress') or {}).get('stage') or 'running'),
+         'units': list(c.get('units') or []), 'progress': c.get('progress'),
+         'wall_s': None if lost else round(max(0, cut - float(c.get('started_at') or cut)), 1),
          'started_at': c.get('started_at'), 'ended_at': cut} for c in rec.get('closing') or []]
     return {
         'kind': 'event_service', 'stamp': rec.get('stamp'), 'slots': rec.get('slots'),

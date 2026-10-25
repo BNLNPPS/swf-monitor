@@ -57,7 +57,11 @@ body scrolls within the available height. Storage follows directly below.
 Notices use 10-pixel text, and every notice is accessible. There is no
 separate inactive-site footer.
 
-Cylinder height represents running jobs on one 2,500-job scale. A compact
+Cylinder height uses a common 2,500-thread running scale for OSG and GREX,
+preserving the approximately 80% height of 2,000 single-threaded jobs.
+Google uses a 100-thread scale. Each of these pillar sections shows its scale in small
+text at the upper left. Google's title row shows its current five-node cap
+at the upper right. Other site cylinders retain the default 2,500-thread scale. A compact
 execution-site cylinder retains its fixed height and shows the shared
 slash break when the value exceeds its display range. The green and red
 proportions represent finished and failed jobs in the preceding hour.
@@ -65,6 +69,20 @@ The slash treatment is shared by both cylinder types. Plots convert
 quarter-hour completion bins to hourly rates. Task finish and fail
 columns retain JEDI input-file accounting; fail counts final failures
 after retries. Task rows extend downward without an internal scrollbar.
+
+Running numbers and pillars count production payload threads. Native
+jobs use the payload's chosen `payloadThreads` report; one-core native jobs
+use one thread, while an unreported multicore thread width remains unknown.
+Event Service jobs count work lanes with assigned units in the shipped
+harness record. Each lane runs one single-threaded payload; empty lanes and
+ended harnesses contribute zero. Records older than ten minutes are unknown.
+An incomplete total with a known contribution is shown as a lower bound
+with a ≥ prefix; it is never presented as the complete count.
+Assigned-unit occupancy includes unit startup and finalization; it measures
+payload parallelism, rather than instantaneous CPU utilization. Queued jobs,
+pilot supply, hourly outcomes and historical job-count curves retain their
+existing units. The shared `processing_activity:v1` minute cache supplies
+current per-queue and OSG execution-site counts.
 
 Site plots use the peak of running, finished/hour and failed/hour,
 rounded upward to two significant digits, as their common ceiling.
@@ -85,9 +103,10 @@ product when the cached average is more than an hour old. The browser
 reuses the result for an hour and refreshes it while attended.
 
 While a pool's negotiator holds our OSG submitter at its fair-share
-limit, the OSG title row shows **fair share limited** in yellow in place
-of the weekly average, and the weekly figure returns when the limit
-lifts. The hover names the pool and the time of the negotiation cycle.
+limit, the OSG title row shows **fair share limited** in yellow followed
+by its weekly average cores in grey, matching GREX. Each keeps its own
+link and hover details. The fair-share hover names the pool and the time
+of the negotiation cycle.
 The notice means our submitter reached its fair-share limit during the
 last reported negotiation cycle. Existing pilots keep their slots;
 later cycles may grant more. The reading is the OSG submit host reporter's

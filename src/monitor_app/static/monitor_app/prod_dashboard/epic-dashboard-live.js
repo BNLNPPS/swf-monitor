@@ -256,15 +256,35 @@
     if (!panel) return;
     panel.dataset.siteKey = aliases[site.id] || site.name;
     text(panel.querySelector('.panelhead strong'), site.name);
+    const nodeCap = config.siteNodeCaps?.[panel.dataset.siteKey];
+    if (nodeCap != null) {
+      const heading = panel.querySelector('.panelhead');
+      let label = heading.querySelector('.site-node-cap');
+      if (!label) {
+        label = element('span', 'site-node-cap right small'); heading.append(label);
+      }
+      label.textContent = 'Current max: ' + nodeCap + ' nodes';
+    }
     productionPanel(panel, site);
     const active = (site.queues || []).filter(q => q.production_display || q.status === 'live');
     const queues = active.length ? active : site.queues || [];
     const sum = key => sumKnown(queues, key);
     const pilots = queues.map(queue => queue.pilots && queue.pilots.waiting_current);
     const waiting = pilots.some(value => value != null) ? pilots.reduce((n, value) => n + (value || 0), 0) : null;
-    const values = [sum('running'), sum('finished_1h'), sum('failed_1h'), sum('queued'),
+    const values = [sum('processing_threads'), sum('finished_1h'), sum('failed_1h'), sum('queued'),
       waiting, sum('harvester_slots_opened_1h')];
+    const partialThreads = values[0] == null && sum('processing_known_threads') > 0;
+    if (partialThreads) values[0] = sum('processing_known_threads');
     panel.querySelectorAll('.metric b').forEach((node, i) => text(node, number(values[i])));
+    const runningMetric = panel.querySelector('.metric');
+    if (runningMetric) {
+      runningMetric.querySelector('span').textContent = 'running threads';
+      if (partialThreads) text(runningMetric.querySelector('b'), '≥' + number(values[0]));
+      runningMetric.title = 'Payload processing threads: native chosen thread width; Event Service lanes with assigned work.\n' +
+        'Idle Event Service lanes are excluded. Unit startup/finalization is included; this is not CPU utilization.\n' +
+        'Unreported multicore native widths or stale Event Service reports remain unknown.' +
+        (partialThreads ? '\nLower bound: some jobs have no fresh thread measurement.' : '');
+    }
     const dot = panel.querySelector('.panelhead > .dot');
     if (dot) dot.style.background = 'var(--' + color(site.status_level || (site.health && site.health.level)) + ')';
     const status = panel.querySelector('.site-status');
@@ -278,37 +298,24 @@
     if (body) {
       text(body, site.status_reason || site.status_label || 'Status unavailable');
     }
-    // While a pool's negotiator holds our submitter at its fair-share
-    // limit, that state stands in the weekly-cores place on the title row.
+    // The fair-share notice and weekly average keep their own links and
+    // hover details, with the average following the notice in grey.
     const weekly = panel.querySelector('.weekly-cores');
     if (weekly && 'fair_share' in site) {
       const share = site.fair_share;
       const notice = share && share.notice;
-      const held = Boolean(notice);
-      const content = weekly.querySelector(':scope > a.dashboard-drilldown') || weekly;
-      weekly.classList.toggle('fair-share', held);
-      weekly.style.color = held ? 'var(--' + color(notice.level) + ')' : '';
-      if (held) {
-        weekly.dataset.override = '1';
-        // the link pass after each render takes this as the hover text
-        weekly.dataset.overrideTitle = notice.detail;
-        weekly.dataset.overrideLink = notice.link;
-        content.textContent = notice.text;
-        // the weekly average's own hover would show beside the throttle's
-        if (weekly.hasAttribute('title')) {
-          weekly.dataset.weeklyTitle = weekly.title;
-          weekly.removeAttribute('title');
+      let label = panel.querySelector('.site-fair-share');
+      if (notice) {
+        if (!label) {
+          label = anchor(notice.link, 'site-fair-share small', notice.text, notice.detail);
+          weekly.before(label);
         }
-      } else {
-        delete weekly.dataset.override;
-        delete weekly.dataset.overrideTitle;
-        delete weekly.dataset.overrideLink;
-        if (weekly.dataset.weeklyText) content.textContent = weekly.dataset.weeklyText;
-        if (weekly.dataset.weeklyTitle) weekly.title = weekly.dataset.weeklyTitle;
-      }
+        label.textContent = notice.text; label.title = notice.detail; label.href = notice.link;
+        label.style.color = 'var(--' + color(notice.level) + ')';
+      } else if (label) label.remove();
     }
     const pillars = panel.querySelectorAll('.queuepillar.svgcolumn');
-    const titles = [number(values[0]) + ' running; ' + number(values[1]) + ' finished, ' +
+    const titles = [(partialThreads ? 'At least ' : '') + number(values[0]) + ' running payload threads; ' + number(values[1]) + ' finished, ' +
       number(values[2]) + ' failed in last 1h', number(values[3]) + ' queued',
       number(waiting) + ' pilots waiting', number(values[5]) + ' slots/1h'];
     pillars.forEach((node, i) => {
@@ -327,7 +334,8 @@
 
   function renderExecutors(sites) {
     const osg = sites.find(site => site.id === 'osg');
-    const executors = (osg && osg.execute_sites || []).filter(item => item.running > 0);
+    const executors = (osg && osg.execute_sites || []).map(item => ({...item,
+      running: item.processing_threads})).filter(item => item.running > 0);
     const strip = document.querySelector('.executeplot');
     const sample = strip.querySelector('.exec');
     const labelFont = sample ? getComputedStyle(sample.querySelector('.ename')).font : '8px Arial';
