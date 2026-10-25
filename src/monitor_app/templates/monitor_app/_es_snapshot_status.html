@@ -1,0 +1,3 @@
+{% if tl.observed_at %}
+<p class="mb-2">{% if tl.live %}Running at the snapshot.{% endif %} Harness snapshot <span data-relative-time="{{ tl.observed_at }}">{{ tl.observed_at }}</span>.{% if tl.snapshot_stale %} <strong class="text-warning">Snapshot is stale; the plot ends at the last observation.</strong>{% endif %}</p>
+{% endif %}

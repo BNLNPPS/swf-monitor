@@ -27,7 +27,7 @@ INTERRUPTED = '#f5d76e'   # processing cut off by a sudden end (preemption)
 UNSHIPPED = '#d49a00'     # finished, its output never left the node
 RUNNING = '#7fc8a9'       # an allocation's job still running
 UNIT_COLOR = {'done': DONE, 'failed': FAILED, 'interrupted': INTERRUPTED, 'unshipped': UNSHIPPED,
-              'running': RUNNING}
+              'running': RUNNING, 'awaiting': '#879d66'}
 IDLE = 'rgba(128,128,128,0.18)'
 
 
@@ -111,10 +111,11 @@ def slot_plot_svg(tl):
         parts.append(f'<rect x="{LEFT}" y="{y + 3}" width="{plot_w:.1f}" height="{LANE_H - 6}" fill="{IDLE}"/>')
         for c in tl.get('closes') or []:
             x0, x1 = x(c['start_s']), x(c['end_s'])
-            title = escape(f"close {c.get('index')}: {'registered' if c.get('ok') else 'failed'}, "
+            outcome = 'running' if c.get('running') else 'registered' if c.get('ok') else 'failed'
+            title = escape(f"close {c.get('index')}: {outcome}, "
                            f"{(c['end_s'] - c['start_s']):.0f} s from {c['start_s'] / 60:.1f} min")
             parts.append(f'<rect x="{x0:.1f}" y="{y + 3}" width="{max(2.0, x1 - x0):.1f}" height="{LANE_H - 6}" '
-                         f'fill="{CLOSE if c.get("ok") else FAILED}"><title>{title}</title></rect>')
+                         f'fill="{CLOSE if c.get("ok") or c.get("running") else FAILED}"><title>{title}</title></rect>')
     # The cut of a preemption: a red line through the lanes.
     if tl.get('cut_s') is not None:
         xc = x(tl['cut_s'])

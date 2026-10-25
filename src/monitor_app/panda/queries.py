@@ -3374,6 +3374,7 @@ def study_job(pandaid, include_batch_reason=False, include_log_analysis=True,
 # ── Event Service ────────────────────────────────────────────────────────────
 
 ES_RANGE_ROW_CAP = 60
+ES_SNAPSHOT_STALE_S = 600  # Two five-minute collection intervals.
 
 
 def es_events_per_range(splitrule):
@@ -3597,23 +3598,34 @@ def task_harness_rollup(jeditaskid, limit=2000):
     with their events, the unit wall's middle and tail and the seconds
     an event costs (unit wall over its events), the closes with their
     events and wall, and every job's untaken-at-deadline mark. From the
-    job reports in the metatable (finished jobs), capped at ``limit``
+    job reports in the metatable or filed harness snapshots, capped at ``limit``
     jobs; None when no job of the task carries a harness report. Never
     raises: one card on a page."""
     conn = connections['panda']
     try:
         with conn.cursor() as cursor:
             cursor.execute(
-                f'SELECT m."pandaid", m."metadata", j."starttime", j."endtime" '
-                f'FROM "{PANDA_SCHEMA}"."metatable" m '
-                f'JOIN "{PANDA_SCHEMA}"."jobsarchived4" j ON j."pandaid" = m."pandaid" '
-                f'WHERE j."jeditaskid" = %s ORDER BY m."pandaid" DESC LIMIT %s',
-                [int(jeditaskid), int(limit)])
+                f'SELECT j."pandaid", m."metadata", j."starttime", j."endtime", '
+                f'j."jobstatus", j."actualcorecount", j."corecount" FROM ('
+                f'SELECT "pandaid", "starttime", "endtime", "jobstatus", "actualcorecount", "corecount" '
+                f'FROM "{PANDA_SCHEMA}"."jobsactive4" WHERE "jeditaskid" = %s UNION '
+                f'SELECT "pandaid", "starttime", "endtime", "jobstatus", "actualcorecount", "corecount" '
+                f'FROM "{PANDA_SCHEMA}"."jobsarchived4" WHERE "jeditaskid" = %s) j '
+                f'LEFT JOIN "{PANDA_SCHEMA}"."metatable" m ON j."pandaid" = m."pandaid" '
+                f'ORDER BY j."pandaid" DESC LIMIT %s',
+                [int(jeditaskid), int(jeditaskid), int(limit)])
             rows = cursor.fetchall()
     except Exception as e:
         logger.error(f"harness rollup query failed for task {jeditaskid}: {e}")
         return None
     from ..es_plot import slot_plot_svg
+    from ..models import EpicProdJob
+    try:
+        filed = dict(EpicProdJob.objects.filter(
+            pandaid__in=[row[0] for row in rows]).values_list('pandaid', 'data'))
+    except Exception as exc:
+        logger.error('harness snapshot lookup failed for task %s: %s', jeditaskid, exc)
+        filed = {}
     jobs = 0
     slots = []
     unit_walls, unit_events, spe = [], [], []
@@ -3623,18 +3635,26 @@ def task_harness_rollup(jeditaskid, limit=2000):
     busy_s = allocated_s = 0.0
     heads, tails = [], []
     plots = []
-    for pandaid, raw, jstart, jend in rows:
+    seen = set()
+    for pandaid, raw, jstart, jend, status, actual_cores, cores in rows:
+        if pandaid in seen:
+            continue
+        seen.add(pandaid)
         try:
             metadata = json.loads(raw) if isinstance(raw, str) else raw
         except (ValueError, TypeError):
             continue
         es = metadata.get('es') if isinstance(metadata, dict) else None
         if not isinstance(es, dict):
+            record = ((filed.get(pandaid) or {}).get('es_record') or {}).get('record')
+            es = es_record_report(record, status)
+        if not isinstance(es, dict):
             continue
         jobs += 1
         # The slots' occupancy of this job, for the task's total and the
         # newest jobs' plots.
-        tl = es_slot_timeline({'starttime': jstart, 'endtime': jend}, es)
+        tl = es_slot_timeline({'starttime': jstart, 'endtime': jend,
+                               'actualcorecount': actual_cores, 'corecount': cores}, es)
         if tl:
             busy_s += tl['busy_s']
             allocated_s += tl['allocated_s']
@@ -3647,7 +3667,9 @@ def task_harness_rollup(jeditaskid, limit=2000):
             slots.append(int(es['slots']))
         if es.get('untaken_at_deadline'):
             deadline_marks += 1
-        for u in es.get('ranges_done') or []:
+        completed = ((es.get('ranges_done') or []) + (es.get('ranges_awaiting_close') or [])
+                     + (es.get('ranges_unshipped') or []))
+        for u in completed:
             if not isinstance(u, dict):
                 continue
             done += 1
@@ -3666,7 +3688,7 @@ def task_harness_rollup(jeditaskid, limit=2000):
             closes += 1
             if c.get('ok'):
                 close_events += int(c.get('events') or 0)
-            else:
+            elif not c.get('running'):
                 close_failed += 1
             if c.get('wall_s') is not None:
                 close_walls.append(float(c['wall_s']))
@@ -3704,6 +3726,8 @@ def es_slot_timeline(job, es):
     lanes, which is what the slots did since each runs one unit at a
     time. None when the job has no start and end."""
     start, end = job.get('starttime'), job.get('endtime')
+    if not end and es.get('observed_at'):
+        end = datetime_from_epoch(es['observed_at'])
     if not start or not end:
         return None
     from datetime import datetime, timezone as _tz
@@ -3728,7 +3752,8 @@ def es_slot_timeline(job, es):
     nslots = int(es.get('slots') or 0) or 1
     units = []
     for status, key in (('done', 'ranges_done'), ('failed', 'ranges_failed'),
-                        ('interrupted', 'ranges_interrupted'), ('unshipped', 'ranges_unshipped')):
+                        ('interrupted', 'ranges_interrupted'), ('unshipped', 'ranges_unshipped'),
+                        ('running', 'ranges_running'), ('awaiting', 'ranges_awaiting_close')):
         for u in es.get(key) or []:
             if not isinstance(u, dict) or u.get('started_at') is None:
                 continue
@@ -3759,7 +3784,7 @@ def es_slot_timeline(job, es):
     for c in es.get('closes') or []:
         if isinstance(c, dict) and c.get('started_at') is not None:
             cs = float(c['started_at'])
-            closes.append({'index': c.get('index'), 'ok': bool(c.get('ok')),
+            closes.append({'index': c.get('index'), 'ok': bool(c.get('ok')), 'running': bool(c.get('running')),
                            'start_s': cs - t0,
                            'end_s': float(c.get('ended_at') or (cs + float(c.get('wall_s') or 0))) - t0})
     wall = t1 - t0
@@ -3791,7 +3816,18 @@ def es_slot_timeline(job, es):
         'lanes_from_record': all(u['slot'] is not None for u in units) and bool(units),
         'cut_s': round(float(cut) - t0, 1) if cut else None,
         'cut_real': bool((es.get('preempted') or {}).get('real')),
+        'live': bool(es.get('live')),
+        'observed_at': datetime_from_epoch(es['observed_at']).isoformat() if es.get('observed_at') else None,
+        'snapshot_stale': bool(es.get('live') and es.get('observed_at') and
+                               timezone.now().timestamp() - float(es['observed_at']) > ES_SNAPSHOT_STALE_S),
+        'compact_lanes': nslots > 64,
     }
+
+
+def datetime_from_epoch(value):
+    """An aware UTC timestamp from a harness clock reading."""
+    from datetime import datetime, timezone as _tz
+    return datetime.fromtimestamp(float(value), _tz.utc)
 
 
 _PILOT_TASK_RE = re.compile(r'(?:pilotlog-task|-task)(\d+)')
@@ -4001,7 +4037,7 @@ def allocation_of_job(pandaid):
     return (row[0], int(row[1])) if row else None
 
 
-def es_from_shipped_record(pandaid):
+def es_from_shipped_record(pandaid, job_status=None):
     """The ``es`` block of a job that ended without its final report, from
     the record the harness shipped off the node as it went (swf-epicprod
     payload/es/es_record.py), as the sweep filed it under
@@ -4012,9 +4048,16 @@ def es_from_shipped_record(pandaid):
     from ..models import EpicProdJob
     job = EpicProdJob.objects.filter(pandaid=int(pandaid)).only('data').first()
     rec = ((job.data or {}).get('es_record') or {}).get('record') if job else None
+    return es_record_report(rec, job_status)
+
+
+def es_record_report(rec, job_status):
+    """Normalize a snapshot; only an ended job can have lost its node."""
     if not isinstance(rec, dict) or not rec.get('written_at'):
         return None
     cut = float(rec['written_at'])
+    terminal = job_status in ('finished', 'failed', 'closed', 'cancelled')
+    lost = terminal and not rec.get('ended_at')
     interrupted = [dict(u, status='interrupted', ended_at=cut,
                         wall_s=round(cut - float(u.get('started_at') or cut), 1))
                    for u in rec.get('in_flight') or []]
@@ -4027,24 +4070,30 @@ def es_from_shipped_record(pandaid):
             per_close.setdefault(int(u['close']), []).append(u.get('unit_id'))
     closes = [dict(c, units=per_close.get(int(c.get('index') or 0), []))
               for c in rec.get('closes') or []] + [
-        {'index': c.get('index'), 'ok': False, 'outcome': 'cut off', 'units': list(c.get('units') or []),
+        {'index': c.get('index'), 'ok': False, 'running': not lost,
+         'outcome': 'cut off' if lost else 'running', 'units': list(c.get('units') or []),
          'started_at': c.get('started_at'), 'ended_at': cut} for c in rec.get('closing') or []]
     return {
         'kind': 'event_service', 'stamp': rec.get('stamp'), 'slots': rec.get('slots'),
+        'started_at': rec.get('started_at'), 'ended_at': rec.get('ended_at'),
+        'observed_at': cut, 'live': not terminal and not rec.get('ended_at'),
         'payload_version': rec.get('payload_version', ''),
         'ranges_done': rec.get('done') or [], 'ranges_failed': rec.get('failed') or [],
-        'ranges_interrupted': interrupted, 'ranges_unshipped': unshipped, 'closes': closes,
+        'ranges_interrupted': interrupted if lost else [],
+        'ranges_unshipped': unshipped if lost else [], 'closes': closes,
+        'ranges_running': [dict(u, status='running') for u in interrupted] if not lost else [],
+        'ranges_awaiting_close': [dict(u, status='awaiting') for u in unshipped] if not lost else [],
         'preempted': {
             'real': True, 'at': cut,
             'after_s': round(cut - float(rec.get('started_at') or cut), 1),
             'interrupted_units': len(interrupted),
             'interrupted_events': sum(int(u.get('events') or 0) for u in interrupted),
             'unshipped_units': len(unshipped),
-            'unshipped_events': sum(int(u.get('events') or 0) for u in unshipped)},
+            'unshipped_events': sum(int(u.get('events') or 0) for u in unshipped)} if lost else None,
     }
 
 
-def es_harness_report(conn, pandaid):
+def es_harness_report(conn, pandaid, job=None):
     """The node harness's account of an Event Service job, from the job
     report the pilot shipped as metadata (evgen_job_dispatcher.py es
     mode: the summary under ``es``, every unit's record with its events,
@@ -4073,13 +4122,14 @@ def es_harness_report(conn, pandaid):
             return None
     es = metadata.get('es') if isinstance(metadata, dict) else None
     if not isinstance(es, dict):
-        es = es_from_shipped_record(pandaid)
+        es = es_from_shipped_record(pandaid, (job or {}).get('jobstatus'))
         if es is None:
             return None
         metadata = {'payload_version': es.get('payload_version', '')}
     units = []
     for status, key in (('done', 'ranges_done'), ('failed', 'ranges_failed'),
-                        ('interrupted', 'ranges_interrupted'), ('unshipped', 'ranges_unshipped')):
+                        ('interrupted', 'ranges_interrupted'), ('unshipped', 'ranges_unshipped'),
+                        ('running', 'ranges_running'), ('awaiting', 'ranges_awaiting_close')):
         for u in es.get(key) or []:
             if not isinstance(u, dict):
                 continue
@@ -4102,6 +4152,7 @@ def es_harness_report(conn, pandaid):
     for c in es.get('closes') or []:
         if isinstance(c, dict):
             closes.append({'index': c.get('index'), 'outcome': c.get('outcome'),
+                           'running': bool(c.get('running')),
                            'events': c.get('events'), 'units': len(c.get('units') or []),
                            'wall_s': c.get('wall_s'), 'did': (c.get('did') or '').split('/')[-1],
                            'message': c.get('message') or '', 'ok': bool(c.get('ok'))})
@@ -4143,7 +4194,7 @@ def event_service_for_job(job, task_info):
         'events_per_range': es_events_per_range((task_info or {}).get('splitrule')),
         'ranges': ranges,
         'verdict': es_verdict(job),
-        'report': es_harness_report(connections['panda'], job.get('pandaid')),
+        'report': es_harness_report(connections['panda'], job.get('pandaid'), job=job),
     }
     if out['report']:
         out['report']['timeline'] = es_slot_timeline(job, out['report']['raw'])

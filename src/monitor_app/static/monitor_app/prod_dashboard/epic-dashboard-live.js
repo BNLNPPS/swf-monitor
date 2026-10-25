@@ -77,6 +77,7 @@
     }
     const view = svg.viewBox.baseVal;
     const width = view.width, bottom = view.height - 4, top = 18, height = bottom - top;
+    const ceiling = options.ceiling || model.ceiling;
     const grid = Array.from(svg.querySelectorAll(':scope > line'));
     grid.forEach((line, i) => {
       const y = top + height * (i + 1) / (grid.length + 1);
@@ -84,6 +85,20 @@
     });
     const layer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     layer.classList.add('trend-layer'); svg.appendChild(layer);
+    let clip;
+    if (options.ceiling) {
+      clip = svg.querySelector('clipPath');
+      if (!clip) {
+        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        clip = document.createElementNS('http://www.w3.org/2000/svg', 'clipPath');
+        clip.id = 'resource-' + container.dataset.metric + '-clip';
+        clip.setAttribute('clipPathUnits', 'userSpaceOnUse');
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('x', '0'); rect.setAttribute('y', top);
+        rect.setAttribute('width', width); rect.setAttribute('height', height);
+        clip.appendChild(rect); defs.appendChild(clip); svg.prepend(defs);
+      }
+    }
     model.curves.forEach((curve, index) => {
       const detail = options.curves?.[curve.key];
       const group = document.createElementNS('http://www.w3.org/2000/svg', detail ? 'a' : 'g');
@@ -93,7 +108,7 @@
         group.setAttribute('aria-label', detail.title);
       }
       layer.appendChild(group);
-      const points = segment => segment.map(([x, y]) => [width * x, bottom - height * y]);
+      const points = segment => segment.map(([x, y]) => [width * x, bottom - height * y * model.ceiling / ceiling]);
       curve.solid.forEach(path => {
         const segment = points(path);
         if (index === 0 && options.fill !== false) {
@@ -113,6 +128,7 @@
         line.setAttribute('vector-effect', 'non-scaling-stroke');
         if (detail) line.setAttribute('title', detail.title);
         if (overflow) line.setAttribute('stroke-dasharray', '4 3');
+        if (clip) line.setAttribute('clip-path', 'url(#' + clip.id + ')');
         group.appendChild(line);
       }
       curve.solid.forEach(path => draw(path, false));
@@ -121,19 +137,20 @@
         if (value == null) return;
         const point = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
         point.setAttribute('cx', width * i / Math.max(1, times.length - 1));
-        point.setAttribute('cy', bottom - height * value / model.ceiling);
-        point.setAttribute('r', '2.1'); point.setAttribute('fill', curve.color);
+        point.setAttribute('cy', bottom - height * Math.min(value, ceiling) / ceiling);
+        point.setAttribute('r', value > ceiling ? '3' : '2.1'); point.setAttribute('fill', curve.color);
+        if (value > ceiling) { point.setAttribute('stroke', '#edf2f1'); point.setAttribute('stroke-width', '.8'); }
         point.setAttribute('title', detail.pointTitle(i)); group.appendChild(point);
       });
     });
-    text(container.querySelector('.chart-y-label'), (options.format || number)(model.ceiling));
+    text(container.querySelector('.chart-y-label'), (options.format || number)(ceiling));
     text(container.querySelector('.axis span:last-child'), et(times[times.length - 1]));
   }
 
   const resourcePanel = element('section', 'panel');
   resourcePanel.id = 'task-resources';
   const resourceHead = element('div', 'panelhead');
-  resourceHead.append(element('strong', '', 'Task resource peaks · 12h'));
+  resourceHead.append(element('strong', '', 'Production resource peaks · 12h'));
   const resourceStamp = element('span', 'right small', 'Loading…');
   resourceHead.append(resourceStamp); resourcePanel.append(resourceHead);
   const resourceCharts = element('div', 'resource-charts');
@@ -145,6 +162,7 @@
   resourceMetrics.forEach(metric => {
     const chart = element('div', 'plot resource-plot'); chart.dataset.metric = metric.key;
     chart.append(element('div', 'resource-title', metric.label + ' · ' + metric.unit));
+    const outliers = element('span', 'resource-outliers'); outliers.hidden = true; chart.append(outliers);
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('viewBox', '0 0 200 82'); svg.setAttribute('preserveAspectRatio', 'none');
     svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', metric.label + ' by task over twelve hours');
@@ -193,8 +211,21 @@
           },
         };
       });
+      const ceiling = trendModel.ceilingForPeak(record.scale_peaks[metric.key]);
+      const extremes = [];
+      record.tasks.forEach(task => task[metric.key].forEach((value, i) => {
+        if (value != null && value > ceiling) extremes.push({task, value, time: record.times[i]});
+      }));
+      extremes.sort((a, b) => b.value - a.value);
+      const outlierLabel = chart.querySelector('.resource-outliers');
+      outlierLabel.hidden = !extremes.length;
+      if (extremes.length) {
+        outlierLabel.textContent = '↑ ' + resourceNumber(extremes[0].value, metric.key) + ' ' + metric.unit + ' · ' + number(extremes.length);
+        outlierLabel.title = 'Above the plotted ' + resourceNumber(ceiling, metric.key) + ' ' + metric.unit + ' range: ' + number(extremes.length) + ' points.\n' + extremes.map(peak =>
+          'Task ' + peak.task.id + ' · ' + resourceNumber(peak.value, metric.key) + ' ' + metric.unit + ' · ' + et(peak.time, true) + '\n' + peak.task.name).join('\n');
+      }
       plot(chart, trendModel.series(columns, {count: record.times.length}), record.times,
-        {fill: false, curves, format: value => resourceNumber(value, metric.key)});
+        {fill: false, ceiling, curves, format: value => resourceNumber(value, metric.key)});
       let empty = chart.querySelector('.resource-empty');
       if (!coverage && !empty) { empty = element('div', 'resource-empty'); chart.append(empty); }
       if (coverage && empty) empty.remove();
