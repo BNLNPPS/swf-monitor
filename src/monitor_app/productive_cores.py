@@ -7,6 +7,7 @@ from snapper_ai.services import publish_component, register_component
 
 from .cached_product import get_product, stores
 from .compute_efficiency import _dashboard_site, query_days
+from .ready_history import history as ready_history
 
 KEY = 'productive_cores_daily:v1'
 COMPONENT = 'production_compute'
@@ -23,7 +24,7 @@ REGISTRATION = {
     'quantities': {
         'daily': {'path': 'daily', 'type': 'array', 'required': True,
                   'kind': 'bounded_history', 'max_items': DAYS,
-                  'description': 'Daily successful core-hours, productive average cores and timing coverage.'},
+                  'description': 'Daily successful core-hours, productive average cores, ready-task averages and observation coverage.'},
     },
 }
 
@@ -56,6 +57,11 @@ def build(now=None):
         total = None if any(s['cores'] is None for s in sites.values()) else sum(s['cores'] for s in sites.values())
         daily.append({'day': str(day), 'sites': sites, 'total': total})
         day += timedelta(days=1)
+    ready_start = start if any('ready_tasks' not in row for row in previous) or not previous else reread
+    ready = ready_history(ready_start, end)
+    for row in daily:
+        if row['day'] >= str(ready_start):
+            row.update(ready.get(row['day'], {'ready_tasks': None, 'ready_coverage_hours': 0}))
     value = {'daily': daily, 'start': str(start), 'end': str(end - timedelta(days=1)),
              'sites': [{'id': sid, 'label': label, 'color': color} for sid, label, color in SITES],
              'through': now.isoformat(), 'day_hours': 24, 'timezone': 'UTC',

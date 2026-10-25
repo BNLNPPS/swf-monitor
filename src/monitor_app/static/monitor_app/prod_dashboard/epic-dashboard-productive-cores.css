@@ -5,6 +5,10 @@
 .productive-legend{display:flex;gap:18px;padding:5px 10px 0 49px;font-size:12px;line-height:18px}
 #productive-cores svg{display:block;width:100%;height:auto;overflow:visible}
 .productive-day:hover{fill:#ffffff0c}
+.ready-queue{border-top:1px solid #293c46}
+.ready-queue-heading{display:flex;align-items:baseline;gap:8px;padding:4px 10px 0 49px;line-height:18px}
+.ready-queue-heading strong{font-size:12px;font-weight:600}
+.ready-queue-status{font-size:11px}
 /* The left stack grows downward; existing columns keep their positions. */
 #stage .main{grid-template-rows:max-content 66px max-content max-content}
 #stage .main.osg-closed{grid-template-rows:max-content max-content max-content}
