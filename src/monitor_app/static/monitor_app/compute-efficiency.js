@@ -125,12 +125,15 @@
         render(snapshot);
       });
     });
+    const largestVolume = Math.max(1, ...volume.values());
     const lines = sites.map(site => ({type: 'scatter', mode: 'lines+markers', name: names.get(site),
       x: stamps, y: stamps.map(stamp => byCell.get(site + '/' + stamp)?.efficiency ?? null),
       connectgaps: false, visible: selected && selected !== site ? 'legendonly' : true,
       customdata: stamps.map(stamp => byCell.get(site + '/' + stamp)?.ended || 0),
-      line: {width: 2}, marker: {size: 6},
-      hovertemplate: '<b>' + names.get(site) + '</b><br>%{x}<br>%{y:.1f}%<br>%{customdata:,.1f} ended core-h<extra></extra>'}));
+      line: {width: Math.max(1, 6 * volume.get(site) / largestVolume)}, marker: {size: 6},
+      hovertemplate: '<b>' + names.get(site) + '</b><br>%{x}<br>%{y:.1f}%<br>%{customdata:,.1f} ended core-h' +
+        '<br>Selected window: ' + number(100 * volume.get(site) / totals[1]) + '% of processing · ' +
+        hours(volume.get(site)) + ' core-h<extra></extra>'}));
     Plotly.react(node('trends'), lines, {...layout,
       title: {text: 'Efficiency trends' + (selected ? ' · ' + names.get(selected) : ''), x: 0.02},
       margin: {l: 65, r: 20, t: 55, b: 110}, height: 490,

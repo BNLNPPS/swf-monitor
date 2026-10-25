@@ -35,6 +35,12 @@ floater with the nearest measured period's efficiency and ended core-hours.
 Line hover respects missing periods and hidden legend entries; it never
 reports an interpolated percentage as a measurement.
 
+Trend line thickness is proportional to the site's ended core-hours over
+the selected date window, with the largest contributor drawn at six pixels
+and a one-pixel minimum keeping smaller contributors visible. Focusing or
+hiding a line preserves this scale. Hover details include the site's total
+core-hours and share of processing for the same window.
+
 ## Measurement
 
 The source is PanDA's active and archived job tables. Finished, failed,
