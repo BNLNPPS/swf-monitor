@@ -20,7 +20,7 @@ DASHBOARD_SITES = (('osg', 'OSG', '#6fcad2'),
                    ('grex', 'GREX', '#7fce95'))
 
 
-def query_days(start, end):
+def query_days(start, end, production=False, finished_only=False):
     """One grouped database read; no per-job records leave the database."""
     pools = osg_pool_queues()
     key = execute_site_key_sql()
@@ -33,6 +33,10 @@ def query_days(start, end):
         END AS hours'''
     where = '''endtime >= %s AND endtime < %s
         AND jobstatus IN ('finished','failed','closed','cancelled')'''
+    if production:
+        where += " AND workinggroup='EIC' AND prodsourcelabel='managed'"
+    if finished_only:
+        where += " AND jobstatus='finished'"
     # PanDA stores UTC timestamps without a timezone; datetime bounds retain
     # their time of day for the dashboard's exact trailing 24-hour window.
     def utc_bound(value):
@@ -43,6 +47,7 @@ def query_days(start, end):
     bounds = [utc_bound(start), utc_bound(end)]
     sql = f'''WITH jobs AS (
         SELECT {fields} FROM "{PANDA_SCHEMA}".jobsarchived4 WHERE {where}
+          AND modificationtime >= %s
         UNION ALL
         SELECT {fields} FROM "{PANDA_SCHEMA}".jobsactive4 WHERE {where}
       ), located AS (
@@ -61,7 +66,7 @@ def query_days(start, end):
     with transaction.atomic(using='panda'):
         with connections['panda'].cursor() as cursor:
             cursor.execute("SET LOCAL statement_timeout = '180s'")
-            cursor.execute(sql, bounds + bounds + [pools])
+            cursor.execute(sql, bounds + [bounds[0]] + bounds + [pools])
             rows = cursor.fetchall()
     return [[str(row[0]), row[1] or 'Unknown queue', bool(row[2]), row[3],
              *[float(v or 0) for v in row[4:]]] for row in rows]

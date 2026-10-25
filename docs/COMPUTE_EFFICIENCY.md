@@ -13,6 +13,24 @@ for the preceding 24 hours and one overall monthly average since May.
 OSG combines execution sites and retired queues; Perlmutter combines its
 historical queues. Hover identifies each curve and its measured values.
 
+A larger **Productive average cores · daily** plot sits immediately above
+Production resource peaks in the dashboard's left column. Its 90 completed
+UTC days show additive filled areas: OSG blue, GREX green and Perlmutter
+amber, with a white line on their summed upper boundary. Each daily value is
+successful core-hours divided by 24. The current incomplete day is omitted;
+the compact right-hand plots retain their preceding-24-hour readings.
+
+This daily plot includes only EIC managed production jobs
+(`workinggroup=EIC`, `prodsourcelabel=managed`), excluding canaries. Missing
+timings create gaps, while a completed day with no production completions
+contributes zero. Hover gives the day, site contributions and summed total.
+The existing PanDA Snapper counters include test jobs, so this filtered
+record has its own Snapper component, `epicprod:production_compute`, and
+cached product, `productive_cores_daily:v1`. The initial build queries 90
+days; hourly refreshes reread seven days and preserve older daily values
+from Snapper. Immutable system snaps retain each accepted history. The
+same hourly scheduled producer refreshes both compute products.
+
 All three metrics use the same ended-job sample. Efficiency divides summed
 successful core-hours by all ended core-hours. Total core-hours per day
 includes failed work and divides by calendar days, including days with

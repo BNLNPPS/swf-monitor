@@ -24,6 +24,7 @@ def dashboard_document(request):
         'historyUrl': reverse('monitor_app:prod_dashboard_history'),
         'resourcesUrl': reverse('monitor_app:prod_dashboard_resources'),
         'efficiencyUrl': reverse('monitor_app:compute_efficiency_data') + '?summary=1',
+        'productiveCoresUrl': reverse('monitor_app:compute_efficiency_data') + '?daily_cores=1',
         'efficiencyHistoryUrl': reverse('monitor_app:compute_efficiency'),
         'taskUrl': reverse('monitor_app:panda_task_detail', args=[0]),
         'breakoutUrl': reverse('monitor_app:prod_dashboard'),
@@ -34,7 +35,7 @@ def dashboard_document(request):
     return render_to_string('monitor_app/prod_dashboard.html', {
         'dashboard_record': record,
         'dashboard_config': config,
-        'dashboard_version': '20261025-efficiency-4',
+        'dashboard_version': '20261025-daily-cores-1',
     }, request=request)
 
 

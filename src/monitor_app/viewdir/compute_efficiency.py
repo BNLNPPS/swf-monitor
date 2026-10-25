@@ -21,6 +21,16 @@ def compute_efficiency(request):
 
 
 def compute_efficiency_data(request):
+    if request.GET.get('daily_cores') == '1':
+        from monitor_app.productive_cores import product
+        try:
+            cached = product(refresh=request.GET.get('refresh') == '1')
+            return JsonResponse({'record': cached['value'], 'built_at': cached['built_at'],
+                                 'refreshing': cached['refreshing']},
+                                status=200 if cached['value'] else 202)
+        except Exception:
+            logger.exception('Daily productive core history refresh failed')
+            return JsonResponse({'error': 'Daily production history update failed.'}, status=503)
     today = datetime.now(timezone.utc).date()
     try:
         end = date.fromisoformat(request.GET.get('end') or str(today))
