@@ -22,6 +22,8 @@ def dashboard_document(request):
     config = {
         'snapshotUrl': reverse('monitor_app:comp_snapshot_json'),
         'historyUrl': reverse('monitor_app:prod_dashboard_history'),
+        'resourcesUrl': reverse('monitor_app:prod_dashboard_resources'),
+        'taskUrl': reverse('monitor_app:panda_task_detail', args=[0]),
         'breakoutUrl': reverse('monitor_app:prod_dashboard'),
         'weeklyUrl': static('monitor_app/prod_dashboard/weekly-cores.json'),
         'sitePanels': {'osg': 'OSG', 'grex': 'GREX', 'nersc': 'Perlmutter',
@@ -30,7 +32,7 @@ def dashboard_document(request):
     return render_to_string('monitor_app/prod_dashboard.html', {
         'dashboard_record': record,
         'dashboard_config': config,
-        'dashboard_version': '20261024-25',
+        'dashboard_version': '20261025-26',
     }, request=request)
 
 
@@ -39,6 +41,20 @@ def prod_dashboard(request):
     from django.http import HttpResponse
 
     return HttpResponse(dashboard_document(request))
+
+
+def task_resources_json(request):
+    from django.http import JsonResponse
+    from monitor_app.task_resources import product
+
+    try:
+        result = product(refresh=request.GET.get('refresh') == '1')
+        return JsonResponse({'record': result['value'],
+                             'built_at': result['built_at'],
+                             'refreshing': result['refreshing']})
+    except Exception:
+        logger.exception('Task resource history unavailable')
+        return JsonResponse({'error': 'Task resource history is temporarily unavailable.'}, status=503)
 
 
 def dashboard_home(request):
