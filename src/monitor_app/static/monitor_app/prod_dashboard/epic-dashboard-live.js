@@ -58,13 +58,15 @@
 
   function plot(container, model, times, options = {}) {
     if (!container) return;
-    const legendKeys = {running: 'running', 'finish/1h': 'finished',
+    const legendKeys = {running: 'running', cores: 'running', 'finish/1h': 'finished',
       'fail/1h': 'failed', queued: 'queued'};
     container.querySelectorAll('.plotkey span').forEach(label => {
       const marker = label.querySelector('i');
       if (!marker) return;
       const key = legendKeys[label.textContent.trim()];
       if (!key) throw new Error('Unknown trend legend: ' + label.textContent);
+      if (key === 'running' && label.textContent.trim() !== 'cores')
+        label.replaceChildren(marker, document.createTextNode('cores'));
       marker.style.background = trendModel.palette[key];
     });
     const svg = container.querySelector('svg');
@@ -256,14 +258,15 @@
     if (!panel) return;
     panel.dataset.siteKey = aliases[site.id] || site.name;
     text(panel.querySelector('.panelhead strong'), site.name);
-    const nodeCap = config.siteNodeCaps?.[panel.dataset.siteKey];
+    const nodeCap = site.node_cap ?? config.siteNodeCaps?.[panel.dataset.siteKey];
     if (nodeCap != null) {
       const heading = panel.querySelector('.panelhead');
       let label = heading.querySelector('.site-node-cap');
       if (!label) {
         label = element('span', 'site-node-cap right small'); heading.append(label);
       }
-      label.textContent = 'Current max: ' + nodeCap + ' nodes';
+      label.textContent = 'Current max: ' + nodeCap + ' nodes' +
+        (site.cores_per_node ? ' × ' + site.cores_per_node + ' cores' : '');
     }
     productionPanel(panel, site);
     const active = (site.queues || []).filter(q => q.production_display || q.status === 'live');
@@ -271,11 +274,20 @@
     const sum = key => sumKnown(queues, key);
     const pilots = queues.map(queue => queue.pilots && queue.pilots.waiting_current);
     const waiting = pilots.some(value => value != null) ? pilots.reduce((n, value) => n + (value || 0), 0) : null;
-    const values = [sum('processing_threads'), sum('finished_1h'), sum('failed_1h'), sum('queued'),
+    const values = [sum('processing_threads'), sum('finished_cores_1h'), sum('failed_cores_1h'), sum('queued_cores'),
       waiting, sum('harvester_slots_opened_1h')];
     const partialThreads = values[0] == null && sum('processing_known_threads') > 0;
     if (partialThreads) values[0] = sum('processing_known_threads');
     panel.querySelectorAll('.metric b').forEach((node, i) => text(node, number(values[i])));
+    const metrics = panel.querySelectorAll('.metric');
+    if (metrics[1]) metrics[1].title = number(values[1]) + ' core completions from ' +
+      number(sum('finished_jobs_1h')) + ' jobs in the last hour';
+    if (metrics[2]) metrics[2].title = number(values[2]) + ' failed cores from ' +
+      number(sum('failed_jobs_1h')) + ' jobs in the last hour';
+    if (metrics[3]) metrics[3].title = number(values[3]) + ' queued cores · ' +
+      number(sum('queued_jobs')) + ' jobs waiting' +
+      (site.cores_per_node ? '\nReady-to-fill core capacity at the current node cap; ' +
+        site.cores_per_node + ' cores per node' : '');
     const runningMetric = panel.querySelector('.metric');
     if (runningMetric) {
       runningMetric.querySelector('span').textContent = 'cores';
@@ -314,8 +326,8 @@
       } else if (label) label.remove();
     }
     const pillars = panel.querySelectorAll('.queuepillar.svgcolumn');
-    const titles = [(partialThreads ? 'At least ' : '') + number(values[0]) + ' payload cores; ' + number(values[1]) + ' finished, ' +
-      number(values[2]) + ' failed in last 1h', number(values[3]) + ' queued',
+    const titles = [(partialThreads ? 'At least ' : '') + number(values[0]) + ' payload cores; ' + number(values[1]) + ' cores finished, ' +
+      number(values[2]) + ' cores failed in last 1h', metrics[3]?.title || number(values[3]) + ' queued cores',
       number(waiting) + ' pilots waiting', number(values[5]) + ' slots/1h'];
     pillars.forEach((node, i) => {
       node.title = titles[i];
@@ -329,15 +341,17 @@
     });
     if (trend) {
       const times = current.trends.t, minutes = current.trends.bin_minutes;
-      let model = trendModel.site(trend, times, minutes);
+      const coreTrend = {...trend, running: trend.cores,
+        queued: trend.queued_cores, finished: trend.finished_cores, failed: trend.failed_cores};
+      let model = trendModel.site(coreTrend, times, minutes);
       const minimum = config.siteTrendMinimums?.[site.id];
       if (model.hasData && minimum > model.ceiling) {
         // A reference column sets the floor through the shared geometry.
         model = trendModel.series([
-          {key: 'running', values: trend.running},
-          {key: 'queued', values: trend.queued, overflow: true},
-          {key: 'finished', values: trendModel.hourly(trend.finished, minutes)},
-          {key: 'failed', values: trendModel.hourly(trend.failed, minutes)},
+          {key: 'running', values: coreTrend.running},
+          {key: 'queued', values: coreTrend.queued, overflow: true},
+          {key: 'finished', values: trendModel.hourly(coreTrend.finished, minutes)},
+          {key: 'failed', values: trendModel.hourly(coreTrend.failed, minutes)},
           {key: 'scale-reference', values: [minimum]},
         ], {count: times.length});
         model.curves = model.curves.filter(curve => curve.key !== 'scale-reference');

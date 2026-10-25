@@ -32,7 +32,7 @@ on every site pane.
 Site labels, reasons and phase colours come from the feed's `status_label`,
 `status_reason` and `status_level`: commissioning is blue and Perlmutter OFF
 is amber. Google uses GREX's ordinary
-production panel content: shared pillars, running and queued jobs, outcomes,
+production panel content: shared pillars, running and queued cores, outcomes,
 pilot supply and trend history. Both displays select queues through the
 feed's `production_display` flag, preserving inactive JLab commissioning.
 Google's standard queue remains off. ES runtime and controller diagnostics
@@ -57,14 +57,15 @@ body scrolls within the available height. Storage follows directly below.
 Notices use 10-pixel text, and every notice is accessible. There is no
 separate inactive-site footer.
 
-Cylinder height uses a common 2,500-thread running scale for OSG and GREX,
+Cylinder height uses a common 2,500-core running scale for OSG and GREX,
 preserving the approximately 80% height of 2,000 single-threaded jobs.
-Google uses a 100-thread scale. Each of these pillar sections shows its scale in small
-text at the upper left. Google's title row shows its current five-node cap
-at the upper right. Other site cylinders retain the default 2,500-thread scale. A compact
+Google uses a 100-core scale. Each of these three pillar sections shows its
+scale in small text at the upper left. Google's title row shows its current
+cap as **5 nodes × 14 cores** at the upper right. Other site cylinders use
+the default scale without a scale label. A compact
 execution-site cylinder retains its fixed height and shows the shared
 slash break when the value exceeds its display range. The green and red
-proportions represent finished and failed jobs in the preceding hour.
+proportions represent finished and failed core counts in the preceding hour.
 The slash treatment is shared by both cylinder types. Plots convert
 quarter-hour completion bins to hourly rates. Task finish and fail
 columns retain JEDI input-file accounting; fail counts final failures
@@ -77,15 +78,29 @@ use one thread, while an unreported multicore thread width remains unknown.
 Event Service jobs count work lanes with assigned units in the shipped
 harness record. Each lane runs one single-threaded payload; empty lanes and
 ended harnesses contribute zero. Records older than ten minutes are unknown.
-An incomplete total with a known contribution is shown as a lower bound
-with a ≥ prefix; it is never presented as the complete count.
+An incomplete total displays its known contribution; hover identifies the
+missing fresh measurements.
 Assigned-unit occupancy includes unit startup and finalization; it measures
-payload parallelism, rather than instantaneous CPU utilization. Queued jobs,
-pilot supply, hourly outcomes and historical job-count curves retain their
-existing units. The shared `processing_activity:v1` minute cache supplies
+payload parallelism, rather than instantaneous CPU utilization. Pilot supply
+retains worker counts. The shared `processing_activity:v1` minute cache supplies
 current per-queue and OSG execution-site counts.
 
-Site plots use the peak of running, finished/hour and failed/hour,
+Site completion and failure figures count cores, summing the reported payload
+thread width or actual core count of each ended job. Five completed 14-core
+jobs therefore contribute 70 core completions, separately from their core-hours.
+Job counts remain in the hover and drilldown. Queued values show core demand
+for the single-core native queues. Google shows the core capacity its waiting
+jobs can fill at the current node cap: ten jobs can feed all five 14-core
+workers, so the display reads 70 queued cores; hover retains ten jobs and
+identifies the capacity limit. The minute cache `site_core_metrics:v1` reads
+deduplicated production-job outcomes and queued demand from PanDA.
+
+Site plots label the white curve **cores** and read Snapper's recorded
+running-core series, including Google's multicore jobs. Green and red curves
+show core completions/hour and failed cores/hour, from reported job core counts
+in fifteen-minute bins; brown shows queued cores. Native single-core queue
+counts retain the same numerical values. The plots use the peak of cores,
+core completions/hour and failed cores/hour,
 rounded upward to two significant digits, as their common ceiling.
 The scale number sits directly below the running legend, in a reserved
 band above every curve and overflow dash. Legend markers and curves use
@@ -95,10 +110,9 @@ within the range, dashed along the ceiling above it, with interpolated
 crossings. Gaps break both kinds of line. A wholly zero window uses a
 ceiling of one.
 
-Google's job-history plot has a minimum ceiling of 15, keeping its usual
-15 queued jobs within the solid curve range. Higher running or hourly
-outcome peaks can raise that ceiling. This history scale is separate from
-the 100-core running pillar.
+Google's history uses core units throughout. Its minimum ceiling is 15;
+the running-core and core-outcome peaks raise that ceiling as needed. This
+history scale is separate from the 100-core running pillar.
 
 Weekly average running cores appear on the active OSG and GREX title
 rows. They are time-weighted from Snapper's recorded running-core curves,

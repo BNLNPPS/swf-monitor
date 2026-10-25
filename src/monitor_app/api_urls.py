@@ -13,6 +13,7 @@ from .views import (
     users_list,
 )
 from .host_reports import host_report
+from .worker_disk_space import worker_disk_space
 from .sse_views import sse_message_stream, sse_status
 from .panda import api as panda_api
 from .panda.corun_callback import corun_callback
@@ -69,6 +70,7 @@ urlpatterns = [
     # Host reporters push what only their own host can see
     # (docs/OSG_SUBMIT_REPORTER.md).
     path('host-reports/<str:host>/', host_report, name='host-report'),
+    path('worker-disk-space/', worker_disk_space, name='worker-disk-space'),
     # PanDA REST API — read-only JSON for external consumers.
     # See monitor_app/panda/api.py.
     path('panda/tasks/', panda_api.tasks_list, name='panda-api-tasks-list'),

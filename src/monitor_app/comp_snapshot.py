@@ -1748,15 +1748,17 @@ def _trends(series):
     out = []
     for site, queues in series['live']:
         running = total([at_edges(q, f'sj_{q}_running', True) for q in queues])[1:]
+        cores = total([at_edges(q, f'sjc_{q}', False) for q in queues])[1:]
         queued = total([at_edges(q, f'sj_{q}_{s}', True) for q in queues
                         for s in NOT_STARTED])[1:]
         finished = ended(total([at_edges(q, f'sjfw_{q}', False) for q in queues]))
         failed = ended(total([at_edges(q, f'sjxw_{q}', False) for q in queues]))
         name = short_name(site['name'])
-        detail = (f'{name} at {to} ET: {num(running[-1])} running, {num(queued[-1])} queued; '
+        detail = (f'{name} at {to} ET: {num(cores[-1])} cores in {num(running[-1])} running jobs, {num(queued[-1])} queued jobs; '
                   f'{num(known_sum(finished[-hour:]))} finished, '
                   f'{num(known_sum(failed[-hour:]))} failed in the hour before')
         out.append({'id': site['id'], 'name': name, 'running': running,
+                    'cores': cores,
                     'queued': queued, 'finished': finished, 'failed': failed,
                     'detail': detail})
     panda = CurrentComponent.objects.filter(scope='epicprod', name='panda').first()
@@ -2105,8 +2107,8 @@ def _report_header(record):
          'detail': 'Compute efficiency history by site and month or week.',
          'metrics': [metric(thread_value, 'cores', '#edf2f1',
                             jobs + '?status=running&days=2', thread_detail),
-                     metric(number(total('finished_1h')), 'finish/1h', '#7fce95',
-                            jobs + '?status=finished&days=1', 'Jobs finished in the last hour')]},
+                     metric(number(total('finished_cores_1h')), 'finish/1h', '#7fce95',
+                            jobs + '?status=finished&days=1', 'Core completions in the last hour')]},
         {'id': 'work', 'title': 'Work available', 'link': front,
          'detail': 'Queued jobs and input work not yet generated into jobs.',
          'metrics': [metric(number(total('queued')), 'queued', '#a79b8f',
@@ -2220,6 +2222,43 @@ def get_snapshot(refresh=False):
             failed=incomplete_registration_link(value['observed_at'])))
             if row.get('id') == 'jlab-rucio' else row
             for row in value.get('storage', [])]
+    from monitor_app.site_core_metrics import product as core_product, ready_capacity
+    try:
+        core_result = core_product()
+        core_data = core_result.get('value') or {}
+        core_fresh = core_result.get('age_seconds') is not None and core_result['age_seconds'] <= 120
+        google = core_data.get('google') or {}
+        for site in value['sites']:
+            for queue in site['queues']:
+                row = (core_data.get('queues') or {}).get(queue['id'], {})
+                for key in ('finished_cores_1h', 'failed_cores_1h', 'queued_cores',
+                            'finished_jobs_1h', 'failed_jobs_1h'):
+                    queue[key] = row.get(key, 0) if core_fresh else None
+                queue['queued_jobs'] = row.get('queued_jobs', 0) if core_fresh else None
+                if queue['id'] == google.get('queue'):
+                    site['node_cap'] = google['nodes']
+                    site['cores_per_node'] = google['cores_per_node']
+                    queue['queued_core_demand'] = row.get('queued_core_demand', 0)
+            trend = next((t for t in (value.get('trends') or {}).get('sites', [])
+                          if t['id'] == site['id']), None)
+            if not trend:
+                continue
+            ids = [q['id'] for q in site['queues']]
+            times = value['trends']['t']
+            for state in ('finished', 'failed'):
+                trend[f'{state}_cores'] = [
+                    sum((core_data.get('ended', {}).get(stamp, {}).get(q, {}).get(state, 0)) for q in ids)
+                    if core_fresh and stamp >= core_data['since'] else None for stamp in times]
+            if not core_fresh:
+                trend['queued_cores'] = [None] * len(times)
+            elif site['id'] == 'google' and google:
+                trend['queued_cores'] = [ready_capacity(n, google['nodes'], google['cores_per_node'])
+                                         if n is not None else None for n in trend['queued']]
+            else:
+                # The native OSG/GREX queues use one core per queued job.
+                trend['queued_cores'] = list(trend['queued'])
+    except Exception:
+        logger.exception('Site core accounting unavailable')
     try:
         value['campaign'] = _dashboard_campaign()
     except Exception:
