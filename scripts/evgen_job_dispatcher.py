@@ -293,11 +293,7 @@ def run_payload_canary(csv_base, stamp, workdir):
     metadata, the DIDs registered. Exits 0 whatever the payload did, so
     the pilot ships the report as job metadata (kept for finished jobs
     only); the verdict is read from the report, never from the exit."""
-    dataset = (os.environ.get('ES_OUTPUT_DATASET', '').lstrip('/') if production
-               else f"{CANARY_DATASET_ROOT}/{stamp}")
-    if production and not dataset.startswith('RECO/'):
-        print('ERROR: production ES requires its declared RECO output dataset', file=sys.stderr)
-        return 2
+    dataset = f"{CANARY_DATASET_ROOT}/{stamp}"
     stages_log = os.path.join(workdir, "payload-stages.log")
     rc, row = run_row(1, csv_base, workdir, extra_env={
         "CANARY_OUTPUT_DATASET": dataset,
@@ -393,9 +389,8 @@ def es_slot_count():
 
 
 def run_event_service(csv_base, stamp, workdir, channel, production=False):
-    """Event Service canary: the node harness over this job's ranges,
-    outputs to epic:/TEST/canary/<stamp>; exits 0 when the harness does,
-    with the job report carrying every range it did or failed."""
+    """Run the same ES harness with ordinary production or expiring canary
+    outputs. Range outcomes and closes remain in the job report."""
     name = channel or os.environ.get("PILOT_EVENTRANGECHANNEL")
     if not name:
         print("ERROR: no range channel (argument or PILOT_EVENTRANGECHANNEL): "
