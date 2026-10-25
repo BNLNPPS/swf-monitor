@@ -56,7 +56,7 @@
     heading.querySelector('strong').style.fontSize = getComputedStyle(productionModel.querySelector('.panelhead strong')).fontSize;
   }
 
-  function plot(container, model, times) {
+  function plot(container, model, times, options = {}) {
     if (!container) return;
     const legendKeys = {running: 'running', 'finish/1h': 'finished',
       'fail/1h': 'failed', queued: 'queued'};
@@ -69,8 +69,8 @@
     });
     const svg = container.querySelector('svg');
     if (!svg) return;
+    svg.querySelectorAll('.trend-layer,polyline,polygon').forEach(node => node.remove());
     if (!times || !times.length || !model || !model.hasData) {
-      svg.querySelectorAll('polyline,polygon').forEach(node => node.remove());
       text(container.querySelector('.chart-y-label'), '—');
       text(container.querySelector('.axis span:last-child'), '—');
       return;
@@ -82,17 +82,26 @@
       const y = top + height * (i + 1) / (grid.length + 1);
       line.setAttribute('y1', y); line.setAttribute('y2', y);
     });
-    svg.querySelectorAll('polyline,polygon').forEach(node => node.remove());
+    const layer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    layer.classList.add('trend-layer'); svg.appendChild(layer);
     model.curves.forEach((curve, index) => {
+      const detail = options.curves?.[curve.key];
+      const group = document.createElementNS('http://www.w3.org/2000/svg', detail ? 'a' : 'g');
+      if (detail) {
+        group.setAttribute('href', detail.href); group.setAttribute('target', '_blank');
+        group.setAttribute('rel', 'noopener');
+        group.setAttribute('aria-label', detail.title);
+      }
+      layer.appendChild(group);
       const points = segment => segment.map(([x, y]) => [width * x, bottom - height * y]);
       curve.solid.forEach(path => {
         const segment = points(path);
-        if (index === 0) {
+        if (index === 0 && options.fill !== false) {
           const fill = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
           fill.setAttribute('points', segment[0][0] + ',' + bottom + ' ' +
             segment.map(p => p.join(',')).join(' ') + ' ' + segment[segment.length - 1][0] + ',' + bottom);
           fill.setAttribute('fill', curve.color);
-          fill.setAttribute('opacity', '.23'); svg.appendChild(fill);
+          fill.setAttribute('opacity', '.23'); group.appendChild(fill);
         }
       });
       function draw(path, overflow) {
@@ -102,14 +111,113 @@
         line.setAttribute('stroke', curve.color);
         line.setAttribute('stroke-width', '1.7');
         line.setAttribute('vector-effect', 'non-scaling-stroke');
+        if (detail) line.setAttribute('title', detail.title);
         if (overflow) line.setAttribute('stroke-dasharray', '4 3');
-        svg.appendChild(line);
+        group.appendChild(line);
       }
       curve.solid.forEach(path => draw(path, false));
       curve.overflow.forEach(path => draw(path, true));
+      if (detail) detail.values.forEach((value, i) => {
+        if (value == null) return;
+        const point = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        point.setAttribute('cx', width * i / Math.max(1, times.length - 1));
+        point.setAttribute('cy', bottom - height * value / model.ceiling);
+        point.setAttribute('r', '2.1'); point.setAttribute('fill', curve.color);
+        point.setAttribute('title', detail.pointTitle(i)); group.appendChild(point);
+      });
     });
-    text(container.querySelector('.chart-y-label'), number(model.ceiling));
+    text(container.querySelector('.chart-y-label'), (options.format || number)(model.ceiling));
     text(container.querySelector('.axis span:last-child'), et(times[times.length - 1]));
+  }
+
+  const resourcePanel = element('section', 'panel');
+  resourcePanel.id = 'task-resources';
+  const resourceHead = element('div', 'panelhead');
+  resourceHead.append(element('strong', '', 'Task resource peaks · 12h'));
+  const resourceStamp = element('span', 'right small', 'Loading…');
+  resourceHead.append(resourceStamp); resourcePanel.append(resourceHead);
+  const resourceCharts = element('div', 'resource-charts');
+  const resourceMetrics = [
+    {key: 'memory', label: 'Peak memory', unit: 'GiB'},
+    {key: 'disk', label: 'Peak scratch disk', unit: 'GiB'},
+    {key: 'files', label: 'Peak scratch files', unit: 'files'},
+  ];
+  resourceMetrics.forEach(metric => {
+    const chart = element('div', 'plot resource-plot'); chart.dataset.metric = metric.key;
+    chart.append(element('div', 'resource-title', metric.label + ' · ' + metric.unit));
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 200 82'); svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', metric.label + ' by task over twelve hours');
+    for (let i = 0; i < 3; i += 1) {
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', '0'); line.setAttribute('x2', '200');
+      line.setAttribute('stroke', '#34434e'); svg.appendChild(line);
+    }
+    chart.append(svg, element('span', 'chart-y-label', '—'));
+    const axis = element('div', 'axis'); axis.append(element('span', '', '12h ago'), element('span', '', '—'));
+    chart.append(axis, element('div', 'resource-coverage', 'Waiting for reported peaks'));
+    resourceCharts.append(chart);
+  });
+  resourcePanel.append(resourceCharts);
+  const resourceNote = element('div', 'resource-note', 'One colour per task · hover a curve or point for details · click for task');
+  resourcePanel.append(resourceNote);
+  document.querySelector('.bottomleft').append(resourcePanel);
+  let resourceLoading = false;
+  const resourceNumber = (value, metric) => value == null ? '—' : Number(value).toLocaleString('en-US', {
+    maximumFractionDigits: metric === 'files' ? 0 : 2,
+  });
+  function renderResources(record, builtAt) {
+    const jobs = record.tasks.reduce((total, task) => total + task.jobs.reduce((a, b) => a + b, 0), 0);
+    resourceStamp.textContent = et(builtAt); resourceStamp.classList.remove('red');
+    resourceStamp.title = record.basis;
+    resourceMetrics.forEach(metric => {
+      const chart = resourceCharts.querySelector('[data-metric="' + metric.key + '"]');
+      const curves = {}, columns = [];
+      let coverage = 0;
+      record.tasks.forEach(task => {
+        coverage += task.coverage[metric.key];
+        if (!task.coverage[metric.key]) return;
+        const key = String(task.id), values = task[metric.key];
+        const peak = Math.max(...values.filter(value => value != null));
+        columns.push({key, values, color: 'hsl(' + (task.id * 137.508 % 360) + ' 75% 70%)'});
+        curves[key] = {
+          href: config.taskUrl.replace(/\/0\/$/, '/' + task.id + '/'), values,
+          title: task.name + '\nTask ' + task.id + ' · ' + metric.label + ': ' + resourceNumber(peak, metric.key) + ' ' + metric.unit + '\n' + number(task.coverage[metric.key]) + ' reported jobs in 12h',
+          pointTitle: i => {
+            const bin = new Date(record.times[i]).getTime();
+            const start = new Date(Math.max(bin, new Date(record.from).getTime()));
+            const end = new Date(Math.min(bin + record.bin_minutes * 60000, new Date(record.through).getTime()));
+            return task.name + '\nTask ' + task.id + ' · ' + et(start, true) + '–' + et(end) +
+              '\n' + metric.label + ': ' + resourceNumber(values[i], metric.key) + ' ' + metric.unit +
+              '\n' + number(task.samples[metric.key][i]) + ' of ' + number(task.jobs[i]) + ' jobs reported this metric';
+          },
+        };
+      });
+      plot(chart, trendModel.series(columns, {count: record.times.length}), record.times,
+        {fill: false, curves, format: value => resourceNumber(value, metric.key)});
+      let empty = chart.querySelector('.resource-empty');
+      if (!coverage && !empty) { empty = element('div', 'resource-empty'); chart.append(empty); }
+      if (coverage && empty) empty.remove();
+      else if (empty) empty.textContent = jobs ? 'No reported peaks' : 'No jobs observed';
+      chart.querySelector('.resource-coverage').textContent = number(coverage) + ' / ' + number(jobs) + ' jobs';
+      chart.querySelector('.resource-coverage').title = record.basis + '\n' + metric.label + ' coverage: ' + number(coverage) + ' of ' + number(jobs) + ' jobs. Missing measurements are gaps.';
+      chart.querySelector('svg').setAttribute('aria-label', metric.label + ' · ' + number(coverage) + ' of ' + number(jobs) + ' jobs reported · ' + (coverage ? columns.length + ' task curves' : 'no reported peaks'));
+    });
+  }
+  async function updateResources() {
+    if (!config.resourcesUrl || resourceLoading) return;
+    resourceLoading = true;
+    try {
+      const response = await fetch(config.resourcesUrl, {cache: 'no-store'});
+      if (!response.ok) throw new Error('Task resources: HTTP ' + response.status);
+      const data = await response.json();
+      if (data.error) throw new Error(data.error);
+      if (!data.record) { resourceStamp.textContent = 'Building…'; return; }
+      renderResources(data.record, data.built_at);
+    } catch (error) {
+      console.error('Task resource history update failed:', error);
+      resourceStamp.textContent = 'Unavailable'; resourceStamp.classList.add('red'); resourceStamp.title = error.message;
+    } finally { resourceLoading = false; }
   }
 
   function renderSite(site, trend) {
@@ -480,6 +588,7 @@
   async function update() {
     if (loading) return;
     loading = true;
+    updateResources();
     try {
       const response = await fetch(config.snapshotUrl, {cache: 'no-store'});
       if (!response.ok) throw new Error('Production record: HTTP ' + response.status);
@@ -499,6 +608,7 @@
     text(document.getElementById('stamp'), 'Loading production record…');
     update();
   }
+  updateResources();
   setInterval(() => { if (visible()) update(); }, 60000);
   addEventListener('focus', () => { if (visible()) update(); });
   addEventListener('pageshow', () => { if (visible()) update(); });
