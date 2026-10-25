@@ -11,8 +11,9 @@
       const scale = configured > 0 ? configured : siteScale;
       panel.dataset.pillarScale = String(scale);
       const pillars = panel.querySelector('.queuepillars');
-      if (!pillars || !(configured > 0)) return;
+      if (!pillars) return;
       let label = pillars.querySelector('.pillar-scale');
+      if (!(configured > 0)) { label?.remove(); return; }
       if (!label) {
         label = document.createElement('span'); label.className = 'pillar-scale';
         pillars.appendChild(label);
