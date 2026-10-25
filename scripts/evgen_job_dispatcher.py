@@ -293,7 +293,11 @@ def run_payload_canary(csv_base, stamp, workdir):
     metadata, the DIDs registered. Exits 0 whatever the payload did, so
     the pilot ships the report as job metadata (kept for finished jobs
     only); the verdict is read from the report, never from the exit."""
-    dataset = f"{CANARY_DATASET_ROOT}/{stamp}"
+    dataset = (os.environ.get('ES_OUTPUT_DATASET', '').lstrip('/') if production
+               else f"{CANARY_DATASET_ROOT}/{stamp}")
+    if production and not dataset.startswith('RECO/'):
+        print('ERROR: production ES requires its declared RECO output dataset', file=sys.stderr)
+        return 2
     stages_log = os.path.join(workdir, "payload-stages.log")
     rc, row = run_row(1, csv_base, workdir, extra_env={
         "CANARY_OUTPUT_DATASET": dataset,
@@ -389,11 +393,9 @@ def es_slot_count():
 
 
 def run_event_service(csv_base, stamp, workdir, channel, production=False):
-    """Run the node harness over this job's ranges and retain its report.
-
-    Production keeps the declared RECO dataset and worker credential; canaries
-    use their existing expiring TEST namespace. Range outcomes go to PanDA.
-    """
+    """Event Service canary: the node harness over this job's ranges,
+    outputs to epic:/TEST/canary/<stamp>; exits 0 when the harness does,
+    with the job report carrying every range it did or failed."""
     name = channel or os.environ.get("PILOT_EVENTRANGECHANNEL")
     if not name:
         print("ERROR: no range channel (argument or PILOT_EVENTRANGECHANNEL): "
@@ -403,20 +405,22 @@ def run_event_service(csv_base, stamp, workdir, channel, production=False):
     if not image:
         print("ERROR: ES_PAYLOAD_IMAGE names no container image", file=sys.stderr)
         return 2
+    if production or os.environ.get('ES_WORKER_PROXY') == '1':
+        # Materialize the native pilot's credential only on the worker, at
+        # the path named by the sandbox environment. It never enters the cache.
+        import shutil
+        proxy = os.environ.get('PILOT_X509_USER_PROXY', '')
+        if not proxy or not os.path.isfile(proxy):
+            print('ERROR: native worker proxy is unavailable', file=sys.stderr)
+            return 2
+        target = os.path.join(workdir, 'worker-proxy')
+        shutil.copyfile(proxy, target)
+        os.chmod(target, 0o600)
     dataset = (os.environ.get('ES_OUTPUT_DATASET', '').lstrip('/') if production
                else f"{CANARY_DATASET_ROOT}/{stamp}")
     if production and not dataset.startswith('RECO/'):
         print('ERROR: production ES requires its declared RECO output dataset', file=sys.stderr)
         return 2
-    if production:
-        proxy = os.environ.get('PILOT_X509_USER_PROXY', '')
-        if not proxy or not os.path.isfile(proxy):
-            print('ERROR: production ES requires the native worker proxy', file=sys.stderr)
-            return 2
-        import shutil
-        target = os.path.join(workdir, 'worker-proxy')
-        shutil.copyfile(proxy, target)
-        os.chmod(target, 0o600)
     work = os.path.join(os.path.dirname(workdir), ES_WORK_DIR)
     summary_path = os.path.join(work, "es_summary.json")
     os.makedirs(work, exist_ok=True)
