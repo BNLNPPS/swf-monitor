@@ -6,7 +6,7 @@ from django.db import connections, transaction
 from .cached_product import get_product
 from .panda.constants import PANDA_SCHEMA
 
-PRODUCT_KEY = 'task_resource_peaks:v1'
+PRODUCT_KEY = 'task_resource_peaks:v2'
 BIN_SECONDS = 900
 
 
@@ -16,7 +16,8 @@ def assemble(rows, now):
     last = int(now.timestamp()) // BIN_SECONDS * BIN_SECONDS
     times = list(range(first, last + 1, BIN_SECONDS))
     tasks = {}
-    for task_id, name, bucket, jobs, memory, disk, files, mem_n, disk_n, files_n in rows:
+    scale_peaks = {'memory': 0, 'disk': 0, 'files': 0}
+    for task_id, name, bucket, jobs, memory, disk, files, mem_n, disk_n, files_n, mem_scale, disk_scale, files_scale in rows:
         task = tasks.setdefault(int(task_id), {'id': int(task_id), 'name': name or str(task_id),
                     'memory': [None] * len(times), 'disk': [None] * len(times),
                     'files': [None] * len(times), 'jobs': [0] * len(times),
@@ -30,11 +31,15 @@ def assemble(rows, now):
             task[metric][i] = float(value) if value is not None else None
             task['samples'][metric][i] = int(count)
             task['coverage'][metric] += int(count)
+        for metric, value in [('memory', mem_scale), ('disk', disk_scale), ('files', files_scale)]:
+            if value is not None:
+                scale_peaks[metric] = max(scale_peaks[metric], float(value))
     return {'from': (now - timedelta(hours=12)).isoformat(),
             'through': now.isoformat(), 'times': [datetime.fromtimestamp(t, timezone.utc).isoformat() for t in times],
             'bin_minutes': 15, 'tasks': sorted(tasks.values(), key=lambda t: t['id']),
             'units': {'memory': 'GiB', 'disk': 'GiB', 'files': 'files'},
-            'basis': 'Maximum reported job peak in each 15-minute observation/completion bin; running jobs use their latest update.'}
+            'scale_peaks': scale_peaks,
+            'basis': 'Production jobs only. Maximum reported job peak in each 15-minute observation/completion bin; running jobs use their latest update.'}
 
 
 def build():
@@ -43,12 +48,28 @@ def build():
     bounds = [start.replace(tzinfo=None), now.replace(tzinfo=None)]
     fields = '''pandaid,jeditaskid,jobstatus,COALESCE(endtime,modificationtime) observed,
                 maxrss,jobmetrics'''
+    metrics = ('memory', 'disk', 'files')
+    quantile_fields = ','.join(
+        f"percentile_cont(ARRAY[0.25,0.75]) WITHIN GROUP (ORDER BY {metric}) AS {metric}, COUNT({metric}) AS {metric}_n"
+        for metric in metrics)
+    # Bound scales using individual jobs, so a sparsely populated task has
+    # the same per-job weight as every other production task. Keep full
+    # bin maxima separately for curves, hover details and overflow markers.
+    scale_fields = ','.join(
+        f'''MAX(m.{metric}) FILTER (WHERE limits.{metric}_n < 4 OR m.{metric} <=
+            CASE WHEN limits.{metric}[2] > limits.{metric}[1]
+              THEN limits.{metric}[2] + 3*(limits.{metric}[2]-limits.{metric}[1])
+              ELSE 3*limits.{metric}[2] END)'''
+        for metric in metrics)
     sql = f'''WITH raw AS (
         SELECT {fields} FROM "{PANDA_SCHEMA}".jobsarchived4
           WHERE endtime >= %s AND endtime <= %s AND workinggroup='EIC'
+            AND modificationtime >= %s
+            AND prodsourcelabel='managed'
         UNION ALL
         SELECT {fields} FROM "{PANDA_SCHEMA}".jobsactive4
           WHERE modificationtime >= %s AND modificationtime <= %s AND workinggroup='EIC'
+            AND prodsourcelabel='managed'
             AND jobstatus IN ('running','starting','holding','finished','failed','closed','cancelled')
       ), jobs AS (
         SELECT DISTINCT ON (pandaid) * FROM raw ORDER BY pandaid, observed DESC
@@ -58,14 +79,16 @@ def build():
           substring(jobmetrics from '(?:^|[[:space:]])scratchPeakMB=([0-9]+)')::double precision/1024 disk,
           substring(jobmetrics from '(?:^|[[:space:]])scratchPeakFiles=([0-9]+)')::bigint files
         FROM jobs WHERE observed >= %s AND observed <= %s AND jeditaskid IS NOT NULL
-      ) SELECT m.jeditaskid,t.taskname,m.bucket,COUNT(*),MAX(memory),MAX(disk),MAX(files),
-          COUNT(memory),COUNT(disk),COUNT(files)
-        FROM measured m LEFT JOIN "{PANDA_SCHEMA}".jedi_tasks t ON t.jeditaskid=m.jeditaskid
+      ), limits AS MATERIALIZED (SELECT {quantile_fields} FROM measured)
+      SELECT m.jeditaskid,t.taskname,m.bucket,COUNT(*),MAX(m.memory),MAX(m.disk),MAX(m.files),
+          COUNT(m.memory),COUNT(m.disk),COUNT(m.files),{scale_fields}
+        FROM measured m CROSS JOIN limits
+        LEFT JOIN "{PANDA_SCHEMA}".jedi_tasks t ON t.jeditaskid=m.jeditaskid
         GROUP BY m.jeditaskid,t.taskname,m.bucket ORDER BY m.jeditaskid,m.bucket'''
     with transaction.atomic(using='panda'):
         with connections['panda'].cursor() as cursor:
             cursor.execute("SET LOCAL statement_timeout='20s'")
-            cursor.execute(sql, bounds * 3)
+            cursor.execute(sql, bounds + [bounds[0]] + bounds * 2)
             rows = cursor.fetchall()
     return assemble(rows, now)
 
