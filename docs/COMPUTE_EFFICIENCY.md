@@ -20,8 +20,9 @@ amber, with a white line on their summed upper boundary. Each daily value is
 successful core-hours divided by 24. The current incomplete day is omitted;
 the compact right-hand plots retain their preceding-24-hour readings.
 
-This daily plot includes only EIC managed production jobs
-(`workinggroup=EIC`, `prodsourcelabel=managed`), excluding canaries. Missing
+This daily plot includes EIC managed jobs and legacy `epicproduction`
+jobs, which carried PanDA's `test` source label before the production label
+transition. Jobs with processing type `canary` are excluded. Missing
 timings create gaps, while a completed day with no production completions
 contributes zero. Hover gives the day, site contributions and summed total.
 The existing PanDA Snapper counters include test jobs, so this filtered

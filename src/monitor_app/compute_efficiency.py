@@ -34,7 +34,11 @@ def query_days(start, end, production=False, finished_only=False):
     where = '''endtime >= %s AND endtime < %s
         AND jobstatus IN ('finished','failed','closed','cancelled')'''
     if production:
-        where += " AND workinggroup='EIC' AND prodsourcelabel='managed'"
+        # Production used the test source label before the managed-label
+        # transition. Keep that history without admitting canary probes.
+        where += """ AND workinggroup='EIC'
+            AND (prodsourcelabel='managed' OR processingtype='epicproduction')
+            AND COALESCE(processingtype,'') <> 'canary'"""
     if finished_only:
         where += " AND jobstatus='finished'"
     # PanDA stores UTC timestamps without a timezone; datetime bounds retain

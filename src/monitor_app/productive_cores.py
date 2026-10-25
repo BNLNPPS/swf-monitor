@@ -17,7 +17,7 @@ SITES = (('osg', 'OSG', '#6ca8e8'), ('grex', 'GREX', '#7fce95'),
          ('perlmutter', 'Perlmutter', '#e3b954'))
 REGISTRATION = {
     'title': 'Daily production compute',
-    'description': 'Successful EIC managed-job core-hours by completed UTC day; canaries excluded.',
+    'description': 'Successful EIC production core-hours by completed UTC day, including legacy production labels; canaries excluded.',
     'visibility': 'public', 'owning_subsystem': 'SWF production computing',
     'assessment_policy': POLICY,
     'quantities': {
@@ -60,7 +60,7 @@ def build(now=None):
              'sites': [{'id': sid, 'label': label, 'color': color} for sid, label, color in SITES],
              'through': now.isoformat(), 'day_hours': 24, 'timezone': 'UTC',
              'source': 'snapper:epicprod:production_compute',
-             'selection': "workinggroup=EIC; prodsourcelabel=managed"}
+             'selection': 'EIC managed or epicproduction jobs; canary processing excluded'}
     # Development reads never publish over the deployed producer's history.
     if stores():
         with transaction.atomic():
