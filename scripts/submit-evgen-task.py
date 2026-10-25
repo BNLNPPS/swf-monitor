@@ -319,7 +319,11 @@ def _assemble_sandbox(spec, proxy_path, root, payload_dir=None, token_path=None,
     # basename rides here; run.sh reads X509_USER_PROXY back.
     proxy_base = os.path.basename(proxy_path)
     env = dict(spec.get('env') or {})
-    if token_path:
+    if spec.get('workerProxy'):
+        # The native pilot already carries the production identity. Copy it
+        # inside the worker, rather than placing a live proxy in the cache.
+        env['X509_USER_PROXY'] = 'worker-proxy'
+    elif token_path:
         env['BEARER_TOKEN_FILE'] = TOKEN_SANDBOX_NAME
     elif not ship_proxy:
         # Not empty and not absent: an empty X509_USER_PROXY fails xrootd's
@@ -348,7 +352,9 @@ def _assemble_sandbox(spec, proxy_path, root, payload_dir=None, token_path=None,
 
     # In-job dispatcher (named to match spec['exec']) and the proxy.
     shutil.copy(DISPATCHER_SCRIPT, os.path.join(sandbox, "evgen_job_dispatcher.py"))
-    if token_path:
+    if spec.get('workerProxy'):
+        pass  # materialized by es-production on the worker, never in the cache
+    elif token_path:
         shutil.copy(token_path, os.path.join(sandbox, TOKEN_SANDBOX_NAME))
         os.chmod(os.path.join(sandbox, TOKEN_SANDBOX_NAME), 0o600)
     elif ship_proxy:
@@ -377,6 +383,14 @@ def _sync_expected_inventory(task_name, spec_path):
     JEDI id needed for expected rows. Failure here must not turn a successful
     submission into a failed submission.
     """
+    with open(spec_path) as f:
+        submitted_spec = json.load(f)
+    if submitted_spec.get('event_service'):
+        # ES closes contain ranges rather than one fixed file per CSV chunk.
+        # The task's event target and the reported/registered ranges are its
+        # coverage record; a row inventory would falsely demand chunk files.
+        _log('ES coverage uses registered ranges; no fixed row inventory')
+        return
     if not os.path.isfile(MANAGE_PY):
         _log(f"WARNING: cannot sync expected inventory; manage.py not found: {MANAGE_PY}")
         return
