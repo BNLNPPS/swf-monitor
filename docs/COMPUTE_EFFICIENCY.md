@@ -1,6 +1,6 @@
 # Compute efficiency history
 
-The Sites menu's **Compute efficiency** page (`compute-efficiency/`) shows
+The Sites menu's **Compute efficiency** page (`panda/compute-efficiency/`) shows
 successful-job core-hours divided by the core-hours of all ended jobs.
 It contains a site-by-period heatmap with core-hour volumes and selectable
 trend lines. The PanDA hub and the dashboard's Computing now heading link

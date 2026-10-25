@@ -281,8 +281,8 @@ urlpatterns = [
     # PanDA Hub
     path('panda/', panda_hub, name='panda_hub'),
     path('prod/', prod_hub, name='prod_hub'),
-    path('compute-efficiency/', compute_efficiency, name='compute_efficiency'),
-    path('compute-efficiency/data/', compute_efficiency_data, name='compute_efficiency_data'),
+    path('panda/compute-efficiency/', compute_efficiency, name='compute_efficiency'),
+    path('panda/compute-efficiency/data/', compute_efficiency_data, name='compute_efficiency_data'),
     path('compute-usage/', compute_usage, name='compute_usage'),
     path('compute-usage/data/', compute_usage_data,
          name='compute_usage_data'),
