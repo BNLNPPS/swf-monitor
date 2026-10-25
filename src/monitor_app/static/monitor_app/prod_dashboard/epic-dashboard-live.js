@@ -279,7 +279,6 @@
     const runningMetric = panel.querySelector('.metric');
     if (runningMetric) {
       runningMetric.querySelector('span').textContent = 'cores';
-      if (partialThreads) text(runningMetric.querySelector('b'), '≥' + number(values[0]));
       runningMetric.title = 'Cores carrying payload work: native chosen thread width; Event Service lanes with assigned work.\n' +
         'Idle Event Service lanes are excluded. Unit startup/finalization is included; this is not CPU utilization.\n' +
         'Unreported multicore native widths or stale Event Service reports remain unknown.' +

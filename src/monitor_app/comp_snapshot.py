@@ -2094,7 +2094,7 @@ def _report_header(record):
     thread_detail = 'Cores carrying payload work in running production jobs'
     known_threads = total('processing_known_threads')
     if thread_count is None and known_threads:
-        thread_value = '≥' + number(known_threads)
+        thread_value = number(known_threads)
         thread_detail += '; lower bound because some jobs have no fresh payload-thread measurement'
     since = campaign.get('delivered_since')
     if since:
