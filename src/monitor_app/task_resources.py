@@ -20,6 +20,7 @@ def assemble(rows, now):
         task = tasks.setdefault(int(task_id), {'id': int(task_id), 'name': name or str(task_id),
                     'memory': [None] * len(times), 'disk': [None] * len(times),
                     'files': [None] * len(times), 'jobs': [0] * len(times),
+                    'samples': {key: [0] * len(times) for key in ('memory', 'disk', 'files')},
                     'coverage': {'memory': 0, 'disk': 0, 'files': 0}})
         i = (int(bucket) - first) // BIN_SECONDS
         if not 0 <= i < len(times):
@@ -27,8 +28,9 @@ def assemble(rows, now):
         task['jobs'][i] = int(jobs)
         for metric, value, count in [('memory', memory, mem_n), ('disk', disk, disk_n), ('files', files, files_n)]:
             task[metric][i] = float(value) if value is not None else None
+            task['samples'][metric][i] = int(count)
             task['coverage'][metric] += int(count)
-    return {'from': datetime.fromtimestamp(first, timezone.utc).isoformat(),
+    return {'from': (now - timedelta(hours=12)).isoformat(),
             'through': now.isoformat(), 'times': [datetime.fromtimestamp(t, timezone.utc).isoformat() for t in times],
             'bin_minutes': 15, 'tasks': sorted(tasks.values(), key=lambda t: t['id']),
             'units': {'memory': 'GiB', 'disk': 'GiB', 'files': 'files'},
@@ -37,7 +39,7 @@ def assemble(rows, now):
 
 def build():
     now = datetime.now(timezone.utc)
-    start = datetime.fromtimestamp(int((now - timedelta(hours=12)).timestamp()) // BIN_SECONDS * BIN_SECONDS, timezone.utc)
+    start = now - timedelta(hours=12)
     bounds = [start.replace(tzinfo=None), now.replace(tzinfo=None)]
     fields = '''pandaid,jeditaskid,jobstatus,COALESCE(endtime,modificationtime) observed,
                 maxrss,jobmetrics'''
