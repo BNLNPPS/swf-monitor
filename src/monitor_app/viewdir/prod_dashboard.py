@@ -30,6 +30,7 @@ def dashboard_document(request):
         'breakoutUrl': reverse('monitor_app:prod_dashboard'),
         'weeklyUrl': static('monitor_app/prod_dashboard/weekly-cores.json'),
         'pillarScales': {'OSG': 2500, 'GREX': 2500, 'Google': 100},
+        'siteTrendMinimums': {'google': 15},
         'siteNodeCaps': {'Google': 5},
         'sitePanels': {'osg': 'OSG', 'grex': 'GREX', 'nersc': 'Perlmutter',
                        'google': 'Google', 'compute-canada': 'Compute Canada', 'jlab': 'JLab'},
@@ -37,7 +38,7 @@ def dashboard_document(request):
     return render_to_string('monitor_app/prod_dashboard.html', {
         'dashboard_record': record,
         'dashboard_config': config,
-        'dashboard_version': '20261025-pillar-scales-2',
+        'dashboard_version': '20261025-pillar-scales-3',
     }, request=request)
 
 

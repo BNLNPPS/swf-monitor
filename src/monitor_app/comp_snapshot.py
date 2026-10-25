@@ -2091,7 +2091,7 @@ def _report_header(record):
     plan = f"{PUBLIC}/pcs/plan/?campaign={quote(campaign.get('id') or '')}"
     thread_count = total('processing_threads')
     thread_value = number(thread_count)
-    thread_detail = 'Payload processing threads in running production jobs'
+    thread_detail = 'Cores carrying payload work in running production jobs'
     known_threads = total('processing_known_threads')
     if thread_count is None and known_threads:
         thread_value = '≥' + number(known_threads)
@@ -2103,7 +2103,7 @@ def _report_header(record):
     return [
         {'id': 'computing', 'title': 'Computing now', 'link': f'{PUBLIC}/panda/compute-efficiency/',
          'detail': 'Compute efficiency history by site and month or week.',
-         'metrics': [metric(thread_value, 'running threads', '#edf2f1',
+         'metrics': [metric(thread_value, 'cores', '#edf2f1',
                             jobs + '?status=running&days=2', thread_detail),
                      metric(number(total('finished_1h')), 'finish/1h', '#7fce95',
                             jobs + '?status=finished&days=1', 'Jobs finished in the last hour')]},

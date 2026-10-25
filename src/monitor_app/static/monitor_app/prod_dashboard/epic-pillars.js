@@ -18,7 +18,7 @@
         pillars.appendChild(label);
       }
       label.textContent = String(scale);
-      label.title = 'Pillar scale: ' + scale + ' · running pillar counts payload threads';
+      label.title = 'Pillar scale: ' + scale + ' · running pillar counts payload cores';
     });
     document.querySelectorAll('.site .queuepillar.svgcolumn').forEach(pillar => {
       const numbers = Array.from(pillar.title.matchAll(/\d[\d,]*/g), match => Number(match[0].replaceAll(',', '')));

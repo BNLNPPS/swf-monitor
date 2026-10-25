@@ -117,7 +117,7 @@ function linkDashboard(record) {
       jobs(name, 'running', 48), () => ended(name, 'finished'), () => errors(name),
       jobs(name, 'queued', 720), queuePage(name, true), url('panda/worker-starts/', {site: queues[name].join(','), hours: 1})
     ];
-    const descriptions = ['Running payload threads; open the contributing jobs', 'Jobs finished in the last hour', 'Error breakdown for jobs failed in the last hour',
+    const descriptions = ['Payload cores; open the contributing jobs', 'Jobs finished in the last hour', 'Error breakdown for jobs failed in the last hour',
       'Queued jobs', 'Harvester workers and pilot supply', 'Worker starts, admission declines and repeated wasted starts'];
     metrics.forEach((metric, i) => link(metric, destinations[i], name + ': ' +
       (i === 0 && metric.title ? metric.title : descriptions[i])));

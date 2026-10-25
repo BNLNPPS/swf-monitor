@@ -278,9 +278,9 @@
     panel.querySelectorAll('.metric b').forEach((node, i) => text(node, number(values[i])));
     const runningMetric = panel.querySelector('.metric');
     if (runningMetric) {
-      runningMetric.querySelector('span').textContent = 'running threads';
+      runningMetric.querySelector('span').textContent = 'cores';
       if (partialThreads) text(runningMetric.querySelector('b'), '≥' + number(values[0]));
-      runningMetric.title = 'Payload processing threads: native chosen thread width; Event Service lanes with assigned work.\n' +
+      runningMetric.title = 'Cores carrying payload work: native chosen thread width; Event Service lanes with assigned work.\n' +
         'Idle Event Service lanes are excluded. Unit startup/finalization is included; this is not CPU utilization.\n' +
         'Unreported multicore native widths or stale Event Service reports remain unknown.' +
         (partialThreads ? '\nLower bound: some jobs have no fresh thread measurement.' : '');
@@ -315,7 +315,7 @@
       } else if (label) label.remove();
     }
     const pillars = panel.querySelectorAll('.queuepillar.svgcolumn');
-    const titles = [(partialThreads ? 'At least ' : '') + number(values[0]) + ' running payload threads; ' + number(values[1]) + ' finished, ' +
+    const titles = [(partialThreads ? 'At least ' : '') + number(values[0]) + ' payload cores; ' + number(values[1]) + ' finished, ' +
       number(values[2]) + ' failed in last 1h', number(values[3]) + ' queued',
       number(waiting) + ' pilots waiting', number(values[5]) + ' slots/1h'];
     pillars.forEach((node, i) => {
@@ -328,7 +328,23 @@
       }
       if (node.firstElementChild && node.firstElementChild.tagName === 'A') node.firstElementChild.title = titles[i];
     });
-    if (trend) plot(panel.querySelector('.plot'), trendModel.site(trend, current.trends.t, current.trends.bin_minutes), current.trends.t);
+    if (trend) {
+      const times = current.trends.t, minutes = current.trends.bin_minutes;
+      let model = trendModel.site(trend, times, minutes);
+      const minimum = config.siteTrendMinimums?.[site.id];
+      if (model.hasData && minimum > model.ceiling) {
+        // A reference column sets the floor through the shared geometry.
+        model = trendModel.series([
+          {key: 'running', values: trend.running},
+          {key: 'queued', values: trend.queued, overflow: true},
+          {key: 'finished', values: trendModel.hourly(trend.finished, minutes)},
+          {key: 'failed', values: trendModel.hourly(trend.failed, minutes)},
+          {key: 'scale-reference', values: [minimum]},
+        ], {count: times.length});
+        model.curves = model.curves.filter(curve => curve.key !== 'scale-reference');
+      }
+      plot(panel.querySelector('.plot'), model, times);
+    }
     else plot(panel.querySelector('.plot'), null, []);
   }
 

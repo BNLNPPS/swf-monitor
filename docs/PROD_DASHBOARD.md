@@ -70,7 +70,8 @@ quarter-hour completion bins to hourly rates. Task finish and fail
 columns retain JEDI input-file accounting; fail counts final failures
 after retries. Task rows extend downward without an internal scrollbar.
 
-Running numbers and pillars count production payload threads. Native
+Running numbers and pillars are labelled **cores** and count cores carrying
+production payload work. Native
 jobs use the payload's chosen `payloadThreads` report; one-core native jobs
 use one thread, while an unreported multicore thread width remains unknown.
 Event Service jobs count work lanes with assigned units in the shipped
@@ -93,6 +94,11 @@ true scale: solid
 within the range, dashed along the ceiling above it, with interpolated
 crossings. Gaps break both kinds of line. A wholly zero window uses a
 ceiling of one.
+
+Google's job-history plot has a minimum ceiling of 15, keeping its usual
+15 queued jobs within the solid curve range. Higher running or hourly
+outcome peaks can raise that ceiling. This history scale is separate from
+the 100-core running pillar.
 
 Weekly average running cores appear on the active OSG and GREX title
 rows. They are time-weighted from Snapper's recorded running-core curves,
