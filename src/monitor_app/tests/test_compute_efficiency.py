@@ -1,13 +1,36 @@
 """Ratios, incident comparisons and history replacement; no database writes."""
-from datetime import date
+from datetime import date, timedelta
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
-from monitor_app.compute_efficiency import build, display_data, merge_days
+from monitor_app.compute_efficiency import build, build_current, dashboard_data, display_data, merge_days
 
 
 class ComputeEfficiencyTests(SimpleTestCase):
+    def test_dashboard_months_sum_hours_and_keep_unmeasured_months(self):
+        result = dashboard_data({'daily': [
+            ['2026-05-01', 'a', False, '', 90, 100, 10, 0],
+            ['2026-05-02', 'b', False, '', 0, 900, 30, 1],
+            ['2026-06-01', 'a', False, '', 0, 60, 2, 0],
+        ]}, None)
+        may, june, july = result['months'][:3]
+        self.assertEqual((may['efficiency'], may['jobs'], may['missing']), (9, 40, 1))
+        self.assertEqual(june['efficiency'], 0)
+        self.assertIsNone(july['efficiency'])
+        self.assertIsNone(result['current'])
+
+    def test_current_window_is_exactly_24_hours_and_sums_core_hours(self):
+        with patch('monitor_app.compute_efficiency.query_days', return_value=[
+                ['2026-10-24', 'a', False, '', 90, 100, 10, 0],
+                ['2026-10-25', 'b', False, '', 0, 900, 30, 0],
+        ]) as query:
+            result = build_current()
+        start, end = query.call_args.args
+        self.assertEqual(end - start, timedelta(hours=24))
+        self.assertIsNotNone(start.tzinfo)
+        self.assertEqual((result['efficiency'], result['jobs']), (9, 40))
+
     def data(self, rows, **options):
         with patch('monitor_app.compute_efficiency._queue_labels', return_value={
                 'grex': 'GREX', 'NERSC_Perlmutter_epic': 'Perlmutter'}):

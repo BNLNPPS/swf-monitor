@@ -10,6 +10,7 @@ from .panda.queries import PANDA_SCHEMA, execute_site_key_sql, execute_site_labe
 from .short_names import short_name
 
 PRODUCT_KEY = 'compute_efficiency:v1'
+CURRENT_KEY = 'compute_efficiency_current:v1'
 START = date(2026, 5, 1)
 TTL = 3600
 INCIDENT_TASK = 40856
@@ -29,8 +30,14 @@ def query_days(start, end):
         END AS hours'''
     where = '''endtime >= %s AND endtime < %s
         AND jobstatus IN ('finished','failed','closed','cancelled')'''
-    bounds = [datetime.combine(start, datetime.min.time()),
-              datetime.combine(end, datetime.min.time())]
+    # PanDA stores UTC timestamps without a timezone; datetime bounds retain
+    # their time of day for the dashboard's exact trailing 24-hour window.
+    def utc_bound(value):
+        if isinstance(value, datetime):
+            return value.astimezone(timezone.utc).replace(tzinfo=None) if value.tzinfo else value
+        return datetime.combine(value, datetime.min.time())
+
+    bounds = [utc_bound(start), utc_bound(end)]
     sql = f'''WITH jobs AS (
         SELECT {fields} FROM "{PANDA_SCHEMA}".jobsarchived4 WHERE {where}
         UNION ALL
@@ -81,6 +88,42 @@ def build(full=False):
 def product(refresh=False, full=False):
     return get_product(PRODUCT_KEY, lambda: build(full), TTL,
                        refresh=refresh or full, async_first_fill=True)
+
+
+def _hours_summary(rows):
+    finished, ended, jobs, missing = (sum(row[i] for row in rows) for i in range(4, 8))
+    return {'finished': finished, 'ended': ended, 'jobs': int(jobs), 'missing': int(missing),
+            'efficiency': 100 * finished / ended if ended >= MIN_HOURS else None}
+
+
+def build_current():
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(hours=24)
+    return {**_hours_summary(query_days(start, end)),
+            'start': start.isoformat(), 'end': end.isoformat()}
+
+
+def current_product():
+    return get_product(CURRENT_KEY, build_current, 60, async_first_fill=True)
+
+
+def dashboard_data(value, current):
+    """One global ratio per month; combine core-hours rather than percentages."""
+    today = datetime.now(timezone.utc).date()
+    grouped = defaultdict(list)
+    for row in value.get('daily', []):
+        day = date.fromisoformat(row[0])
+        if START <= day <= today:
+            grouped[str(day.replace(day=1))].append(row)
+    months = []
+    month = START
+    while month <= today:
+        months.append({'period': str(month), 'label': month.strftime('%b'),
+                       'partial': month.year == today.year and month.month == today.month,
+                       **_hours_summary(grouped[str(month)])})
+        month = date(month.year + (month.month == 12), month.month % 12 + 1, 1)
+    return {'current': current, 'months': months, 'minimum_hours': MIN_HOURS,
+            'history_through': value.get('through')}
 
 
 def _queue_labels():

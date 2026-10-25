@@ -23,6 +23,8 @@ def dashboard_document(request):
         'snapshotUrl': reverse('monitor_app:comp_snapshot_json'),
         'historyUrl': reverse('monitor_app:prod_dashboard_history'),
         'resourcesUrl': reverse('monitor_app:prod_dashboard_resources'),
+        'efficiencyUrl': reverse('monitor_app:compute_efficiency_data') + '?summary=1',
+        'efficiencyHistoryUrl': reverse('monitor_app:compute_efficiency'),
         'taskUrl': reverse('monitor_app:panda_task_detail', args=[0]),
         'breakoutUrl': reverse('monitor_app:prod_dashboard'),
         'weeklyUrl': static('monitor_app/prod_dashboard/weekly-cores.json'),

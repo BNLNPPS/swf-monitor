@@ -142,6 +142,18 @@ renderer and shared trend geometry.
 
 ## Live record and links
 
+Compute efficiency sits directly below Storage in the right column. The
+large figure covers jobs ended in the preceding 24 hours. A compact trend
+and one average per month since May provide historical context; the
+current month is marked with an asterisk. Each average divides summed
+successful-job core-hours by all ended-job core-hours, including failed,
+closed and cancelled jobs. Running jobs and idle pilots are excluded.
+Hover gives the sample hours and job counts, and each reading opens the
+full efficiency history. Missing or low-volume readings remain unknown.
+The current reading refreshes through the shared minute cache; monthly
+history uses its existing hourly cache. The panel follows Storage without
+changing the positions or available heights of the existing panels.
+
 The dashboard reads the shared comp snapshot, `comp_snapshot:v1`,
 through `panda/comp/snapshot.json` ([COMP_SNAPSHOT.md](COMP_SNAPSHOT.md)).
 The production document includes the current cached record; the shared
