@@ -319,7 +319,9 @@ def _assemble_sandbox(spec, proxy_path, root, payload_dir=None, token_path=None,
     # basename rides here; run.sh reads X509_USER_PROXY back.
     proxy_base = os.path.basename(proxy_path)
     env = dict(spec.get('env') or {})
-    if token_path:
+    if spec.get('workerProxy'):
+        env['X509_USER_PROXY'] = 'worker-proxy'
+    elif token_path:
         env['BEARER_TOKEN_FILE'] = TOKEN_SANDBOX_NAME
     elif not ship_proxy:
         # Not empty and not absent: an empty X509_USER_PROXY fails xrootd's
@@ -348,7 +350,9 @@ def _assemble_sandbox(spec, proxy_path, root, payload_dir=None, token_path=None,
 
     # In-job dispatcher (named to match spec['exec']) and the proxy.
     shutil.copy(DISPATCHER_SCRIPT, os.path.join(sandbox, "evgen_job_dispatcher.py"))
-    if token_path:
+    if spec.get('workerProxy'):
+        pass  # copied from the native pilot on the worker, never uploaded
+    elif token_path:
         shutil.copy(token_path, os.path.join(sandbox, TOKEN_SANDBOX_NAME))
         os.chmod(os.path.join(sandbox, TOKEN_SANDBOX_NAME), 0o600)
     elif ship_proxy:
@@ -627,6 +631,9 @@ def main():
     ap.add_argument("--es-events-per-range", type=int, default=0,
                     help="Event Service canary: events per range "
                          "(nEventsPerWorker); with --es-input-dataset")
+    ap.add_argument("--es-worker-proxy", action="store_true",
+                    help="native ES canary: use the pilot's credential on the "
+                         "worker instead of uploading a proxy in the sandbox")
     ap.add_argument("--es-events", type=int, default=0,
                     help="Event Service canary: events of the input file the "
                          "job covers (nEventsPerJob and nEventsPerInputFile); "
@@ -723,6 +730,9 @@ def main():
     ap.add_argument("--trial-queue", default="",
                     help="the PanDA queue a trial is sent to")
     args = ap.parse_args()
+    if args.es_worker_proxy and (not args.canary_stamp or not args.es_input_dataset):
+        _log('ERROR: --es-worker-proxy requires an Event Service canary')
+        return 2
     if bool(args.canary_stamp) != bool(args.canary_queue):
         _log("ERROR: --canary-stamp and --canary-queue go together")
         return 2
@@ -901,6 +911,12 @@ def main():
                             f"{spec['csvBase']} {args.canary_stamp} "
                             f"$PILOT_EVENTRANGECHANNEL"
                             + (" --accessmode=direct" if args.es_direct_input else ""))
+            if args.es_worker_proxy:
+                if args.canary_credential != 'x509':
+                    _log('ERROR: --es-worker-proxy requires the x509 canary mode')
+                    return 2
+                spec['workerProxy'] = True
+                spec['exec'] = 'ES_WORKER_PROXY=1 ' + spec['exec']
             spec['nCore'] = 1 if es_slots == 'auto' else int(es_slots)
             if args.es_ram_per_core_mb > 0:
                 # The memory is per core, and a queue that declares a whole

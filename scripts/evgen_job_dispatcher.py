@@ -401,6 +401,17 @@ def run_event_service(csv_base, stamp, workdir, channel):
     if not image:
         print("ERROR: ES_PAYLOAD_IMAGE names no container image", file=sys.stderr)
         return 2
+    if os.environ.get('ES_WORKER_PROXY') == '1':
+        # Materialize the native pilot's credential only on the worker, at
+        # the path named by the sandbox environment. It never enters the cache.
+        import shutil
+        proxy = os.environ.get('PILOT_X509_USER_PROXY', '')
+        if not proxy or not os.path.isfile(proxy):
+            print('ERROR: native worker proxy is unavailable', file=sys.stderr)
+            return 2
+        target = os.path.join(workdir, 'worker-proxy')
+        shutil.copyfile(proxy, target)
+        os.chmod(target, 0o600)
     dataset = f"{CANARY_DATASET_ROOT}/{stamp}"
     work = os.path.join(os.path.dirname(workdir), ES_WORK_DIR)
     summary_path = os.path.join(work, "es_summary.json")
@@ -426,6 +437,7 @@ def run_event_service(csv_base, stamp, workdir, channel):
     for line in proc.stderr:
         sys.stderr.write(line)
         stderr_tail.append(line.rstrip("\n"))
+    proc.stderr.close()
     rc = proc.wait()
     summary = {}
     try:
