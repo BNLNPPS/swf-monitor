@@ -2290,7 +2290,11 @@ def get_snapshot(refresh=False):
     try:
         core_result = core_product()
         core_data = core_result.get('value') or {}
-        core_fresh = core_result.get('age_seconds') is not None and core_result['age_seconds'] <= 120
+        # The last complete accounting stands until the next one replaces it
+        # (PROD_DASHBOARD.md, never blank): the product rebuilds behind a
+        # read, so the first read after the dashboard sat unattended finds it
+        # old, and blanking then dropped every curve but running.
+        core_fresh = bool(core_data.get('since'))
         google = core_data.get('google') or {}
         for site in value['sites']:
             for queue in site['queues']:

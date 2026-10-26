@@ -98,6 +98,10 @@ current per-queue and OSG execution-site counts.
 Site completion and failure figures count cores, summing the reported payload
 thread width or actual core count of each ended job. Five completed 14-core
 jobs therefore contribute 70 core completions, separately from their core-hours.
+The completion, failure and queued figures and their curves come from the
+`site_core_metrics:v1` minute cache, which rebuilds behind a read; its last
+complete accounting stands until the next replaces it, so the first read
+after the dashboard sat unattended never blanks them.
 Job counts remain in the hover and drilldown. Queued values show core demand
 for the single-core native queues. Google shows the core capacity its waiting
 jobs can fill at the current node cap: ten jobs can feed all five 14-core
