@@ -65,9 +65,9 @@ def build():
     return result
 
 
-def reading():
+def reading(refresh=False):
     from .cached_product import get_product
-    product = get_product('worker_disk_space:v1', build, 60)
+    product = get_product('worker_disk_space:v1', build, 60, refresh=refresh)
     value = dict(product.get('value') or {})
     value['age_seconds'] = product.get('age_seconds')
     return value
@@ -81,4 +81,4 @@ from rest_framework.response import Response
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def worker_disk_space(request):
-    return Response(reading())
+    return Response(reading(refresh=request.query_params.get('refresh') == '1'))

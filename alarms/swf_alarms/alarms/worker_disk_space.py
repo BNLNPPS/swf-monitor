@@ -6,7 +6,9 @@ PARAMS = {'warn_free_fraction': 0.20, 'critical_free_fraction': 0.10,
 
 
 def detect(client, params):
-    record = client._get('/api/worker-disk-space/')
+    # A five-minute alarm poll must not judge the previous cached response
+    # while its replacement builds in the background.
+    record = client._get('/api/worker-disk-space/', {'refresh': '1'})
     if (record.get('age_seconds') is None or record.get('age_seconds', 0) > 180
             or record.get('running_jobs') and
             (not record.get('reporting_jobs') or

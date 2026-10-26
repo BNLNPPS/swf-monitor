@@ -17,7 +17,7 @@ class WorkerDiskSpaceTests(unittest.TestCase):
 
     def detect(self, record):
         record = dict(record, age_seconds=0)
-        return list(alarm.detect(SimpleNamespace(_get=lambda _: record), {}))
+        return list(alarm.detect(SimpleNamespace(_get=lambda _, params=None: record), {}))
 
     def test_warns_before_one_gib_abort(self):
         record = summarize([('UM_GREX_PanDA_1', 1, self.metrics())], 1000)
