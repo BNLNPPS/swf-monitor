@@ -50,6 +50,11 @@ INACTIVE_SITE_LABELS = {
     'compute-canada': 'Authentication block',
     'jlab': 'Cybersecurity block',
 }
+# A live site's standing note: Perlmutter runs Event Service production on
+# one node (swf-epicprod docs/NERSC_PERLMUTTER.md, Production).
+LIVE_SITE_LABELS = {
+    'nersc': 'Single node',
+}
 
 # GREX runs eight pilots per Slurm worker (2026-10-20).
 from swf_epicprod.regulation import PILOTS_PER_WORKER
@@ -2187,6 +2192,8 @@ def get_snapshot(refresh=False):
         }.get(site['status'], site['status'].replace('_', ' ').upper())
         if site['status'] != 'live':
             site['status_label'] = INACTIVE_SITE_LABELS.get(site['id'], site['status_label'])
+        else:
+            site['status_label'] = LIVE_SITE_LABELS.get(site['id'], '')
         site['status_level'] = (
             'grey' if site['id'] in INACTIVE_SITE_LABELS and site['status'] != 'live' else
             'blue' if site['status'] == 'commissioning' else

@@ -306,7 +306,7 @@
       text(status, site.status_label || 'unknown');
       status.title = site.status_reason || '';
       status.style.color = 'var(--' + color(site.status_level) + ')';
-      status.hidden = site.status === 'live' || !site.status_label;
+      status.hidden = !site.status_label;
     }
     const body = panel.querySelector('.site-body');
     if (body) {

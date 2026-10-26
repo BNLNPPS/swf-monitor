@@ -656,7 +656,8 @@ colours are composed by the feed.
 
 Sites carry `status_label`, `status_level` and `status_reason`. Commissioning
 is labelled `COMMISSIONING` in blue; Perlmutter off is `OFF` in amber. Live
-sites have no redundant status label and use their health colour. The internal
+sites have no redundant status label and use their health colour, except
+a standing note (`LIVE_SITE_LABELS`): live Perlmutter is `Single node`. The internal
 `not_built` state is displayed as `OFF`. These display fields apply to cached
 snapshots immediately and do not alter queue admission or worker controls.
 Each queue also carries
