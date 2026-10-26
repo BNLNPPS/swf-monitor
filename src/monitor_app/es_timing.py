@@ -37,7 +37,8 @@ def unit_segments(unit, origin, observed_end):
         add('initialization', simulation['initialization_started_at'],
             simulation.get('first_event_at') or end, 3)
     if simulation.get('first_event_at'):
-        add('simulation', simulation['first_event_at'], simulation.get('ended_at') or end, 2)
+        add('simulation', simulation['first_event_at'],
+            simulation.get('last_event_at') or simulation.get('ended_at') or end, 2)
     if reconstruction.get('initialization_started_at'):
         add('initialization', reconstruction['initialization_started_at'],
             reconstruction.get('initialized_at') or end, 3)
