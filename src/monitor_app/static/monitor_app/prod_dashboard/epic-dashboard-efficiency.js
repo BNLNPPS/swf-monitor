@@ -6,10 +6,14 @@
   const compact = value => value >= 1000 ? (value / 1000).toFixed(1) + 'k' : Math.round(value).toLocaleString('en-US');
   const metrics = [
     {key: 'efficiency', label: 'Efficiency', unit: '%', format: value => value.toFixed(1) + '%', ceiling: 100},
-    {key: 'core_hours_per_day', label: 'Core-hours / day', unit: 'core-h/day', format: compact},
+    {key: 'core_hours_per_day', label: 'Cores / day', unit: 'cores/day', divisor: 24, format: compact},
     {key: 'productive_cores', label: 'Productive avg cores', unit: 'cores', format: value => Math.round(value).toLocaleString('en-US')},
   ];
-  const reading = (metric, row) => row?.[metric.key] == null ? '—' : metric.format(row[metric.key]);
+  const metricValue = (metric, row) => row?.[metric.key] == null ? null : row[metric.key] / (metric.divisor || 1);
+  const reading = (metric, row) => {
+    const value = metricValue(metric, row);
+    return value == null ? '—' : metric.format(value);
+  };
   const panel = document.createElement('section');
   panel.id = 'compute-efficiency'; panel.className = 'panel';
   panel.innerHTML = '<div class="panelhead"><strong><a class="efficiency-link">Production compute</a></strong></div>' +
@@ -65,7 +69,7 @@
       cells.style.setProperty('--months', Math.max(1, months.length));
       cells.replaceChildren(); chart.replaceChildren();
       const model = trendModel.series(sites.map(site => ({key: site.id, color: site.color,
-        values: site.months.map(row => row[metric.key])})), {count: months.length});
+        values: site.months.map(row => metricValue(metric, row))})), {count: months.length});
       const ceiling = metric.ceiling || model.ceiling;
       [12, 37, 62].forEach((position, index) => {
         chart.append(svg('line', {x1: 30, x2: 240, y1: position, y2: position,
@@ -90,10 +94,10 @@
             title: site.label + '\n' + site.months.map(row => row.label + ': ' + reading(metric, row)).join('\n')}));
         });
         site.months.forEach((row, i) => {
-          if (row[metric.key] == null) return;
+          if (metricValue(metric, row) == null) return;
           const title = site.label + ' · ' + (row.current ? 'last 24 hours' : row.period.slice(0, 7)) + (row.partial ? ' · month to date' : '') +
             '\n' + metric.label + ': ' + reading(metric, row) + '\n' + detail(row);
-          group.append(svg('circle', {cx: 30 + (i + .5) * step, cy: y(row[metric.key] / ceiling),
+          group.append(svg('circle', {cx: 30 + (i + .5) * step, cy: y(metricValue(metric, row) / ceiling),
             r: row.current ? 5 : 2.6, fill: curve.color,
             stroke: row.current ? '#edf2f1' : 'none', 'stroke-width': row.current ? 1 : 0,
             class: row.current ? 'efficiency-today' : 'efficiency-month', title}));

@@ -198,13 +198,14 @@ renderer and shared trend geometry.
 ## Live record and links
 
 Production compute sits directly below Storage in the right column. Its
-three plots show efficiency, total core-hours/day and productive average
-cores, with OSG, Perlmutter and GREX curves in each. Each plot has an
+three plots show efficiency, total average cores (labelled cores/day) and
+productive average cores, with OSG, Perlmutter and GREX curves in each. Each plot has an
 overall last-24-hour figure and one overall monthly average since May.
 The current month is marked with an asterisk. All three use ended-job
 walltime times cores, without processor-performance weighting. Efficiency
-is the successful fraction; core-hours/day includes failed work;
-productive average cores is successful core-hours divided by elapsed hours.
+is the successful fraction; cores/day divides all ended core-hours by elapsed
+hours and includes failed work. Productive average cores is successful
+core-hours divided by elapsed hours, so it equals cores/day times efficiency.
 Running jobs and idle pilots are excluded. Monthly rates use calendar time,
 including days with no completions, through the observation timestamp.
 Hover gives the site, sample hours and job counts. Missing or low-volume

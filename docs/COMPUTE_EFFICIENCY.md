@@ -7,9 +7,9 @@ trend lines. The PanDA hub and the dashboard's Computing now heading link
 to this history.
 
 The dashboard's panel below Storage has three monthly plots, each with
-OSG, Perlmutter and GREX curves: efficiency, total core-hours per day,
-and productive average cores. Each plot also shows an overall reading
-for the preceding 24 hours and one overall monthly average since May.
+OSG, Perlmutter and GREX curves: efficiency, total average cores (labelled
+**Cores / day**), and productive average cores. Each plot also shows an overall
+reading for the preceding 24 hours and one overall monthly average since May.
 OSG combines execution sites and retired queues; Perlmutter combines its
 historical queues. Hover identifies each curve and its measured values.
 
@@ -45,10 +45,12 @@ collection gaps. These daily means are retained with productive cores in
 Snapper; the hourly producer rereads the latest seven days.
 
 All three metrics use the same ended-job sample. Efficiency divides summed
-successful core-hours by all ended core-hours. Total core-hours per day
-includes failed work and divides by calendar days, including days with
-no completions. Productive average cores divides successful core-hours
-by elapsed hours; it equals core-hours/day times efficiency divided by 24.
+successful core-hours by all ended core-hours. Total average cores includes
+failed work and divides ended core-hours by elapsed calendar hours, including
+days with no completions. The dashboard's cores/day readings divide the
+underlying core-hours/day values by 24. Productive average cores divides
+successful core-hours by elapsed hours; it equals cores/day times efficiency,
+with efficiency expressed as a fraction.
 No processor-performance weights are applied. The partial current month
 uses elapsed time through the history's observation timestamp.
 
