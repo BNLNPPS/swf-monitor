@@ -3734,7 +3734,8 @@ def es_slot_timeline(job, es):
     record (payload 0.21.4); an older record is laid out greedily onto
     lanes, which is what the slots did since each runs one unit at a
     time. None when the job has no start and end."""
-    from ..es_timing import unit_segments, phase_totals, turnaround
+    from ..es_timing import unit_segments, phase_totals, turnaround, member_segments
+    from ..es_timing import pooled as es_pooled, epoch as es_epoch
     start, end = job.get('starttime'), job.get('endtime')
     if es.get('observed_at') and (not end or es.get('live') or es.get('incomplete')):
         end = datetime_from_epoch(es['observed_at'])
@@ -3762,7 +3763,7 @@ def es_slot_timeline(job, es):
         # earlier than payload activity independently shipped afterward.
         t1 = float(cut)
     nslots = int(es.get('slots') or 0) or 1
-    units = []
+    found = []
     for status, key in (('done', 'ranges_done'), ('failed', 'ranges_failed'),
                         ('interrupted', 'ranges_interrupted'), ('unshipped', 'ranges_unshipped'),
                         ('running', 'ranges_running'), ('awaiting', 'ranges_awaiting_close')):
@@ -3771,11 +3772,48 @@ def es_slot_timeline(job, es):
                 continue
             us = float(u['started_at'])
             ue = float(u.get('ended_at') or (us + float(u.get('wall_s') or 0)))
-            units.append({'unit_id': u.get('unit_id'), 'status': status,
-                          'start_s': us - t0, 'end_s': ue - t0,
-                          'events': int(u.get('events_reconstructed') or u.get('events') or 0),
-                          'segments': unit_segments(dict(u, ended_at=ue), t0, t1),
-                          'slot': u.get('slot'), 'close': u.get('close')})
+            found.append((status, u, us, ue))
+    # A reconstruction on a shared pool member runs off the unit's core. Under
+    # asynchronous reconstruction the slot takes its next unit as soon as the
+    # simulation ends, so a pooled unit holds its core until the next unit on
+    # the same slot starts; a slot's last unit, until its simulation ended.
+    by_slot = {}
+    for item in found:
+        by_slot.setdefault(item[1].get('slot'), []).append(item)
+    asynchronous = False
+    for items in by_slot.values():
+        items.sort(key=lambda item: item[2])
+        asynchronous |= any(es_pooled(a[1]) and b[2] < a[3] - 1 for a, b in zip(items, items[1:]))
+    core_end = {}
+    for items in by_slot.values():
+        for item, following in zip(items, items[1:] + [None]):
+            status, u, us, ue = item
+            end = ue
+            if asynchronous and es_pooled(u):
+                simulated = es_epoch((u.get('simulation') or {}).get('ended_at')) or ue
+                end = min(ue, following[2]) if following else min(ue, max(us, simulated))
+            core_end[id(u)] = end
+    units, member_units = [], {}
+    for status, u, us, ue in found:
+        end = core_end[id(u)]
+        units.append({'unit_id': u.get('unit_id'), 'status': status,
+                      'start_s': us - t0, 'end_s': end - t0,
+                      'events': int(u.get('events_reconstructed') or u.get('events') or 0),
+                      'segments': unit_segments(dict(u, ended_at=end), t0, t1,
+                                                without_reconstruction=es_pooled(u)),
+                      'slot': u.get('slot'), 'close': u.get('close')})
+        if es_pooled(u):
+            parts = member_segments(u, t0, t1)
+            if parts:
+                reconstruction = u['reconstruction']
+                member_units.setdefault(int(reconstruction['pool_member']), []).append({
+                    'unit_id': u.get('unit_id'), 'status': status, 'events': 0,
+                    'reconstructed': int(u.get('events_reconstructed') or 0),
+                    'start_s': parts[0]['start_s'], 'end_s': parts[-1]['end_s'], 'segments': parts,
+                    'close': u.get('close'),
+                    'title': (f"{u.get('unit_id')}: reconstruction of {int(u.get('events_reconstructed') or 0)} "
+                              f"events from core {u.get('slot')} on member {reconstruction['pool_member']}, "
+                              f"{float(reconstruction.get('pool_wait_s') or 0):.1f} s waiting for the member")})
     units.sort(key=lambda u: u['start_s'])
     lanes = {}
     if all(u['slot'] is not None for u in units) and units:
@@ -3817,15 +3855,27 @@ def es_slot_timeline(job, es):
         harness = {'start_s': float(es['started_at']) - t0,
                    'end_s': (float(es['ended_at']) - t0) if es.get('ended_at') else None}
     timing = phase_totals(units)
+    # Pool members' lanes follow the cores' and count apart from them: the
+    # members run on the node's spare hardware threads, not the job's cores.
+    member_rows = []
+    for member in sorted(member_units):
+        mu = sorted(member_units[member], key=lambda u: u['start_s'])
+        member_rows.append({'index': member, 'label': f'reco {member}', 'units': mu,
+                            'right_text': f"{sum(u['reconstructed'] for u in mu if u['status'] == 'done'):,} ev"})
+    members = phase_totals([u for row in member_rows for u in row['units']]) if member_rows else {}
     return {
         'wall_s': round(wall, 1), 'slots': max(nslots, len(lanes)),
         **timing, **turnaround(lanes.values()),
         'saved_processing_fraction': (round(timing['saved_processing_s'] / allocated, 3)
                                       if allocated and timing['measured_units'] else None),
+        'members': len(member_rows),
+        'member_processing_s': members.get('processing_s'),
+        'member_saved_processing_s': members.get('saved_processing_s'),
+        'member_initialization_s': members.get('initialization_s'),
         # The cores the batch job holds, which may exceed the cores it works
         # (npps0: 6 of 8, a memory limit).
         'cores_allocated': int(job.get('actualcorecount') or job.get('corecount') or 0) or None,
-        'rows': slot_rows, 'closes': closes, 'harness': harness,
+        'rows': slot_rows + member_rows, 'closes': closes, 'harness': harness,
         'busy_s': round(busy, 1), 'allocated_s': round(allocated, 1),
         'busy_fraction': round(busy / allocated, 3) if allocated else None,
         'head_idle_s': round(min(r['head_idle_s'] for r in slot_rows), 1) if slot_rows else None,

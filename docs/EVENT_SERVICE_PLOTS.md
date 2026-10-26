@@ -47,6 +47,17 @@ counts only measured event-processing intervals whose output was saved,
 divided by observed allocated core-time. The two quantities are shown
 separately. Missing phase measurements never imply zero initialization.
 
+A unit whose reconstruction ran on a shared pool member (`reconstruction.pool_member`,
+swf-epicprod `es/reco_pool.py`) has its reconstruction drawn on the member's own
+lane (`reco N`), with the member's startup in orange when that unit's request
+started it. The member lanes come after the cores. The members run on hardware
+threads apart from the job's cores, so their time is summed separately and left
+out of the cores' occupancy and saved processing. With asynchronous
+reconstruction the slot takes its next unit as the simulation ends, so a pooled
+unit holds its core until the next unit on that core starts; a core's last unit
+holds it until its simulation ends. Before this, the overlap was drawn twice on the
+core and counted twice, and turnaround clamped to zero.
+
 Turnaround between units is the time on a core from the end of one unit's last
 measured simulation or reconstruction interval to the start of the next unit's
 first. The page gives its median, 90th percentile and longest value and the

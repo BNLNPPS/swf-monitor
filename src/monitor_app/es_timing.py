@@ -13,8 +13,36 @@ def epoch(value):
     return parsed.timestamp()
 
 
-def unit_segments(unit, origin, observed_end):
-    """Partition one unit without treating an unmeasured interval as processing."""
+def pooled(unit):
+    """True when the unit's reconstruction ran on a shared pool member
+    (swf-epicprod es/reco_pool.py), not on the unit's own core."""
+    return (unit.get('reconstruction') or {}).get('pool_member') is not None
+
+
+def member_segments(unit, origin, observed_end):
+    """A pooled unit's reconstruction on its member's lane: the member's
+    startup when this unit's request started it, then the request."""
+    reconstruction = unit.get('reconstruction') or {}
+    parts = []
+    for phase, first, last in (('initialization', reconstruction.get('initialization_started_at'),
+                                reconstruction.get('initialized_at')),
+                               ('reconstruction', reconstruction.get('started_at'),
+                                reconstruction.get('ended_at'))):
+        first, last = epoch(first), epoch(last)
+        if phase == 'initialization' and int(reconstruction.get('pool_requests') or 1) != 1:
+            continue
+        if first is None or last is None:
+            continue
+        first, last = max(origin, first), min(observed_end, last)
+        if last > first:
+            parts.append({'phase': phase, 'start_s': first - origin, 'end_s': last - origin})
+    return parts
+
+
+def unit_segments(unit, origin, observed_end, without_reconstruction=False):
+    """Partition one unit without treating an unmeasured interval as processing.
+    without_reconstruction: the reconstruction ran on a shared member, so it is
+    no part of this core's time (member_segments draws it on the member's lane)."""
     start = max(origin, epoch(unit['started_at']))
     end = min(observed_end, epoch(unit.get('ended_at')) or observed_end)
     if end <= start:
@@ -39,15 +67,17 @@ def unit_segments(unit, origin, observed_end):
     if simulation.get('first_event_at'):
         add('simulation', simulation['first_event_at'],
             simulation.get('last_event_at') or simulation.get('ended_at') or end, 2)
-    if reconstruction.get('initialization_started_at'):
+    if reconstruction.get('initialization_started_at') and not without_reconstruction:
         add('initialization', reconstruction['initialization_started_at'],
             reconstruction.get('initialized_at') or end, 3)
-    if reconstruction.get('started_at'):
+    if reconstruction.get('started_at') and not without_reconstruction:
         add('reconstruction', reconstruction['started_at'], reconstruction.get('ended_at') or end, 2)
     for name in ('simulation', 'reconstruction'):
         phase = phases.get(name) or {}
         separated = (bool(simulation.get('first_event_at')) if name == 'simulation'
                      else bool(reconstruction.get('started_at')))
+        if name == 'reconstruction' and without_reconstruction:
+            continue
         if phase.get('started_at') and not separated:
             add('unseparated', phase['started_at'], phase.get('ended_at') or end, 1)
     measured = bool(simulation or reconstruction or phases)

@@ -7,6 +7,12 @@
   setup and output handling {{ tl.overhead_s|fmt_duration }}.
   {% if tl.unseparated_s %}A further {{ tl.unseparated_s|fmt_duration }} has no separate processing measurement.{% endif %}
 </p>
+{% if tl.members %}
+<p class="mb-1"><strong>Reconstruction on {{ tl.members }} shared member{{ tl.members|pluralize }}</strong>
+  (their own lanes, on hardware threads apart from the job's cores, so outside the figures above):
+  {{ tl.member_processing_s|fmt_duration }} of reconstruction, {{ tl.member_saved_processing_s|fmt_duration }} of it saved;
+  member startup {{ tl.member_initialization_s|fmt_duration }}.</p>
+{% endif %}
 {% if tl.turnaround_n %}
 <p class="mb-1"><strong>Turnaround between units:</strong>
   median {{ tl.turnaround_median_s|floatformat:1 }} s, 90th percentile {{ tl.turnaround_p90_s|floatformat:1 }} s,

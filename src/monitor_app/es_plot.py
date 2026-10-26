@@ -79,8 +79,10 @@ def slot_plot_svg(tl):
         y = TOP + i * LANE_H
         # Compact lanes are labelled every eighth, the label centred on its lane.
         if i % label_every == 0:
+            # A pool member's lane carries its own label (reco N).
+            label = row.get('label') or f"{lane_label} {row['index']}"
             parts.append(f'<text x="{LEFT - 8}" y="{y + label_dy:.1f}" text-anchor="end" fill="currentColor">'
-                         f'{lane_label} {row["index"]}</text>')
+                         f'{escape(label)}</text>')
         parts.append(f'<rect x="{LEFT}" y="{y + pad}" width="{plot_w:.1f}" height="{LANE_H - 2 * pad}" fill="{IDLE}"/>')
         for u in row['units']:
             x0, x1 = x(u['start_s']), x(u['end_s'])
