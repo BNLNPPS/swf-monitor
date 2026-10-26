@@ -2229,6 +2229,17 @@ def get_snapshot(refresh=False):
             None if site['status'] == 'live' else 'grey')
         site['production_panel'] = True
         site['status_reason'] = (primary or {}).get('status_reason') or site['status_label']
+        # A live site whose front feed an operator switched off, with the
+        # reason recorded, says so in its panel: running work continues,
+        # the front sends no more.
+        off = [q['id'] for q in site['queues']
+               if cfg.get(f"front.queue.{q['id']}.feed") is False
+               and cfg.get(f"front.queue.{q['id']}.feed_off_reason")]
+        if site['status'] == 'live' and off:
+            site['status_label'] = 'Pressure front OFF'
+            site['status_level'] = 'red'
+            site['status_reason'] = (f"{', '.join(off)}: the pressure front's feed is off; running work "
+                                     f"continues. {cfg.get(f'front.queue.{off[0]}.feed_off_reason')}")
         if primary:
             site['links'] = dict(primary['links'])
         if site['id'] == 'google':
