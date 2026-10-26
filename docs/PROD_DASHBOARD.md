@@ -31,7 +31,8 @@ on every site pane.
 
 Site labels, reasons and phase colours come from the feed's `status_label`,
 `status_reason` and `status_level`. Inactive Perlmutter reads **No allocation**,
-Canada **Authentication block**, and JLab **Cybersecurity block**.
+Canada **Authentication block**, and JLab **Cybersecurity block**; all three
+status labels use grey.
 Google uses GREX's ordinary
 production panel content: shared pillars, running and queued cores, outcomes,
 pilot supply and trend history. Both displays select queues through the

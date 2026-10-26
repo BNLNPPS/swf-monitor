@@ -2172,8 +2172,8 @@ def get_snapshot(refresh=False):
         if site['status'] != 'live':
             site['status_label'] = INACTIVE_SITE_LABELS.get(site['id'], site['status_label'])
         site['status_level'] = (
+            'grey' if site['id'] in INACTIVE_SITE_LABELS and site['status'] != 'live' else
             'blue' if site['status'] == 'commissioning' else
-            'amber' if site['id'] == 'nersc' and site['status'] == 'off' else
             None if site['status'] == 'live' else 'grey')
         site['production_panel'] = True
         site['status_reason'] = (primary or {}).get('status_reason') or site['status_label']
