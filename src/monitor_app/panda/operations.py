@@ -375,6 +375,8 @@ def queue_task_operations(*, tasks, operation, requested_by,
                 'jedi_task_id': record.jedi_task_id,
                 'task_name': (record.task_name
                               or f'PanDA task {record.jedi_task_id}'),
+                **({'previous_site': str((record.evidence or {}).get('previous_site') or '')}
+                   if operation == 'reassign' else {}),
             }
             for record in new_records
         ]

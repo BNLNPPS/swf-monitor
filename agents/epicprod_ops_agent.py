@@ -960,6 +960,11 @@ class EpicProdOpsAgent(BaseAgent):
     def _do_panda_task_operations(self, m):
         operation = str(m['operation'])
         items = list(m['items'])
+        move_sites = ({
+            'previous_site': ', '.join(sorted({str(item.get('previous_site') or 'source unavailable')
+                                               for item in items})),
+            'site': str(m.get('site') or ''),
+        } if operation == 'reassign' else {})
         batch_id = str(m['batch_id'])
         username = str(m.get('created_by') or '')
         task_ids = [str(item['jedi_task_id']) for item in items]
@@ -1011,6 +1016,7 @@ class EpicProdOpsAgent(BaseAgent):
                 'panda_task_operation', t0, outcome='timeout', reason=reason,
                 username=username, sublevel='high', live_default=False,
                 level=logging.ERROR, operation=operation, tasks=len(items),
+                **move_sites,
                 summary=f'0/{len(items)} verified · {len(items)} timed out',
                 url='/panda/tasks/', **notice_subject)
             return
@@ -1064,6 +1070,8 @@ class EpicProdOpsAgent(BaseAgent):
                     'jedi_task_id': str(item['jedi_task_id']),
                     'task_name': str(item.get('task_name') or ''),
                     'site': str(m.get('site') or ''),
+                    'previous_site': str((result or {}).get('previous_site')
+                                         or item.get('previous_site') or ''),
                     'mode': str(m.get('mode') or 'soft'),
                     'created_by': username, 'since': time.time()})
         problems = counts.get('failed', 0) + counts.get('unverified', 0)
@@ -1080,6 +1088,7 @@ class EpicProdOpsAgent(BaseAgent):
             username=username, sublevel='high', live_default=False,
             level=logging.WARNING if problems else logging.INFO,
             operation=operation, tasks=len(items),
+            **move_sites,
             summary=' · '.join(parts), url='/panda/tasks/',
             **notice_subject, **counts)
 
