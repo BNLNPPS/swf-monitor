@@ -137,9 +137,10 @@ product when the cached average is more than an hour old. The browser
 reuses the result for an hour and refreshes it while attended.
 
 An active operator worker-limit override replaces the weekly average in
-the same title-row position with **Worker limit N** in red. The snapshot
-reads the queue's current worker-limit control, including its level and
-reason. Clearing the override restores the weekly average. Weekly history
+the same title-row position with **Core limit N** in red. The snapshot
+converts worker allocations to their core capacity; GREX has eight
+single-core pilots per allocation. The current control carries the level
+and reason. Clearing the override restores the weekly average. Weekly history
 refreshes preserve the override while it remains active; its link opens
 the queue record.
 

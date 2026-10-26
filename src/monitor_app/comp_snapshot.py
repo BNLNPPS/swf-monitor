@@ -2177,6 +2177,7 @@ def get_snapshot(refresh=False):
     TTL (docs/CACHED_PRODUCTS.md)."""
     from monitor_app.cached_product import get_product
     from monitor_app.models import SysConfig
+    from swf_epicprod.regulation import PILOTS_PER_WORKER
     result = get_product(PRODUCT_KEY, build, TTL_SECONDS, refresh=refresh)
     value = dict(result.get('value') or {})
     # Correct the old queue-wide labels immediately, without rebuilding
@@ -2237,17 +2238,21 @@ def get_snapshot(refresh=False):
             control = cfg.get(f"pilot.queue.{queue['id']}.worker_limit") or {}
             if (isinstance(control, dict) and control.get('active')
                     and isinstance(control.get('limit'), int) and control['limit'] > 0):
-                limits.append(dict(control, queue=queue['id']))
+                width = control.get('cores_per_worker') or PILOTS_PER_WORKER.get(queue['id'])
+                core_limit = control['limit'] * width if isinstance(width, int) and width > 0 else None
+                limits.append(dict(control, queue=queue['id'], core_limit=core_limit))
         site['worker_limit'] = None
         if limits:
-            levels = ', '.join(f"{item['limit']:,}" for item in limits)
+            levels = ', '.join(f"{item['core_limit']:,}" if item['core_limit'] is not None
+                               else 'unavailable' for item in limits)
             detail = '\n'.join(
-                f"{item['queue']}: {item['limit']:,} Harvester workers; "
+                f"{item['queue']}: {item['core_limit'] if item['core_limit'] is not None else 'unknown'} "
+                f"core ceiling ({item['limit']:,} Harvester allocations); "
                 f"{item.get('reason') or 'operator override'}. "
                 'Existing allocations finish normally.' for item in limits)
             site['worker_limit'] = {
                 'active': True, 'controls': limits,
-                'notice': {'text': f'Worker limit {levels}', 'level': 'red',
+                'notice': {'text': f'Core limit {levels}', 'level': 'red',
                            'detail': detail,
                            'link': (site.get('links') or {}).get('panda_queue')},
             }
