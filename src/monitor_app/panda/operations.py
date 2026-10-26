@@ -144,7 +144,9 @@ def queue_task_operation(*, task, operation, requested_by, source='manual',
         'created_by': requested_by,
     }
     if operation == 'reassign':
-        msg.update(site=site, mode='soft')
+        msg.update(site=site, mode='soft',
+                   previous_site=str((record.evidence or {}).get('previous_site')
+                                     or task.get('site') or ''))
     _send_operation_message(msg, [record])
     return record, True
 

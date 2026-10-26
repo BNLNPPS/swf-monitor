@@ -51,6 +51,23 @@
     return;
   }
   const source = document.currentScript.src;
+  function render(label) {
+    const content = label.querySelector('a') || label;
+    content.textContent = label.dataset.overrideText || label.dataset.weeklyText || '… avg cores/1wk';
+    label.title = label.dataset.overrideDetail || label.dataset.weeklyTitle || '';
+    label.style.color = label.dataset.overrideText ? 'var(--red)' : '';
+  }
+  window.epicDashboard.renderWeeklyLabel = render;
+  function override(label, notice) {
+    label.dataset.overrideText = notice ? notice.text : '';
+    label.dataset.overrideDetail = notice ? notice.detail : '';
+    render(label);
+  }
+  window.epicDashboard.setWeeklyOverride = override;
+  let initial = {};
+  try {
+    initial = JSON.parse(document.getElementById('dashboard-record')?.textContent || '{}');
+  } catch (error) { console.error('Initial dashboard record unavailable:', error); }
   const headers = new Map();
   document.querySelectorAll('.site .panelhead').forEach(header => {
     const name = header.closest('.site').dataset.siteKey || header.querySelector('strong').textContent.trim();
@@ -60,6 +77,9 @@
     label.textContent = '… avg cores/1wk';
     header.appendChild(label);
     headers.set(name, label);
+    const site = (initial.sites || []).find(site =>
+      window.epicDashboard.sitePanels[site.id] === name || site.name === name);
+    override(label, site && site.worker_limit && site.worker_limit.notice);
   });
 
   let current = null, pending = false;
@@ -67,15 +87,13 @@
     current = record;
     headers.forEach((label, name) => {
       const result = record.values[name];
-      const content = label.querySelector('a') || label;
       label.dataset.weeklyText = (result ? Math.round(result.value).toLocaleString('en-US') : '—') +
         ' avg cores/1wk';
-      content.textContent = label.dataset.weeklyText;
       label.dataset.weeklyTitle = result ? 'Time-weighted average running cores over the last week; ' +
         Math.round(result.coverage * 100) + '% recorded coverage.' +
         (name === 'OSG' ? ' Includes production on the retired OSG queue.' : '') :
         'No recorded running-core history for this queue.';
-      label.title = label.dataset.weeklyTitle;
+      render(label);
     });
   }
   async function load() {
@@ -109,7 +127,7 @@
       console.error('Weekly average running cores unavailable:', error);
       headers.forEach(label => {
         label.dataset.weeklyTitle = error.message;
-        label.title = error.message;
+        render(label);
       });
     } finally { pending = false; }
   }

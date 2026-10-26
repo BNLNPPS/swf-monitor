@@ -315,6 +315,10 @@
     // The fair-share notice and weekly average keep their own links and
     // hover details, with the average following the notice in grey.
     const weekly = panel.querySelector('.weekly-cores');
+    if (weekly) {
+      const notice = site.worker_limit && site.worker_limit.notice;
+      config.setWeeklyOverride(weekly, notice);
+    }
     if (weekly && 'fair_share' in site) {
       const share = site.fair_share;
       const notice = share && share.notice;

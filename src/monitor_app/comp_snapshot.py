@@ -2232,6 +2232,25 @@ def get_snapshot(refresh=False):
                                      f"continues. {cfg.get(f'front.queue.{off[0]}.feed_off_reason')}")
         if primary:
             site['links'] = dict(primary['links'])
+        limits = []
+        for queue in site['queues']:
+            control = cfg.get(f"pilot.queue.{queue['id']}.worker_limit") or {}
+            if (isinstance(control, dict) and control.get('active')
+                    and isinstance(control.get('limit'), int) and control['limit'] > 0):
+                limits.append(dict(control, queue=queue['id']))
+        site['worker_limit'] = None
+        if limits:
+            levels = ', '.join(f"{item['limit']:,}" for item in limits)
+            detail = '\n'.join(
+                f"{item['queue']}: {item['limit']:,} Harvester workers; "
+                f"{item.get('reason') or 'operator override'}. "
+                'Existing allocations finish normally.' for item in limits)
+            site['worker_limit'] = {
+                'active': True, 'controls': limits,
+                'notice': {'text': f'Worker limit {levels}', 'level': 'red',
+                           'detail': detail,
+                           'link': (site.get('links') or {}).get('panda_queue')},
+            }
         if site['id'] == 'google':
             site.pop('board', None)
             _google_pilot_display(site, cfg)

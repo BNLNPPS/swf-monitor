@@ -762,6 +762,9 @@ class EpicProdOpsAgent(BaseAgent):
         operation = m["operation"]
         task_name = str(m["task_name"])
         jedi_task_id = str(m["jedi_task_id"])
+        move_sites = ({'previous_site': str(m.get('previous_site') or ''),
+                       'site': str(m.get('site') or '')}
+                      if operation == 'reassign' else {})
         cmd = [
             sys.executable, str(PANDA_TASK_OPERATION_SCRIPT),
             "--operation", operation,
@@ -806,6 +809,7 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True, level=logging.ERROR,
                              operation=operation, task_name=task_name,
+                             **move_sites,
                              url=f'/panda/tasks/{jedi_task_id}/')
             return
 
@@ -819,6 +823,9 @@ class EpicProdOpsAgent(BaseAgent):
                 result = json.loads((p.stdout or '').strip().splitlines()[-1])
             except (IndexError, json.JSONDecodeError):
                 result = {}
+        if operation == 'reassign':
+            move_sites['previous_site'] = str(result.get('previous_site')
+                                              or move_sites['previous_site'])
         if p.returncode == 0:
             summary = (p.stdout or "").strip()
             if is_state_change and not result.get('verified'):
@@ -833,7 +840,7 @@ class EpicProdOpsAgent(BaseAgent):
                 self._record_panda_operation_state(
                     operation_id, 'unverified', diagnostic=reason,
                     observed_status=observed_status,
-                    evidence={'panda_diagnostic': result.get('diagnostic', '')})
+                    evidence={'panda_diagnostic': result.get('diagnostic', ''), **move_sites})
                 self.send_message('/topic/epictopic', {
                     'msg_type': 'panda_task_operation_done',
                     'operation_id': operation_id,
@@ -848,6 +855,7 @@ class EpicProdOpsAgent(BaseAgent):
                     username=str(m.get('created_by') or ''),
                     sublevel='high', live_default=True, level=logging.WARNING,
                     operation=operation, task_name=task_name,
+                    **move_sites,
                     observed_status=observed_status,
                     url=f'/panda/tasks/{jedi_task_id}/')
                 if operation == 'reassign':
@@ -855,6 +863,7 @@ class EpicProdOpsAgent(BaseAgent):
                         'operation_id': operation_id,
                         'jedi_task_id': jedi_task_id, 'task_name': task_name,
                         'site': str(m.get('site') or ''),
+                        'previous_site': move_sites['previous_site'],
                         'mode': str(m.get('mode') or 'soft'),
                         'created_by': str(m.get('created_by') or ''),
                         'since': time.time()})
@@ -898,6 +907,7 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True,
                              operation=operation, task_name=task_name,
+                             **move_sites,
                              **ok_bits)
         else:
             reason = self._derive_reason(p)
@@ -921,7 +931,7 @@ class EpicProdOpsAgent(BaseAgent):
                              subject_type='panda_task', subject_key=jedi_task_id,
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True, level=logging.ERROR,
-                             operation=operation, task_name=task_name)
+                             operation=operation, task_name=task_name, **move_sites)
 
     def _handle_panda_task_operations(self, m):
         """Run one paced batch of scalar PanDA pause/resume commands."""
@@ -1133,6 +1143,7 @@ class EpicProdOpsAgent(BaseAgent):
         jedi_task_id = str(settle['jedi_task_id'])
         task_name = str(settle.get('task_name') or '')
         site = str(settle.get('site') or '')
+        move_sites = {'previous_site': str(settle.get('previous_site') or ''), 'site': site}
         left = int(REASSIGN_SETTLE_TIMEOUT - (time.time() - float(settle.get('since') or 0)))
         t0 = time.monotonic()
         result = {}
@@ -1192,6 +1203,7 @@ class EpicProdOpsAgent(BaseAgent):
                 sublevel='high', live_default=True,
                 level=logging.INFO if repaid else logging.ERROR,
                 operation='reassign', task_name=task_name, summary=summary,
+                **move_sites,
                 url=f'/panda/tasks/{jedi_task_id}/')
             return
         reason = (f'JEDI had not moved the task to {site} within {hours} h of the '
@@ -1206,6 +1218,7 @@ class EpicProdOpsAgent(BaseAgent):
             username=str(settle.get('created_by') or ''),
             sublevel='high', live_default=True, level=logging.ERROR,
             operation='reassign', task_name=task_name,
+            **move_sites,
             url=f'/panda/tasks/{jedi_task_id}/')
 
     def _settle_panda_bulk_item(self, message, item, status, *,
@@ -4548,8 +4561,17 @@ class EpicProdOpsAgent(BaseAgent):
                            'reason'):
                 extra[key] = value
         if not message:
-            subject = f"{subject_type}:{subject_key}" if subject_key else ''
-            message = ' '.join(x for x in (str(action), subject, str(outcome)) if x)
+            if action == 'panda_task_operation' and counts.get('operation') == 'reassign':
+                previous = counts.get('previous_site') or 'source unavailable'
+                target = counts.get('site') or 'destination unavailable'
+                state = {'unverified': 'pending', 'ok': 'completed',
+                         'error': 'failed', 'timeout': 'timed out'}.get(outcome, outcome)
+                message = f'Move {subject_key}: {previous} → {target}; {state}'
+                if counts.get('summary'):
+                    message += '; ' + str(counts['summary'])
+            else:
+                subject = f"{subject_type}:{subject_key}" if subject_key else ''
+                message = ' '.join(x for x in (str(action), subject, str(outcome)) if x)
         if reason:
             message = f"{message} — {str(reason)[:300]}"
         try:

@@ -136,6 +136,13 @@ small static seed; a lazy request uses the existing Snapper series
 product when the cached average is more than an hour old. The browser
 reuses the result for an hour and refreshes it while attended.
 
+An active operator worker-limit override replaces the weekly average in
+the same title-row position with **Worker limit N** in red. The snapshot
+reads the queue's current worker-limit control, including its level and
+reason. Clearing the override restores the weekly average. Weekly history
+refreshes preserve the override while it remains active; its link opens
+the queue record.
+
 While a pool's negotiator holds our OSG submitter at its fair-share
 limit, the OSG title row shows **fair share limited** in yellow followed
 by its weekly average cores in grey, matching GREX. Each keeps its own
