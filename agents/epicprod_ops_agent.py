@@ -385,6 +385,9 @@ SNAPPER_OPPORTUNITY_SECONDS = int(
     or os.environ.get("EPICPROD_SNAPPER_POLL_SECONDS")
     or "30")
 SNAPPER_SCHEDULER_INITIAL_DELAY = int(os.environ.get("EPICPROD_SNAPPER_INITIAL_DELAY", "5"))
+# The capture's own background pool, apart from the default one that slow
+# production operations fill.
+SNAPPER_QUEUE = 'snapper'
 
 # Dedicated namespace config shipped beside the agent. A fixed 'prodops' namespace
 # makes the singleton identifiable in the monitor and lets callers address it
@@ -1411,7 +1414,7 @@ class EpicProdOpsAgent(BaseAgent):
         self.run_in_background(
             self._do_snapper_capture, request,
             dedup_key=f"snapper_capture_manual_{scope}",
-            label=f"capture_system_snap {scope}")
+            label=f"capture_system_snap {scope}", queue=SNAPPER_QUEUE)
 
     def _do_snapper_capture(self, m):
         scope = str(m.get('scope') or 'all')
@@ -1538,13 +1541,19 @@ class EpicProdOpsAgent(BaseAgent):
             executor = self._bg_executor
             if executor is not None and getattr(executor, '_shutdown', False):
                 return
+            # Its own pool: on the default one the capture waited behind
+            # submissions and Moves that hold all four workers for minutes,
+            # and each opportunity it missed is a coverage gap in the record
+            # (2026-10-26 16:57:34 to 17:00:05 ET: two submissions, four
+            # Moves and a node-measure ingest; the floor's trends then broke
+            # for half an hour at every quarter-hour edge such a gap held).
             self.run_in_background(
                 self._do_snapper_capture,
                 {'scope': 'all', 'manual': False,
                  'source': 'ops_agent_periodic',
                  'requested_at': datetime.now(timezone.utc).isoformat()},
                 dedup_key="snapper_capture_periodic",
-                label="capture_system_snap periodic")
+                label="capture_system_snap periodic", queue=SNAPPER_QUEUE)
 
     def _handle_association_sweep(self, m):
         """Batch-associate recent PanDA tasks with PCS campaign tasks."""
