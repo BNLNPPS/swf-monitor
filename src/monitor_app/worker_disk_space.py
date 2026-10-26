@@ -30,7 +30,13 @@ def summarize(rows, now=None):
                        total_inodes=values[label + 'ITotal'],
                        observed_at=stamp, pandaid=pandaid)
             old = volumes.get(key)
-            if old is None or row['free_fraction'] < old['free_fraction']:
+            # The CE spool is one shared filesystem: a newer sample observes
+            # cleanup that an older low sample cannot. Worker volumes are
+            # distinct, so keep their worst fresh measurement.
+            newer_ce = old is not None and label == 'ce' and stamp > old['observed_at']
+            worse = old is not None and row['free_fraction'] < old['free_fraction']
+            comparable = old is not None and (label != 'ce' or stamp == old['observed_at'])
+            if old is None or newer_ce or (comparable and worse):
                 volumes[key] = row
     return dict(at=int(now), running_jobs=running, reporting_jobs=reporting,
                 volumes=list(volumes.values()))

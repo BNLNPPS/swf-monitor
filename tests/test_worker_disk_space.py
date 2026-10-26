@@ -47,6 +47,19 @@ class WorkerDiskSpaceTests(unittest.TestCase):
         self.assertEqual(record['reporting_jobs'], 1)
         self.assertIn('unavailable', self.detect(record)[0].subject)
 
+    def test_new_shared_spool_measurement_replaces_old_low_space(self):
+        rows = [('UM_GREX_PanDA_1', 1, self.metrics(1000, stamp=950)),
+                ('UM_GREX_PanDA_1', 2, self.metrics(80000, stamp=1000))]
+        for order in (rows, rows[::-1]):
+            result = summarize(order, 1000)
+            self.assertEqual(result['volumes'][0]['pandaid'], 2)
+            self.assertEqual(self.detect(result), [])
+
+    def test_distinct_worker_filesystems_keep_worst_fresh_sample(self):
+        rows = [('UM_GREX_PanDA_1', 1, self.metrics(1000, stamp=950).replace('ce', 'scratch')),
+                ('UM_GREX_PanDA_1', 2, self.metrics(80000, stamp=1000).replace('ce', 'scratch'))]
+        self.assertEqual(summarize(rows, 1000)['volumes'][0]['pandaid'], 1)
+
     def test_inode_pressure_warns_even_with_free_bytes(self):
         metrics = self.metrics(80000).replace('ceIFree=900000', 'ceIFree=10')
         self.assertEqual(len(self.detect(summarize([('UM_GREX_PanDA_1', 1, metrics)], 1000))), 1)
