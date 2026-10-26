@@ -3734,7 +3734,7 @@ def es_slot_timeline(job, es):
     record (payload 0.21.4); an older record is laid out greedily onto
     lanes, which is what the slots did since each runs one unit at a
     time. None when the job has no start and end."""
-    from ..es_timing import unit_segments, phase_totals
+    from ..es_timing import unit_segments, phase_totals, turnaround
     start, end = job.get('starttime'), job.get('endtime')
     if es.get('observed_at') and (not end or es.get('live') or es.get('incomplete')):
         end = datetime_from_epoch(es['observed_at'])
@@ -3819,7 +3819,7 @@ def es_slot_timeline(job, es):
     timing = phase_totals(units)
     return {
         'wall_s': round(wall, 1), 'slots': max(nslots, len(lanes)),
-        **timing,
+        **timing, **turnaround(lanes.values()),
         'saved_processing_fraction': (round(timing['saved_processing_s'] / allocated, 3)
                                       if allocated and timing['measured_units'] else None),
         # The cores the batch job holds, which may exceed the cores it works

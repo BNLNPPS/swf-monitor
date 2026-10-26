@@ -7,6 +7,12 @@
   setup and output handling {{ tl.overhead_s|fmt_duration }}.
   {% if tl.unseparated_s %}A further {{ tl.unseparated_s|fmt_duration }} has no separate processing measurement.{% endif %}
 </p>
+{% if tl.turnaround_n %}
+<p class="mb-1"><strong>Turnaround between units:</strong>
+  median {{ tl.turnaround_median_s|floatformat:1 }} s, 90th percentile {{ tl.turnaround_p90_s|floatformat:1 }} s,
+  longest {{ tl.turnaround_max_s|floatformat:1 }} s over {{ tl.turnaround_n }} transitions: on each core, from the
+  last measured event of one unit to the first of the next.</p>
+{% endif %}
 {% else %}
 <p class="mb-1 text-muted">Initialization and event processing were not separately measured in this record.
   Unit occupancy includes initialization, processing and output handling.</p>

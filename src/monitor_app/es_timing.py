@@ -67,6 +67,34 @@ def unit_segments(unit, origin, observed_end):
     return result
 
 
+def turnaround(lanes):
+    """On each core, the seconds from the last measured event processing of
+    one unit to the first of the next: what a core spends between segments.
+    A unit without measured processing breaks the sequence rather than
+    joining two gaps into one."""
+    gaps = []
+    for units in lanes:
+        previous = None
+        for unit in sorted(units, key=lambda u: u['start_s']):
+            processing = [part for part in unit.get('segments') or []
+                          if part['phase'] in ('simulation', 'reconstruction')]
+            if not processing:
+                previous = None
+                continue
+            if previous is not None:
+                gaps.append(max(0., processing[0]['start_s'] - previous))
+            previous = processing[-1]['end_s']
+    if not gaps:
+        return {'turnaround_n': 0}
+    gaps.sort()
+
+    def quantile(q):
+        return round(gaps[min(len(gaps) - 1, int(q * len(gaps)))], 2)
+
+    return {'turnaround_n': len(gaps), 'turnaround_median_s': quantile(0.5),
+            'turnaround_p90_s': quantile(0.9), 'turnaround_max_s': round(gaps[-1], 2)}
+
+
 def phase_totals(units):
     result = dict(processing_s=0., saved_processing_s=0., initialization_s=0.,
                   overhead_s=0., unseparated_s=0., measured_units=0)
