@@ -1,7 +1,7 @@
 {% load static %}
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ePIC production dashboard</title>
 <link rel="stylesheet" href="{% static 'monitor_app/prod_dashboard/epic-dashboard-efficiency.css' %}?v=3">
-<script defer src="{% static 'monitor_app/prod_dashboard/epic-dashboard-efficiency.js' %}?v=3"></script>
+<script defer src="{% static 'monitor_app/prod_dashboard/epic-dashboard-efficiency.js' %}?v={{ dashboard_version }}"></script>
 <script defer src="{% static 'monitor_app/prod_dashboard/epic-dashboard-productive-cores.js' %}?v={{ dashboard_version }}"></script>
 <link rel="stylesheet" href="{% static 'monitor_app/prod_dashboard/epic-dashboard-productive-cores.css' %}?v={{ dashboard_version }}">
 <style>
