@@ -691,6 +691,12 @@ def main():
                          "closes, each the units since the last merged into one "
                          "podio file and registered (payload es/es_close.sh); "
                          "0 = each unit registers its own file")
+    ap.add_argument("--es-close-max-files", type=int, default=0,
+                    help="Event Service canary: bound each rolling close to this many unit files")
+    ap.add_argument("--es-min-unit-events", type=int, default=0,
+                    help="Event Service canary: minimum contiguous events before a slot starts; 0 keeps the harness default")
+    ap.add_argument("--es-cohort-start", action="store_true",
+                    help="Event Service canary: release the first units together after every slot has input")
     ap.add_argument("--es-max-attempt", type=int, default=1,
                     help="Event Service canary: job attempts over the input "
                          "file (default 1, a canary's); 2 or more lets a job "
@@ -740,6 +746,9 @@ def main():
     ap.add_argument("--trial-queue", default="",
                     help="the PanDA queue a trial is sent to")
     args = ap.parse_args()
+    if args.es_close_max_files < 0 or args.es_min_unit_events < 0:
+        _log('ERROR: ES close file and minimum event counts must be nonnegative')
+        return 2
     if args.es_worker_proxy and (not args.canary_stamp or not args.es_input_dataset):
         _log('ERROR: --es-worker-proxy requires an Event Service canary')
         return 2
@@ -906,6 +915,12 @@ def main():
             per_unit = (f"ES_EVENTS_PER_UNIT={int(args.es_events_per_range)} "
                         if args.es_fine_grained and args.es_events_per_range > 0 else "")
             close = f"ES_CLOSE_S={int(args.es_close_s)} " if args.es_close_s > 0 else ""
+            if args.es_close_max_files:
+                close += f"ES_CLOSE_MAX_FILES={int(args.es_close_max_files)} "
+            if args.es_min_unit_events:
+                per_unit += f"ES_MIN_UNIT_EVENTS={int(args.es_min_unit_events)} "
+            if args.es_cohort_start:
+                per_unit += "EPICPROD_SWITCH_ES_COHORT_START=1 "
             # TEST AND DEMO ONLY: a sudden end (swf-epicprod es_harness.py
             # --preempt-at-s). Never set on production submissions.
             if args.es_preempt_at_s > 0:
