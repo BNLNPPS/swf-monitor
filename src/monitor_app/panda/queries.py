@@ -3734,6 +3734,7 @@ def es_slot_timeline(job, es):
     record (payload 0.21.4); an older record is laid out greedily onto
     lanes, which is what the slots did since each runs one unit at a
     time. None when the job has no start and end."""
+    from ..es_timing import unit_segments, phase_totals
     start, end = job.get('starttime'), job.get('endtime')
     if es.get('observed_at') and (not end or es.get('live') or es.get('incomplete')):
         end = datetime_from_epoch(es['observed_at'])
@@ -3773,6 +3774,7 @@ def es_slot_timeline(job, es):
             units.append({'unit_id': u.get('unit_id'), 'status': status,
                           'start_s': us - t0, 'end_s': ue - t0,
                           'events': int(u.get('events_reconstructed') or u.get('events') or 0),
+                          'segments': unit_segments(dict(u, ended_at=ue), t0, t1),
                           'slot': u.get('slot'), 'close': u.get('close')})
     units.sort(key=lambda u: u['start_s'])
     lanes = {}
@@ -3814,8 +3816,12 @@ def es_slot_timeline(job, es):
     if es.get('started_at'):
         harness = {'start_s': float(es['started_at']) - t0,
                    'end_s': (float(es['ended_at']) - t0) if es.get('ended_at') else None}
+    timing = phase_totals(units)
     return {
         'wall_s': round(wall, 1), 'slots': max(nslots, len(lanes)),
+        **timing,
+        'saved_processing_fraction': (round(timing['saved_processing_s'] / allocated, 3)
+                                      if allocated and timing['measured_units'] else None),
         # The cores the batch job holds, which may exceed the cores it works
         # (npps0: 6 of 8, a memory limit).
         'cores_allocated': int(job.get('actualcorecount') or job.get('corecount') or 0) or None,

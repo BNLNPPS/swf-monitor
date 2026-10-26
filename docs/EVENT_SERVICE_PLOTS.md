@@ -31,3 +31,18 @@ Task range totals exclude a cancelled historical jobset copy when the same
 file/process range has a completed consumer. Consumer outcomes remain visible;
 a cancelled range without completed work remains cancelled. Normal ended
 harness observations are labelled final records rather than running snapshots.
+
+Resident particle-gun records distinguish initialization, event processing,
+and setup/output handling within each unit. Simulation processing begins at
+the first event callback, including Geant4's lazy first-run preparation in
+initialization. Reconstruction uses the resident service's ready time and
+the measured request interval. Both live snapshots and final records retain
+these boundaries. Orange marks initialization; slate marks setup/output
+handling; outcome colors apply to measured simulation and reconstruction.
+Older aggregate intervals are mauve and carry an explicit unavailable
+measurement, rather than being counted as measured event processing.
+
+Unit occupancy counts the full assigned interval. Measured saved processing
+counts only measured event-processing intervals whose output was saved,
+divided by observed allocated core-time. The two quantities are shown
+separately. Missing phase measurements never imply zero initialization.

@@ -84,7 +84,7 @@
                 <tr><td><strong>Unit wall</strong></td><td>{% if h.unit_wall_median_s is not None %}median {{ h.unit_wall_median_s }} s, 90th percentile {{ h.unit_wall_p90_s }} s{% if h.s_per_event_median %}; {{ h.s_per_event_median }} s an event{% endif %}{% endif %}</td></tr>
                 <tr><td><strong>Closes</strong></td><td>{% if h.closes %}{{ h.closes }} started; {{ h.closes_saved }} saved, {{ h.close_events }} events{% if h.closes_unfinished %}; {{ h.closes_unfinished }} unfinished{% endif %}{% if h.closes_failed %}; <span class="text-danger">{{ h.closes_failed }} failed</span>{% endif %}{% if h.close_wall_median_s is not None %}; median completed close {{ h.close_wall_median_s }} s{% endif %}{% else %}none: each unit registered its own file{% endif %}</td></tr>
                 {% if h.busy_fraction is not None %}
-                <tr><td><strong>Core occupancy</strong></td><td>{{ h.busy_s|fmt_duration }} core-time busy of {{ h.allocated_s|fmt_duration }} allocated over the reported spans: <strong>{% widthratio h.busy_fraction 1 100 %}%</strong></td></tr>
+                <tr><td><strong>Unit occupancy</strong></td><td>{{ h.busy_s|fmt_duration }} core-time occupied, including initialization and output handling, of {{ h.allocated_s|fmt_duration }} allocated over the reported spans: <strong>{% widthratio h.busy_fraction 1 100 %}%</strong></td></tr>
                 {% endif %}
             </table>
             {% if h.plots %}
@@ -93,7 +93,8 @@
             <div class="mt-3">
             {% for pl in h.plots %}
                 {% include "monitor_app/_es_snapshot_status.html" with tl=pl.timeline %}
-                <p class="mb-1 mt-2"><a href="{% url 'monitor_app:panda_job_detail' pandaid=pl.pandaid %}">Job {{ pl.pandaid }}</a>: {{ pl.timeline.slots }} core{{ pl.timeline.slots|pluralize }}, {{ pl.timeline.wall_s|floatformat:0 }} seconds {% if pl.timeline.live or pl.timeline.incomplete %}observed{% else %}of job wall{% endif %}, {% widthratio pl.timeline.busy_fraction 1 100 %}% of observed core-time busy.</p>
+                <p class="mb-1 mt-2"><a href="{% url 'monitor_app:panda_job_detail' pandaid=pl.pandaid %}">Job {{ pl.pandaid }}</a>: {{ pl.timeline.slots }} core{{ pl.timeline.slots|pluralize }}, {{ pl.timeline.wall_s|floatformat:0 }} seconds {% if pl.timeline.live or pl.timeline.incomplete %}observed{% else %}of job wall{% endif %}, {% widthratio pl.timeline.busy_fraction 1 100 %}% unit occupancy.</p>
+                {% include "monitor_app/_es_timing_summary.html" with tl=pl.timeline %}
                 {{ pl.svg }}
             {% endfor %}
             {% if h.jobs > 8 %}<p class="text-muted mt-2">The newest 8 of {{ h.jobs }} jobs are drawn.</p>{% endif %}

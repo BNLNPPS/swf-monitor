@@ -1,6 +1,8 @@
 """The core occupancy plot of an Event Service job: one lane per core the
 job works (one single-threaded payload instance each)
-along the job's own clock, each unit a bar (green done, red failed; after a sudden end, light
+along the job's own clock. Measured initialization, event processing and
+setup/output handling have distinct segments; legacy aggregate time stays
+unseparated. Processing carries its output outcome (green saved, red failed; after a sudden end, light
 yellow the processing cut off and dark yellow the units whose output
 never left the node), each core's processed events at its right and their total on the closes
 lane, the closes on their own lane, the harness's span, the pilot's head and
@@ -29,6 +31,9 @@ RUNNING = '#7fc8a9'       # an allocation's job still running
 UNIT_COLOR = {'done': DONE, 'failed': FAILED, 'interrupted': INTERRUPTED, 'unshipped': UNSHIPPED,
               'running': RUNNING, 'awaiting': '#879d66'}
 IDLE = 'rgba(128,128,128,0.18)'
+INITIALIZATION = '#d97706'
+OVERHEAD = '#64748b'
+UNSEPARATED = '#8a7f91'
 
 
 def _tick_step(wall_s):
@@ -84,8 +89,23 @@ def slot_plot_svg(tl):
                 f"{u.get('unit_id') or 'unit'}: {u['status']}, {u.get('events') or 0} events, "
                 f"{(u['end_s'] - u['start_s']) / 60:.1f} min from {u['start_s'] / 60:.1f} min"
                 + (f"; output shipped in close {u['close']}" if u.get('close') else '')))
-            parts.append(f'<rect x="{x0:.1f}" y="{y + pad}" width="{max(1.5, x1 - x0):.1f}" height="{LANE_H - 2 * pad}" '
-                         f'fill="{color}"><title>{title}</title></rect>')
+            segments = u.get('segments')
+            if segments:
+                for segment in segments:
+                    phase = segment['phase']
+                    a, b = x(segment['start_s']), x(segment['end_s'])
+                    fill = (INITIALIZATION if phase == 'initialization' else
+                            OVERHEAD if phase == 'overhead' else
+                            UNSEPARATED if phase == 'unseparated' else color)
+                    label = {'initialization': 'initialization', 'overhead': 'setup / output handling',
+                             'unseparated': 'unit time; initialization and processing not separately measured',
+                             'simulation': 'simulation events', 'reconstruction': 'reconstruction events'}[phase]
+                    detail = escape(f"{label}: {segment['end_s'] - segment['start_s']:.2f} s; ")
+                    parts.append(f'<rect x="{a:.1f}" y="{y + pad}" width="{max(.2, b - a):.1f}" '
+                                 f'height="{LANE_H - 2 * pad}" fill="{fill}"><title>{detail}{title}</title></rect>')
+            else:
+                parts.append(f'<rect x="{x0:.1f}" y="{y + pad}" width="{max(1.5, x1 - x0):.1f}" height="{LANE_H - 2 * pad}" '
+                             f'fill="{color}"><title>{title}</title></rect>')
             # A slim white line where the unit starts: consecutive units
             # on a core read as one bar without it.
             if x1 - x0 >= 3:
