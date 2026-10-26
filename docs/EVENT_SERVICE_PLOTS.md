@@ -46,3 +46,12 @@ Unit occupancy counts the full assigned interval. Measured saved processing
 counts only measured event-processing intervals whose output was saved,
 divided by observed allocated core-time. The two quantities are shown
 separately. Missing phase measurements never imply zero initialization.
+
+Turnaround between units is the time on a core from the end of one unit's last
+measured simulation or reconstruction interval to the start of the next unit's
+first. The page gives its median, 90th percentile and longest value and the
+number of transitions. A unit without measured processing breaks the
+sequence, so two gaps are never joined into one. It covers per-unit setup
+and output handling, the wait for the next unit and the simulation's own
+per-request start (swf-epicprod EPICPROD_PAYLOAD.md, Resident Event Service
+units).
