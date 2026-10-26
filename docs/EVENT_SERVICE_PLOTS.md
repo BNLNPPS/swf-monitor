@@ -60,7 +60,8 @@ core and counted twice, and turnaround clamped to zero.
 
 Turnaround between units is the time on a core from the end of one unit's last
 measured simulation or reconstruction interval to the start of the next unit's
-first. The page gives its median, 90th percentile and longest value and the
+first. A pooled unit's reconstruction is on a member's lane, so for it only
+the simulation counts. The page gives its median, 90th percentile and longest value and the
 number of transitions. A unit without measured processing breaks the
 sequence, so two gaps are never joined into one. It covers per-unit setup
 and output handling, the wait for the next unit and the simulation's own
