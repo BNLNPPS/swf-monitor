@@ -328,6 +328,21 @@
         label.style.color = 'var(--' + color(notice.level) + ')';
       } else if (label) label.remove();
     }
+    // A live site's status label (Pressure front OFF) shows in the panel head
+    // where OSG's fair-share notice sits, before the weekly average.
+    if (weekly && !status) {
+      let note = panel.querySelector('.site-status-note');
+      const shown = site.status_label && !(site.fair_share && site.fair_share.notice);
+      if (shown) {
+        if (!note) {
+          note = document.createElement('span');
+          note.className = 'site-fair-share small site-status-note';
+          weekly.before(note);
+        }
+        note.textContent = site.status_label; note.title = site.status_reason || '';
+        note.style.color = 'var(--' + color(site.status_level) + ')';
+      } else if (note) note.remove();
+    }
     const pillars = panel.querySelectorAll('.queuepillar.svgcolumn');
     const titles = [(partialThreads ? 'At least ' : '') + number(values[0]) + ' payload cores; ' + number(values[1]) + ' cores finished, ' +
       number(values[2]) + ' cores failed in last 1h', metrics[3]?.title || number(values[3]) + ' queued cores',
