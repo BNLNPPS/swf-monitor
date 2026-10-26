@@ -87,7 +87,8 @@ ended harnesses contribute zero. Records older than ten minutes are unknown.
 A count is never blanked. While any job of a queue or execution site is
 unmeasured, as an Event Service job is before its first shipped record, the
 last complete count stands until a complete one replaces it (`threads_at`
-carries its measurement time); with none yet, the known contribution shows.
+carries its measurement time), never below the part now measured; with none
+yet, the measured part shows.
 The latest measured counts also stand when the minute cache is late.
 Assigned-unit occupancy includes unit startup and finalization; it measures
 payload parallelism, rather than instantaneous CPU utilization. Pilot supply

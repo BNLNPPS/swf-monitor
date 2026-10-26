@@ -70,7 +70,8 @@ def build():
     # A count is never blanked. While any job of a queue or execution site is
     # unmeasured (an Event Service job before its first shipped record, a
     # multicore job without its thread report), the last complete count
-    # stands until a complete one replaces it; with none, the known part.
+    # stands until a complete one replaces it, and never below the part now
+    # measured; with no complete count yet, the measured part.
     previous = (CachedProduct.objects.filter(key=KEY)
                 .values_list('value', flat=True).first()) or {}
     for scope, buckets in (('queues', queues), ('executors', executors)):
@@ -80,7 +81,8 @@ def build():
                 bucket['threads'], bucket['threads_at'] = bucket['known_threads'], now.isoformat()
                 continue
             last = held.get(name) or {}
-            if last.get('threads') is not None and last.get('threads_at'):
+            if (last.get('threads') is not None and last.get('threads_at')
+                    and last['threads'] > bucket['known_threads']):
                 bucket['threads'], bucket['threads_at'] = last['threads'], last['threads_at']
             else:
                 bucket['threads'], bucket['threads_at'] = bucket['known_threads'], None
