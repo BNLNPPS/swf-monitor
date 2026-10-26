@@ -8,10 +8,12 @@ PARAMS = {'warn_free_fraction': 0.20, 'critical_free_fraction': 0.10,
 def detect(client, params):
     record = client._get('/api/worker-disk-space/')
     if (record.get('age_seconds') is None or record.get('age_seconds', 0) > 180
-            or record.get('running_jobs') and not record.get('reporting_jobs')):
+            or record.get('running_jobs') and
+            (not record.get('reporting_jobs') or
+             not any(v.get('volume') == 'ce' for v in record.get('volumes', [])))):
         yield Detection('worker-disk:UM_GREX_PanDA_1:visibility',
                         'GREX worker disk monitoring unavailable',
-                        'Running jobs have no fresh filesystem headroom measurement; '
+                        'No fresh shared CE-spool headroom measurement is available; '
                         'capacity cannot be confirmed. Restore reporting; missing data is not recovery.', record)
     for volume in record.get('volumes', []):
         free = volume['free_bytes'] / 2**30

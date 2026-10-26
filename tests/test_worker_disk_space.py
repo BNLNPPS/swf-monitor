@@ -41,6 +41,12 @@ class WorkerDiskSpaceTests(unittest.TestCase):
         self.assertEqual(self.detect(summarize([('UM_GREX_PanDA_1', 1,
                                                 self.metrics(80000))], 1000)), [])
 
+    def test_worker_volume_does_not_substitute_for_missing_shared_spool(self):
+        metrics = self.metrics(80000).replace('ce', 'pilot')
+        record = summarize([('UM_GREX_PanDA_1', 1, metrics)], 1000)
+        self.assertEqual(record['reporting_jobs'], 1)
+        self.assertIn('unavailable', self.detect(record)[0].subject)
+
     def test_inode_pressure_warns_even_with_free_bytes(self):
         metrics = self.metrics(80000).replace('ceIFree=900000', 'ceIFree=10')
         self.assertEqual(len(self.detect(summarize([('UM_GREX_PanDA_1', 1, metrics)], 1000))), 1)
