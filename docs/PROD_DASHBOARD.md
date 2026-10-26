@@ -35,8 +35,9 @@ Canada **Authentication block**, and JLab **Cybersecurity block**; all three
 status labels use grey.
 Google uses GREX's ordinary
 production panel content: shared pillars, running and queued cores, outcomes,
-pilot supply and trend history. Both displays select queues through the
-feed's `production_display` flag, preserving inactive JLab commissioning.
+and trend history. Google's pilot-count figure and waiting-pilot cylinder are
+hidden; its worker cap remains in the title row. Both displays select queues
+through the feed's `production_display` flag, preserving inactive JLab commissioning.
 Google's standard queue remains off. ES runtime and controller diagnostics
 remain in operator views. Google's status bullet is green when its production
 queue is live and the controller reports healthy workers. Missing or stale
@@ -288,7 +289,8 @@ bins. Site histories use the live 90-second series cache. Missing data
 is shown as unavailable rather than retaining captured design values.
 
 The slots/hour figure counts Harvester worker starts, including declined
-starts. Its number and cylinder open the worker-admission summary for that
+starts. It does not yet count Google's GKE worker starts. Its number and
+cylinder open the worker-admission summary for that
 queue and hour: start-cohort outcomes, current workers and payload jobs,
 pre-job refusal evidence, repeated slot matches and measured time costs.
 Individual expected declines stay below the dashboard's error threshold;

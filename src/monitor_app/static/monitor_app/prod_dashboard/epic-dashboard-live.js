@@ -276,6 +276,9 @@
     const waiting = pilots.some(value => value != null) ? pilots.reduce((n, value) => n + (value || 0), 0) : null;
     const values = [sum('processing_threads'), sum('finished_cores_1h'), sum('failed_cores_1h'), sum('queued_cores'),
       waiting, sum('harvester_slots_opened_1h')];
+    const showPilots = site.id !== 'google';
+    const pilotMetric = panel.querySelector('.pilotmetric');
+    if (pilotMetric) pilotMetric.style.display = showPilots ? '' : 'none';
     const partialThreads = values[0] == null && sum('processing_known_threads') > 0;
     if (partialThreads) values[0] = sum('processing_known_threads');
     panel.querySelectorAll('.metric b').forEach((node, i) => text(node, number(values[i])));
@@ -330,6 +333,7 @@
       number(values[2]) + ' cores failed in last 1h', metrics[3]?.title || number(values[3]) + ' queued cores',
       number(waiting) + ' pilots waiting', number(values[5]) + ' slots/1h'];
     pillars.forEach((node, i) => {
+      node.style.display = i === 2 && !showPilots ? 'none' : '';
       node.title = titles[i];
       node.dataset.value = String([values[0], values[3], waiting, values[5]][i] || 0);
       node.style.visibility = [values[0], values[3], waiting, values[5]][i] == null ? 'hidden' : '';
