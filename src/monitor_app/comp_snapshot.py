@@ -2213,20 +2213,24 @@ def get_snapshot(refresh=False):
     try:
         activity = processing_product()
         measured = activity.get('value') or {}
-        fresh = activity.get('age_seconds') is not None and activity['age_seconds'] <= 120
+        # The last measured counts stand until the measurement refreshes; a
+        # count is never blanked (processing_activity holds a queue's last
+        # complete count while any of its jobs is unmeasured).
         for site in value['sites']:
             for queue in site['queues']:
                 row = (measured.get('queues') or {}).get(queue['id'], {})
-                queue['processing_threads'] = row.get('threads', 0) if fresh else None
-                queue['processing_known_threads'] = row.get('known_threads', 0) if fresh else None
-                queue['processing_unknown_jobs'] = row.get('unknown_jobs', 0) if fresh else None
+                queue['processing_threads'] = row.get('threads', 0)
+                queue['processing_known_threads'] = row.get('known_threads', 0)
+                queue['processing_unknown_jobs'] = row.get('unknown_jobs', 0)
+                queue['processing_threads_at'] = row.get('threads_at')
             counts = [q['processing_threads'] for q in site['queues']]
             site['processing_threads'] = sum(counts) if all(n is not None for n in counts) else None
             for executor in site.get('execute_sites', []):
                 matches = [r for name, r in (measured.get('executors') or {}).items()
                            if (_uncut_site(name) or 'not reported') == executor['name']]
-                executor['processing_threads'] = (sum(r['known_threads'] for r in matches)
-                    if fresh and not any(r['unknown_jobs'] for r in matches) else None)
+                counts = [r.get('threads') for r in matches]
+                executor['processing_threads'] = (sum(counts) if all(n is not None for n in counts)
+                                                  else sum(r['known_threads'] for r in matches))
         value['processing_observed_at'] = measured.get('observed_at')
     except Exception:
         logger.exception('Payload processing activity unavailable')

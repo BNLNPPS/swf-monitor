@@ -84,8 +84,11 @@ use one thread, while an unreported multicore thread width remains unknown.
 Event Service jobs count work lanes with assigned units in the shipped
 harness record. Each lane runs one single-threaded payload; empty lanes and
 ended harnesses contribute zero. Records older than ten minutes are unknown.
-An incomplete total displays its known contribution; hover identifies the
-missing fresh measurements.
+A count is never blanked. While any job of a queue or execution site is
+unmeasured, as an Event Service job is before its first shipped record, the
+last complete count stands until a complete one replaces it (`threads_at`
+carries its measurement time); with none yet, the known contribution shows.
+The latest measured counts also stand when the minute cache is late.
 Assigned-unit occupancy includes unit startup and finalization; it measures
 payload parallelism, rather than instantaneous CPU utilization. Pilot supply
 retains worker counts. The shared `processing_activity:v1` minute cache supplies

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from django.db import connections, transaction
 
 from .cached_product import get_product
-from .models import EpicProdJob
+from .models import CachedProduct, EpicProdJob
 from .panda.queries import PANDA_SCHEMA
 
 KEY = 'processing_activity:v1'
@@ -67,8 +67,23 @@ def build():
             bucket['jobs'] += 1
             bucket['unknown_jobs'] += threads is None
             bucket['known_threads'] += threads or 0
-    for bucket in [*queues.values(), *executors.values()]:
-        bucket['threads'] = None if bucket['unknown_jobs'] else bucket['known_threads']
+    # A count is never blanked. While any job of a queue or execution site is
+    # unmeasured (an Event Service job before its first shipped record, a
+    # multicore job without its thread report), the last complete count
+    # stands until a complete one replaces it; with none, the known part.
+    previous = (CachedProduct.objects.filter(key=KEY)
+                .values_list('value', flat=True).first()) or {}
+    for scope, buckets in (('queues', queues), ('executors', executors)):
+        held = previous.get(scope) or {}
+        for name, bucket in buckets.items():
+            if not bucket['unknown_jobs']:
+                bucket['threads'], bucket['threads_at'] = bucket['known_threads'], now.isoformat()
+                continue
+            last = held.get(name) or {}
+            if last.get('threads') is not None and last.get('threads_at'):
+                bucket['threads'], bucket['threads_at'] = last['threads'], last['threads_at']
+            else:
+                bucket['threads'], bucket['threads_at'] = bucket['known_threads'], None
     return {'queues': dict(queues), 'executors': dict(executors), 'observed_at': now.isoformat()}
 
 
