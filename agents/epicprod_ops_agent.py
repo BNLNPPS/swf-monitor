@@ -388,6 +388,7 @@ SNAPPER_SCHEDULER_INITIAL_DELAY = int(os.environ.get("EPICPROD_SNAPPER_INITIAL_D
 # The capture's own background pool, apart from the default one that slow
 # production operations fill.
 SNAPPER_QUEUE = 'snapper'
+OPS_BACKGROUND_WORKERS = 16     # threads per background pool (SWF_AGENT_MAX_WORKERS overrides)
 
 # Dedicated namespace config shipped beside the agent. A fixed 'prodops' namespace
 # makes the singleton identifiable in the monitor and lets callers address it
@@ -438,6 +439,13 @@ class EpicProdOpsAgent(BaseAgent):
         # System-level singleton (not a per-user testbed agent): its namespace is
         # the fixed 'prodops' from PRODOPS_CONFIG, so it is identifiable in the
         # monitor and callers address it explicitly. See docs/EPICPROD_OPS.md.
+        # Each background pool's threads: BaseAgent's default of four held
+        # the day's submissions, Moves, drains and sweeps (2026-10-26: 112
+        # submissions and 77 task operations in 24 h) and queued the rest
+        # behind them for minutes. The doers are subprocesses that mostly
+        # wait on PanDA, Rucio and JLab; sixteen fit the host (8 cores, 15 GB)
+        # and both databases with room to spare.
+        os.environ.setdefault('SWF_AGENT_MAX_WORKERS', str(OPS_BACKGROUND_WORKERS))
         super().__init__(agent_type="PRODOPS", subscription_queue=OPS_QUEUE,
                          config_path=str(PRODOPS_CONFIG))
         self._deliberate = False
