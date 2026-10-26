@@ -86,7 +86,7 @@ def build(full=False):
     row = CachedProduct.objects.filter(key=PRODUCT_KEY).first()
     previous = (row.value or {}).get('daily', []) if row else []
     start = START if full or not previous else max(START, now.date() - timedelta(days=7))
-    recent = query_days(start, now.date() + timedelta(days=1))
+    recent = query_days(start, now.date() + timedelta(days=1), production=True)
     if full and previous:
         if not recent:
             raise RuntimeError('Full efficiency reconciliation returned no source history')
@@ -129,7 +129,7 @@ def _dashboard_site(row):
 def build_current():
     end = datetime.now(timezone.utc)
     start = end - timedelta(hours=24)
-    rows = query_days(start, end)
+    rows = query_days(start, end, production=True)
     sites = {sid: _delivery_summary([row for row in rows if _dashboard_site(row) == sid], 1)
              for sid, _, _ in DASHBOARD_SITES}
     return {**_delivery_summary(rows, 1), 'sites': sites,
