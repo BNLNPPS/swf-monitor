@@ -26,3 +26,8 @@ is reaped after losing its heartbeat.
 
 The report transport and range accounting are documented in swf-epicprod
 `docs/JOB_REPORTING.md` and `docs/NODE_EVENT_DISPATCHER.md`.
+
+Task range totals exclude a cancelled historical jobset copy when the same
+file/process range has a completed consumer. Consumer outcomes remain visible;
+a cancelled range without completed work remains cancelled. Normal ended
+harness observations are labelled final records rather than running snapshots.

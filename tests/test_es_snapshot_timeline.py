@@ -6,7 +6,7 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'swf_monitor_project.settings')
 import django
 django.setup()
 
-from monitor_app.panda.queries import es_record_report, es_slot_timeline
+from monitor_app.panda.queries import es_record_report, es_slot_timeline, _es_range_query
 from monitor_app.es_plot import slot_plot_svg
 
 
@@ -54,6 +54,9 @@ class SnapshotTimelineTest(unittest.TestCase):
         es = es_record_report(dict(self.record, ended_at=1300), 'finished')
         self.assertIsNone(es['preempted'])
         self.assertFalse(es['live'])
+        timeline = es_slot_timeline(dict(self.job, endtime='1970-01-01T00:21:40Z'), es)
+        self.assertTrue(timeline['normal_end'])
+        self.assertFalse(timeline['snapshot_stale'])
 
     def test_lost_worker_observation_outlives_stale_panda_endtime(self):
         es = es_record_report(self.record, 'finished', loss_confirmed=True)
@@ -76,6 +79,29 @@ class SnapshotTimelineTest(unittest.TestCase):
         self.assertTrue(all(u['status'] not in ('interrupted', 'unshipped')
                             for row in timeline['rows'] for u in row['units']))
 
+
+
+    def test_completed_successor_supersedes_cancelled_bookkeeping_only(self):
+        # Range1 was recovered by consumer102; range2 really remains cancelled.
+        # Range3 remains ready under the current jobset.
+        data = [
+            (1, 101, 10, 1, 4, 1, 1, None, 1, None, None),
+            (1, 101, 10, 2, 4, 2, 2, None, 1, None, None),
+            (1, 102, 10, 1, 3, 1, 1, None, 1, None, None),
+            (1, 103, 10, 3, 0, 3, 3, None, 1, None, None),
+        ]
+        class Cursor:
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def execute(self, *args): pass
+            def fetchall(self): return data
+        class Connection:
+            def cursor(self): return Cursor()
+        result = _es_range_query(Connection(), 'test', [], 0, consumer_ids=[102])
+        self.assertEqual(result['events_requested'], 3)
+        self.assertEqual(result['events_done'], 1)
+        self.assertEqual({c['status']: c['n'] for c in result['range_counts']}, {0: 1, 4: 1})
+        self.assertEqual(result['attempt_counts'][0]['n'], 1)
 
 if __name__ == '__main__':
     unittest.main()

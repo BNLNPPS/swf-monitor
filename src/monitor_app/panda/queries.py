@@ -3474,7 +3474,11 @@ def _es_range_query(conn, where_sql, params, cap, consumer_ids=None):
                     'error_code': ecode,
                     'error_diag': ediag,
                 })
-    for _pid, status, attempt in latest_bookkeeping.values():
+    for key, (_pid, status, attempt) in latest_bookkeeping.items():
+        # A completed successor owns the range now. An earlier jobset's
+        # cancelled copy is history, not a cancellation of the saved work.
+        if status == 4 and distinct[key][1]:
+            continue
         _count(range_counts, (status,), status, attempt, None)
     return {
         'total': total,
@@ -3825,6 +3829,7 @@ def es_slot_timeline(job, es):
         'cut_real': bool((es.get('preempted') or {}).get('real')),
         'live': bool(es.get('live')),
         'incomplete': bool(es.get('incomplete')),
+        'normal_end': bool(es.get('ended_at')),
         'observed_at': datetime_from_epoch(es['observed_at']).isoformat() if es.get('observed_at') else None,
         'snapshot_stale': bool(es.get('live') and es.get('observed_at') and
                                timezone.now().timestamp() - float(es['observed_at']) > ES_SNAPSHOT_STALE_S),
