@@ -636,20 +636,6 @@
     document.querySelectorAll('#flow > .flowcell').forEach((cell, i) => {
       if (values[i]) cell.querySelectorAll('.flowrow b').forEach((node, j) => text(node, number(values[i][j])));
     });
-    // A queue whose front feed an operator switched off reads OFF in the
-    // pressure-front cell, with the reason in its hover.
-    const frontRow = document.querySelector('#flow > .flowcell .flowrow');
-    if (frontRow) {
-      frontRow.querySelectorAll('.feed-off').forEach(node => node.remove());
-      (front.feeds_off || []).forEach(item => {
-        const off = document.createElement('div');
-        off.className = 'feed-off';
-        off.title = (item.name || item.queue) + ': front feed off' + (item.reason ? ' (' + item.reason + ')' : '');
-        const b = document.createElement('b'); b.className = 'red'; b.textContent = 'OFF';
-        const span = document.createElement('span'); span.textContent = item.name || item.queue;
-        off.append(b, ' ', span); frontRow.append(off);
-      });
-    }
     sites.forEach(site => renderSite(site, record.trends && record.trends.sites.find(row => row.id === site.id)));
     panels.forEach((panel, name) => {
       if (panel.querySelector('.metric') && !sites.some(site => (aliases[site.id] || site.name) === name))
