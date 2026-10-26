@@ -2056,8 +2056,11 @@ def _google_pilot_display(site, cfg):
     fresh = (age is not None and 0 <= age <= REPORT_STALE_SECONDS
              and cap.get('queue') == queue['id'])
     workers = cap.get('workers') if fresh else None
+    if workers is not None and (workers.get('error') or not all(
+            isinstance(workers.get(key), int) for key in ('pending', 'running'))):
+        workers = None
     latest = (workers or {}).get('latest') or {}
-    state = 'red' if fresh and latest.get('failed') else 'amber'
+    state = 'red' if latest.get('failed') else 'green' if workers is not None else 'amber'
     if workers is not None:
         pending, running = workers.get('pending'), workers.get('running')
         worker_text = f'{pending} pilots waiting, {running} running'
@@ -2070,7 +2073,8 @@ def _google_pilot_display(site, cfg):
     else:
         worker_text = 'pilot supply unknown'
         queue['pilots'] = None
-    queue['health'] = _health({'status': _part('amber', queue['status'], queue['status']),
+    status_level = 'green' if queue['status'] == 'live' else 'blue' if queue['status'] == 'commissioning' else 'grey'
+    queue['health'] = _health({'status': _part(status_level, queue['status'], queue['status']),
                                'gke_workers': _part(state, None, worker_text)})
     queue['status_reason'] = queue['status']
     site['health'] = {'level': _worst(q['health']['level'] for q in site['queues']),

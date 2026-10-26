@@ -38,7 +38,10 @@ production panel content: shared pillars, running and queued cores, outcomes,
 pilot supply and trend history. Both displays select queues through the
 feed's `production_display` flag, preserving inactive JLab commissioning.
 Google's standard queue remains off. ES runtime and controller diagnostics
-remain in operator views. Canada, Perlmutter and JLab use the same standard
+remain in operator views. Google's status bullet is green when its production
+queue is live and the controller reports healthy workers. Missing or stale
+worker readings are amber; reported worker failures are red.
+Canada, Perlmutter and JLab use the same standard
 panel content in their existing dashboard positions, with inactive status
 labels retained. `site.production_panel` controls the presentation independently
 of queue activity. Reported counts remain visible while inactive; missing
