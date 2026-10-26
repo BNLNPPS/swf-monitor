@@ -1,5 +1,6 @@
 """Successful wall-time efficiency history (docs/COMPUTE_EFFICIENCY.md)."""
 from collections import defaultdict
+import re
 from datetime import date, datetime, timedelta, timezone
 
 from django.db import connections, transaction
@@ -15,9 +16,34 @@ START = date(2026, 5, 1)
 TTL = 3600
 INCIDENT_TASK = 40856
 MIN_HOURS = 50
+# An Event Service queue's jobs from before its move to production were its
+# commissioning trials, whatever their source label (Torre, 2026-10-26), and
+# stay out of the production sample. SysConfig
+# ``compute_efficiency.commissioning_until`` {queue: ISO time}.
+DEFAULT_COMMISSIONING_UNTIL = {
+    'BNL_ePIC_GOOGLE_es': '2026-10-25T21:36:37+00:00',
+    'NERSC_Perlmutter_epic_es': '2026-10-26T12:20:35+00:00',
+}
 DASHBOARD_SITES = (('osg', 'OSG', '#6fcad2'),
                    ('perlmutter', 'Perlmutter', '#e3b954'),
                    ('grex', 'GREX', '#7fce95'))
+
+
+def commissioning_until():
+    """{queue: naive UTC time} from SysConfig; malformed entries are skipped."""
+    from .models import SysConfig
+    value = SysConfig.get_setting('compute_efficiency.commissioning_until',
+                                  DEFAULT_COMMISSIONING_UNTIL)
+    out = {}
+    for queue, stamp in (value.items() if isinstance(value, dict) else ()):
+        try:
+            at = datetime.fromisoformat(str(stamp))
+        except ValueError:
+            continue
+        if re.fullmatch(r'[A-Za-z0-9_.-]+', str(queue)):
+            out[queue] = (at.astimezone(timezone.utc).replace(tzinfo=None)
+                          if at.tzinfo else at)
+    return out
 
 
 def query_days(start, end, production=False, finished_only=False):
@@ -39,6 +65,10 @@ def query_days(start, end, production=False, finished_only=False):
         where += """ AND workinggroup='EIC'
             AND (prodsourcelabel='managed' OR processingtype='epicproduction')
             AND COALESCE(processingtype,'') <> 'canary'"""
+        # Validated names and parsed times, so they are written in place.
+        for queue, at in commissioning_until().items():
+            where += (f" AND NOT (computingsite = '{queue}'"
+                      f" AND creationtime < '{at.isoformat(sep=' ')}')")
     if finished_only:
         where += " AND jobstatus='finished'"
     # PanDA stores UTC timestamps without a timezone; datetime bounds retain

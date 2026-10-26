@@ -3,7 +3,11 @@
 The Sites menu's **Compute efficiency** page (`panda/compute-efficiency/`) shows
 successful-job core-hours divided by the core-hours of all ended jobs.
 Both it and the dashboard count production jobs only: EIC managed jobs and
-legacy `epicproduction` jobs; trials (processing type `canary`) are excluded.
+legacy `epicproduction` jobs; trials (processing type `canary`) are excluded,
+and so are an Event Service queue's jobs created before its move to production,
+which were its commissioning trials whatever their label (SysConfig
+`compute_efficiency.commissioning_until`: Google ES 2026-10-25 17:36 ET,
+Perlmutter ES 2026-10-26 08:20 ET).
 It contains a site-by-period heatmap with core-hour volumes and selectable
 trend lines. The PanDA hub and the dashboard's Computing now heading link
 to this history.
