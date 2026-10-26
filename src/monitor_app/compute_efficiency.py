@@ -24,7 +24,7 @@ DEFAULT_COMMISSIONING_UNTIL = {
     'BNL_ePIC_GOOGLE_es': '2026-10-25T21:36:37+00:00',
     'NERSC_Perlmutter_epic_es': '2026-10-26T12:20:35+00:00',
 }
-DASHBOARD_SITES = (('osg', 'OSG', '#6fcad2'),
+DASHBOARD_SITES = (('osg', 'OSG', '#b48ee8'),
                    ('perlmutter', 'Perlmutter', '#e3b954'),
                    ('grex', 'GREX', '#7fce95'))
 

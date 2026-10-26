@@ -14,7 +14,7 @@ COMPONENT = 'production_compute'
 PUBLISHER = 'swf-monitor:production-compute'
 POLICY = 'production-daily-core-hours-v1'
 DAYS = 90
-SITES = (('osg', 'OSG', '#6ca8e8'), ('grex', 'GREX', '#7fce95'),
+SITES = (('osg', 'OSG', '#b48ee8'), ('grex', 'GREX', '#7fce95'),
          ('perlmutter', 'Perlmutter', '#e3b954'))
 REGISTRATION = {
     'title': 'Daily production compute',

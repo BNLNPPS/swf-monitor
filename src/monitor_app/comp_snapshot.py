@@ -1329,12 +1329,15 @@ def build():
 
     ready = b.part('ready_tasks', lambda: _ready_tasks(), None)
     released = b.part('released', lambda: _released(b.hour_ago), None)
-    # Queues the front regulates whose feed an operator has switched off:
-    # the dashboard shows each as OFF beside the front's counts.
+    # Queues the front regulates whose feed an operator has switched off,
+    # with the reason recorded (front.queue.<q>.feed_off_reason): the
+    # dashboard shows each as OFF beside the front's counts. Queues fed by
+    # their own feeders keep the switch off by design and carry no reason.
     def feeds_off():
         from swf_epicprod.queues import regulated
-        return [{'queue': q, 'name': short_name(q)} for q in regulated()
-                if cfg.get(f'front.queue.{q}.feed') is False]
+        return [{'queue': q, 'name': short_name(q), 'reason': cfg.get(f'front.queue.{q}.feed_off_reason')}
+                for q in regulated()
+                if cfg.get(f'front.queue.{q}.feed') is False and cfg.get(f'front.queue.{q}.feed_off_reason')]
     front = {
         'ready_tasks': ready, 'released_1h': released,
         'feeds_off': b.part('feeds_off', feeds_off, []),
