@@ -29,6 +29,15 @@ class RegulationTests(SimpleTestCase):
         self.assertIsNone(effective_waiting_limit({}, dict(old, queue_limit=-1), now))
         self.assertEqual(_pilot_supply_part(None, 1000, 0, 0)['level'], 'amber')
 
+    def test_a_queue_no_harvester_reports_reads_panda_workers(self):
+        # NERSC's harvester sends no report: one running worker with a job
+        # queued behind it is the one-node design, not a supply failure.
+        part = _pilot_supply_part(None, 1, 0, 0, workers=(1, 0))
+        self.assertEqual(part['level'], 'green')
+        self.assertIn('1 worker(s) running', part['note'])
+        self.assertEqual(_pilot_supply_part(None, 1, 0, 0, workers=(0, 0))['level'], 'amber')
+        self.assertEqual(_pilot_supply_part(None, 0, 0, 0)['level'], 'grey')
+
     def test_failed_count_or_stale_demand_cannot_be_green(self):
         p = {'report_age_seconds': 1, 'waiting': 600, 'limit': 600,
              'error': 'worker count query failed'}

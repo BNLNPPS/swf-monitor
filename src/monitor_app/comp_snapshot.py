@@ -165,13 +165,19 @@ def _pilot_display(pilots):
                                 'harvester' if waiting is not None else None))
 
 
-def _pilot_supply_part(p, queued, started_1h, submitted_1h):
+def _pilot_supply_part(p, queued, started_1h, submitted_1h, workers=None):
     """Whether pilots keep reaching the queue (docs/COMP_SNAPSHOT.md, Pilot
     supply). Harvester holds new pilots back against its own count of
     those waiting, so a count the schedd no longer bears out stops supply
-    while the queue reads full."""
+    while the queue reads full. ``workers`` (running, submitted) is PanDA's
+    own worker table, read for a queue no harvester report names."""
     if not p:
-        return _part('amber' if queued else 'grey', None, 'no harvester report names the queue')
+        running, submitted = workers or (0, 0)
+        if running or submitted:
+            return _part('green', submitted, f'no harvester report; PanDA records {running} worker(s) '
+                                             f'running and {submitted} submitted')
+        return _part('amber' if queued else 'grey', None, 'no harvester report names the queue, '
+                                                          'and PanDA records no worker running or submitted')
     age = p.get('report_age_seconds')
     stale_seconds = p.get('report_stale_seconds', REPORT_STALE_SECONDS)
     if age is None or age > stale_seconds:
@@ -677,6 +683,18 @@ class _Build:
         h = self.hour_ago
         return {site: (int(s or 0), int(n or 0)) for site, s, n in _rows(sql, (h, h, h, h))}
 
+    def workers_now(self):
+        """Harvester workers per queue now, from PanDA's own table: (running,
+        submitted). The pilot-supply reading of a queue whose harvester
+        sends us no report (NERSC's, run by PanDA operations)."""
+        sql = f'''SELECT computingsite,
+                         SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END),
+                         SUM(CASE WHEN status = 'submitted' THEN 1 ELSE 0 END)
+                  FROM "{self.S}"."harvester_workers"
+                  WHERE status IN ('running', 'submitted') AND submittime >= %s GROUP BY 1'''
+        return {site: (int(r or 0), int(s or 0))
+                for site, r, s in _rows(sql, (self.now - timedelta(days=7),))}
+
     def queue_status(self, names):
         sql = f'''SELECT panda_queue, data->>'status' FROM "{self.S}"."schedconfig_json"
                   WHERE panda_queue = ANY(%s)'''
@@ -1174,7 +1192,8 @@ def build():
     ended = b.part('ended', lambda: b.ended('computingsite'), {})
     failures = b.part('failures', b.top_failures, {})
     opened = b.part('harvester', b.opened, {})
-    pandastatus = b.part('queue_status', lambda: b.queue_status(names), {})
+    workers = b.part('harvester_workers', b.workers_now, {})
+    pandastatus =b.part('queue_status', lambda: b.queue_status(names), {})
     decisions = b.part('front', lambda: b.front_decisions(names), {})
     pool = b.part('osg_pool', b.osg_pool, None)
     pilots = b.part('pilots', b.pilots, {})
@@ -1235,7 +1254,7 @@ def build():
                     supply = _gke_workers(cfg)[2]
                 else:
                     supply = _pilot_supply_part(pilots.get(q), int(c.get('not_started') or 0),
-                                                *opened.get(q, (0, 0)))
+                                                *opened.get(q, (0, 0)), workers=workers.get(q))
                 health = _health({'prod_activity': activity, 'canary': canary_part,
                                   'snapper_errors': snap, 'pilot_supply': supply})
             else:
@@ -1310,8 +1329,15 @@ def build():
 
     ready = b.part('ready_tasks', lambda: _ready_tasks(), None)
     released = b.part('released', lambda: _released(b.hour_ago), None)
+    # Queues the front regulates whose feed an operator has switched off:
+    # the dashboard shows each as OFF beside the front's counts.
+    def feeds_off():
+        from swf_epicprod.queues import regulated
+        return [{'queue': q, 'name': short_name(q)} for q in regulated()
+                if cfg.get(f'front.queue.{q}.feed') is False]
     front = {
         'ready_tasks': ready, 'released_1h': released,
+        'feeds_off': b.part('feeds_off', feeds_off, []),
         'enabled': cfg.get('front.enabled'), 'mode': cfg.get('front.mode'),
         'jedi_throttled': cfg.get('front.jedi_throttled'),
         'link': f'{PUBLIC}/panda/front/#ready',

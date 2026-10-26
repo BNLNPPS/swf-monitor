@@ -270,9 +270,17 @@ A queue's parts:
   It is `red` also when jobs are queued and in the last hour no pilot
   waited, was submitted or started. The two schedd rules need the OSG
   submit reporter's count and apply to the OSG queues only. `grey` when
-  no harvester report names the queue, the report is more than fifteen
-  minutes old, or the limit harvester applies is not yet reported;
-  otherwise `green`, with the counts in the note.
+  the report is more than fifteen minutes old or the limit harvester
+  applies is not yet reported; otherwise `green`, with the counts in the
+  note.
+
+  A queue no harvester report names reads PanDA's own worker table
+  instead (`harvester_workers`, the workers running or submitted now):
+  NERSC's harvester is PanDA operations' and reports nothing to us, and
+  the Event Service queue's one worker at a time, with the next job
+  queued behind it, read `amber` until 26 October. `green` with a worker
+  running or submitted; otherwise `amber` with jobs queued, `grey`
+  without.
 
   A queue the ops agent supplies with pilots instead of harvester
   (swf-epicprod `queues.AGENT_SUPPLIED`: BNL_ePIC_GOOGLE_es) reads its
