@@ -274,6 +274,13 @@ A queue's parts:
   minutes old, or the limit harvester applies is not yet reported;
   otherwise `green`, with the counts in the note.
 
+  A queue the ops agent supplies with pilots instead of harvester
+  (swf-epicprod `queues.AGENT_SUPPLIED`: BNL_ePIC_GOOGLE_es) reads its
+  part from the GKE controller's worker observation, the same reading as
+  its `gke_workers` part: `red` when the controller's latest worker
+  failed, `amber` when no fresh observation exists, otherwise `green`
+  with its waiting and running pilots.
+
 A site's health is the worst of its queues'. An execute site's health
 has the `prod_activity` part only.
 

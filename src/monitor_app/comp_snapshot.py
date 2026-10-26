@@ -1157,6 +1157,7 @@ def build():
     """Build the record (docs/COMP_SNAPSHOT.md, schema 1)."""
     from monitor_app.models import SysConfig
     from monitor_app.panda.census import queue_census
+    from swf_epicprod import queues as registry
 
     t0 = time.monotonic()
     b = _Build()
@@ -1225,8 +1226,11 @@ def build():
                 else:
                     snap = _part('green', e['failed'],
                                  f'top: {top[0][1]} x {top[0][0]}' if top else 'no failures')
-                supply = _pilot_supply_part(pilots.get(q), int(c.get('not_started') or 0),
-                                            *opened.get(q, (0, 0)))
+                if q in registry.AGENT_SUPPLIED:
+                    supply = _gke_workers(cfg)[2]
+                else:
+                    supply = _pilot_supply_part(pilots.get(q), int(c.get('not_started') or 0),
+                                                *opened.get(q, (0, 0)))
                 health = _health({'prod_activity': activity, 'canary': canary_part,
                                   'snapper_errors': snap, 'pilot_supply': supply})
             else:
@@ -2040,30 +2044,39 @@ def _dashboard_campaign():
             'configurations': totals.get('configurations')}
 
 
-def _google_pilot_display(site, cfg):
-    """Supply counts for the ordinary production presentation; diagnostics stay in the controller record."""
+def _gke_workers(cfg, queue='BNL_ePIC_GOOGLE_es'):
+    """The GKE controller's fresh worker reading for its queue, its age, and
+    the pilot-supply part it gives (swf-epicprod GKE_PILOT_FLOW.md): the
+    controller, not Harvester, supplies this queue."""
     from monitor_app.models import CachedProduct
     from swf_epicprod.gke_pilots import CAPABILITY_KEY
 
-    queue = next((q for q in site['queues'] if q['id'] == 'BNL_ePIC_GOOGLE_es'), None)
-    if not queue or not queue.get('production_display'):
-        return
-    limit = int(cfg.get('gke_pilots.max_pods') or 0)
     row = CachedProduct.objects.filter(key=CAPABILITY_KEY).first()
     cap = (row.value or {}) if row else {}
     age = ((timezone.now() - row.built_at).total_seconds()
            if row and row.built_at else None)
     fresh = (age is not None and 0 <= age <= REPORT_STALE_SECONDS
-             and cap.get('queue') == queue['id'])
+             and cap.get('queue') == queue)
     workers = cap.get('workers') if fresh else None
     if workers is not None and (workers.get('error') or not all(
             isinstance(workers.get(key), int) for key in ('pending', 'running'))):
         workers = None
     latest = (workers or {}).get('latest') or {}
     state = 'red' if latest.get('failed') else 'green' if workers is not None else 'amber'
+    text = (f"{workers['pending']} pilots waiting, {workers['running']} running"
+            if workers is not None else 'pilot supply unknown')
+    return workers, age, _part(state, None, text)
+
+
+def _google_pilot_display(site, cfg):
+    """Supply counts for the ordinary production presentation; diagnostics stay in the controller record."""
+    queue = next((q for q in site['queues'] if q['id'] == 'BNL_ePIC_GOOGLE_es'), None)
+    if not queue or not queue.get('production_display'):
+        return
+    limit = int(cfg.get('gke_pilots.max_pods') or 0)
+    workers, age, workers_part = _gke_workers(cfg, queue['id'])
     if workers is not None:
         pending, running = workers.get('pending'), workers.get('running')
-        worker_text = f'{pending} pilots waiting, {running} running'
         queue['pilots'] = {'report': 'gke-pilots', 'waiting': pending,
                            'waiting_current': pending, 'waiting_source': 'gke-pilots',
                            'running': running, 'limit': limit,
@@ -2071,11 +2084,10 @@ def _google_pilot_display(site, cfg):
                            'report_stale_seconds': REPORT_STALE_SECONDS,
                            'limit_source': 'controller', 'error': None}
     else:
-        worker_text = 'pilot supply unknown'
         queue['pilots'] = None
     status_level = 'green' if queue['status'] == 'live' else 'blue' if queue['status'] == 'commissioning' else 'grey'
     queue['health'] = _health({'status': _part(status_level, queue['status'], queue['status']),
-                               'gke_workers': _part(state, None, worker_text)})
+                               'gke_workers': workers_part})
     queue['status_reason'] = queue['status']
     site['health'] = {'level': _worst(q['health']['level'] for q in site['queues']),
                       'parts': {q['id']: q['health']['level'] for q in site['queues']}}
