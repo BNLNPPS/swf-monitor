@@ -283,15 +283,16 @@
     if (partialThreads) values[0] = sum('processing_known_threads');
     // An Event Service site's work arrives close by close and its jobs finish
     // once in hours, so its second number is the last hour's events, in
-    // thousands, from the closes that stood (PROD_DASHBOARD.md).
+    // millions to one decimal, from the closes that stood (PROD_DASHBOARD.md).
     const eventService = queues.length > 0 && queues.every(q => q.event_service);
-    const shown = values.slice();
-    if (eventService) shown[1] = sum('events_1h') == null ? null : sum('events_1h') / 1000;
-    panel.querySelectorAll('.metric b').forEach((node, i) => text(node, number(shown[i])));
+    const millions = value => value == null ? '—' : (value / 1e6).toLocaleString('en-US',
+      {minimumFractionDigits: 1, maximumFractionDigits: 1});
+    panel.querySelectorAll('.metric b').forEach((node, i) =>
+      text(node, eventService && i === 1 ? millions(sum('events_1h')) : number(values[i])));
     const metrics = panel.querySelectorAll('.metric');
     if (metrics[1]) {
       const unit = metrics[1].querySelector('span');
-      if (unit) unit.textContent = eventService ? 'kEvents/1h' : 'finish/1h';
+      if (unit) unit.textContent = eventService ? 'Mevents/1h' : 'finish/1h';
       const unknown = sum('events_unknown_jobs');
       metrics[1].title = eventService
         ? number(sum('events_1h')) + ' events in Event Service closes that stood in the last hour' +
