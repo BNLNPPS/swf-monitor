@@ -77,7 +77,7 @@ def _live_counts():
 
 # The production tasks sent to a queue and not ended, by processing type
 # (_tasks_active says why): one selection for the front's count, which also
-# leaves out paused tasks, and for the list behind it (sent_production_tasks).
+# leaves out paused tasks, and for the lists behind it (sent_production_tasks_by_queue).
 _SENT_TASKS_WHERE = (
     '"processingtype" = \'epicproduction\' AND ("status" IS NULL OR "status" NOT IN ('
     + ', '.join(['%s'] * len(TASK_TERMINAL_STATUSES)) + '))')
@@ -106,22 +106,31 @@ def _tasks_active():
         return {str(site): int(n or 0) for site, n in cursor.fetchall()}
 
 
-def sent_production_tasks(queues):
-    """(JEDI task id, status) of the production tasks sent to ``queues`` and
-    not ended, paused ones included, newest first: the selection the front counts
-    (_tasks_active, which leaves out paused tasks). The PCS catalog's queue
-    view lists the PCS tasks behind them."""
-    queues = [q for q in queues if q]
-    if not queues:
-        return []
+def sent_production_tasks_by_queue():
+    """{queue: [(JEDI task id, status), ...]} of every production task sent to
+    a queue and not ended, paused ones included, newest first: the selection
+    the front counts (_tasks_active, which leaves out paused tasks). The PCS
+    page of production tasks in flight lists the PCS tasks behind them."""
     sql = f"""
-        SELECT "jeditaskid", "status" FROM "{PANDA_SCHEMA}"."jedi_tasks"
-        WHERE {_SENT_TASKS_WHERE} AND "site" IN ({', '.join(['%s'] * len(queues))})
+        SELECT COALESCE("site", 'unknown'), "jeditaskid", "status"
+        FROM "{PANDA_SCHEMA}"."jedi_tasks"
+        WHERE {_SENT_TASKS_WHERE}
         ORDER BY "jeditaskid" DESC
     """
+    out = {}
     with connections['panda'].cursor() as cursor:
-        cursor.execute(sql, list(TASK_TERMINAL_STATUSES) + queues)
-        return [(int(task_id), status or '') for task_id, status in cursor.fetchall()]
+        cursor.execute(sql, list(TASK_TERMINAL_STATUSES))
+        for queue, task_id, status in cursor.fetchall():
+            out.setdefault(str(queue), []).append((int(task_id), status or ''))
+    return out
+
+
+def sent_production_tasks(queues):
+    """(JEDI task id, status) of the production tasks sent to ``queues`` and
+    not ended, newest first (sent_production_tasks_by_queue)."""
+    by_queue = sent_production_tasks_by_queue()
+    return sorted((row for q in dict.fromkeys(queues) for row in by_queue.get(q, [])),
+                  key=lambda row: -row[0])
 
 
 def ungenerated_by_task():
