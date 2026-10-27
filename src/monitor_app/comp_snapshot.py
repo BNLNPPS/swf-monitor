@@ -50,11 +50,9 @@ INACTIVE_SITE_LABELS = {
     'compute-canada': 'Authentication block',
     'jlab': 'Cybersecurity block',
 }
-# A live site's standing note: Perlmutter runs Event Service production on
-# one node (swf-epicprod docs/NERSC_PERLMUTTER.md, Production).
-LIVE_SITE_LABELS = {
-    'nersc': 'Single node',
-}
+# A live site's standing note. None stands now: Perlmutter's nodes show in its
+# title row ("1 node x 128 cores", PROD_DASHBOARD.md).
+LIVE_SITE_LABELS = {}
 
 # GREX runs eight pilots per Slurm worker (2026-10-20).
 from swf_epicprod.regulation import PILOTS_PER_WORKER

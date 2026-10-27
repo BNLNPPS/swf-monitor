@@ -40,7 +40,7 @@ def dashboard_document(request):
     return render_to_string('monitor_app/prod_dashboard.html', {
         'dashboard_record': record,
         'dashboard_config': config,
-        'dashboard_version': '20261027-es-events',
+        'dashboard_version': '20261027-es-events-2',
     }, request=request)
 
 

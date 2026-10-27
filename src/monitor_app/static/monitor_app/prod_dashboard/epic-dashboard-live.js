@@ -292,6 +292,9 @@
     if (metrics[1]) {
       const unit = metrics[1].querySelector('span');
       if (unit) unit.textContent = eventService ? 'kEvents/1h' : 'finish/1h';
+      // Its label is wider than finish/1h: it keeps its width and the
+      // neighbouring numbers give way, rather than the labels running together.
+      metrics[1].style.flexShrink = eventService ? '0' : '';
       const unknown = sum('events_unknown_jobs');
       metrics[1].title = eventService
         ? number(sum('events_1h')) + ' events in Event Service closes that stood in the last hour' +
