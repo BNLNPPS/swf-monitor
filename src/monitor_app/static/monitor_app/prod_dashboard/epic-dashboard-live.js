@@ -292,7 +292,7 @@
     const metrics = panel.querySelectorAll('.metric');
     if (metrics[1]) {
       const unit = metrics[1].querySelector('span');
-      if (unit) unit.textContent = eventService ? 'Mevents/1h' : 'finish/1h';
+      if (unit) unit.textContent = eventService ? 'Mevts/1h' : 'finish/1h';
       const unknown = sum('events_unknown_jobs');
       metrics[1].title = eventService
         ? number(sum('events_1h')) + ' events in Event Service closes that stood in the last hour' +

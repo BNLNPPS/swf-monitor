@@ -72,7 +72,7 @@ left. Google's and Perlmutter's title rows show their production at the upper
 right, **5 nodes × 14 cores** and **1 node × 128 cores**; Perlmutter's nodes are
 the feeder's own (`perlmutter_production.NODES`), so the row follows when
 production goes to five. An Event Service site, one whose production queues
-are all in the ES close-out's list, shows **Mevents/1h** (millions, one
+are all in the ES close-out's list, shows **Mevts/1h** (millions of events, one
 decimal) in place of finish/1h: the events of the closes that stood in the last hour, from its
 jobs' shipped harness records (`processing_activity`), since its jobs finish
 once in hours. Other site cylinders use
