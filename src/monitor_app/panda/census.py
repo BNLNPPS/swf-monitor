@@ -75,6 +75,14 @@ def _live_counts():
     return out
 
 
+# The production tasks active on a queue: neither ended nor paused, by
+# processing type (_tasks_active says why). One selection for the front's count
+# and for the list behind it (active_production_task_ids).
+_ACTIVE_TASKS_WHERE = (
+    '"processingtype" = \'epicproduction\' AND ("status" IS NULL OR "status" NOT IN ('
+    + ', '.join(['%s'] * len(TASK_TERMINAL_STATUSES)) + ", 'paused'))")
+
+
 def _tasks_active():
     """Per queue, the production tasks pinned to it that have not
     ended and are not paused (canary and other test tasks excluded).
@@ -86,17 +94,29 @@ def _tasks_active():
     operator resumes it, so it does not count toward the front's task
     cap: three tasks paused on 2026-08-17 had held BNL_OSG_EPIC_PROD_1
     at its cap with nothing running."""
-    placeholders = ', '.join(['%s'] * len(TASK_TERMINAL_STATUSES))
     sql = f"""
         SELECT COALESCE("site", 'unknown'), COUNT(*)
         FROM "{PANDA_SCHEMA}"."jedi_tasks"
-        WHERE "processingtype" = 'epicproduction'
-          AND ("status" IS NULL OR "status" NOT IN ({placeholders}, 'paused'))
+        WHERE {_ACTIVE_TASKS_WHERE}
         GROUP BY 1
     """
     with connections['panda'].cursor() as cursor:
         cursor.execute(sql, list(TASK_TERMINAL_STATUSES))
         return {str(site): int(n or 0) for site, n in cursor.fetchall()}
+
+
+def active_production_task_ids(queue):
+    """The JEDI task ids of the production tasks the front counts as active
+    on ``queue`` (_tasks_active, the same selection), newest first: the PCS
+    catalog's queue view lists the PCS tasks behind them."""
+    sql = f"""
+        SELECT "jeditaskid" FROM "{PANDA_SCHEMA}"."jedi_tasks"
+        WHERE {_ACTIVE_TASKS_WHERE} AND "site" = %s
+        ORDER BY "jeditaskid" DESC
+    """
+    with connections['panda'].cursor() as cursor:
+        cursor.execute(sql, list(TASK_TERMINAL_STATUSES) + [queue])
+        return [int(row[0]) for row in cursor.fetchall()]
 
 
 def ungenerated_by_task():
