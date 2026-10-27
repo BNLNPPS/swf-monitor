@@ -3378,12 +3378,15 @@ ES_SNAPSHOT_STALE_S = 600  # Two five-minute collection intervals.
 
 
 def es_events_per_range(splitrule):
-    """The task's events per range, from the ES= term of its split rule.
+    """The task's events per range, from its split rule.
 
     JEDI writes ``nEventsPerWorker`` into ``jedi_tasks.splitrule`` as
-    ``ES=<n>`` (``NE=100,ES=10,...``), which spares the taskparams JSON.
+    ``ES=<n>`` (``NE=100,ES=10,...``), which spares the taskparams JSON. A
+    fine-grained task has no ES= term; with our server's local
+    ``nEventsPerFineGrainedRange`` it carries ``FR=<n>`` instead.
     """
-    m = re.search(r'(?:^|,)ES=(\d+)', splitrule or '')
+    m = (re.search(r'(?:^|,)ES=(\d+)', splitrule or '')
+         or re.search(r'(?:^|,)FR=(\d+)', splitrule or ''))
     return int(m.group(1)) if m else None
 
 

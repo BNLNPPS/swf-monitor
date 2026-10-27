@@ -895,7 +895,9 @@ def main():
                          f"{args.es_measure_queue or args.canary_queue} ({m.get('jobs', 0)} finished "
                          f"jobs in {m.get('days')} days)")
                     return 2
-                args.es_events_per_range = max(1, int(round(args.es_quantum_s / float(m["s_per_event"]))))
+                # Whole ranges a unit: a multiple of --es-fine-range-events.
+                k = max(1, args.es_fine_range_events)
+                args.es_events_per_range = k * max(1, int(round(args.es_quantum_s / float(m["s_per_event"]) / k)))
                 _log(f"unit: {args.es_events_per_range} events = {args.es_quantum_s} s over "
                      f"{m['s_per_event']} s/event ({m['jobs']} finished jobs of the configuration on "
                      f"{m['queue']}, median {m['median_wall_s']} s for {m['median_events']} events)")
@@ -912,9 +914,11 @@ def main():
                 return 2
             deadline = (f"ES_DEADLINE_S={int(args.es_deadline_s)} ES_MARGIN_S={int(args.es_margin_s)} "
                         if args.es_deadline_s else "")
-            # A fine-grained task's ranges are single events; the harness
-            # runs --es-events-per-range of them as one unit (the loss
-            # quantum, the chunk that names the outputs).
+            # A fine-grained task's ranges hold --es-fine-range-events events
+            # (one by default); the harness runs --es-events-per-range events
+            # of them as one unit (the loss quantum, the chunk that names the
+            # outputs). Ranges above one event need a batch-channel pilot,
+            # which counts events; the stock pilot counts ranges.
             per_unit = (f"ES_EVENTS_PER_UNIT={int(args.es_events_per_range)} "
                         if args.es_fine_grained and args.es_events_per_range > 0 else "")
             close = f"ES_CLOSE_S={int(args.es_close_s)} " if args.es_close_s > 0 else ""
