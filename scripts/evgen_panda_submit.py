@@ -191,6 +191,12 @@ def build_task_params(spec, archive_name):
     if spec.get('fineGrainedProc'):
         params.pop('nEventsPerWorker', None)
         params['fineGrainedProc'] = True
+        # Events per range, one unless set: JEDI's nEventsPerFineGrainedRange
+        # (split rule FR), a local patch on the ePIC server until upstream
+        # (distcomp-services panda-server/UPGRADE.md, Local changes on the
+        # host). A row per event bounds a task by JEDI's 600 s job insertion.
+        if int(spec.get('fineGrainedRangeEvents') or 1) > 1:
+            params['nEventsPerFineGrainedRange'] = int(spec['fineGrainedRangeEvents'])
     # An Event Service job runs its payload in one step outside the
     # pilot's container (the harness starts the image itself), so the
     # container's pre- and post-process steps have nothing to do: the

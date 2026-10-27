@@ -673,6 +673,11 @@ def main():
                          "the rest back to the file; --es-events-per-range "
                          "is then the harness's unit, consecutive events "
                          "run as one chunk")
+    ap.add_argument("--es-fine-range-events", type=int, default=1,
+                    help="with --es-fine-grained: events per range "
+                         "(JEDI's nEventsPerFineGrainedRange, split rule FR); "
+                         "one by default; must divide --es-events-per-range, "
+                         "the harness's unit")
     ap.add_argument("--es-quantum-s", type=int, default=0,
                     help="Event Service canary: the loss quantum in seconds; "
                          "the harness's unit is this over the configuration's "
@@ -898,6 +903,13 @@ def main():
                 _log("ERROR: --es-input-dataset needs --es-events-per-range "
                      "(or --es-fine-grained) and --es-events")
                 return 2
+            if args.es_fine_range_events != 1 and (
+                    not args.es_fine_grained or args.es_fine_range_events < 1
+                    or args.es_events_per_range < 1
+                    or args.es_events_per_range % args.es_fine_range_events):
+                _log("ERROR: --es-fine-range-events needs --es-fine-grained and "
+                     "must divide --es-events-per-range")
+                return 2
             deadline = (f"ES_DEADLINE_S={int(args.es_deadline_s)} ES_MARGIN_S={int(args.es_margin_s)} "
                         if args.es_deadline_s else "")
             # A fine-grained task's ranges are single events; the harness
@@ -947,6 +959,7 @@ def main():
                         nEventsPerJob=int(args.es_events),
                         nEventsPerWorker=int(args.es_events_per_range),
                         fineGrainedProc=bool(args.es_fine_grained),
+                        fineGrainedRangeEvents=int(args.es_fine_range_events),
                         # The es_events storage's record reaches the pilot
                         # from the queue's published ddmendpoints.json
                         # (perlmutter/<queue>/, STORAGEDATA_SERVER_URL in
@@ -963,7 +976,7 @@ def main():
                         noLog=True)
             _log(f"event service canary: {args.es_events} events of "
                  f"{args.es_input_dataset} in ranges of "
-                 + (f"1 (fine-grained), units of {args.es_events_per_range or 1}"
+                 + (f"{args.es_fine_range_events} (fine-grained), units of {args.es_events_per_range or 1}"
                     if args.es_fine_grained else str(args.es_events_per_range)))
         _log(f"payload canary {spec['outDS']} on {args.canary_queue}: "
              f"row {spec['csvRows'][0]}"
