@@ -267,9 +267,9 @@ registrations are amber when nonzero and open the jobs with pending or
 unfinished payload registration in the same completion hour.
 
 Each site panel's name has **TASKS** centred beneath it, in the pillar scale's
-9-pixel text: what has been sent to that allocation, the PCS catalog's queue view
-(`pcs/catalog/?site=<name>&queue=<live queues>`) of the production tasks on the
-site's live queues that have not ended, paused ones included.
+9-pixel text: what has been sent to that allocation, the PCS page Prod tasks in
+flight for it (`pcs/in-flight/?site=<name>`), the production tasks sent to its
+queues that have not ended, paused ones included.
 
 Drilldown queue filters come from each snapshot site's queues. The site's
 primary queue page is also selected in the feed. The dashboard's panel-name

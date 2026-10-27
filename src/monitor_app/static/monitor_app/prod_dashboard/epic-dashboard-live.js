@@ -254,9 +254,8 @@
     } finally { resourceLoading = false; }
   }
 
-  // TASKS, centred under a site's name: the PCS catalog's view of what has
-  // been sent to the allocation, the production tasks on the site's live
-  // queues that have not ended (Torre, 2026-10-27).
+  // TASKS, centred under a site's name: Prod tasks in flight for the
+  // allocation, what has been sent to it and not ended (Torre, 2026-10-27).
   function siteTasks(panel, site, queues) {
     const name = panel.querySelector('.panelhead strong');
     if (!name || !queues.length) return;
@@ -268,7 +267,7 @@
     }
     const ids = queues.map(queue => queue.id);
     const link = title.querySelector('.site-tasks');
-    link.href = new URL('pcs/catalog/?' + new URLSearchParams({site: site.name, queue: ids.join(',')}),
+    link.href = new URL('pcs/in-flight/?' + new URLSearchParams({site: site.name}),
       'https://epic-devcloud.org/prod/').href;
     link.target = '_blank'; link.rel = 'noopener';
     link.title = 'Tasks sent to ' + site.name + ' (' + ids.join(', ') + ')';
