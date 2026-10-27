@@ -75,12 +75,13 @@ def _live_counts():
     return out
 
 
-# The production tasks active on a queue: neither ended nor paused, by
-# processing type (_tasks_active says why). One selection for the front's count
-# and for the list behind it (active_production_task_ids).
-_ACTIVE_TASKS_WHERE = (
+# The production tasks sent to a queue and not ended, by processing type
+# (_tasks_active says why): one selection for the front's count, which also
+# leaves out paused tasks, and for the list behind it (sent_production_tasks).
+_SENT_TASKS_WHERE = (
     '"processingtype" = \'epicproduction\' AND ("status" IS NULL OR "status" NOT IN ('
-    + ', '.join(['%s'] * len(TASK_TERMINAL_STATUSES)) + ", 'paused'))")
+    + ', '.join(['%s'] * len(TASK_TERMINAL_STATUSES)) + '))')
+_ACTIVE_TASKS_WHERE = _SENT_TASKS_WHERE + " AND \"status\" IS DISTINCT FROM 'paused'"
 
 
 def _tasks_active():
@@ -105,18 +106,22 @@ def _tasks_active():
         return {str(site): int(n or 0) for site, n in cursor.fetchall()}
 
 
-def active_production_task_ids(queue):
-    """The JEDI task ids of the production tasks the front counts as active
-    on ``queue`` (_tasks_active, the same selection), newest first: the PCS
-    catalog's queue view lists the PCS tasks behind them."""
+def sent_production_tasks(queues):
+    """(JEDI task id, status) of the production tasks sent to ``queues`` and
+    not ended, paused ones included, newest first: the selection the front counts
+    (_tasks_active, which leaves out paused tasks). The PCS catalog's queue
+    view lists the PCS tasks behind them."""
+    queues = [q for q in queues if q]
+    if not queues:
+        return []
     sql = f"""
-        SELECT "jeditaskid" FROM "{PANDA_SCHEMA}"."jedi_tasks"
-        WHERE {_ACTIVE_TASKS_WHERE} AND "site" = %s
+        SELECT "jeditaskid", "status" FROM "{PANDA_SCHEMA}"."jedi_tasks"
+        WHERE {_SENT_TASKS_WHERE} AND "site" IN ({', '.join(['%s'] * len(queues))})
         ORDER BY "jeditaskid" DESC
     """
     with connections['panda'].cursor() as cursor:
-        cursor.execute(sql, list(TASK_TERMINAL_STATUSES) + [queue])
-        return [int(row[0]) for row in cursor.fetchall()]
+        cursor.execute(sql, list(TASK_TERMINAL_STATUSES) + queues)
+        return [(int(task_id), status or '') for task_id, status in cursor.fetchall()]
 
 
 def ungenerated_by_task():

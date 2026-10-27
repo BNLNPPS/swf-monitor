@@ -52,7 +52,8 @@
     body.replaceWith(content);
     const heading = panel.querySelector('.panelhead');
     if (!heading.querySelector(':scope > .dot'))
-      heading.insertBefore(productionModel.querySelector('.panelhead > .dot').cloneNode(true), heading.querySelector('strong'));
+      heading.insertBefore(productionModel.querySelector('.panelhead > .dot').cloneNode(true),
+        heading.querySelector(':scope > .site-title') || heading.querySelector('strong'));
     heading.querySelector('strong').style.fontSize = getComputedStyle(productionModel.querySelector('.panelhead strong')).fontSize;
   }
 
@@ -253,6 +254,26 @@
     } finally { resourceLoading = false; }
   }
 
+  // TASKS, centred under a site's name: the PCS catalog's view of what has
+  // been sent to the allocation, the production tasks on the site's live
+  // queues that have not ended (Torre, 2026-10-27).
+  function siteTasks(panel, site, queues) {
+    const name = panel.querySelector('.panelhead strong');
+    if (!name || !queues.length) return;
+    let title = name.parentElement.classList.contains('site-title') ? name.parentElement : null;
+    if (!title) {
+      title = element('span', 'site-title');
+      name.replaceWith(title);
+      title.append(name, element('a', 'site-tasks', 'TASKS'));
+    }
+    const ids = queues.map(queue => queue.id);
+    const link = title.querySelector('.site-tasks');
+    link.href = new URL('pcs/catalog/?' + new URLSearchParams({site: site.name, queue: ids.join(',')}),
+      'https://epic-devcloud.org/prod/').href;
+    link.target = '_blank'; link.rel = 'noopener';
+    link.title = 'Tasks sent to ' + site.name + ' (' + ids.join(', ') + ')';
+  }
+
   function renderSite(site, trend) {
     const panel = panels.get(aliases[site.id] || site.name);
     if (!panel) return;
@@ -271,6 +292,7 @@
     productionPanel(panel, site);
     const active = (site.queues || []).filter(q => q.production_display || q.status === 'live');
     const queues = active.length ? active : site.queues || [];
+    siteTasks(panel, site, queues);
     const sum = key => sumKnown(queues, key);
     const pilots = queues.map(queue => queue.pilots && queue.pilots.waiting_current);
     const waiting = pilots.some(value => value != null) ? pilots.reduce((n, value) => n + (value || 0), 0) : null;
