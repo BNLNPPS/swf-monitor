@@ -971,13 +971,13 @@ def main():
                         # executor resolves the storage id on the
                         # pilot-wide information service, which a job-level
                         # record does not reach (job 3494150).
-                        # No log dataset: the pilot makes an event-service
-                        # job's log tarball from the wrong directory and the
-                        # missing file fails the job after every range was
-                        # reported (3494150, pilot error 1165), which loses
-                        # the ranges; the worker record on the portal is the
-                        # log. The npps0 round trip ran the same way.
-                        noLog=True)
+                        # The job keeps its log dataset: an Event Service
+                        # job's pilot log is its only full account (the
+                        # worker record carries selected lines). The site
+                        # pilot of September made the ES log tarball from
+                        # the wrong directory (3494150, pilot error 1165);
+                        # the native pilot is tested on its own.
+                        )
             _log(f"event service canary: {args.es_events} events of "
                  f"{args.es_input_dataset} in ranges of "
                  + (f"{args.es_fine_range_events} (fine-grained), units of {args.es_events_per_range or 1}"
