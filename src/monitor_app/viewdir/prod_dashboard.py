@@ -33,14 +33,14 @@ def dashboard_document(request):
         # 1,000 above its five-node production of 640 work lanes (128 a node).
         'pillarScales': {'OSG': 2500, 'GREX': 2500, 'Google': 100, 'Perlmutter': 1000},
         'siteTrendMinimums': {'google': 15},
-        'siteNodeCaps': {'Google': 5, 'Perlmutter': 5},
+        'siteNodeCaps': {'Google': 5},
         'sitePanels': {'osg': 'OSG', 'grex': 'GREX', 'nersc': 'Perlmutter',
                        'google': 'Google', 'compute-canada': 'Compute Canada', 'jlab': 'JLab'},
     }
     return render_to_string('monitor_app/prod_dashboard.html', {
         'dashboard_record': record,
         'dashboard_config': config,
-        'dashboard_version': '20261026-worker-limit',
+        'dashboard_version': '20261027-es-events',
     }, request=request)
 
 

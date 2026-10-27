@@ -2271,6 +2271,10 @@ def get_snapshot(refresh=False):
         # The last measured counts stand until the measurement refreshes; a
         # count is never blanked (processing_activity holds a queue's last
         # complete count while any of its jobs is unmeasured).
+        # An Event Service queue's production shows as events, not finished
+        # jobs: its jobs finish once in hours (PROD_DASHBOARD.md).
+        from swf_epicprod.es_closeout import setting as es_setting
+        es_queues = set(es_setting('queues', seed=False) or ())
         for site in value['sites']:
             for queue in site['queues']:
                 row = (measured.get('queues') or {}).get(queue['id'], {})
@@ -2278,6 +2282,9 @@ def get_snapshot(refresh=False):
                 queue['processing_known_threads'] = row.get('known_threads', 0)
                 queue['processing_unknown_jobs'] = row.get('unknown_jobs', 0)
                 queue['processing_threads_at'] = row.get('threads_at')
+                queue['event_service'] = queue['id'] in es_queues
+                queue['events_1h'] = row.get('events_1h', 0)
+                queue['events_unknown_jobs'] = row.get('events_unknown_jobs', 0)
             counts = [q['processing_threads'] for q in site['queues']]
             site['processing_threads'] = sum(counts) if all(n is not None for n in counts) else None
             for executor in site.get('execute_sites', []):
@@ -2333,7 +2340,9 @@ def get_snapshot(refresh=False):
                     site['cores_per_node'] = google['cores_per_node']
                     queue['queued_core_demand'] = row.get('queued_core_demand', 0)
                 if queue['id'] == perlmutter_production.QUEUE:
-                    # The work lanes of a production node (the feeder's shape)
+                    # The production's nodes and each node's work lanes, as
+                    # the feeder holds them
+                    site['node_cap'] = perlmutter_production.NODES
                     site['cores_per_node'] = int(perlmutter_production.SHAPE['slots'])
             trend = next((t for t in (value.get('trends') or {}).get('sites', [])
                           if t['id'] == site['id']), None)

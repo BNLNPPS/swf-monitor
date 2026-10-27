@@ -265,7 +265,7 @@
       if (!label) {
         label = element('span', 'site-node-cap right small'); heading.append(label);
       }
-      label.textContent = 'Current max: ' + nodeCap + ' nodes' +
+      label.textContent = nodeCap + (Number(nodeCap) === 1 ? ' node' : ' nodes') +
         (site.cores_per_node ? ' × ' + site.cores_per_node + ' cores' : '');
     }
     productionPanel(panel, site);
@@ -281,10 +281,23 @@
     if (pilotMetric) pilotMetric.style.display = showPilots ? '' : 'none';
     const partialThreads = values[0] == null && sum('processing_known_threads') > 0;
     if (partialThreads) values[0] = sum('processing_known_threads');
-    panel.querySelectorAll('.metric b').forEach((node, i) => text(node, number(values[i])));
+    // An Event Service site's work arrives close by close and its jobs finish
+    // once in hours, so its second number is the last hour's events, in
+    // thousands, from the closes that stood (PROD_DASHBOARD.md).
+    const eventService = queues.length > 0 && queues.every(q => q.event_service);
+    const shown = values.slice();
+    if (eventService) shown[1] = sum('events_1h') == null ? null : sum('events_1h') / 1000;
+    panel.querySelectorAll('.metric b').forEach((node, i) => text(node, number(shown[i])));
     const metrics = panel.querySelectorAll('.metric');
-    if (metrics[1]) metrics[1].title = number(values[1]) + ' core completions from ' +
-      number(sum('finished_jobs_1h')) + ' jobs in the last hour';
+    if (metrics[1]) {
+      const unit = metrics[1].querySelector('span');
+      if (unit) unit.textContent = eventService ? 'kEvents/1h' : 'finish/1h';
+      const unknown = sum('events_unknown_jobs');
+      metrics[1].title = eventService
+        ? number(sum('events_1h')) + ' events in Event Service closes that stood in the last hour' +
+          (unknown ? '; ' + number(unknown) + ' jobs without a record yet' : '')
+        : number(values[1]) + ' core completions from ' + number(sum('finished_jobs_1h')) + ' jobs in the last hour';
+    }
     if (metrics[2]) metrics[2].title = number(values[2]) + ' failed cores from ' +
       number(sum('failed_jobs_1h')) + ' jobs in the last hour';
     if (metrics[3]) metrics[3].title = number(values[3]) + ' queued cores · ' +
