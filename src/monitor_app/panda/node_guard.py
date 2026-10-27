@@ -188,7 +188,11 @@ def window_rows(window_h, queues=()):
                     'endtime': end.isoformat() if end is not None else None,
                     'pandaid': pandaid,
                     'site': execute_site(dest_site, host),
-                    'error': error_label(pilot, exe, trans) if status == 'failed' else ''})
+                    'error': error_label(pilot, exe, trans) if status == 'failed' else '',
+                    # the payload's registration exit, whatever the pilot's
+                    # label; the fixed-time reading sets it aside
+                    'registration': status == 'failed' and '78' in (str(exe or '').strip(),
+                                                                    str(trans or '').strip())})
     return out
 
 
