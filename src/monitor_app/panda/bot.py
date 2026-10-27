@@ -284,7 +284,9 @@ EPIC_DOC_SEARCH_TOOL = {
     "name": "epic_doc_search",
     "description": (
         "Search ePIC documentation by natural-language query (semantic vector search). "
-        "Covers SWF testbed, SWF monitor, Bamboo/PanDA, EICrecon, containers, ePIC production, "
+        "Covers the ePIC WFMS documentation (epic-wfms-docs.readthedocs.io: PCS, production, "
+        "platform, operations, TeamComms), SWF testbed, SWF monitor, Bamboo/PanDA, EICrecon, "
+        "containers, ePIC production, "
         "EIC master docs, afterburner, eic-shell, and more. "
         "Use for conceptual 'how does X work?' questions about the software and experiment."
     ),

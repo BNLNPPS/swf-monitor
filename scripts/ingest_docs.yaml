@@ -8,6 +8,11 @@ chunk_size: 3000
 chunk_overlap: 300
 
 sources:
+  # ── ePIC WFMS documentation (epic-wfms-docs.readthedocs.io) ────────────
+  - path: /data/wenauseic/github/epic-wfms-docs/docs
+    glob: "**/*.md"
+    label: epic-wfms-docs
+
   # ── SWF / Testbed ──────────────────────────────────────────────────────
   - path: /data/wenauseic/github/swf-testbed/docs
     glob: "**/*.md"
