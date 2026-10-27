@@ -65,9 +65,11 @@ separate inactive-site footer.
 
 Cylinder height uses a common 2,500-core running scale for OSG and GREX,
 preserving the approximately 80% height of 2,000 single-threaded jobs.
-Google uses a 100-core scale. Each of these three pillar sections shows its
-scale in small text at the upper left. Google's title row shows its current
-cap as **5 nodes × 14 cores** at the upper right. Other site cylinders use
+Google uses a 100-core scale, and Perlmutter a 1,000-core scale (128 work
+lanes a node; its five-node production of 640 at about two-thirds height).
+Each of these four pillar sections shows its scale in small text at the upper
+left. Google's and Perlmutter's title rows show their current cap at the upper
+right, **5 nodes × 14 cores** and **5 nodes × 128 cores**. Other site cylinders use
 the default scale without a scale label. A compact
 execution-site cylinder retains its fixed height and shows the shared
 slash break when the value exceeds its display range. The green and red

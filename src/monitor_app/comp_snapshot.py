@@ -58,6 +58,7 @@ LIVE_SITE_LABELS = {
 
 # GREX runs eight pilots per Slurm worker (2026-10-20).
 from swf_epicprod.regulation import PILOTS_PER_WORKER
+from swf_epicprod import perlmutter_production
 OSG_SUBMIT_HOST = 'osgsub01'
 # The harvester reporters (docs/HARVESTER_REPORTER.md); each record names
 # the queues its harvester serves. osgsub01's own key is the OSG submit
@@ -2331,6 +2332,9 @@ def get_snapshot(refresh=False):
                     site['node_cap'] = google['nodes']
                     site['cores_per_node'] = google['cores_per_node']
                     queue['queued_core_demand'] = row.get('queued_core_demand', 0)
+                if queue['id'] == perlmutter_production.QUEUE:
+                    # The work lanes of a production node (the feeder's shape)
+                    site['cores_per_node'] = int(perlmutter_production.SHAPE['slots'])
             trend = next((t for t in (value.get('trends') or {}).get('sites', [])
                           if t['id'] == site['id']), None)
             if not trend:

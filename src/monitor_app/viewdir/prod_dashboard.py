@@ -29,9 +29,11 @@ def dashboard_document(request):
         'taskUrl': reverse('monitor_app:panda_task_detail', args=[0]),
         'breakoutUrl': reverse('monitor_app:prod_dashboard'),
         'weeklyUrl': static('monitor_app/prod_dashboard/weekly-cores.json'),
-        'pillarScales': {'OSG': 2500, 'GREX': 2500, 'Google': 100},
+        # Google's 100 sits above its five-pod cap of 70 cores; Perlmutter's
+        # 1,000 above its five-node production of 640 work lanes (128 a node).
+        'pillarScales': {'OSG': 2500, 'GREX': 2500, 'Google': 100, 'Perlmutter': 1000},
         'siteTrendMinimums': {'google': 15},
-        'siteNodeCaps': {'Google': 5},
+        'siteNodeCaps': {'Google': 5, 'Perlmutter': 5},
         'sitePanels': {'osg': 'OSG', 'grex': 'GREX', 'nersc': 'Perlmutter',
                        'google': 'Google', 'compute-canada': 'Compute Canada', 'jlab': 'JLab'},
     }
