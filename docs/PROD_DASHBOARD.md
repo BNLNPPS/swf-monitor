@@ -71,9 +71,10 @@ Google uses a 100-core scale, and Perlmutter a 1,000-core scale (128 work
 lanes a node; its five-node production of 640 at about two-thirds height).
 Each of these four pillar sections shows its scale in small text at the upper
 left. Google's and Perlmutter's title rows show their production at the upper
-right, **5 nodes × 14 cores** and **1 node × 128 cores**; Perlmutter's nodes are
-the feeder's own (`perlmutter_production.NODES`), so the row follows when
-production goes to five. An Event Service site, one whose production queues
+right, **5 nodes × 14 cores** and **N nodes × 128 cores**; Perlmutter's N is
+the nodes running now, from PanDA's worker table (the queue's `workers_now`),
+so the row corrects itself (Torre Wenaus, 2026-10-28: "title should be auto
+correct"). An Event Service site, one whose production queues
 are all in the ES close-out's list, shows **Mevt/1h** (millions of events, one
 decimal) in place of finish/1h: the events of the closes that stood in the last hour, from its
 jobs' shipped harness records (`processing_activity`), since its jobs finish

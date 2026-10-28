@@ -164,6 +164,14 @@ def _pilot_display(pilots):
                                 'harvester' if waiting is not None else None))
 
 
+def _node_ceilings():
+    """{queue: the most nodes it may hold}, SysConfig ``comp.node_ceilings``:
+    Perlmutter's Event Service queue at five (Torre Wenaus, 2026-10-28)."""
+    from monitor_app.models import SysConfig
+    value = SysConfig.get_setting('comp.node_ceilings', {'NERSC_Perlmutter_epic_es': 5})
+    return value if isinstance(value, dict) else {}
+
+
 def _worker_limit(cfg, queue):
     """The operator's active worker limit control on ``queue``
     (``pilot.queue.<queue>.worker_limit``), or None."""
@@ -1293,6 +1301,10 @@ def build():
             queues.append({
                 'id': q, 'name': qc.get('name') or q,
                 'status': status, 'status_reason': reason,
+                # PanDA's worker table now (running, submitted): the nodes a
+                # whole-node queue holds, held against its ceiling (Report).
+                'workers_now': (dict(zip(('running', 'submitted'), workers[q]))
+                                if workers.get(q) else None),
                 'production_display': _production_display(q, status, cfg),
                 'running': running, 'starting': starting,
                 'queued': int(c.get('not_started') or 0),
@@ -2085,6 +2097,19 @@ def _site_state_items(value, cfg):
                           'text': (f'{subject} core limit {cores}'
                                    f"{_account(control.get('at'), control.get('by'))}: "
                                    f"{control.get('reason') or 'no reason recorded'}")})
+        # A whole-node queue past its node ceiling (Torre Wenaus, 2026-10-28:
+        # "5 IS OUR MAX"): the Harvester limit is the ceiling's enforcement,
+        # this line its check.
+        ceilings = _node_ceilings()
+        for q in site.get('queues', []):
+            w = q.get('workers_now') or {}
+            nodes = int(w.get('running') or 0) + int(w.get('submitted') or 0)
+            if ceilings.get(q['id']) and nodes > ceilings[q['id']]:
+                items.append({'level': 'red', 'site': site['id'], 'key': f"nodes:{q['id']}",
+                              'link': (site.get('links') or {}).get('panda_queue'),
+                              'text': (f"{_subject_name(site, q, live)} nodes {nodes} over the "
+                                       f"ceiling of {ceilings[q['id']]} ({w.get('running') or 0} "
+                                       f"running, {w.get('submitted') or 0} waiting)")})
         notice = (site.get('fair_share') or {}).get('notice')
         if notice:
             items.append({'level': notice.get('level') or 'amber', 'site': site['id'],
@@ -2608,9 +2633,10 @@ def get_snapshot(refresh=False):
                     site['cores_per_node'] = google['cores_per_node']
                     queue['queued_core_demand'] = row.get('queued_core_demand', 0)
                 if queue['id'] == perlmutter_production.QUEUE:
-                    # The production's nodes and each node's work lanes, as
-                    # the feeder holds them
-                    site['node_cap'] = perlmutter_production.NODES
+                    # The nodes running now, from PanDA's worker table, so the
+                    # title corrects itself (Torre Wenaus, 2026-10-28: "title
+                    # should be auto correct"), and each node's work lanes
+                    site['node_cap'] = int((queue.get('workers_now') or {}).get('running') or 0)
                     site['cores_per_node'] = int(perlmutter_production.SHAPE['slots'])
             trend = next((t for t in (value.get('trends') or {}).get('sites', [])
                           if t['id'] == site['id']), None)

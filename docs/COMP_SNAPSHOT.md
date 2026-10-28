@@ -441,6 +441,11 @@ OSG. Queue identifiers and links retain their canonical names.
     paused it, when and why (`paused`, below);
   - an operator **core limit**, red, with the control's reason, who and
     when (`pilot.queue.<queue>.worker_limit`);
+  - a whole-node queue holding more **nodes** than its ceiling, red: its
+    workers running and waiting in PanDA's worker table (the queue's
+    `workers_now`) against SysConfig `comp.node_ceilings` (Perlmutter's
+    Event Service queue at five; Torre Wenaus, 2026-10-28: "5 IS OUR MAX"),
+    whose enforcement is the Harvester worker limit;
   - the pool's **fair-share** limit, grey, informational: OSG's normal
     mode of operation, which never colours the site (Torre Wenaus,
     2026-10-28), with the pool and the negotiation cycle's time
