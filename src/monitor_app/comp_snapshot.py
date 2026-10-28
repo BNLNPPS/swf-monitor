@@ -1485,7 +1485,7 @@ def _queue_drift():
 
 def _drift_items(drift):
     """One red report line per disagreement: the copy must be put right."""
-    return [{'level': 'red',
+    return [{'level': 'red', 'key': f"drift:{d['queue']}:{d['copy']}",
              'text': (f"Queue drift, {d['queue']}: {d['copy']} holds {d['holds']}, "
                       f"the queue registry says {d['expected']}"),
              'link': f'{PUBLIC}/panda/front/'} for d in drift or []]
@@ -2032,16 +2032,18 @@ def _site_state_items(value, cfg):
             exempt, off = cfg.get(f'{base}.feed_exempt'), cfg.get(f'{base}.feed_off_reason')
             if exempt:
                 items.append({'level': 'grey', 'site': site['id'], 'link': f'{PUBLIC}/panda/front/',
+                              'key': f"feed_exempt:{q['id']}",
                               'text': f'{subject} front EXEMPT{account}: {exempt}'})
             else:
                 items.append({'level': 'red', 'site': site['id'], 'link': f'{PUBLIC}/panda/front/',
+                              'key': f"feed_off:{q['id']}",
                               'text': (f'{subject} front feed OFF{account}: {off}' if off else
                                        f'{subject} front feed OFF: no reason recorded')})
         for control in (site.get('worker_limit') or {}).get('controls') or []:
             subject = _subject_name(site, {'id': control['queue']}, live)
             cores = (f"{control['core_limit']:,} cores" if control.get('core_limit') is not None
                      else f"{control.get('limit')} allocations")
-            items.append({'level': 'red', 'site': site['id'],
+            items.append({'level': 'red', 'site': site['id'], 'key': f"limit:{control['queue']}",
                           'link': (site.get('links') or {}).get('panda_queue'),
                           'text': (f'{subject} core limit {cores}'
                                    f"{_account(control.get('at'), control.get('by'))}: "
@@ -2049,7 +2051,7 @@ def _site_state_items(value, cfg):
         notice = (site.get('fair_share') or {}).get('notice')
         if notice:
             items.append({'level': notice.get('level') or 'amber', 'site': site['id'],
-                          'link': notice.get('link'),
+                          'key': f"fair_share:{site['id']}", 'link': notice.get('link'),
                           'text': f"{name} {notice['text']}: {notice.get('detail') or ''}".rstrip(': ')})
         queues = {q['id'] for q in site.get('queues', [])}
         for task in paused:
@@ -2057,20 +2059,73 @@ def _site_state_items(value, cfg):
                 continue
             subject = _subject_name(site, {'id': task['queue']}, live)
             items.append({'level': 'red', 'site': site['id'], 'link': task.get('link'),
+                          'key': f"paused:{task['id']}",
                           'text': (f"{subject} task {task['id']} paused"
                                    f"{_account(task.get('since'), task.get('paused_by'))}: "
                                    f"{task.get('pause_reason') or 'no reason recorded'}")})
     return items
 
 
+NUMBERS_KEY = 'prod_now_numbers'
+NUMBER_HOLD = timedelta(hours=1)
+NUMBER_SEEN_REFRESH = timedelta(minutes=5)
+
+
+def _stable_numbers(keys, now=None):
+    """{key: n}. A Production now line keeps its number while it stands
+    (Torre Wenaus, 2026-10-28: "prod now numbering should be immutable"):
+    a new line takes the lowest number not held, and a cleared line's
+    number stays held for NUMBER_HOLD, so a line that returns keeps it and
+    no other line takes it meanwhile. Held in the CachedProduct row
+    NUMBERS_KEY, ``{key: {n, seen}}``, written only when it changes."""
+    from django.db import transaction
+    from monitor_app.models import CachedProduct
+    now = now or timezone.now()
+    with transaction.atomic():
+        row, _ = CachedProduct.objects.select_for_update().get_or_create(
+            key=NUMBERS_KEY, defaults={'value': {}})
+        held = dict(row.value or {})
+        changed = False
+        for key, entry in list(held.items()):
+            if key not in keys and now - datetime.fromisoformat(entry['seen']) > NUMBER_HOLD:
+                del held[key]
+                changed = True
+        used = {entry['n'] for entry in held.values()}
+        for key in keys:
+            if key in held:
+                if now - datetime.fromisoformat(held[key]['seen']) > NUMBER_SEEN_REFRESH:
+                    held[key] = dict(held[key], seen=now.isoformat())
+                    changed = True
+                continue
+            n = 1
+            while n in used:
+                n += 1
+            held[key] = {'n': n, 'seen': now.isoformat()}
+            used.add(n)
+            changed = True
+        if changed:
+            row.value = held
+            row.save(update_fields=['value', 'updated_at'])
+    return {key: held[key]['n'] for key in keys}
+
+
 def _numbered(items, sites):
-    """The report's lines numbered from 1, red first, then amber, grey and
-    green; each site's own lines as ``site.notices`` for its panel, and its
-    bullet ``site.level``: the worst of its health, status and lines."""
-    items = sorted(items, key=lambda i: LEVEL_ORDER.get(i.get('level'), 2))
+    """The report's lines, red first, then amber, grey and green, each with
+    its standing number (``_stable_numbers``); each site's own lines as
+    ``site.notices`` for its panel, and its bullet ``site.level``: the
+    worst of its health, status and lines."""
+    for item in items:
+        item.setdefault('key', item.get('text') or '')
+    try:
+        numbers = _stable_numbers(list(dict.fromkeys(i['key'] for i in items)))
+    except Exception:
+        logger.exception('Production now numbers unavailable')
+        numbers = {}
+    for item in items:
+        item['n'] = numbers.get(item['key'])
+    items = sorted(items, key=lambda i: (LEVEL_ORDER.get(i.get('level'), 2), i['n'] or 0))
     by_site = {}
-    for n, item in enumerate(items, 1):
-        item['n'] = n
+    for item in items:
         if item.get('site'):
             by_site.setdefault(item['site'], []).append(
                 {k: item.get(k) for k in ('n', 'level', 'text', 'link')})
@@ -2130,7 +2185,7 @@ def _report_items(front, sites, storage, alarms, assessment):
     No per-site counts: the pillars carry those."""
     items = []
     if not front.get('enabled'):
-        items.append({'level': 'red', 'text': 'Pressure front: off, nothing is fed',
+        items.append({'level': 'red', 'key': 'front:off', 'text': 'Pressure front: off, nothing is fed',
                       'link': front.get('link')})
     for s in sites:
         live = [q for q in s['queues'] if q['status'] == 'live']
@@ -2145,7 +2200,7 @@ def _report_items(front, sites, storage, alarms, assessment):
             if (f.get('state') and f.get('state') not in ('supplied', 'fed')
                     and f.get('reason') not in FEED_SWITCH_REASONS):
                 reason = FRONT_REASONS.get(f.get('reason'), '')
-                items.append({'level': level, 'site': s['id'],
+                items.append({'level': level, 'site': s['id'], 'key': f"front:{q['id']}",
                               'text': f"Front, {subject}: {words}{', ' + reason if reason else ''}",
                               'link': front.get('link')})
             for name, p in q['health']['parts'].items():
@@ -2154,7 +2209,7 @@ def _report_items(front, sites, storage, alarms, assessment):
                 link = (q['links'].get('slots') if name == 'pilot_supply' else
                         q['links'].get('canary') if name == 'canary' else
                         q['links'].get('snapper'))
-                items.append({'level': p['level'], 'site': s['id'],
+                items.append({'level': p['level'], 'site': s['id'], 'key': f"health:{q['id']}:{name}",
                               'text': f"{subject} {PART_NAMES.get(name, name)}: {p['note']}",
                               'link': link})
     seen = set()
@@ -2174,24 +2229,28 @@ def _report_items(front, sites, storage, alarms, assessment):
         if task:
             number, state, rate, name = task.groups()
             text = f'Final failures {rate}, task {number} ({state}): {name}'
+            key = f'alarm:task:{number}'
         elif due:
             _days, date, what = due.groups()
             text = f'Due {date}: {what}'
+            key = f'due:{date}:{what}'
         else:
             text = f"{'Due' if ping else 'Alarm'}: {title.replace(' — ', ': ')}"
-        items.append({'level': 'amber' if ping else 'red', 'text': text,
+            key = f'alarm:{title}'
+        items.append({'level': 'amber' if ping else 'red', 'text': text, 'key': key,
                       'link': f"{PUBLIC}/alarms/events/{a['id']}/"})
     for st in storage:
         for name, p in st['health']['parts'].items():
             if p['level'] in ('amber', 'red'):
-                items.append({'level': p['level'], 'text': f"{st['name']}: {p['note']}",
+                items.append({'level': p['level'], 'key': f"storage:{st['id']}:{name}",
+                              'text': f"{st['name']}: {p['note']}",
                               'link': (st.get('links') or {}).get('storage')})
     if assessment:
         level = {'ok': 'green', 'green': 'green', 'warn': 'amber', 'warning': 'amber',
                  'amber': 'amber', 'fail': 'red', 'error': 'red', 'red': 'red'}.get(
                      assessment['status'], 'grey')
         if level in ('amber', 'red'):
-            items.append({'level': level,
+            items.append({'level': level, 'key': 'assessment',
                           'text': f"Campaign assessment: {assessment['summary']}",
                           'link': f'{PUBLIC}/ai/assessments/?subject_type=campaign_task,campaign'})
     items.sort(key=lambda i: LEVEL_ORDER.get(i['level'], 2))
@@ -2543,7 +2602,8 @@ def get_snapshot(refresh=False):
         state_items = _site_state_items(value, cfg)
     except Exception:
         logger.exception('Site state lines unavailable')
-        state_items = [{'level': 'red', 'text': 'Site state lines unavailable: see the monitor log'}]
+        state_items = [{'level': 'red', 'key': 'error:state',
+                        'text': 'Site state lines unavailable: see the monitor log'}]
     value['report']['items'] = _numbered(
         [dict(item, text=short_text(item.get('text')))
          for item in value['report'].get('items', []) + state_items], value['sites'])

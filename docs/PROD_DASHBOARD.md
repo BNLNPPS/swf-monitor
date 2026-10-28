@@ -157,7 +157,8 @@ Every exceptional condition of a site is a numbered Production now line
 (Torre Wenaus, 2026-10-28): its feed off or exempt, a paused task, an
 operator core limit, OSG's fair-share limit, a health part not green,
 each with who, when and why (COMP_SNAPSHOT.md, Report). Production now
-shows each line's number in the line's colour where the bullet was. The
+shows each line's number in the line's colour where the bullet was. A
+line's number does not change while it stands (COMP_SNAPSHOT.md, Report). The
 site panel's title row cites its lines' numbers at the upper right, each
 in its colour, with the line's text on hover and its link: a grid of small
 numbers that wraps into columns and shrinks its type until every number
