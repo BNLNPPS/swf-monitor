@@ -1061,7 +1061,16 @@ def get_log_filter_counts(request):
     at_or_above = ([v for v in SUBLEVEL_VALUES
                     if SUBLEVEL_ORDER[v] >= SUBLEVEL_ORDER[sublevel]]
                    if sublevel in SUBLEVEL_ORDER else None)
-    base_queryset = AppLog.objects.all()
+    # The live stream's filters count what its list shows, the live rows,
+    # not every record of the app (Torre Wenaus, 2026-10-28: "list is right,
+    # filters is a mess").
+    def rows():
+        if request.GET.get('live') == '1':
+            from .epicprod_logging import live_stream_q
+            return AppLog.objects.filter(live_stream_q())
+        return AppLog.objects.all()
+
+    base_queryset = rows()
     if username:
         base_queryset = base_queryset.filter(
             Q(instance_name__regex=rf'-{username}-\d+$')
@@ -1082,7 +1091,7 @@ def get_log_filter_counts(request):
     # extra_data): apply the other filters, never the threshold itself.
     # Cumulative — each option counts events at or above it, matching the
     # ≥ filter semantics (normal shows normal and high).
-    qs_for_sublevel = AppLog.objects.all()
+    qs_for_sublevel = rows()
     if username:
         qs_for_sublevel = qs_for_sublevel.filter(
             instance_name__regex=rf'-{username}-\d+$')
@@ -1108,7 +1117,7 @@ def get_log_filter_counts(request):
     # two sources are disjoint (action instances are 'ops-agent'/'web'/'mcp',
     # which never match the agent pattern).
     username_pattern = re.compile(r'-([^-]+)-\d+$')
-    qs_for_username = apply_filters(AppLog.objects.all(), current_filters)
+    qs_for_username = apply_filters(rows(), current_filters)
     if at_or_above:
         qs_for_username = qs_for_username.filter(
             extra_data__sublevel__in=at_or_above)
@@ -1129,6 +1138,10 @@ def get_log_filter_counts(request):
 
     # Convert to sorted list of tuples (matching expected format)
     filter_counts['username'] = sorted(username_counts.items(), key=lambda x: (-x[1], x[0]))
+    if request.GET.get('live') == '1':
+        # The live stream offers its busiest sources, not every one.
+        filter_counts['username'] = filter_counts['username'][:15]
+        filter_counts['instance_name'] = filter_counts['instance_name'][:15]
 
     # Add username/sublevel to current_filters for UI state (after utility call)
     current_filters['username'] = username
