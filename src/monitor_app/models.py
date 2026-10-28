@@ -693,6 +693,21 @@ class PersistentState(models.Model):
             return obj.state_data
     
     @classmethod
+    def next_number(cls, name, start=1):
+        """The next number of the counter ``name``, atomically: it only
+        rises, so no number is given twice. Kept as ``next_<name>``; a new
+        counter begins at ``start``."""
+        from django.db import transaction
+        with transaction.atomic():
+            obj, created = cls.objects.select_for_update().get_or_create(
+                id=1, defaults={'state_data': {}})
+            key = f'next_{name}'
+            current = int(obj.state_data.get(key) or start)
+            obj.state_data[key] = current + 1
+            obj.save()
+            return current
+
+    @classmethod
     def get_next_run_number(cls):
         """Get next run number atomically and update last run info."""
         from django.db import transaction

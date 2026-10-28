@@ -2109,28 +2109,30 @@ NUMBER_SEEN_REFRESH = timedelta(minutes=5)
 
 
 def _stable_numbers(keys, now=None):
-    """{key: (n, since)}. A Production now line keeps its number while it
-    stands (Torre Wenaus, 2026-10-28: "prod now numbering should be
-    immutable"): a new line takes the next number above every held one, so
-    numbers rise with time and the newest line has the biggest, and a
-    cleared line's number stays held for NUMBER_HOLD, so a line that
-    returns keeps it and no other line takes it meanwhile. ``since`` is when the line
-    first stood, kept with its number. Held in the CachedProduct row
-    NUMBERS_KEY, ``{key: {n, seen, since}}``, written only when it
-    changes."""
+    """{key: (n, since)}. A Production now line's number is immutable
+    (Torre Wenaus, 2026-10-28: "prod now numbering should be immutable"):
+    a new line takes the next number of the PersistentState counter
+    ``prod_now_line``, which only rises, so a number names one line and is
+    never given to another, and the newest line has the biggest. A line
+    keeps its number while it stands, and a cleared line's number stays
+    held for NUMBER_HOLD, so a line that returns within it keeps it; one
+    that returns later takes a new number. ``since`` is when the line first
+    stood. The lines are held in the CachedProduct row NUMBERS_KEY,
+    ``{key: {n, seen, since}}``, written only when it changes."""
     from django.db import transaction
-    from monitor_app.models import CachedProduct
+    from monitor_app.models import CachedProduct, PersistentState
     now = now or timezone.now()
     with transaction.atomic():
         row, _ = CachedProduct.objects.select_for_update().get_or_create(
             key=NUMBERS_KEY, defaults={'value': {}})
         held = dict(row.value or {})
         changed = False
+        # the counter's first number is above every number already held
+        start = max((entry['n'] for entry in held.values()), default=0) + 1
         for key, entry in list(held.items()):
             if key not in keys and now - datetime.fromisoformat(entry['seen']) > NUMBER_HOLD:
                 del held[key]
                 changed = True
-        used = {entry['n'] for entry in held.values()}
         for key in keys:
             if key in held:
                 if now - datetime.fromisoformat(held[key]['seen']) > NUMBER_SEEN_REFRESH:
@@ -2141,10 +2143,8 @@ def _stable_numbers(keys, now=None):
                     held[key] = dict(held[key], since=now.isoformat())
                     changed = True
                 continue
-            # the next number above every held one: numbers rise with time
-            n = max(used, default=0) + 1
-            held[key] = {'n': n, 'seen': now.isoformat(), 'since': now.isoformat()}
-            used.add(n)
+            held[key] = {'n': PersistentState.next_number('prod_now_line', start),
+                         'seen': now.isoformat(), 'since': now.isoformat()}
             changed = True
         if changed:
             row.value = held
@@ -2153,10 +2153,10 @@ def _stable_numbers(keys, now=None):
 
 
 def _numbered(items, sites):
-    """The report's lines newest first, by when each first stood (Torre
-    Wenaus, 2026-10-28: "prod now items should be reverse time order"),
-    with their standing numbers (``_stable_numbers``), the colour carrying
-    the level; each site's own lines as
+    """The report's lines newest first, the biggest number at the top
+    (Torre Wenaus, 2026-10-28: "reverse time order, which means I should
+    see biggest numbers at top"), with their standing numbers
+    (``_stable_numbers``), the colour carrying the level; each site's own lines as
     ``site.notices`` for its panel, and its bullet ``site.level``: the
     worst of its health, status and lines."""
     for item in items:

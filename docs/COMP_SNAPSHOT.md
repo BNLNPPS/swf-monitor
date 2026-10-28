@@ -418,8 +418,9 @@ OSG. Queue identifiers and links retain their canonical names.
   line's standing number (Torre Wenaus, 2026-10-28: "prod now numbering
   should be immutable"): `key` names what the line is about (a queue's
   feed, a paused task, an alarm's title...), a line keeps its number while
-  it stands, a new line takes the next number above every held one, so
-  numbers rise with time, and a cleared
+  it stands, a new line takes the next number of a counter that only rises
+  (PersistentState `next_prod_now_line`), so no number is ever given to a
+  second line and numbers rise with time, and a cleared
   line's number stays held for an hour, so a line that returns keeps it
   and no other line takes it meanwhile (CachedProduct
   `prod_now_numbers`). `site` is the id of the site a line belongs to,
