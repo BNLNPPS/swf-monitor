@@ -292,6 +292,12 @@ A queue's parts:
 A site's health is the worst of its queues'. An execute site's health
 has the `prod_activity` part only.
 
+`site.level` is the site's bullet: the worst of its health, its status
+level and the levels of its report items (Report, below), so a site held
+for failures is never green (Torre Wenaus, 2026-10-28: GREX read green
+with its feed off for failures and its only task paused). Grey items do
+not raise it. A site that is not live keeps its status level.
+
 ### Storage
 
 The E1s' Rucio storage, reported as the queues are: what arrived in the
@@ -398,11 +404,33 @@ OSG. Queue identifiers and links retain their canonical names.
   without an LLM: the front, each live site's running and last-hour
   outcomes, and every non-green health part.
 - `report.items`: what the room's floor cannot show, one line each as
-  `{level, text, link}`, red first, then amber, then grey and green,
-  with no per-site counts (the pillars carry those): why the front
-  feeds nothing (the global front is off, each live
+  `{n, level, text, link, site}`, red first, then amber, then grey and
+  green, numbered `n` from 1 in that order, with no per-site counts (the
+  pillars carry those). `site` is the id of the site a line belongs to,
+  or absent; the line names the site by its display name (the shared
+  short-name vocabulary; a queue name only where the site has more than
+  one live queue), and `site.notices` lists that site's lines,
+  `{n, level, text, link}`, for its panel (Torre Wenaus, 2026-10-28:
+  every exceptional condition of a site is a numbered line, and the
+  panel cites the numbers). Every state a site is in is a line with who,
+  when and why, read from the current settings when the record is read:
+  - its front feed **off**, red, with the recorded reason, who and when
+    (`front.queue.<queue>.feed_off_reason`, `.feed_set_by`,
+    `.feed_set_at`); a feed off with no recorded reason is a red line
+    saying so;
+  - its front feed **exempt** (its own feeder supplies it), grey, with
+    the recorded reason;
+  - a production task **paused** at one of its queues, red, with who
+    paused it, when and why (`paused`, below);
+  - an operator **core limit**, red, with the control's reason, who and
+    when (`pilot.queue.<queue>.worker_limit`);
+  - the pool's **fair-share** limit, amber, with the pool and the
+    negotiation cycle's time (`site.fair_share.notice`).
+
+  Then why the front feeds nothing (the global front is off, each live
   queue's front decision in the words of CONTINUOUS_PRODUCTION.md's
-  states and reasons), every amber or red health part with its note,
+  states and reasons, a feed switch apart), every amber or red health
+  part with its note,
   every active alarm event (red) and approaching deadline ping (amber),
   storage parts not green, and late or missing scheduled campaign
   assessments (the System
@@ -544,8 +572,13 @@ included, except a task ended quietly (swf-epicprod EPICPROD_OPS.md, Quiet end).
   pause), `link` (the task's page) and `detail`: the site and queue,
   since when, and the input files done and lost.
 
-PanDA records no reason for a pause; the task's page and the action
-stream carry who paused it when it was paused through our tools.
+PanDA records no reason for a pause, and its "pause by Torre Wenaus" is
+the operations agent's credential, not the actor. A pause made through
+our tools has its operation record (`PandaTaskOperation`, operation
+`pause`): each item carries `paused_by` (the person, or `front task
+guard` for the front's guard) and `pause_reason` (the guard's trip from
+its evidence, a person's recorded reason, or null when none was
+recorded).
 
 ### Completed
 

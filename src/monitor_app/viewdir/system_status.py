@@ -46,6 +46,27 @@ def system_status_page(request):
     })
 
 
+def feed_switch_refusal(previous, config):
+    """Why a SysConfig document may not be saved, or '': a front feed is
+    never off without a recorded reason (swf-epicprod CONTINUOUS_PRODUCTION.md,
+    Set points and caps; Torre Wenaus, 2026-10-28). Refused: a feed this
+    save switches off, or an off feed whose reason it removes, with neither
+    ``feed_off_reason`` nor ``feed_exempt``. A feed already off with no
+    reason, as before the rule, is left as it is."""
+    for key, value in config.items():
+        if not (key.startswith('front.queue.') and key.endswith('.feed')) or value is not False:
+            continue
+        base = key[:-len('.feed')]
+        has = config.get(f'{base}.feed_off_reason') or config.get(f'{base}.feed_exempt')
+        had = previous.get(f'{base}.feed_off_reason') or previous.get(f'{base}.feed_exempt')
+        if not has and (previous.get(key) is not False or had):
+            queue = base[len('front.queue.'):]
+            return (f'{queue}: a feed switched off needs its reason in {base}.feed_off_reason '
+                    f'(or {base}.feed_exempt for a queue its own feeder supplies); '
+                    'scripts/front-feed.py records the reason, who and when')
+    return ''
+
+
 @require_POST
 def sysconfig_save(request):
     """Replace the SysConfig document from the System page editor."""
@@ -62,6 +83,10 @@ def sysconfig_save(request):
             raise ValueError('top level must be a JSON object')
     except (ValueError, TypeError) as exc:
         messages.error(request, f'SysConfig not saved — invalid JSON: {exc}')
+        return redirect('monitor_app:system_status')
+    refusal = feed_switch_refusal(SysConfig.get_config(), parsed)
+    if refusal:
+        messages.error(request, f'SysConfig not saved: {refusal}.')
         return redirect('monitor_app:system_status')
     SysConfig.replace_config(parsed, username=request.user.username)
     log_epicprod_action(

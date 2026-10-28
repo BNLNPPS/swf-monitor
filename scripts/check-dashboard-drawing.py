@@ -24,8 +24,11 @@ assert template.count("static 'monitor_app/prod_dashboard/epic-trend-model.js'")
 assert template.index('epic-trend-model.js') < template.index('epic-dashboard-live.js')
 live = (assets / 'epic-dashboard-live.js').read_text()
 assert 'createEpicTrendModel()' in live and 'trendModel.site(' in live, 'dashboard trends must consume the shared model'
-assert 'share.notice' in live and 'notice.text' in live and 'notice.detail' in live, 'fair-share notice must come from the feed'
-assert all('notice.' + field in live for field in ('text', 'level', 'detail', 'link')), 'fair-share adapter must use the complete notice'
+# A site's exceptional conditions (fair share, core limit, feed switch,
+# paused tasks) are the feed's numbered report lines (COMP_SNAPSHOT.md,
+# Report); the panel cites them from site.notices, with no words of its own.
+assert 'site.notices' in live and all('item.' + field in live for field in ('n', 'text', 'level', 'link')), \
+    'panel notices must be the feed\'s numbered report lines'
 assert 'queue.pilots.waiting_current' in live, 'waiting pilots must use the feed-resolved count'
 assert 'trendModel.hourly(' in live and 'rateMultiplier' not in live, 'hourly conversion must use the shared trend model'
 assert 'marker.style.background = trendModel.palette[key]' in live, 'plot legend markers must use the shared palette'

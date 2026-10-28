@@ -30,7 +30,8 @@ the remaining columns. Site panes open by default; Open and Close act
 on every site pane.
 
 Site labels, reasons and phase colours come from the feed's `status_label`,
-`status_reason` and `status_level`. Inactive Perlmutter reads **No allocation**,
+`status_reason` and `status_level`. A site's bullet is the feed's
+`site.level`, the worst of its health, status and Production now lines. Inactive Perlmutter reads **No allocation**,
 Canada **Authentication block**, and JLab **Cybersecurity block**; all three
 status labels use grey.
 Google uses GREX's ordinary
@@ -144,19 +145,20 @@ small static seed; a lazy request uses the existing Snapper series
 product when the cached average is more than an hour old. The browser
 reuses the result for an hour and refreshes it while attended.
 
-An active operator worker-limit override replaces the weekly average in
-the same title-row position with **Core limit N** in red. The snapshot
-converts worker allocations to their core capacity; GREX has eight
-single-core pilots per allocation. The current control carries the level
-and reason. Clearing the override restores the weekly average. Weekly history
-refreshes preserve the override while it remains active; its link opens
-the queue record.
+Every exceptional condition of a site is a numbered Production now line
+(Torre Wenaus, 2026-10-28): its feed off or exempt, a paused task, an
+operator core limit, OSG's fair-share limit, a health part not green,
+each with who, when and why (COMP_SNAPSHOT.md, Report). Production now
+shows each line's number in the line's colour where the bullet was. The
+site panel's title row cites its lines' numbers at the upper right, each
+in its colour, with the line's text on hover and its link: a grid of small
+numbers that wraps into columns and shrinks its type until every number
+fits, followed by the weekly average cores in grey. The core limit, the
+fair-share notice and the feed switch no longer write words there.
 
 While a pool's negotiator holds our OSG submitter at its fair-share
-limit, the OSG title row shows **fair share limited** in yellow followed
-by its weekly average cores in grey, matching GREX. Each keeps its own
-link and hover details. The fair-share hover names the pool and the time
-of the negotiation cycle.
+limit, OSG has an amber line naming the pool and the time of the
+negotiation cycle.
 The notice means our submitter reached its fair-share limit during the
 last reported negotiation cycle. Existing pilots keep their slots;
 later cycles may grant more. The reading is the OSG submit host reporter's

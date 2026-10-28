@@ -538,6 +538,10 @@ class _Build:
                            + (f" ({queue})" if queue and queue != where else '')
                            + (f" since {local:%m-%d %H:%M} ET" if local else '')
                            + f"; {done:,} of {n:,} files done, {lost:,} lost. {name}")})
+        # Who paused each and why, where our tools paused it.
+        accounts = _pause_accounts([i['id'] for i in items])
+        for i in items:
+            i['paused_by'], i['pause_reason'] = accounts.get(i['id'], (None, None))
         # The task list's window reaches back to the oldest pause.
         days = max(7, (self.now - oldest).days + 1) if oldest else 7
         listed = ', '.join(f"{i['id']} on {site_name.get(i['queue'], i['queue'])}"
@@ -1530,6 +1534,7 @@ FRONT_STATES = {
 }
 FRONT_REASONS = {
     'queue_off': 'its feed is off', 'front_off': 'the front is off',
+    'queue_exempt': 'its own feeder supplies it',
     'declared': 'a declared downtime', 'would_exceed_high': 'a feed would pass the high mark',
     'task_cap': 'the task cap', 'job_cap': 'the job cap',
     'unsized_task': 'a task that cannot be sized', 'no_calibration': 'no calibration yet',
@@ -1975,6 +1980,144 @@ def _storage_capacity():
     return {'output': output, 'rses': rses}
 
 
+FEED_SWITCH_REASONS = ('queue_off', 'queue_exempt')
+ET = ZoneInfo('America/New_York')
+
+
+def _subject_name(site, queue, live):
+    """How a report line names what it is about: the site's display name,
+    or the queue's short name where the site has more than one live queue."""
+    return (short_name(site.get('name') or site['id']) if len(live) <= 1
+            else short_name(queue['id']))
+
+
+def _when(at):
+    """An ISO time as the report shows it, Eastern: '10/28 06:05 ET'."""
+    if not at:
+        return ''
+    try:
+        t = datetime.fromisoformat(str(at).replace('Z', '+00:00'))
+    except ValueError:
+        return str(at)
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=dt_timezone.utc)
+    return f'{t.astimezone(ET):%m/%d %H:%M} ET'
+
+
+def _account(when, by):
+    """' (10/28 06:05 ET, swf-1)': when and who, as far as recorded."""
+    bits = [b for b in (_when(when), by) if b]
+    return f" ({', '.join(bits)})" if bits else ''
+
+
+def _site_state_items(value, cfg):
+    """Every state a site is in, as report lines with who, when and why
+    (COMP_SNAPSHOT.md, Report; Torre Wenaus, 2026-10-28: "absolute reported
+    accountability in why a site is in the states it is in"), from the
+    current settings: a front feed off or exempt, a core limit, the pool's
+    fair-share limit and each production task paused at its queues."""
+    items = []
+    paused = (value.get('paused') or {}).get('items') or []
+    for site in value.get('sites') or []:
+        live = [q for q in site.get('queues', []) if q.get('status') == 'live']
+        name = short_name(site.get('name') or site['id'])
+        for q in live:
+            if q.get('front') is None:
+                continue        # not a queue the front regulates
+            base = f"front.queue.{q['id']}"
+            if cfg.get(f'{base}.feed') is True:
+                continue
+            subject = _subject_name(site, q, live)
+            account = _account(cfg.get(f'{base}.feed_set_at'), cfg.get(f'{base}.feed_set_by'))
+            exempt, off = cfg.get(f'{base}.feed_exempt'), cfg.get(f'{base}.feed_off_reason')
+            if exempt:
+                items.append({'level': 'grey', 'site': site['id'], 'link': f'{PUBLIC}/panda/front/',
+                              'text': f'{subject} front EXEMPT{account}: {exempt}'})
+            else:
+                items.append({'level': 'red', 'site': site['id'], 'link': f'{PUBLIC}/panda/front/',
+                              'text': (f'{subject} front feed OFF{account}: {off}' if off else
+                                       f'{subject} front feed OFF: no reason recorded')})
+        for control in (site.get('worker_limit') or {}).get('controls') or []:
+            subject = _subject_name(site, {'id': control['queue']}, live)
+            cores = (f"{control['core_limit']:,} cores" if control.get('core_limit') is not None
+                     else f"{control.get('limit')} allocations")
+            items.append({'level': 'red', 'site': site['id'],
+                          'link': (site.get('links') or {}).get('panda_queue'),
+                          'text': (f'{subject} core limit {cores}'
+                                   f"{_account(control.get('at'), control.get('by'))}: "
+                                   f"{control.get('reason') or 'no reason recorded'}")})
+        notice = (site.get('fair_share') or {}).get('notice')
+        if notice:
+            items.append({'level': notice.get('level') or 'amber', 'site': site['id'],
+                          'link': notice.get('link'),
+                          'text': f"{name} {notice['text']}: {notice.get('detail') or ''}".rstrip(': ')})
+        queues = {q['id'] for q in site.get('queues', [])}
+        for task in paused:
+            if task.get('queue') not in queues:
+                continue
+            subject = _subject_name(site, {'id': task['queue']}, live)
+            items.append({'level': 'red', 'site': site['id'], 'link': task.get('link'),
+                          'text': (f"{subject} task {task['id']} paused"
+                                   f"{_account(task.get('since'), task.get('paused_by'))}: "
+                                   f"{task.get('pause_reason') or 'no reason recorded'}")})
+    return items
+
+
+def _numbered(items, sites):
+    """The report's lines numbered from 1, red first, then amber, grey and
+    green; each site's own lines as ``site.notices`` for its panel, and its
+    bullet ``site.level``: the worst of its health, status and lines."""
+    items = sorted(items, key=lambda i: LEVEL_ORDER.get(i.get('level'), 2))
+    by_site = {}
+    for n, item in enumerate(items, 1):
+        item['n'] = n
+        if item.get('site'):
+            by_site.setdefault(item['site'], []).append(
+                {k: item.get(k) for k in ('n', 'level', 'text', 'link')})
+    for site in sites:
+        site['notices'] = by_site.get(site['id'], [])
+        health = (site.get('health') or {}).get('level')
+        if site.get('status') == 'live':
+            site['level'] = _worst([health, site.get('status_level')]
+                                   + [i['level'] for i in site['notices']])
+        else:
+            site['level'] = site.get('status_level') or health
+    return items
+
+
+def _guard_reason(evidence):
+    """The front's task guard's trip, from its pause evidence."""
+    e = evidence or {}
+    if e.get('trigger') == 'consecutive':
+        return (f"{e.get('consecutive_failed')} consecutive completed attempts failed "
+                f"across {e.get('run_hosts')} hosts")
+    if e.get('trigger'):
+        return (f"{e.get('window_failed')} of the latest {e.get('counted')} completed "
+                f"attempts failed across {e.get('window_hosts')} hosts")
+    if e.get('failed') is not None:
+        return (f"{e['failed']} of {int(e.get('finished') or 0) + int(e['failed'])} "
+                'completed jobs failed')
+    return None
+
+
+def _pause_accounts(task_ids):
+    """{jedi task id: (who, why)} from each task's latest pause made
+    through our tools (PandaTaskOperation); PanDA records no reason."""
+    from monitor_app.models import PandaTaskOperation
+    out = {}
+    if not task_ids:
+        return out
+    for op in (PandaTaskOperation.objects.filter(jedi_task_id__in=list(task_ids), operation='pause')
+               .order_by('jedi_task_id', '-requested_at')):
+        if op.jedi_task_id in out:
+            continue
+        if str(op.source or '').startswith('front_task_failure_guard'):
+            out[op.jedi_task_id] = ('front task guard', _guard_reason(op.evidence))
+        else:
+            out[op.jedi_task_id] = (op.requested_by or None, (op.evidence or {}).get('reason'))
+    return out
+
+
 def _report_items(front, sites, storage, alarms, assessment):
     """The report as items (docs/COMP_SNAPSHOT.md, Report): what the room's
     floor cannot show, each one line with a level and the page to open.
@@ -1988,12 +2131,16 @@ def _report_items(front, sites, storage, alarms, assessment):
         if not live:
             continue
         for q in live:
+            subject = _subject_name(s, q, live)
             f = q.get('front') or {}
             level, words = FRONT_STATES.get(f.get('state'), ('grey', f.get('state') or ''))
-            if f.get('state') and f.get('state') not in ('supplied', 'fed'):
+            # A feed switch is the site's own state line, with who, when
+            # and why, composed when the record is read (_site_state_items).
+            if (f.get('state') and f.get('state') not in ('supplied', 'fed')
+                    and f.get('reason') not in FEED_SWITCH_REASONS):
                 reason = FRONT_REASONS.get(f.get('reason'), '')
-                items.append({'level': level,
-                              'text': f"Front, {short_name(q['id'])}: {words}{', ' + reason if reason else ''}",
+                items.append({'level': level, 'site': s['id'],
+                              'text': f"Front, {subject}: {words}{', ' + reason if reason else ''}",
                               'link': front.get('link')})
             for name, p in q['health']['parts'].items():
                 if p['level'] not in ('amber', 'red'):
@@ -2001,8 +2148,8 @@ def _report_items(front, sites, storage, alarms, assessment):
                 link = (q['links'].get('slots') if name == 'pilot_supply' else
                         q['links'].get('canary') if name == 'canary' else
                         q['links'].get('snapper'))
-                items.append({'level': p['level'],
-                              'text': f"{short_name(q['id'])} {PART_NAMES.get(name, name)}: {p['note']}",
+                items.append({'level': p['level'], 'site': s['id'],
+                              'text': f"{subject} {PART_NAMES.get(name, name)}: {p['note']}",
                               'link': link})
     seen = set()
     for a in alarms or []:  # newest first
@@ -2377,8 +2524,16 @@ def get_snapshot(refresh=False):
     value['report'] = dict(value.get('report') or {}, header=_report_header(value),
                           text=_report_text(value.get('pressure_front') or {}, value['sites'],
                                             value.get('storage') or []))
-    value['report']['items'] = [dict(item, text=short_text(item.get('text')))
-                                for item in value['report'].get('items', [])]
+    # Each state a site is in is a line, every line is numbered, and each
+    # site carries its lines and its bullet (COMP_SNAPSHOT.md, Report).
+    try:
+        state_items = _site_state_items(value, cfg)
+    except Exception:
+        logger.exception('Site state lines unavailable')
+        state_items = [{'level': 'red', 'text': 'Site state lines unavailable: see the monitor log'}]
+    value['report']['items'] = _numbered(
+        [dict(item, text=short_text(item.get('text')))
+         for item in value['report'].get('items', []) + state_items], value['sites'])
     value['age_seconds'] = result.get('age_seconds')
     value['refreshing'] = result.get('refreshing')
     return value

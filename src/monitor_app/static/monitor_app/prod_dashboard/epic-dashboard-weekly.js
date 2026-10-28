@@ -79,7 +79,7 @@
     headers.set(name, label);
     const site = (initial.sites || []).find(site =>
       window.epicDashboard.sitePanels[site.id] === name || site.name === name);
-    override(label, site && site.worker_limit && site.worker_limit.notice);
+    override(label, null);  // a core limit is a numbered Production now line
   });
 
   let current = null, pending = false;

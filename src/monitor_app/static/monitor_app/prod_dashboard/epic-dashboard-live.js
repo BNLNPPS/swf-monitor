@@ -273,6 +273,42 @@
     link.title = 'Tasks sent to ' + site.name + ' (' + ids.join(', ') + ')';
   }
 
+  // A site's Production now lines by number at its title row's upper
+  // right, each in its line's colour, its text on hover and its link: a
+  // grid of small numbers filling columns, its type shrinking until every
+  // number fits beside the title (Torre, 2026-10-28).
+  function renderNotices(panel, notices) {
+    const heading = panel.querySelector('.panelhead');
+    if (!heading) return;
+    let box = heading.querySelector(':scope > .site-notices');
+    if (!notices.length) { if (box) box.remove(); return; }
+    if (!box) {
+      box = element('span', 'site-notices');
+      const next = heading.querySelector(':scope > .weekly-cores, :scope > .site-node-cap, :scope > .site-status');
+      if (next) next.before(box); else heading.append(box);
+    }
+    box.replaceChildren(...notices.map(item => {
+      const node = anchor(item.link || config.snapshotUrl, 'site-notice', String(item.n), item.n + '. ' + item.text);
+      node.style.color = 'var(--' + color(item.level) + ')';
+      return node;
+    }));
+    fitNotices(box, heading, notices.length);
+  }
+  function fitNotices(box, heading, count) {
+    const others = [...heading.children].filter(node => node !== box && node.offsetWidth > 0);
+    const gap = parseFloat(getComputedStyle(heading).columnGap) || 6;
+    const room = Math.max(12, heading.clientWidth - others.reduce((w, node) => w + node.offsetWidth, 0)
+      - gap * (others.length + 1) - 20);
+    const height = Math.max(8, heading.clientHeight - 4);
+    for (let size = 12; size >= 5; size -= 0.5) {
+      const line = Math.ceil(size * 1.05);
+      const rows = Math.max(1, Math.min(count, Math.floor(height / line)));
+      box.style.fontSize = size + 'px';
+      box.style.gridTemplateRows = 'repeat(' + rows + ', ' + line + 'px)';
+      if (box.offsetWidth <= room) break;
+    }
+  }
+
   function renderSite(site, trend) {
     const panel = panels.get(aliases[site.id] || site.name);
     if (!panel) return;
@@ -334,8 +370,9 @@
         'Unreported multicore native widths or stale Event Service reports remain unknown.' +
         (partialThreads ? '\nLower bound: some jobs have no fresh thread measurement.' : '');
     }
+    // The bullet is the worst of the site's health, status and lines.
     const dot = panel.querySelector('.panelhead > .dot');
-    if (dot) dot.style.background = 'var(--' + color(site.status_level || (site.health && site.health.level)) + ')';
+    if (dot) dot.style.background = 'var(--' + color(site.level || site.status_level || (site.health && site.health.level)) + ')';
     const status = panel.querySelector('.site-status');
     if (status) {
       text(status, site.status_label || 'unknown');
@@ -347,41 +384,13 @@
     if (body) {
       text(body, site.status_reason || site.status_label || 'Status unavailable');
     }
-    // The fair-share notice and weekly average keep their own links and
-    // hover details, with the average following the notice in grey.
+    // The upper right cites the site's numbered Production now lines (the
+    // core limit, fair share and feed switch among them), then the weekly
+    // average in grey (PROD_DASHBOARD.md).
     const weekly = panel.querySelector('.weekly-cores');
-    if (weekly) {
-      const notice = site.worker_limit && site.worker_limit.notice;
-      config.setWeeklyOverride(weekly, notice);
-    }
-    if (weekly && 'fair_share' in site) {
-      const share = site.fair_share;
-      const notice = share && share.notice;
-      let label = panel.querySelector('.site-fair-share');
-      if (notice) {
-        if (!label) {
-          label = anchor(notice.link, 'site-fair-share small', notice.text, notice.detail);
-          weekly.before(label);
-        }
-        label.textContent = notice.text; label.title = notice.detail; label.href = notice.link;
-        label.style.color = 'var(--' + color(notice.level) + ')';
-      } else if (label) label.remove();
-    }
-    // A live site's status label (Pressure front OFF) shows in the panel head
-    // where OSG's fair-share notice sits, before the weekly average.
-    if (weekly && !status) {
-      let note = panel.querySelector('.site-status-note');
-      const shown = site.status_label && !(site.fair_share && site.fair_share.notice);
-      if (shown) {
-        if (!note) {
-          note = document.createElement('span');
-          note.className = 'site-fair-share small site-status-note';
-          weekly.before(note);
-        }
-        note.textContent = site.status_label; note.title = site.status_reason || '';
-        note.style.color = 'var(--' + color(site.status_level) + ')';
-      } else if (note) note.remove();
-    }
+    if (weekly) config.setWeeklyOverride(weekly, null);
+    panel.querySelectorAll('.site-fair-share').forEach(node => node.remove());
+    renderNotices(panel, site.notices || []);
     const pillars = panel.querySelectorAll('.queuepillar.svgcolumn');
     const titles = [(partialThreads ? 'At least ' : '') + number(values[0]) + ' payload cores; ' + number(values[1]) + ' cores finished, ' +
       number(values[2]) + ' cores failed in last 1h', metrics[3]?.title || number(values[3]) + ' queued cores',
@@ -593,10 +602,13 @@
       return row;
     });
     document.querySelector('#events .board').replaceChildren(...rows);
+    // Each line's number, in its colour, where the bullet was: the site
+    // panels cite these numbers (PROD_DASHBOARD.md).
     const issues = list(record.report).map(item => {
       const row = anchor(item.link || config.snapshotUrl, 'issue', undefined, item.text);
-      const dot = element('span', 'dot'); dot.style.background = 'var(--' + color(item.level) + ')';
-      row.append(dot, element('span', '', item.text)); return row;
+      const number = element('span', 'issue-n', item.n != null ? String(item.n) : '');
+      number.style.color = 'var(--' + color(item.level) + ')';
+      row.append(number, element('span', '', item.text)); return row;
     });
     document.querySelector('#report .issues').replaceChildren(...issues);
     const assessment = record.report && record.report.assessment;

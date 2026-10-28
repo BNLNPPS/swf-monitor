@@ -104,11 +104,10 @@ function linkDashboard(record) {
     const name = panel.dataset.siteKey || title.textContent.trim();
     if (!(name in queues)) return;
     link(title, history(name), name + ': last 12h');
+    // A core limit is a numbered Production now line, not this label.
     const weekly = panel.querySelector('.weekly-cores');
-    const workerLimit = sites[name].worker_limit && sites[name].worker_limit.notice;
-    link(weekly, workerLimit ? workerLimit.link : history(name, '7d'),
-      workerLimit ? workerLimit.detail : weekly && weekly.dataset.weeklyTitle ||
-      name + ': running cores · last 7d');
+    link(weekly, history(name, '7d'),
+      weekly && weekly.dataset.weeklyTitle || name + ': running cores · last 7d');
     const status = panel.querySelector('.site-status');
     link(status, name === 'Perlmutter' ? url('panda/front/', {}, 'nersc-allocation') : queuePage(name),
       name + ': queue status');
