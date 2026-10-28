@@ -168,8 +168,9 @@ fits, followed by the weekly average cores in grey. The core limit, the
 fair-share notice and the feed switch no longer write words there.
 
 While a pool's negotiator holds our OSG submitter at its fair-share
-limit, OSG has an amber line naming the pool and the time of the
-negotiation cycle.
+limit, OSG has a grey, informational line naming the pool and the time of
+the negotiation cycle: it is OSG's normal mode of operation, so it never
+turns OSG's bullet amber (Torre Wenaus, 2026-10-28).
 The notice means our submitter reached its fair-share limit during the
 last reported negotiation cycle. Existing pilots keep their slots;
 later cycles may grant more. The reading is the OSG submit host reporter's

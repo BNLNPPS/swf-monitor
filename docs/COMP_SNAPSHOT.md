@@ -431,8 +431,10 @@ OSG. Queue identifiers and links retain their canonical names.
     paused it, when and why (`paused`, below);
   - an operator **core limit**, red, with the control's reason, who and
     when (`pilot.queue.<queue>.worker_limit`);
-  - the pool's **fair-share** limit, amber, with the pool and the
-    negotiation cycle's time (`site.fair_share.notice`).
+  - the pool's **fair-share** limit, grey, informational: OSG's normal
+    mode of operation, which never colours the site (Torre Wenaus,
+    2026-10-28), with the pool and the negotiation cycle's time
+    (`site.fair_share.notice`).
 
   Then why the front feeds nothing (the global front is off, each live
   queue's front decision in the words of CONTINUOUS_PRODUCTION.md's

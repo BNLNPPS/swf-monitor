@@ -1451,8 +1451,10 @@ def _fair_share_notice(share, link):
             when = f" ({at.astimezone(ZoneInfo('America/New_York')):%Y-%m-%d %H:%M:%S} ET)"
         except (TypeError, ValueError):
             logger.warning('Unusable fair-share cycle time: %r', cycle)
+    # Informational: the pool holding us at our share is OSG's normal mode
+    # (Torre Wenaus, 2026-10-28), not a warning, and never colours OSG.
     return {
-        'text': 'fair share limited', 'level': 'amber', 'link': link,
+        'text': 'fair share limited', 'level': 'grey', 'link': link,
         'detail': (f'{pools}: fair-share limit reached in the last reported '
                    f'negotiation cycle{when}. Existing pilots keep their slots; '
                    'later cycles may grant more.'),
