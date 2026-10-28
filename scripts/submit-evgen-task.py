@@ -603,6 +603,10 @@ def main():
                          "MB) the dispatcher puts on the payload, so a "
                          "reference run matches the production queue's "
                          "memory")
+    ap.add_argument("--es-input-files", default="",
+                    help="comma-separated file names of --es-input-dataset that the task takes, "
+                         "and no others: an input read where it resides, a catalog's own dataset "
+                         "(swf-epicprod evgen_es.catalog_input)")
     ap.add_argument("--es-input-dataset", default="",
                     help="payload canary as an Event Service job (swf-epicprod "
                          "NODE_EVENT_DISPATCHER.md): this PanDA input dataset "
@@ -958,6 +962,8 @@ def main():
             if args.es_direct_input:
                 # runGen takes the input as given (the kernel's --givenPFN)
                 spec['directInput'] = True
+            if args.es_input_files:
+                spec['inputFiles'] = [n for n in args.es_input_files.split(',') if n]
             spec.update(inputDataset=args.es_input_dataset, nFilesPerJob=1,
                         nEventsPerInputFile=int(args.es_events),
                         nEventsPerJob=int(args.es_events),
