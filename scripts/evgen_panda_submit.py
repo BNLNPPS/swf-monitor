@@ -227,6 +227,14 @@ def build_task_params(spec, archive_name):
         params['nFilesPerJob'] = int(spec.get('nFilesPerJob', 1))
         if spec.get('nEventsPerInputFile'):
             params['nEventsPerInputFile'] = int(spec['nEventsPerInputFile'])
+        # Each file at its own events (swf-epicprod production_es, EVGEN
+        # input): JEDI reads them from the listing, which the ePIC DDM
+        # interface gives the task's counts (epicFileEvents), so the last
+        # file is taken only as far as the manifest and none is dropped.
+        if spec.get('epicFileEvents'):
+            params['useRealNumEvents'] = True
+            params['epicFileEvents'] = {str(k): int(v) for k, v in spec['epicFileEvents'].items()}
+            params.pop('nEventsPerInputFile', None)
         # Over real input nEvents is the events to process, not the job
         # count the noInput shape encodes in it. An EVGEN Event Service task
         # gives its own: its manifest's total, which takes its last file

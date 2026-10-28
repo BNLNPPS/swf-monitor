@@ -607,6 +607,10 @@ def main():
                     help="comma-separated file names of --es-input-dataset that the task takes, "
                          "and no others: an input read where it resides, a catalog's own dataset "
                          "(swf-epicprod evgen_es.catalog_input)")
+    ap.add_argument("--es-file-events", default="",
+                    help="with --es-input-files: each file's events, NAME=EVENTS comma-separated, "
+                         "the task at their sum (JEDI's useRealNumEvents with the counts the ePIC "
+                         "DDM interface gives the listing; swf-epicprod production_es file_events)")
     ap.add_argument("--es-input-dataset", default="",
                     help="payload canary as an Event Service job (swf-epicprod "
                          "NODE_EVENT_DISPATCHER.md): this PanDA input dataset "
@@ -964,6 +968,10 @@ def main():
                 spec['directInput'] = True
             if args.es_input_files:
                 spec['inputFiles'] = [n for n in args.es_input_files.split(',') if n]
+            file_events = {}
+            for pair in [p for p in args.es_file_events.split(',') if p]:
+                name, _, count = pair.partition('=')
+                file_events[name] = int(count)
             spec.update(inputDataset=args.es_input_dataset, nFilesPerJob=1,
                         nEventsPerInputFile=int(args.es_events),
                         nEventsPerJob=int(args.es_events),
@@ -984,6 +992,13 @@ def main():
                         # the wrong directory (3494150, pilot error 1165);
                         # the native pilot is tested on its own.
                         )
+            if file_events:
+                if list(file_events) != spec.get('inputFiles'):
+                    _log('ERROR: --es-file-events must name the --es-input-files, in order')
+                    return 2
+                spec.pop('nEventsPerInputFile', None)
+                spec.update(epicFileEvents=file_events, nEventsPerJob=sum(file_events.values()),
+                            nEvents=sum(file_events.values()), nJobs=len(file_events))
             _log(f"event service canary: {args.es_events} events of "
                  f"{args.es_input_dataset} in ranges of "
                  + (f"{args.es_fine_range_events} (fine-grained), units of {args.es_events_per_range or 1}"
