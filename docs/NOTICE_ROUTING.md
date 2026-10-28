@@ -159,7 +159,13 @@ and its eventual resolution in `epicprod-live`. A private dialog, commit,
 TJAI coordination message or assessment alone does not complete reporting.
 Each report identifies the incident and affected campaign, tasks or endpoint,
 states what is known and what remains uncertain, links supporting evidence,
-and gives the action or owner. A resolution references the original incident,
+and gives the action or owner. Information the assessments should weigh that
+arrives outside the record, by mail, in a draft or in dialog (a site's own
+account of a cause, an operator's decision and its reason), is posted the same
+way: the assessments read nothing else (Torre Wenaus, 2026-10-28, after the
+daily assessment called GREX's registration losses unexplained while GREX's
+admins had given their 1 Gb/s uplink as the cause by mail).
+A resolution references the original incident,
 distinguishes identified cause, implemented fix, deployment and verified
 recovery, and states any remaining scope limitation. Report new evidence and
 state changes, not every investigative step or routine successful check.
