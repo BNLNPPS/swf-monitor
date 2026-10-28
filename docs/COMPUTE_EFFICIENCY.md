@@ -14,7 +14,8 @@ to this history.
 
 The dashboard's panel below Storage has three monthly plots, each with
 OSG, Perlmutter and GREX curves: efficiency, total average cores (labelled
-**Cores / day**), and productive average cores. Each plot also shows an overall
+**Cores / day**), and productive average cores; the efficiency plot also has a
+Google curve, whose few cores would draw flat lines on the other two. Each plot also shows an overall
 reading for the preceding 24 hours and one overall monthly average since May.
 OSG combines execution sites and retired queues; Perlmutter combines its
 historical queues. Hover identifies each curve and its measured values.

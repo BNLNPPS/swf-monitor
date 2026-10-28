@@ -68,7 +68,9 @@
       const chart = block.querySelector('svg');
       cells.style.setProperty('--months', Math.max(1, months.length));
       cells.replaceChildren(); chart.replaceChildren();
-      const model = trendModel.series(sites.map(site => ({key: site.id, color: site.color,
+      // A site the server marks for some plots only (Google: efficiency).
+      const shown = sites.filter(site => !site.metrics?.length || site.metrics.includes(metric.key));
+      const model = trendModel.series(shown.map(site => ({key: site.id, color: site.color,
         values: site.months.map(row => metricValue(metric, row))})), {count: months.length});
       const ceiling = metric.ceiling || model.ceiling;
       [12, 37, 62].forEach((position, index) => {
@@ -84,7 +86,7 @@
       chart.append(svg('line', {x1: 240-step, x2: 240-step, y1: 7, y2: 67,
         stroke: '#6a7b86', 'stroke-width': 1, 'stroke-dasharray': '2 3'}));
       model.curves.forEach((curve, index) => {
-        const site = sites[index];
+        const site = shown[index];
         const group = svg('g', {class: 'efficiency-series'});
         curve.solid.forEach(path => {
           if (path.length < 2) return;
@@ -113,7 +115,7 @@
         const amount = document.createElement('b'); amount.textContent = reading(metric, row);
         cell.append(label, amount); cells.append(cell);
       });
-      chart.setAttribute('aria-label', metric.label + ' monthly since May: ' + sites.map(site =>
+      chart.setAttribute('aria-label', metric.label + ' monthly since May: ' + shown.map(site =>
         site.label + ': ' + site.months.map(row => row.label + ' ' + reading(metric, row)).join(', ')).join('; '));
     });
     stamp.classList.remove('red');

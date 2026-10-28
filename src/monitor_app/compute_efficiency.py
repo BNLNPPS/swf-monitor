@@ -26,7 +26,12 @@ DEFAULT_COMMISSIONING_UNTIL = {
 }
 DASHBOARD_SITES = (('osg', 'OSG', '#b48ee8'),
                    ('perlmutter', 'Perlmutter', '#e3b954'),
-                   ('grex', 'GREX', '#7fce95'))
+                   ('grex', 'GREX', '#7fce95'),
+                   ('google', 'Google', '#6fb7f2'))
+# A site drawn only on some of the dashboard's plots: Google's few cores make
+# flat lines on the core plots, while its efficiency is meaningful (Torre,
+# 2026-10-27). A site absent here is drawn on all three.
+DASHBOARD_SITE_METRICS = {'google': ('efficiency',)}
 
 
 def commissioning_until():
@@ -153,6 +158,8 @@ def _dashboard_site(row):
         return 'perlmutter'
     if row[1] == 'UM_GREX_PanDA_1':
         return 'grex'
+    if row[1].startswith('BNL_ePIC_GOOGLE'):
+        return 'google'
     return None
 
 
@@ -182,7 +189,8 @@ def dashboard_data(value, current):
         if START <= day <= today:
             grouped[str(day.replace(day=1))].append(row)
     months = []
-    sites = [{'id': sid, 'label': label, 'color': color, 'months': []}
+    sites = [{'id': sid, 'label': label, 'color': color, 'months': [],
+              'metrics': list(DASHBOARD_SITE_METRICS.get(sid, ()))}
              for sid, label, color in DASHBOARD_SITES]
     month = START
     while month <= today:
