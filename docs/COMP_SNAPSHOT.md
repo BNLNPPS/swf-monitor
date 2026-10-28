@@ -409,8 +409,11 @@ OSG. Queue identifiers and links retain their canonical names.
   without an LLM: the front, each live site's running and last-hour
   outcomes, and every non-green health part.
 - `report.items`: what the room's floor cannot show, one line each as
-  `{n, key, level, text, link, site}`, in the order of their numbers, the
-  level carried by the colour, with no per-site counts (the pillars carry
+  `{n, key, level, text, link, site, since}`, newest first by `since`,
+  when the line first stood (Torre Wenaus, 2026-10-28: "prod now items
+  should be reverse time order"; lines standing before then carry that
+  deploy's time and keep number order among themselves), the level
+  carried by the colour, with no per-site counts (the pillars carry
   those). `n` is the
   line's standing number (Torre Wenaus, 2026-10-28: "prod now numbering
   should be immutable"): `key` names what the line is about (a queue's

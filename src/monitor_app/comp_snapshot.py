@@ -2109,12 +2109,14 @@ NUMBER_SEEN_REFRESH = timedelta(minutes=5)
 
 
 def _stable_numbers(keys, now=None):
-    """{key: n}. A Production now line keeps its number while it stands
-    (Torre Wenaus, 2026-10-28: "prod now numbering should be immutable"):
-    a new line takes the lowest number not held, and a cleared line's
-    number stays held for NUMBER_HOLD, so a line that returns keeps it and
-    no other line takes it meanwhile. Held in the CachedProduct row
-    NUMBERS_KEY, ``{key: {n, seen}}``, written only when it changes."""
+    """{key: (n, since)}. A Production now line keeps its number while it
+    stands (Torre Wenaus, 2026-10-28: "prod now numbering should be
+    immutable"): a new line takes the lowest number not held, and a cleared
+    line's number stays held for NUMBER_HOLD, so a line that returns keeps
+    it and no other line takes it meanwhile. ``since`` is when the line
+    first stood, kept with its number. Held in the CachedProduct row
+    NUMBERS_KEY, ``{key: {n, seen, since}}``, written only when it
+    changes."""
     from django.db import transaction
     from monitor_app.models import CachedProduct
     now = now or timezone.now()
@@ -2133,23 +2135,28 @@ def _stable_numbers(keys, now=None):
                 if now - datetime.fromisoformat(held[key]['seen']) > NUMBER_SEEN_REFRESH:
                     held[key] = dict(held[key], seen=now.isoformat())
                     changed = True
+                if 'since' not in held[key]:
+                    # a line numbered before its first-stood time was kept
+                    held[key] = dict(held[key], since=now.isoformat())
+                    changed = True
                 continue
             n = 1
             while n in used:
                 n += 1
-            held[key] = {'n': n, 'seen': now.isoformat()}
+            held[key] = {'n': n, 'seen': now.isoformat(), 'since': now.isoformat()}
             used.add(n)
             changed = True
         if changed:
             row.value = held
             row.save(update_fields=['value', 'updated_at'])
-    return {key: held[key]['n'] for key in keys}
+    return {key: (held[key]['n'], held[key]['since']) for key in keys}
 
 
 def _numbered(items, sites):
-    """The report's lines in the order of their standing numbers
-    (``_stable_numbers``), the colour carrying the level (Torre Wenaus,
-    2026-10-28: red first put the numbers out of order); each site's own lines as
+    """The report's lines newest first, by when each first stood (Torre
+    Wenaus, 2026-10-28: "prod now items should be reverse time order"),
+    with their standing numbers (``_stable_numbers``), the colour carrying
+    the level; each site's own lines as
     ``site.notices`` for its panel, and its bullet ``site.level``: the
     worst of its health, status and lines."""
     for item in items:
@@ -2160,8 +2167,10 @@ def _numbered(items, sites):
         logger.exception('Production now numbers unavailable')
         numbers = {}
     for item in items:
-        item['n'] = numbers.get(item['key'])
-    items = sorted(items, key=lambda i: (i['n'] is None, i['n'] or 0))
+        item['n'], item['since'] = numbers.get(item['key'], (None, None))
+    # Newest first; lines that first stood together keep number order.
+    items = sorted(items, key=lambda i: (i['n'] or 0))
+    items = sorted(items, key=lambda i: i['since'] or '', reverse=True)
     by_site = {}
     for item in items:
         if item.get('site'):
