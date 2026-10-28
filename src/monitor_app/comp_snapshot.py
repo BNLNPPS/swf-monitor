@@ -518,8 +518,12 @@ class _Build:
                        AND d.masterid IS NULL AND d.type IN ('input', 'pseudo_input')
                   WHERE t.status = 'paused' AND t.processingtype = 'epicproduction'
                   GROUP BY 1, 2, 3, 4 ORDER BY 4, 1'''
+        from swf_epicprod.quiet_end import quiet_task_ids
+        quiet = quiet_task_ids()        # ended quietly: never on the floor (EPICPROD_OPS.md)
         items, oldest = [], None
         for tid, name, queue, since, n, done, lost in _rows(sql, ()):
+            if int(tid) in quiet:
+                continue
             if since is not None and since.tzinfo is None:
                 since = since.replace(tzinfo=dt_timezone.utc)  # PanDA stores UTC
             oldest = oldest or since
@@ -648,6 +652,9 @@ class _Build:
         items = []
         rows = _rows(sql, (since.astimezone(dt_timezone.utc).replace(tzinfo=None),))
         physics = _task_physics({(int(r[0]), r[1]) for r in rows})
+        from swf_epicprod.quiet_end import quiet_task_ids
+        quiet = quiet_task_ids()        # ended quietly: never on the floor (EPICPROD_OPS.md)
+        rows = [r for r in rows if int(r[0]) not in quiet]
         for tid, name, queue, state, at, n, done, lost in rows:
             if at is not None and at.tzinfo is None:
                 at = at.replace(tzinfo=dt_timezone.utc)  # PanDA stores UTC

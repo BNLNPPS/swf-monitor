@@ -534,7 +534,7 @@ writes the ids of the tasks whose `sites` hold it (Torre Wenaus,
 `paused` is the epicprod disc's paused pillar (Torre Wenaus,
 2026-10-23): every production task (`processingtype` `epicproduction`)
 whose PanDA status is `paused`, wherever it is placed, a retired queue
-included.
+included, except a task ended quietly (swf-epicprod EPICPROD_OPS.md, Quiet end).
 
 - `tasks`: the count; `link`: the task list narrowed to paused
   production tasks, its window reaching back to the oldest pause;
@@ -553,7 +553,8 @@ stream carry who paused it when it was paused through our tools.
 for the dashboard's panel under the paused tasks (Torre Wenaus,
 2026-10-24): every `epicproduction` task whose PanDA status is `done`
 (every input file finished) or `finished` (some lost), trials included,
-by its end time.
+by its end time, except a task ended quietly (swf-epicprod EPICPROD_OPS.md,
+Quiet end).
 
 - `tasks`: the count; `window_hours`: 24; `link`: the day's production
   task list; `detail`: the count in words.
