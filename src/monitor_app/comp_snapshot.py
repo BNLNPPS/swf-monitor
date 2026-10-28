@@ -2095,7 +2095,13 @@ def _site_state_items(value, cfg):
             if task.get('queue') not in queues:
                 continue
             subject = _subject_name(site, {'id': task['queue']}, live)
-            items.append({'level': 'red', 'site': site['id'], 'link': task.get('link'),
+            # The task guard's pause is failing work: red. A person's pause
+            # with its reason is information: grey (Torre Wenaus, 2026-10-28:
+            # "not a red condition! it is info"). One outside our tools has
+            # no reason anyone recorded: red.
+            by = task.get('paused_by')
+            level = 'red' if by in ('front task guard', 'outside our tools') or not task.get('pause_reason') else 'grey'
+            items.append({'level': level, 'site': site['id'], 'link': task.get('link'),
                           'key': f"paused:{task['id']}",
                           'text': (f"{subject} task {task['id']} paused"
                                    f"{_account(task.get('since'), task.get('paused_by'))}: "
