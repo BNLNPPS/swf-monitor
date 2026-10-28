@@ -61,8 +61,9 @@ The right column is bounded by the visible viewport using the existing
 screen-height measurement. Production now wraps its notices without growing
 to fill unused space. When the notices would push Storage off screen, their
 body scrolls within the available height. Storage follows directly below.
-Notices use 10-pixel text, and every notice is accessible. There is no
-separate inactive-site footer.
+Notices use 10-pixel text, and every notice is accessible. A notice has
+no hover text, which would repeat the line (Torre Wenaus, 2026-10-28:
+"they are noise"). There is no separate inactive-site footer.
 
 Cylinder height uses a common 2,500-core running scale for OSG and GREX,
 preserving the approximately 80% height of 2,000 single-threaded jobs.

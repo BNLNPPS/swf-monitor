@@ -643,7 +643,8 @@
     // Each line's number, in its colour, where the bullet was: the site
     // panels cite these numbers (PROD_DASHBOARD.md).
     const issues = list(record.report).map(item => {
-      const row = anchor(item.link || config.snapshotUrl, 'issue', undefined, item.text);
+      // No hover text: it would repeat the line (Torre Wenaus, 2026-10-28).
+      const row = anchor(item.link || config.snapshotUrl, 'issue');
       const number = element('span', 'issue-n', item.n != null ? String(item.n) : '');
       number.style.color = 'var(--' + color(item.level) + ')';
       row.append(number, element('span', '', item.text)); return row;
