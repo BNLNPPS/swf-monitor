@@ -427,7 +427,10 @@ def jedi_regulation():
             handle.seek(max(0, handle.tell() - 1024 * 1024))
             lines = handle.read().decode('utf-8', 'replace').splitlines()
         for line in lines:
-            match = re.search(r'REGULATION_OK vo=(wlcg|epic) mode=throttle lock=true exclusions=true decision=(PASS|SKIP)', line)
+            # Fields added after exclusions= (accounting=, scope=, 2026-10-28)
+            # are read past: the decision is what the front checks.
+            match = re.search(r'REGULATION_OK vo=(wlcg|epic) mode=throttle lock=true exclusions=true'
+                              r'(?: \S+=\S+)*? decision=(PASS|SKIP)', line)
             stamp = re.search(r'\d{4}-\d\d-\d\d[ T]\d\d:\d\d:\d\d', line)
             if match and stamp:
                 voices[match.group(1)] = {'at': stamp.group().replace(' ', 'T') + 'Z',
