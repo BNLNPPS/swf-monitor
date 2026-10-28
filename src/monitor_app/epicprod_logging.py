@@ -157,6 +157,11 @@ ACTION_DEFAULTS = {
         'description': "Record a ping's obligation as fulfilled; its alarm "
                        "event clears on the engine's next tick.",
     },
+    'prodconfig_vo': {
+        'sublevel': 'normal', 'live': False,
+        'description': "Change a production configuration's VO for future "
+                       "submissions; existing task identities stay unchanged.",
+    },
     'standard_prodconfig_create': {
         'sublevel': 'normal', 'live': True,
         'description': "Create a campaign edition's Standard Production "
