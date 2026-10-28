@@ -2110,8 +2110,9 @@ def _stable_numbers(keys, now=None):
 
 
 def _numbered(items, sites):
-    """The report's lines, red first, then amber, grey and green, each with
-    its standing number (``_stable_numbers``); each site's own lines as
+    """The report's lines in the order of their standing numbers
+    (``_stable_numbers``), the colour carrying the level (Torre Wenaus,
+    2026-10-28: red first put the numbers out of order); each site's own lines as
     ``site.notices`` for its panel, and its bullet ``site.level``: the
     worst of its health, status and lines."""
     for item in items:
@@ -2123,7 +2124,7 @@ def _numbered(items, sites):
         numbers = {}
     for item in items:
         item['n'] = numbers.get(item['key'])
-    items = sorted(items, key=lambda i: (LEVEL_ORDER.get(i.get('level'), 2), i['n'] or 0))
+    items = sorted(items, key=lambda i: (i['n'] is None, i['n'] or 0))
     by_site = {}
     for item in items:
         if item.get('site'):
