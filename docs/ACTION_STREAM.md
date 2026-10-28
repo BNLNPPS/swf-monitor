@@ -43,15 +43,35 @@ Any additional keys are free counts and context (`rows_added=…`,
 
 Two independent axes govern publication; neither touches log level.
 
-**`sublevel`** — the event's importance, declared at the call site,
-AUTHORITATIVE: changing it means changing the event, in code, in git. It says
-*which humans* an event reaches (the UI presents it as **Importance**, and
-filters on it as an at-or-above **importance threshold**):
+**`sublevel`** — the event's importance (the UI presents it as
+**Importance**, and filters on it as an at-or-above **importance
+threshold**). It means one thing (Torre Wenaus, 2026-10-28: "high should be
+made to MEAN something"):
 
-- `high` — everyone, including digest and email audiences (submissions,
-  sweeps, failures, configuration changes)
-- `normal` — live-page watchers (fetches, syncs, assessments)
-- `low` — deliberately verbose viewers only (routine mechanics)
+- `high` — a problem a person should look at now: a failure of production
+  work or of the machinery behind it, a stop production made by itself (the
+  front's task guard pausing a task), a finding of a production problem;
+- `normal` — what people and the front do to production and what it
+  delivers: submissions, task operations, settings, limits, trials,
+  priorities, work released to a site, node exclusions, assessments,
+  recoveries, and a maintenance pass's failure, which the alarms follow;
+- `low` — routine mechanics: maintenance passes, imports, sweeps and syncs
+  that succeed, bookkeeping, pilot cycles, and the step records behind an
+  event another record reports. A low event is never live by default.
+
+The catalog (`ACTION_DEFAULTS`, below) declares each action's importance
+and live default when it succeeds, and where one outcome matters more than
+the rest, that outcome's own (`outcomes`: a front decision that `fed`, a
+feeder pass that `submitted`). A failure (an `error`, `timeout`, `partial`
+or `unrecorded` outcome, or a record at ERROR) is `high` and live, a
+maintenance pass's failure `normal`. These are set at the write, whoever
+writes the record (the web tier, the MCP tools, the cron runners, the ops
+agent's REST posts): `AppLog.save` applies `epicprod_logging.publication`,
+so a call site's own values are not consulted for a catalogued action. An
+action missing from the catalog keeps its call site's values and is logged
+as uncatalogued. Over the seven days before the rule, 68 records would have
+been `high` (37 guard pauses, the rest failures and findings) against more
+than 1,500 declared so.
 
 **`live`** — a special category: "interesting to some humans, now." Each
 event declares a `live_default` recommendation; the effective decision is the
@@ -108,7 +128,8 @@ Rules of the road:
 
 1. Declare every new action in `ACTION_DEFAULTS`
    (`monitor_app/epicprod_logging.py`) — the greppable catalog the live-policy
-   page reads. It MUST mirror the call sites. Every declaration carries a
+   page reads and the write applies (Publication axes): its importance and
+   live default are the record's, by the meaning above. Every declaration carries a
    plain-English `description` — the one-liner answering "what is this
    action", available in the log entry's technical details and on the live-policy page so a
    stream reader is never left guessing what an event was.

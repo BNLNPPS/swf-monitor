@@ -242,6 +242,16 @@ class AppLog(models.Model):
     def __str__(self):
         return f'{self.timestamp} - {self.app_name}:{self.instance_name} - {self.get_level_display()} - {self.message}'
 
+    def save(self, *args, **kwargs):
+        # An action record's importance and live default are set by their
+        # meaning at the write, whoever writes it: the web tier, the MCP
+        # tools, the ops agent's REST posts (ACTION_STREAM.md, Importance).
+        if (self._state.adding and self.app_name == 'epicprod'
+                and isinstance(self.extra_data, dict) and self.extra_data.get('action')):
+            from .epicprod_logging import publication
+            publication(self.extra_data, self.levelname)
+        super().save(*args, **kwargs)
+
 """
 Django models for the SWF Fast Monitoring Agent database.
 
