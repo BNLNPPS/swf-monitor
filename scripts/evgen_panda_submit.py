@@ -214,11 +214,16 @@ def build_task_params(spec, archive_name):
     # when the catalog carries no event count.
     if spec.get('inputDataset'):
         params.pop('noInput', None)
-        params['jobParameters'].append({
+        item = {
             'type': 'template', 'param_type': 'input',
             'value': '-i "${IN/T}"', 'dataset': spec['inputDataset'],
             'expand': True, 'exclude': r'\.log\.tgz(\.\d+)*$',
-        })
+        }
+        # An input read where it resides (swf-epicprod evgen_es.catalog_input):
+        # the catalog's dataset, of which JEDI takes these files only.
+        if spec.get('inputFiles'):
+            item['files'] = list(spec['inputFiles'])
+        params['jobParameters'].append(item)
         params['nFilesPerJob'] = int(spec.get('nFilesPerJob', 1))
         if spec.get('nEventsPerInputFile'):
             params['nEventsPerInputFile'] = int(spec['nEventsPerInputFile'])
