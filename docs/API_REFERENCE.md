@@ -151,13 +151,17 @@ export REQUESTS_CA_BUNDLE=/opt/swf-monitor/current/full-chain.pem
 ### PanDA task operations
 
 - `POST /api/panda/tasks/{jeditaskid}/operations/` - Authenticated request for
-  `{"operation": "pause"}` or `{"operation": "resume"}`. Creates a durable
+  `{"operation": "pause", "reason": "..."}` or `{"operation": "resume"}`. A
+  pause without a reason is refused (HTTP 400): no task is paused without a
+  recorded reason (Torre Wenaus, 2026-10-28), which the operation record keeps
+  and the production dashboard shows. Creates a durable
   operation record and queues the credentialed work to prod-ops; HTTP 202 means
   queued, not completed. This action is restricted to the internal monitor;
   requests arriving through the swf-remote tunnel receive HTTP 403.
 - `POST /api/panda/task-operations/` - Authenticated internal-monitor bulk
   task-operation request with `{"operation":
-  "pause|resume|retry_failures|finish", "jedi_task_ids": [...]}`. The
+  "pause|resume|retry_failures|finish", "jedi_task_ids": [...]}`, with
+  `"reason"` required for pause, recorded on every task's record. The
   endpoint re-reads current PanDA state and queues only eligible tasks:
   `running` for pause, `paused` for resume,
   `finished`/`failed`/`exhausted`/`aborted` for retry_failures, and active

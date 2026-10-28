@@ -2111,10 +2111,18 @@ def _pause_accounts(task_ids):
                .order_by('jedi_task_id', '-requested_at')):
         if op.jedi_task_id in out:
             continue
+        evidence = op.evidence or {}
         if str(op.source or '').startswith('front_task_failure_guard'):
-            out[op.jedi_task_id] = ('front task guard', _guard_reason(op.evidence))
+            out[op.jedi_task_id] = ('front task guard',
+                                    _guard_reason(evidence) or evidence.get('reason'))
         else:
-            out[op.jedi_task_id] = (op.requested_by or None, (op.evidence or {}).get('reason'))
+            out[op.jedi_task_id] = (op.requested_by or None,
+                                    evidence.get('reason') or evidence.get('note'))
+    # A pause with no record was made outside our tools, in PanDA itself,
+    # which keeps no reason (EPICPROD_OPS.md: no pause without a reason).
+    for task_id in task_ids:
+        out.setdefault(task_id, ('outside our tools',
+                                 'paused directly in PanDA, which records no reason'))
     return out
 
 

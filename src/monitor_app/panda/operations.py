@@ -117,9 +117,12 @@ def operation_controls(task, *, authenticated, internal_monitor, pending=None):
 
 
 def queue_task_operation(*, task, operation, requested_by, source='manual',
-                         evidence=None, site=''):
+                         evidence=None, site='', reason=''):
     """Persist and queue one task operation for the prod-ops agent.
-    ``site`` is the target queue of a reassign."""
+    ``site`` is the target queue of a reassign; ``reason`` is recorded in
+    the evidence, and a pause requires one."""
+    if str(reason or '').strip():
+        evidence = dict(evidence or {}, reason=str(reason).strip())
     if operation == 'reassign':
         site = validate_move_site(site)
         evidence = dict(evidence or {}, site=site, mode='soft')
@@ -170,6 +173,12 @@ def _persist_task_operation(*, task, operation, requested_by, source,
     if operation not in OPERATION_VERBS:
         raise PandaTaskOperationError(
             'operation must be one of: ' + ', '.join(sorted(OPERATION_VERBS)))
+    # No task is paused without a recorded reason (Torre Wenaus, 2026-10-28):
+    # the record keeps it and the production dashboard shows it.
+    if operation == 'pause' and not str((evidence or {}).get('reason') or '').strip():
+        raise PandaTaskOperationError(
+            'A pause needs a reason; it is recorded with the task and shown on '
+            'the production dashboard.', 400)
     try:
         jedi_task_id = int(task.get('jeditaskid'))
     except (TypeError, ValueError):
@@ -309,7 +318,7 @@ def retry_parameters(raw):
 
 
 def queue_task_operations(*, tasks, operation, requested_by,
-                          new_parameters=None, site=''):
+                          new_parameters=None, site='', reason=''):
     """Persist eligible task records and queue one paced prod-ops batch.
 
     ``new_parameters`` (retry_failures only) are the task parameters the
@@ -340,6 +349,8 @@ def queue_task_operations(*, tasks, operation, requested_by,
         jedi_task_id = task.get('jeditaskid')
         task_status = str(task.get('status') or '').lower()
         evidence = {'task_status': task_status, 'batch_id': batch_id}
+        if str(reason or '').strip():
+            evidence['reason'] = str(reason).strip()
         if operation == 'reassign':
             evidence.update(site=site, mode='soft',
                             previous_site=str(task.get('site') or ''))

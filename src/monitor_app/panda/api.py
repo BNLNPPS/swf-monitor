@@ -210,6 +210,7 @@ def task_operation_request(request, jeditaskid):
             task=task,
             operation=str(request.data.get('operation') or ''),
             requested_by=getattr(request.user, 'username', '') or 'operator',
+            reason=str(request.data.get('reason') or ''),
         )
     except operations.PandaTaskOperationError as exc:
         return Response({'error': exc.detail}, status=exc.status)
@@ -256,6 +257,7 @@ def task_operations_request(request):
             requested_by=getattr(request.user, 'username', '') or 'operator',
             new_parameters=new_parameters,
             site=str(request.data.get('site') or ''),
+            reason=str(request.data.get('reason') or ''),
         )
     except operations.PandaTaskOperationError as exc:
         return Response({'error': exc.detail}, status=exc.status)

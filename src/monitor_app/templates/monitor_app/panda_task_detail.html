@@ -556,6 +556,13 @@
     }
 
     async function requestOperation(operation) {
+        // No task is paused without a recorded reason (Torre, 2026-10-28).
+        let reason = '';
+        if (operation === 'pause') {
+            reason = window.prompt('Pause this task?\n\nReason (recorded with the task and shown on the production dashboard):');
+            if (reason === null) return;
+            if (!reason.trim()) { window.alert('A pause needs a reason.'); return; }
+        }
         disableControls();
         showStatus(`${operation === 'pause' ? 'Pause' : 'Resume'} requested · waiting for PanDA…`, 'primary');
         watchOperation();
@@ -568,7 +575,7 @@
                     'Content-Type': 'application/json',
                     'X-CSRFToken': csrfToken,
                 },
-                body: JSON.stringify({operation: operation}),
+                body: JSON.stringify({operation: operation, reason: reason.trim()}),
             });
             const record = await response.json();
             if (!response.ok) throw new Error(record.error || 'Operation could not be queued.');

@@ -575,10 +575,13 @@ included, except a task ended quietly (swf-epicprod EPICPROD_OPS.md, Quiet end).
 PanDA records no reason for a pause, and its "pause by Torre Wenaus" is
 the operations agent's credential, not the actor. A pause made through
 our tools has its operation record (`PandaTaskOperation`, operation
-`pause`): each item carries `paused_by` (the person, or `front task
-guard` for the front's guard) and `pause_reason` (the guard's trip from
-its evidence, a person's recorded reason, or null when none was
-recorded).
+`pause`), and every pause through our tools carries a reason (swf-epicprod
+EPICPROD_OPS.md): each item carries `paused_by` (the person, or `front
+task guard` for the front's guard) and `pause_reason` (the guard's trip
+from its evidence, or the recorded reason; null only for a pause made
+before 2026-10-28 without one). A paused task with no operation record
+was paused outside our tools, directly in PanDA: `paused_by` reads
+`outside our tools`.
 
 ### Completed
 
