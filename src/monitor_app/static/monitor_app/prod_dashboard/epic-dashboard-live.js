@@ -340,7 +340,7 @@
         label = element('span', 'site-node-cap right small'); heading.append(label);
       }
       label.textContent = nodeCap + (Number(nodeCap) === 1 ? ' node' : ' nodes') +
-        (site.cores_per_node ? ' × ' + site.cores_per_node + ' cores' : '');
+        (site.cores_per_node ? ' ×' + site.cores_per_node : '');
     }
     productionPanel(panel, site);
     const active = (site.queues || []).filter(q => q.production_display || q.status === 'live');

@@ -71,7 +71,7 @@ Google uses a 100-core scale, and Perlmutter a 1,000-core scale (128 work
 lanes a node; its five-node production of 640 at about two-thirds height).
 Each of these four pillar sections shows its scale in small text at the upper
 left. Google's and Perlmutter's title rows show their production at the upper
-right, **5 nodes × 14 cores** and **N nodes × 128 cores**; Perlmutter's N is
+right, **5 nodes ×14** and **N nodes ×128**; Perlmutter's N is
 the nodes running now, from PanDA's worker table (the queue's `workers_now`),
 so the row corrects itself (Torre Wenaus, 2026-10-28: "title should be auto
 correct"). An Event Service site, one whose production queues
