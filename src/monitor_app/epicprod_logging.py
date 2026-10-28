@@ -90,7 +90,8 @@ ACTION_DEFAULTS = {
         'sublevel': 'high', 'live': True,
         'description': "A pool our OSG pilots run in held our submitter at "
                        "its fair-share limit, so it gives our pilots no new "
-                       "slots (state held, warning), or released it after "
+                       "slots (state held, informational: OSG's normal "
+                       "mode of operation), or released it after "
                        "three consecutive clear readings (state lifted); "
                        "read from each pool negotiator's last cycle by the "
                        "OSG submit host reporter.",

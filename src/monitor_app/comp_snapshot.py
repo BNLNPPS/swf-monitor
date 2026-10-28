@@ -1661,7 +1661,7 @@ def _live_records():
                       'link': f"{PUBLIC}/logs/{r['id']}/"})
         if len(items) == LIVE_ITEMS:
             break
-    return {'link': f'{PUBLIC}/logs/?app_name=epicprod&live=1',
+    return {'link': f'{PUBLIC}/logs/epicprod-live/',
             'numbering': 'site', 'items': items}
 
 

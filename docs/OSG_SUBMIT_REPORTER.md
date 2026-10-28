@@ -45,7 +45,10 @@ where they did not already hold slots.
 
 The ingest compares each record's reading with the state kept in
 `PersistentState` (`monitor_app/osg_throttle.py`). A pool's first hold
-records one `osg_throttle` incident at warning level; its lift is
+records one `osg_throttle` incident at info level, since the hold is
+OSG's normal mode of operation and never a warning on the dashboard's
+epicprod-live panel, which shows warnings and errors (Torre Wenaus,
+2026-10-28); its lift is
 recorded once the pool has released our submitter for three consecutive
 records, so a limit that flips between negotiation cycles is one
 incident. `#epicprod-live` carries both through its live subscription,

@@ -141,6 +141,35 @@ at `/logs/live-policy/` lists every known action with its declared sublevel,
 live default, current override, and effective state — overrides editable in
 place when signed in, each save itself logged (`live_policy_edit`).
 
+**Curated view.** The dashboard's epicprod-live title opens
+`/logs/epicprod-live/`: the live stream's last 24 hours (`?hours=N`, at
+most a week) as a reader wants them, in six groups, one line per event,
+newest first in each, with who and why (Torre Wenaus, 2026-10-28, asking
+for considered curation in place of the raw list). The groups, in
+`monitor_app/live_curated.py`:
+
+- Problems: warnings and errors, one line per subject (the newest, as the
+  dashboard's panel keeps them), with how often it recurred and whether it
+  has since recovered, ended or been answered;
+- Findings and decisions: findings, settings, core limits, trials,
+  priorities and every other action no rule names, until it is given its
+  place;
+- Task operations: submissions, pauses, resumes, finishes and moves, with
+  who and why from the operation record (`PandaTaskOperation`: the front's
+  task guard and its trip, the front's idle move, a person and their
+  reason), an operation's pending and final records shown once, a task's
+  moves on one line;
+- Feeds: work released to a site by the front or a site's own feeder;
+- Node guard: nodes newly excluded;
+- Assessments: registrations, with their verdicts.
+
+Left out, and counted on the page: machinery (the maintenance passes,
+routine imports and sweeps, pilot cycles, segfault bookkeeping, the EVGEN
+intake's own steps), the steps behind an event another line reports (the
+idle move behind a Move, the guard's pause request behind a Pause), and
+OSG's fair-share hold, which Production now carries. The page links to the
+live stream view, which keeps every record.
+
 **Mattermost.** The `#epicprod-live` channel is fed by the publisher
 (`manage.py publish_epicprod_live`, systemd unit `swf-epicprod-live`) — a
 polling tailer that posts one compact message per live event: timestamp,

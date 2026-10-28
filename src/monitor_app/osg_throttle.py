@@ -6,7 +6,8 @@ The submit host reporter's record carries each pool negotiator's last
 cycle and whether it held our submitter at its fair-share limit. On each
 record this compares the reading with the state kept in PersistentState
 and records one action-stream incident per change: ``osg_throttle`` at
-warning level when a pool first holds us, and its lift once the pool has
+info level when a pool first holds us (OSG's normal mode of operation,
+never a warning: Torre Wenaus, 2026-10-28), and its lift once the pool has
 released us for LIFT_READINGS consecutive records, so a limit that flips
 between negotiation cycles is one incident rather than one per cycle.
 The epicprod-live subscription and a capcom subscription deliver it
@@ -64,8 +65,8 @@ def observe(record, username=''):
                 log_epicprod_action(
                     'report', ACTION, subject_type='osg_pool', subject_key=pool,
                     subject_label=pool, username=username, outcome='held',
-                    sublevel='high', live_default=True, level=logging.WARNING,
-                    message=text, summary=text, severity='warning', state='held',
+                    sublevel='high', live_default=True,
+                    message=text, summary=text, severity='info', state='held',
                     kind='fair_share', submitters=now['submitters'],
                     cycle_at=now['cycle_at'])
                 state[pool] = {'state': 'held', 'since': now['cycle_at'], 'clear_readings': 0}

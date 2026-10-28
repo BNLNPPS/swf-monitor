@@ -907,6 +907,23 @@ def live_policy(request):
                   {'rows': live_policy_rows()})
 
 
+def epicprod_live(request):
+    """The curated epicprod-live page: the live stream's last day in six
+    groups (ACTION_STREAM.md, Curated view)."""
+    from .live_curated import WINDOW_H, curated_live
+    try:
+        hours = int(request.GET.get('hours') or WINDOW_H)
+    except ValueError:
+        hours = WINDOW_H
+    record = curated_live(hours)
+    prefix = request.META.get('SCRIPT_NAME', '')
+    for group in record['groups']:
+        for line in group['lines']:
+            if line.get('path'):
+                line['href'] = prefix + line['path']
+    return render(request, 'monitor_app/epicprod_live.html', {'live': record})
+
+
 def log_detail(request, log_id):
     """Display details for a specific log entry."""
     from .epicprod_logging import EPICPROD_APP_NAME, action_description

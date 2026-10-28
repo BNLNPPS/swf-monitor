@@ -265,7 +265,13 @@ initial record does not expose the design's captured figures.
 
 Links open queue-specific Snapper history, filtered job lists, task
 pages, the production front, storage history, live logs and individual
-assessment or alarm records. Hourly completion links compute their
+assessment or alarm records. The epicprod-live title opens the live
+stream's last day, curated (ACTION_STREAM.md, Curated view). Its panel
+shows the stream's warnings and errors from the last 12 hours, newest
+first, one per subject; a failure that has recovered, a node guard
+re-trip, a record a later one on its subject supersedes and a record an
+operator has answered leave it (COMP_SNAPSHOT.md, Live). OSG's
+fair-share hold is recorded at info level, so it never reaches the panel. Hourly completion links compute their
 ending interval when opened. Failure counts open the error summary for
 the selected queue and hour; task failure counts select that task. Error
 summaries apply execution-queue filters in SQL, including their status

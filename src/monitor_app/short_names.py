@@ -11,6 +11,7 @@ SHORT_NAMES = {
     'NERSC': 'Perlmutter',
     'Compute Canada': 'Canada',
     'BNL_OSG_PanDA_1': 'OSG',
+    'UM_GREX_PanDA_1': 'GREX',
     'IRISHEP-SSL-UCHICAGO': 'IRISHEP',
     'UNL-PATH': 'UNL',
     'UWM-Mortimer': 'UWM',

@@ -198,7 +198,7 @@ function linkDashboard(record) {
   link(document.querySelector('#storage .plot'), storage({quantity: 'files'}), 'Registered files');
   link(document.querySelector('#storage .science-storage'),
     storage({rse: 'BNL-XRD', panels: 'capacity', quantity: 'bytes'}), 'BNL-XRD usage and quota');
-  link(document.querySelector('#events .panelhead strong'), url('logs/', {live: 1}), 'Live production action stream');
+  link(document.querySelector('#events .panelhead strong'), url('logs/epicprod-live/'), 'The live stream\'s last day, curated');
   document.querySelectorAll('#events .boardrow').forEach(row => {
     const anchor = row.querySelector('a');
     if (anchor) link(row.querySelector('time'), anchor.href, anchor.title);

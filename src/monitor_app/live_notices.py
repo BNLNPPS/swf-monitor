@@ -55,7 +55,14 @@ BOARD_LABELS = {
     'file_events_measure': 'File events', 'credential_expiry_check': 'Credential expiry',
     'panda_sandbox_keepalive': 'Sandbox keepalive',
     'osg_throttle': 'OSG throttle',
+    'production_finding': 'Finding', 'sysconfig_edit': 'Setting',
+    'worker_limit': 'Core limit', 'node_guard_set': 'Node guard set',
+    'prodtask_trial': 'Trial', 'prodtask_priority_set': 'Priority',
+    'proposal_created': 'AI proposal', 'attempt_manifest_repair': 'Manifest repair',
 }
+# Subjects named by a composed task name, too long for a title: the title
+# carries its physics and evgen tags instead (p1108.e37).
+TASK_SUBJECTS = frozenset({'prod_task', 'campaign_task'})
 OPERATION_LABELS = {'reassign': 'Move', 'pause': 'Pause', 'resume': 'Resume',
                     'retry': 'Retry', 'finish': 'Finish', 'kill': 'Kill',
                     'abort': 'Abort'}
@@ -80,8 +87,10 @@ def board_text(message, extra):
         return (f"{OPERATION_LABELS.get(op, op.capitalize() or label)} · "
                 f"task {extra.get('subject_key')}",
                 f"{task}: {extra.get('reason') or message}")
+    subject_type = extra.get('subject_type')
     where = short_name(extra.get('site') or extra.get('rse') or extra.get('queue')
-                       or extra.get('subject_label'))
+                       or (extra.get('subject_key') if subject_type == 'panda_queue' else None)
+                       or (None if subject_type in TASK_SUBJECTS else extra.get('subject_label')))
     if not where:
         tags = CONFIG_TAGS.search(str(extra.get('subject_key') or ''))
         where = tags.group(1) if tags else ''
