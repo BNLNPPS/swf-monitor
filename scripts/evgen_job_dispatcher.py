@@ -459,6 +459,12 @@ def run_event_service(csv_base, stamp, workdir, channel, production=False):
                "untaken_at_deadline": summary.get("untaken_at_deadline"),
                "ranges_done": summary.get("done", []),
                "ranges_failed": summary.get("failed", []),
+               # With EPICPROD_SWITCH_ES_RECORD_PER_CLOSE the units of shipped
+               # closes are in the report store, not here; the counts stand
+               # for every unit (swf-epicprod swf_epicprod/es_records.py).
+               "done_count": summary.get("done_count"),
+               "failed_count": summary.get("failed_count"),
+               "shipped_closes": summary.get("shipped_closes", []),
                "closes": summary.get("closes", []),
                # TEST AND DEMO ONLY (ES_PREEMPT_AT_S): the sudden end and what it cost.
                "preempted": summary.get("preempted"),

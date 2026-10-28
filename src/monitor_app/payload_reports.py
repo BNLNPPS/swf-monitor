@@ -284,8 +284,11 @@ def file_es_records(client, bucket, prefix, since, dry_run=False, running_only=F
     for pandaid, jeditaskid in es_record_candidates(since, running_only=running_only):
         key = f'{prefix}{pandaid}/es.json'
         try:
-            body = client.get_object(Bucket=bucket, Key=key)['Body'].read()
-            record = json.loads(body.decode('utf-8'))
+            # The job's record with its shipped closes' units joined in
+            # (swf-epicprod swf_epicprod/es_records.py): the whole account,
+            # however the harness divided it.
+            from swf_epicprod import es_records
+            record = es_records.load(client, bucket, prefix, pandaid)
             if (not isinstance(record, dict) or record.get('kind') != 'es_record'
                     or str(record.get('pandaid')) != str(pandaid)):
                 raise ValueError('The harness record does not match the requested job')

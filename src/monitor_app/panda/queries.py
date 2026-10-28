@@ -3653,9 +3653,11 @@ def task_harness_rollup(jeditaskid, limit=2000):
         except (ValueError, TypeError):
             continue
         es = metadata.get('es') if isinstance(metadata, dict) else None
-        if not isinstance(es, dict):
+        if not isinstance(es, dict) or es.get('shipped_closes'):
+            # No report, or one whose shipped closes' units are in the store
+            # only: the filed record, joined whole (es_records.load).
             record = ((filed.get(pandaid) or {}).get('es_record') or {}).get('record')
-            es = es_record_report(record, status, loss_confirmed=pilot_error == 1256)
+            es = es_record_report(record, status, loss_confirmed=pilot_error == 1256) or es
         if not isinstance(es, dict):
             continue
         jobs += 1
@@ -4197,6 +4199,13 @@ def es_harness_report(conn, pandaid, job=None):
             logger.error(f"job metadata unparsable for job {pandaid}: {e}")
             return None
     es = metadata.get('es') if isinstance(metadata, dict) else None
+    if isinstance(es, dict) and es.get('shipped_closes'):
+        # The report carries only units no close shipped; the filed record,
+        # joined whole (swf-epicprod es_records.load), has them all.
+        whole = es_from_shipped_record(pandaid, (job or {}).get('jobstatus'),
+                                      loss_confirmed=(job or {}).get('piloterrorcode') == 1256)
+        if whole is not None:
+            es = dict(whole, closes=es.get('closes') or whole.get('closes'))
     if not isinstance(es, dict):
         es = es_from_shipped_record(pandaid, (job or {}).get('jobstatus'),
                                    loss_confirmed=(job or {}).get('piloterrorcode') == 1256)
