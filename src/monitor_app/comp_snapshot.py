@@ -2144,7 +2144,7 @@ def _guard_reason(evidence):
     """The front's task guard's trip, from its pause evidence."""
     e = evidence or {}
     if e.get('trigger') == 'consecutive':
-        return f"last {e.get('consecutive_failed')} attempts failed, on {e.get('run_hosts')} hosts"
+        return f"last {e.get('consecutive_failed')} jobs failed, on {e.get('run_hosts')} hosts"
     if e.get('trigger'):
         return (f"{e.get('window_failed')} of last {e.get('counted')} jobs failed, "
                 f"on {e.get('window_hosts')} hosts")
