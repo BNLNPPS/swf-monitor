@@ -47,7 +47,7 @@ _proxy = os.environ.get('EVGEN_X509_PROXY', '')
 if _proxy and os.path.exists(_proxy):
     os.environ['X509_USER_PROXY'] = _proxy
 
-from monitor_app.panda.storage_doors import run_cycle  # noqa: E402
+from monitor_app.panda.storage_doors import PROGRESS_PREFIX, run_cycle  # noqa: E402
 
 
 def main():
@@ -63,7 +63,9 @@ def main():
     args = ap.parse_args()
     try:
         doors, summary = run_cycle(dry_run=args.dry_run, force=args.force,
-                                   only=tuple(args.rse), created_by=args.created_by)
+                                   only=tuple(args.rse), created_by=args.created_by,
+                                   progress=lambda event: print(
+                                       PROGRESS_PREFIX + json.dumps(event), flush=True))
     except Exception as exc:  # noqa: BLE001
         print(f'ERROR: {type(exc).__name__}: {exc}', file=sys.stderr)
         return 1

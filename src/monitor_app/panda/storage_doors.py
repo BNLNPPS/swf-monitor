@@ -24,6 +24,7 @@ Settings live in SysConfig under ``storage_doors.*``, seeded at their
 defaults on first read so every knob is visible on the System page.
 """
 import logging
+import json
 import os
 from datetime import timedelta, timezone as dt_timezone
 
@@ -32,6 +33,7 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 STATE_KEY = 'storage_door_state'
+PROGRESS_PREFIX = 'STORAGE_DOOR_PROGRESS '
 STATE_TTL_S = 24 * 3600
 MODES = ('shadow', 'live')
 DEFAULTS = {
@@ -214,8 +216,48 @@ def is_due(entry, interval_h, now):
     return (now - last) >= timedelta(hours=interval_h)
 
 
+def failure_context(output, reason):
+    """Explain an unfinished cycle from its own flushed progress only.
+
+    Never identify a past probe from today's cached door state. A killed
+    doer or TimeoutExpired may return bytes and a partial final line.
+    """
+    if isinstance(output, bytes):
+        output = output.decode('utf-8', errors='replace')
+    events = []
+    for line in (output or '').splitlines():
+        if line.startswith(PROGRESS_PREFIX):
+            try:
+                event = json.loads(line[len(PROGRESS_PREFIX):])
+            except (ValueError, TypeError):
+                continue  # a signal can interrupt the final stdout write
+            if isinstance(event, dict) and event.get('phase'):
+                events.append(event)
+    current = events[-1] if events else {}
+    completed = [e for e in events if e['phase'] == 'completed']
+    labels = {'catalog': 'reading the storage-door catalog',
+              'credential': 'obtaining the probe credential',
+              'write': 'writing the probe file', 'stat': 'checking the probe file',
+              'delete': 'deleting the probe file',
+              'certificate': 'reading the door certificate',
+              'completed': 'finishing the door check',
+              'publication': 'publishing the cycle results'}
+    stage = labels.get(current.get('phase'), 'running the storage-door checks')
+    rse, door = current.get('rse'), current.get('door')
+    subject = f' for {rse} at {door}' if rse and door else ''
+    summary = f'Storage-door cycle stopped while {stage}{subject}: {reason}.'
+    if not events:
+        summary += ' The storage element, door address and check in progress were not recorded.'
+    summary += f' Completed door checks recorded: {len(completed)}.'
+    return {'summary': summary, 'rse': rse or '', 'door': door or '',
+            'catalog_url': current.get('catalog_url') or '',
+            'probe_path': current.get('path') or '', 'check': stage,
+            'completed_checks': completed,
+            'narration': 'This cycle did not finish. Its interruption alone gives no new door-health verdict.'}
+
+
 def run_cycle(*, dry_run=False, created_by='storage-doors', force=False,
-              only=()):
+              only=(), progress=None):
     """One cycle: the due doors probed, the verdicts recorded, a changed
     verdict announced. Returns (doors, summary)."""
     from canary import doors as canary_doors
@@ -225,6 +267,10 @@ def run_cycle(*, dry_run=False, created_by='storage-doors', force=False,
     cfg = settings()
     errors = []
 
+    def report(phase, **fields):
+        if progress is not None:
+            progress({'phase': phase, **fields})
+
     def failed(label):
         def note(exc):
             errors.append(f'{label}: {type(exc).__name__}: {exc}')
@@ -232,6 +278,7 @@ def run_cycle(*, dry_run=False, created_by='storage-doors', force=False,
         return note
 
     previous = previous_state()
+    report('catalog', catalog_url=cfg['catalog_url'])
     resolved = _safe('catalog', lambda: catalog_doors(cfg), failed('catalog')) or {}
     if only:
         # A look by hand at named RSEs; the cycle itself takes the catalog.
@@ -265,12 +312,20 @@ def run_cycle(*, dry_run=False, created_by='storage-doors', force=False,
         # where the door takes one (over TLS), else the proxy the cycle's
         # script put in X509_USER_PROXY (swf_epicprod.jlab_auth).
         from swf_epicprod.jlab_auth import door_access
+        report('credential', rse=rse, door=door['door'], path=path)
         url, env, how = door_access(
             door['door'], canary_doors.server_path(path),
             verbs=('storage.create', 'storage.modify', 'storage.read'),
             proxy=os.environ.get('X509_USER_PROXY') or None)
+
+        def probe_command(command, timeout_s, stdin_text=None):
+            phase = ('write' if os.path.basename(command[0]) == 'xrdcp'
+                     else {'stat': 'stat', 'rm': 'delete'}.get(command[2], 'probe'))
+            report(phase, rse=rse, door=door['door'], path=path)
+            return canary_doors.run_command(command, timeout_s, stdin_text, env=env)
+
         reading = _safe(f'{rse} probe', lambda url=url, path=path, env=env: canary_doors.probe_door(
-            url, path, timeout_s=cfg['timeout_s'], env=env), failed(f'{rse} probe'))
+            url, path, timeout_s=cfg['timeout_s'], env=env, run=probe_command), failed(f'{rse} probe'))
         if reading is not None:
             reading['door'] = door['door']
             reading['credential'] = how
@@ -278,12 +333,16 @@ def run_cycle(*, dry_run=False, created_by='storage-doors', force=False,
             state[rse] = {**was, 'rse': rse, 'door': door['door']}
             continue
         reading['rse'] = rse
+        report('certificate', rse=rse, door=door['door'], path=path)
         reading['expiry'] = _safe(
             f'{rse} certificate',
             lambda door=door: canary_doors.door_certificate(door['door'], cfg['timeout_s']),
             failed(f'{rse} certificate'))
         readings.append(reading)
         probed += 1
+        report('completed', rse=rse, door=door['door'], path=path,
+               **{step: (reading.get(step) or {}).get('class')
+                  for step in ('write', 'stat', 'delete')})
 
     verdicts = canary_doors.decide_doors(
         readings, {'warn_days': cfg['warn_days']}, t0) if readings else {}
@@ -305,6 +364,7 @@ def run_cycle(*, dry_run=False, created_by='storage-doors', force=False,
             changes.append((rse, 'unseen', verdict['verdict'], verdict))
 
     if not dry_run:
+        report('publication')
         for rse, before, after, verdict in changes:
             evidence = verdict['evidence']
             severity = {'down': 'alarm', 'unknown': 'warning'}.get(after, 'info')

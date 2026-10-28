@@ -37,6 +37,16 @@ def _value(value, key=''):
 
 def present_log(log):
     extra = log.extra_data if isinstance(log.extra_data, dict) else {}
+    # Old interrupted cycles recorded only a signal/timeout. Explain that
+    # gap without attributing them to a door from the current cache.
+    if (extra.get('action') == 'storage_door_cycle'
+            and extra.get('outcome') in ('error', 'timeout')
+            and (extra.get('outcome') == 'timeout'
+                 or _text(extra.get('reason')).startswith('killed by signal '))
+            and not _text(extra.get('summary'))):
+        from .panda.storage_doors import failure_context
+        extra = {**failure_context('', _text(extra.get('reason')) or 'cause not recorded'),
+                 **extra}
     summary = (_text(extra.get('summary')) or _text(extra.get('narration'))
                or _text(log.message))
     passages = []

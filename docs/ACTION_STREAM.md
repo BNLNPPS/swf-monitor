@@ -139,6 +139,12 @@ Rules of the road:
    `outcome: error` with no why is itself a silent failure. The web and MCP
    tiers put the cause in the message text; the agent's `_log_action` takes
    `reason=` and exposes it in both the record and the message.
+   An interrupted storage-door cycle also carries its last flushed probe
+   progress: the storage element, catalog door address, probe path and
+   current check, together with completed checks. The doer flushes each
+   stage before it runs, so a signal or timeout preserves the subject.
+   Older failures without that progress explicitly say the door was not
+   recorded; a current cached reading is not evidence of a past probe.
 4. Requester identity travels in the message (`created_by`, `owner`,
    `requested_by`) and is recorded at execution. Anonymous open-face requests
    record an empty username.

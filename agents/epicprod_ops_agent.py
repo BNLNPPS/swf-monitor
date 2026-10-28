@@ -3282,17 +3282,21 @@ class EpicProdOpsAgent(BaseAgent):
     def _do_storage_door_cycle(self, m):
         """One cycle of the storage door canary. The canary reports and
         production operations act: nothing here excludes anything."""
+        from monitor_app.panda.storage_doors import failure_context
+
         cmd = [sys.executable, str(STORAGE_DOOR_SCRIPT),
                "--created-by", str(m.get('created_by') or 'prodops_agent')]
         t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
                                timeout=STORAGE_DOOR_TIMEOUT)
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
+            reason = f'timed out after {STORAGE_DOOR_TIMEOUT}s'
+            context = failure_context(exc.stdout, reason)
             self.logger.error(
                 f"PRODOPS storage_door_cycle TIMEOUT after {STORAGE_DOOR_TIMEOUT}s")
             self._log_action('storage_door_cycle', t0, outcome='timeout',
-                             reason=f'timed out after {STORAGE_DOOR_TIMEOUT}s',
+                             reason=reason, message=context['summary'], **context,
                              username=str(m.get('created_by') or ''),
                              sublevel='low', live_default=False,
                              level=logging.ERROR)
@@ -3302,9 +3306,13 @@ class EpicProdOpsAgent(BaseAgent):
         for line in (p.stderr or "").splitlines():
             self.logger.info(f"  storage-door-cycle: {line}")
         if p.returncode != 0:
+            reason = self._derive_reason(p)
+            if p.returncode == -signal.SIGTERM and self._stopping:
+                reason = 'SIGTERM while the ops agent was shutting down'
+            context = failure_context(p.stdout, reason)
             self.logger.error(f"PRODOPS storage_door_cycle FAILED rc={p.returncode}")
             self._log_action('storage_door_cycle', t0, outcome='error',
-                             reason=self._derive_reason(p),
+                             reason=reason, message=context['summary'], **context,
                              username=str(m.get('created_by') or ''),
                              sublevel='normal', live_default=True,
                              level=logging.ERROR)
