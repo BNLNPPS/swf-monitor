@@ -269,7 +269,11 @@ A queue's parts:
     five minutes the schedd held 163 of 200.
 
   It is `red` also when jobs are queued and in the last hour no pilot
-  waited, was submitted or started. The two schedd rules need the OSG
+  waited, was submitted or started, unless the queue's running slots fill
+  the operator's worker limit (`pilot.queue.<queue>.worker_limit`): a
+  full queue is due no pilot, so the part is `green` and the limit is its
+  own Report line (Torre Wenaus, 2026-10-28, when GREX, full at its
+  300-core limit, read red here). The two schedd rules need the OSG
   submit reporter's count and apply to the OSG queues only. `grey` when
   the report is more than fifteen minutes old or the limit harvester
   applies is not yet reported; otherwise `green`, with the counts in the

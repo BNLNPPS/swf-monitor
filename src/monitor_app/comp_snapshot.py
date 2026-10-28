@@ -164,12 +164,25 @@ def _pilot_display(pilots):
                                 'harvester' if waiting is not None else None))
 
 
-def _pilot_supply_part(p, queued, started_1h, submitted_1h, workers=None):
+def _worker_limit(cfg, queue):
+    """The operator's active worker limit control on ``queue``
+    (``pilot.queue.<queue>.worker_limit``), or None."""
+    control = cfg.get(f'pilot.queue.{queue}.worker_limit') or {}
+    if (isinstance(control, dict) and control.get('active')
+            and isinstance(control.get('limit'), int) and control['limit'] > 0):
+        return control
+    return None
+
+
+def _pilot_supply_part(p, queued, started_1h, submitted_1h, workers=None, operator_limit=None):
     """Whether pilots keep reaching the queue (docs/COMP_SNAPSHOT.md, Pilot
     supply). Harvester holds new pilots back against its own count of
     those waiting, so a count the schedd no longer bears out stops supply
     while the queue reads full. ``workers`` (running, submitted) is PanDA's
-    own worker table, read for a queue no harvester report names."""
+    own worker table, read for a queue no harvester report names. A queue
+    whose running slots fill the operator's worker limit is due no pilot:
+    the limit is its own line (Torre Wenaus, 2026-10-28, GREX full at its
+    300-core limit read red here)."""
     if not p:
         running, submitted = workers or (0, 0)
         if running or submitted:
@@ -188,6 +201,9 @@ def _pilot_supply_part(p, queued, started_1h, submitted_1h, workers=None):
             demand_age is None or demand_age > p['demand_max_age_seconds']):
         return _part('amber', demand_age, 'job-demand cache missing or stale')
     waiting, limit = p['waiting'], p.get('limit')
+    if operator_limit and (p.get('running') or 0) >= operator_limit:
+        return _part('green', p['running'], f"{p['running']} of the operator's limit of "
+                                           f"{operator_limit} slots running: full, no pilot due")
     if queued and not waiting and not started_1h and not submitted_1h:
         return _part('red', 0, f"{queued} jobs queued, no pilot waiting, submitted "
                                f"or started in the last hour")
@@ -1264,7 +1280,8 @@ def build():
                     supply = _gke_workers(cfg)[2]
                 else:
                     supply = _pilot_supply_part(pilots.get(q), int(c.get('not_started') or 0),
-                                                *opened.get(q, (0, 0)), workers=workers.get(q))
+                                                *opened.get(q, (0, 0)), workers=workers.get(q),
+                                                operator_limit=(_worker_limit(cfg, q) or {}).get('limit'))
                 health = _health({'prod_activity': activity, 'canary': canary_part,
                                   'snapper_errors': snap, 'pilot_supply': supply})
             else:
@@ -2474,9 +2491,8 @@ def get_snapshot(refresh=False):
             site['links'] = dict(primary['links'])
         limits = []
         for queue in site['queues']:
-            control = cfg.get(f"pilot.queue.{queue['id']}.worker_limit") or {}
-            if (isinstance(control, dict) and control.get('active')
-                    and isinstance(control.get('limit'), int) and control['limit'] > 0):
+            control = _worker_limit(cfg, queue['id'])
+            if control:
                 width = control.get('cores_per_worker') or PILOTS_PER_WORKER.get(queue['id'])
                 core_limit = control['limit'] * width if isinstance(width, int) and width > 0 else None
                 limits.append(dict(control, queue=queue['id'], core_limit=core_limit))
