@@ -811,6 +811,19 @@ def log_summary_datatable_ajax(request):
     return dt.create_response(data, records_total, records_filtered)
 
 
+def _log_window(request, queryset):
+    """The logs page's ``hours`` filter: records of the last N hours, the
+    window the dashboard's epicprod-live counts link with."""
+    from datetime import timedelta
+    try:
+        hours = float(request.GET.get('hours') or 0)
+    except ValueError:
+        return queryset
+    if hours > 0:
+        queryset = queryset.filter(timestamp__gte=timezone.now() - timedelta(hours=hours))
+    return queryset
+
+
 def log_list(request):
     """
     Professional log list view using server-side DataTables.
@@ -860,6 +873,7 @@ def log_list(request):
         'selected_instance': request.GET.get('instance_name'),
         'selected_sublevel': request.GET.get('sublevel'),
         'selected_module': request.GET.get('module'),
+        'selected_hours': request.GET.get('hours'),
         'live_mode': live_mode,
     }
     return render(request, 'monitor_app/log_list_dynamic.html', context)
@@ -990,6 +1004,7 @@ def logs_datatable_ajax(request):
     if request.GET.get('live') == '1':
         from .epicprod_logging import live_stream_q
         queryset = queryset.filter(live_stream_q())
+    queryset = _log_window(request, queryset)
 
     # Handle time range filters
     start_time = request.GET.get('start_time')
@@ -1087,7 +1102,7 @@ def get_log_filter_counts(request):
             return AppLog.objects.filter(live_stream_q())
         return AppLog.objects.all()
 
-    base_queryset = rows()
+    base_queryset = _log_window(request, rows())
     if username:
         base_queryset = base_queryset.filter(
             Q(instance_name__regex=rf'-{username}-\d+$')

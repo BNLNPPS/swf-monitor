@@ -1662,7 +1662,25 @@ def _live_records():
         if len(items) == LIVE_ITEMS:
             break
     return {'link': f'{PUBLIC}/logs/epicprod-live/',
-            'numbering': 'site', 'items': items}
+            'numbering': 'site', 'items': items, 'hours': LIVE_WINDOW_H,
+            'counts': _live_counts(cutoff)}
+
+
+def _live_counts(cutoff):
+    """The live stream's records since ``cutoff`` at INFO, WARNING and
+    ERROR, zero included, each with the logs page's list of exactly those
+    records (COMP_SNAPSHOT.md, Live)."""
+    from django.db.models import Count
+    from monitor_app.epicprod_logging import live_stream_q
+    from monitor_app.models import AppLog
+    levels = ('INFO', 'WARNING', 'ERROR')
+    found = dict(AppLog.objects.filter(live_stream_q(), timestamp__gte=cutoff,
+                                       levelname__in=levels)
+                 .values_list('levelname').annotate(n=Count('id')))
+    return [{'level': level, 'count': found.get(level, 0),
+             'link': (f'{PUBLIC}/logs/?app_name=epicprod&live=1&levelname={level}'
+                      f'&hours={LIVE_WINDOW_H}')}
+            for level in levels]
 
 
 def _coverage_gaps(scope, start):

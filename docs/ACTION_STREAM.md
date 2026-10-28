@@ -128,7 +128,8 @@ Rules of the road:
 
 **Operators.** The Logs page (`/logs/`, Logs in the epicprod nav, pre-filtered
 `?app_name=epicprod`) is the first live channel: the *Live stream* toggle
-(`?live=1`) shows live events with 30-second auto-refresh. Each record's log
+(`?live=1`) shows live events with 30-second auto-refresh; `hours=N`
+narrows the list and its filter counts to the last N hours. Each record's log
 entry page leads with its verdict and summary, falling back to narration or
 the log message when no summary was recorded. Timestamp, origin, subject,
 requester and duration form a compact metadata line. Distinct reasons and

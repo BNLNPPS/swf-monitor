@@ -24,6 +24,7 @@
     levelname: '{{ selected_levelname|default:"" }}',
     sublevel: '{{ selected_sublevel|default:"" }}',
     module: '{{ selected_module|default:"" }}',
+    hours: '{{ selected_hours|default:"" }}',
     live: '{% if live_mode %}1{% endif %}'
 }
 {% endblock %}
@@ -84,6 +85,10 @@ if (currentFilters.module) {
 
 if (currentFilters.live === '1') {
     badges.push('<span class="badge bg-success me-1">Live stream</span>');
+}
+
+if (currentFilters.hours) {
+    badges.push(`<span class="badge bg-info me-1">Last ${currentFilters.hours} h</span>`);
 }
 
 if (badges.length > 0) {

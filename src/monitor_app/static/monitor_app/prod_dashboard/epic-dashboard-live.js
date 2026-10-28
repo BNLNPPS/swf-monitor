@@ -631,7 +631,15 @@
         anchor(item.link, color(item.level), item.title, item.detail));
       return row;
     });
-    document.querySelector('#events .board').replaceChildren(...rows);
+    // The window's live records by level, zero included, each opening its
+    // list (PROD_DASHBOARD.md): INFO (j) WARNING (n) ERROR (m).
+    const live = record.live || {};
+    const counts = element('div', 'livecounts');
+    list(live.counts).forEach(c => counts.append(anchor(c.link, color(c.level),
+      c.level + ' (' + c.count + ')',
+      'Live stream records at ' + c.level + ' in the last ' + live.hours + ' h')));
+    document.querySelector('#events .board').replaceChildren(
+      ...(counts.childElementCount ? [counts] : []), ...rows);
     // Each line's number, in its colour, where the bullet was: the site
     // panels cite these numbers (PROD_DASHBOARD.md).
     const issues = list(record.report).map(item => {

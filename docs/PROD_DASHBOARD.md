@@ -271,7 +271,11 @@ shows the stream's warnings and errors from the last 12 hours, newest
 first, one per subject; a failure that has recovered, a node guard
 re-trip, a record a later one on its subject supersedes and a record an
 operator has answered leave it (COMP_SNAPSHOT.md, Live). OSG's
-fair-share hold is recorded at info level, so it never reaches the panel. Hourly completion links compute their
+fair-share hold is recorded at info level, so it never reaches the panel.
+The panel's first line reads **INFO (j) WARNING (n) ERROR (m)**, the
+window's live records by level, zero included, grey, yellow and red, each
+opening exactly those records on the logs page (the snapshot's
+`live.counts`). Hourly completion links compute their
 ending interval when opened. Failure counts open the error summary for
 the selected queue and hour; task failure counts select that task. Error
 summaries apply execution-queue filters in SQL, including their status

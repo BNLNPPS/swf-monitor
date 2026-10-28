@@ -84,7 +84,8 @@ storage[]         {id, name, holds, status, counts,
 report            {text, items: [{level, text, link}],
                    assessment: {verdict, level, at, link, campaign,
                                 title, narration}}
-live              {link, items: [{id, at, level, title, detail, link}]}
+live              {link, hours, items: [{id, at, level, title, detail, link}],
+                   counts: [{level, count, link}]}
 tasks             {link, items: [{id, name, at, level, title, counts, detail, sites, queues, link}]}
   counts          {ungenerated, queued, running, finished, failed}
 trends            {window_hours, bin_minutes, t[], sampled_at, source_as_of,
@@ -518,6 +519,12 @@ A record leaves the floor when it is no longer news:
   "..."` writes one through the log REST endpoint.
 
 None of these changes the records on the logs page.
+
+`counts` are the live stream's records of the window (`hours`, 12) at
+INFO, WARNING and ERROR, in that order, zero included, each with its
+`link`, the logs page's live view narrowed to that level and window
+(`levelname=<level>&hours=12`), which lists exactly the records counted
+(Torre Wenaus, 2026-10-28).
 
 ### Tasks
 
