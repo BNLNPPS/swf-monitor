@@ -2636,7 +2636,11 @@ def get_snapshot(refresh=False):
                     # The nodes running now, from PanDA's worker table, so the
                     # title corrects itself (Torre Wenaus, 2026-10-28: "title
                     # should be auto correct"), and each node's work lanes
-                    site['node_cap'] = int((queue.get('workers_now') or {}).get('running') or 0)
+                    # With no worker reading (an older record, a failed
+                    # read), the running jobs, one per node: never a false 0.
+                    workers_now = queue.get('workers_now')
+                    site['node_cap'] = (int(workers_now.get('running') or 0) if workers_now
+                                        else int(queue.get('running') or 0))
                     site['cores_per_node'] = int(perlmutter_production.SHAPE['slots'])
             trend = next((t for t in (value.get('trends') or {}).get('sites', [])
                           if t['id'] == site['id']), None)
