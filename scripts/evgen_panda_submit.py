@@ -223,8 +223,11 @@ def build_task_params(spec, archive_name):
         if spec.get('nEventsPerInputFile'):
             params['nEventsPerInputFile'] = int(spec['nEventsPerInputFile'])
         # Over real input nEvents is the events to process, not the job
-        # count the noInput shape encodes in it.
-        params['nEvents'] = params['nEventsPerJob'] * int(spec.get('nJobs', 1))
+        # count the noInput shape encodes in it. An EVGEN Event Service task
+        # gives its own: its manifest's total, which takes its last file
+        # only part way (swf-epicprod production_es.py, EVGEN input).
+        params['nEvents'] = (int(spec['nEvents']) if spec.get('nEvents')
+                             else params['nEventsPerJob'] * int(spec.get('nJobs', 1)))
         # Input handed to the payload as a TURL, not staged: runGen's
         # --givenPFN takes the input names as given and skips its check
         # for a local copy, which otherwise ends the job before the
