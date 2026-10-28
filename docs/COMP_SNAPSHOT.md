@@ -469,7 +469,8 @@ the control room: it shows what is live now, and the logs page keeps the
 history (`live.link`, the logs page's live view,
 `logs/?app_name=epicprod&live=1`, whose filters count the live rows it
 lists, not every record of the app, offering the busiest 15 users and
-instances; Torre Wenaus, 2026-10-28). The items are records of the epicprod
+instances, and its table fits the page, never scrolling sideways; Torre
+Wenaus, 2026-10-28). The items are records of the epicprod
 live stream (`live_stream_q`, ACTION_STREAM.md) at level WARNING, ERROR
 or CRITICAL from the last 12 hours, newest first, at most ten, each with
 its time, level, title, detail and page (`logs/<id>/`). The records ride

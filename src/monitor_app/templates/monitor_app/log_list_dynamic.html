@@ -28,6 +28,24 @@
 }
 {% endblock %}
 
+{% block extra_styles %}
+<style>
+/* The logs table fits the page: no horizontal scroll (Torre Wenaus,
+   2026-10-28). Fixed layout at full width, long words break in their cells. */
+#main-table{table-layout:fixed;width:100% !important}
+#main-table td,#main-table th{overflow-wrap:anywhere}
+#main-table th:nth-child(1){width:8% !important}
+#main-table th:nth-child(2){width:6% !important}
+#main-table th:nth-child(3){width:8% !important}
+#main-table th:nth-child(4){width:8% !important}
+#main-table th:nth-child(5){width:5% !important}
+#main-table th:nth-child(6){width:6% !important}
+#main-table th:nth-child(7){width:43% !important}
+#main-table th:nth-child(8){width:9% !important}
+#main-table th:nth-child(9){width:7% !important}
+</style>
+{% endblock %}
+
 {% block default_order %}[[0, 'desc']]{% endblock %} <!-- Order by timestamp descending -->
 
 {% block update_active_filters_display %}
