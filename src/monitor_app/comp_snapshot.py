@@ -2111,9 +2111,10 @@ NUMBER_SEEN_REFRESH = timedelta(minutes=5)
 def _stable_numbers(keys, now=None):
     """{key: (n, since)}. A Production now line keeps its number while it
     stands (Torre Wenaus, 2026-10-28: "prod now numbering should be
-    immutable"): a new line takes the lowest number not held, and a cleared
-    line's number stays held for NUMBER_HOLD, so a line that returns keeps
-    it and no other line takes it meanwhile. ``since`` is when the line
+    immutable"): a new line takes the next number above every held one, so
+    numbers rise with time and the newest line has the biggest, and a
+    cleared line's number stays held for NUMBER_HOLD, so a line that
+    returns keeps it and no other line takes it meanwhile. ``since`` is when the line
     first stood, kept with its number. Held in the CachedProduct row
     NUMBERS_KEY, ``{key: {n, seen, since}}``, written only when it
     changes."""
@@ -2140,9 +2141,8 @@ def _stable_numbers(keys, now=None):
                     held[key] = dict(held[key], since=now.isoformat())
                     changed = True
                 continue
-            n = 1
-            while n in used:
-                n += 1
+            # the next number above every held one: numbers rise with time
+            n = max(used, default=0) + 1
             held[key] = {'n': n, 'seen': now.isoformat(), 'since': now.isoformat()}
             used.add(n)
             changed = True
@@ -2168,9 +2168,8 @@ def _numbered(items, sites):
         numbers = {}
     for item in items:
         item['n'], item['since'] = numbers.get(item['key'], (None, None))
-    # Newest first; lines that first stood together keep number order.
-    items = sorted(items, key=lambda i: (i['n'] or 0))
-    items = sorted(items, key=lambda i: i['since'] or '', reverse=True)
+    # Newest first: the biggest number at the top, numbers rising with time.
+    items = sorted(items, key=lambda i: (i['n'] is not None, i['n'] or 0), reverse=True)
     by_site = {}
     for item in items:
         if item.get('site'):
