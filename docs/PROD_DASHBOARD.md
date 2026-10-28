@@ -119,7 +119,15 @@ identifies the capacity limit. The minute cache `site_core_metrics:v1` reads
 deduplicated production-job outcomes and queued demand from PanDA.
 
 Site plots label the white curve **cores** and read Snapper's recorded
-running-core series, including Google's multicore jobs. Green and red curves
+running-core series, including Google's multicore jobs. The right end is
+live (Torre Wenaus, 2026-10-28): after the last whole quarter-hour, the
+cores and queued curves end at the panel's own figures now (COMP_SNAPSHOT.md,
+Trends, `live`), placed by time, so the number and the curve's end agree;
+the finish and fail rates end at the last whole quarter-hour. The time of
+that last whole quarter-hour, the history's last update, stands at the
+plot's upper right at the scale number's level and font; the axis's right
+end gives the live time. The shared trend model is unchanged (the room pins
+its hash): the dashboard places the live point by time when it draws. Green and red curves
 show core completions/hour and failed cores/hour, from reported job core counts
 in fifteen-minute bins; brown shows queued cores. Native single-core queue
 counts retain the same numerical values. The plots use the peak of cores,

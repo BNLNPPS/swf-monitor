@@ -663,6 +663,15 @@ coverage record (the gaps recovering snaps closed and the capture
 cursor's open gap), listed in `gaps`. A queue with no sample is null
 throughout.
 
+The live right end (Torre Wenaus, 2026-10-28, after GREX showed 265 cores
+over a plot ending at 8, its last point the 06:30 quarter-hour at 06:42):
+`live_t` is the time of the panel's live figures (the processing
+reading's `processing_observed_at`), and each site's `live` carries them,
+`cores` (its `processing_threads`) and `queued_cores` (its queues'
+`queued_cores`), added when the record is read. The dashboard ends the
+cores and queued curves there, after the last whole bin; the ended-job
+curves stay on whole bins.
+
 ## Links
 
 Every queue links to its ePIC queue page (`panda/epic-queues/<queue>/`),

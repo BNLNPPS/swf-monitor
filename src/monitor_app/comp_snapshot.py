@@ -2520,6 +2520,13 @@ def get_snapshot(refresh=False):
             else:
                 # The native OSG/GREX queues use one core per queued job.
                 trend['queued_cores'] = list(trend['queued'])
+            # The plot's live right end: the panel's own figures now, so the
+            # number and the curve's end agree (PROD_DASHBOARD.md).
+            trend['live'] = {'cores': site.get('processing_threads'),
+                             'queued_cores': (sum(q.get('queued_cores') or 0 for q in site['queues'])
+                                              if core_fresh else None)}
+        if value.get('trends'):
+            value['trends']['live_t'] = value.get('processing_observed_at') or value.get('observed_at')
     except Exception:
         logger.exception('Site core accounting unavailable')
     try:

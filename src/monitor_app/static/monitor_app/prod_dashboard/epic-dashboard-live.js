@@ -80,6 +80,13 @@
     }
     const view = svg.viewBox.baseVal;
     const width = view.width, bottom = view.height - 4, top = 18, height = bottom - top;
+    // The shared model spaces samples evenly; ``positions`` places them by
+    // time (a live last point closer than a whole bin), outside the model.
+    const at = options.positions;
+    const place = at && at.length > 1 ? x => {
+      const n = at.length - 1, f = x * n, i = Math.min(n - 1, Math.floor(f));
+      return at[i] + (at[i + 1] - at[i]) * (f - i);
+    } : x => x;
     const ceiling = options.ceiling || model.ceiling;
     const grid = Array.from(svg.querySelectorAll(':scope > line'));
     grid.forEach((line, i) => {
@@ -111,7 +118,7 @@
         group.setAttribute('aria-label', detail.title);
       }
       layer.appendChild(group);
-      const points = segment => segment.map(([x, y]) => [width * x, bottom - height * y * model.ceiling / ceiling]);
+      const points = segment => segment.map(([x, y]) => [width * place(x), bottom - height * y * model.ceiling / ceiling]);
       curve.solid.forEach(path => {
         const segment = points(path);
         if (index === 0 && options.fill !== false) {
@@ -148,6 +155,17 @@
     });
     text(container.querySelector('.chart-y-label'), (options.format || number)(ceiling));
     text(container.querySelector('.axis span:last-child'), et(times[times.length - 1]));
+    // The last whole quarter-hour, at the scale number's level and font on
+    // the right; the live end is not counted (Torre, 2026-10-28).
+    if (options.updated) {
+      let stamp = container.querySelector('.chart-updated');
+      if (!stamp) {
+        stamp = element('span', 'chart-y-label chart-updated');
+        container.querySelector('.chart-y-label')?.after(stamp);
+      }
+      text(stamp, et(options.updated));
+      stamp.title = 'History last updated at ' + et(options.updated) + '; the right end is live';
+    }
   }
 
   const resourcePanel = element('section', 'panel');
@@ -407,9 +425,20 @@
       if (node.firstElementChild && node.firstElementChild.tagName === 'A') node.firstElementChild.title = titles[i];
     });
     if (trend) {
-      const times = current.trends.t, minutes = current.trends.bin_minutes;
-      const coreTrend = {...trend, running: trend.cores,
-        queued: trend.queued_cores, finished: trend.finished_cores, failed: trend.failed_cores};
+      // The right end is live: the panel's own cores and queued now, after
+      // the last whole quarter-hour, placed by time; the finish and fail
+      // rates end at the last whole quarter-hour (PROD_DASHBOARD.md).
+      const whole = current.trends.t, minutes = current.trends.bin_minutes;
+      const liveAt = current.trends.live_t;
+      const live = trend.live && liveAt && whole.length
+        && Date.parse(liveAt) > Date.parse(whole[whole.length - 1]) ? trend.live : null;
+      const times = live ? whole.concat([liveAt]) : whole;
+      const extend = (values, value) => live ? (values || []).concat([value]) : values;
+      const coreTrend = {...trend, running: extend(trend.cores, live && live.cores),
+        queued: extend(trend.queued_cores, live && live.queued_cores),
+        finished: extend(trend.finished_cores, null), failed: extend(trend.failed_cores, null)};
+      const start = Date.parse(times[0]), span = Date.parse(times[times.length - 1]) - start;
+      const positions = live && span > 0 ? times.map(t => (Date.parse(t) - start) / span) : null;
       let model = trendModel.site(coreTrend, times, minutes);
       const minimum = config.siteTrendMinimums?.[site.id];
       if (model.hasData && minimum > model.ceiling) {
@@ -423,7 +452,8 @@
         ], {count: times.length});
         model.curves = model.curves.filter(curve => curve.key !== 'scale-reference');
       }
-      plot(panel.querySelector('.plot'), model, times);
+      plot(panel.querySelector('.plot'), model, times,
+        {positions, updated: whole[whole.length - 1]});
     }
     else plot(panel.querySelector('.plot'), null, []);
   }
