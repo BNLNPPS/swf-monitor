@@ -46,6 +46,9 @@ Capabilities:
   panda_task_operation — run a PanDA-native operation on an existing JEDI task:
                        pause/resume, increase attempts, or retry failed work.
   panda_task_operations — run one paced bulk pause/resume request.
+  rse_deletion       — preview, or remove, the datasets matching a pattern on
+                       a disk RSE where tape holds a complete copy
+                       (swf-epicprod docs/STORAGE.md, Removing datasets).
   panda_sandbox_keepalive — touch the sandbox tarballs of retryable tasks in
                        the PanDA server cache so the 7-day purge passes them
                        by (nightly catalog_sync chain step).
@@ -309,6 +312,11 @@ GKE_PILOT_CYCLE_TIMEOUT = int(os.environ.get("EPICPROD_GKE_PILOT_CYCLE_TIMEOUT",
 # tier (about an hour at the pass's pacing, STORAGE.md); the nightly full
 # pass lists the target campaigns' files. Three hours holds either.
 STORAGE_SWEEP_TIMEOUT = int(os.environ.get("EPICPROD_STORAGE_SWEEP_TIMEOUT", "10800"))
+# Removing datasets from a disk RSE (swf-epicprod docs/STORAGE.md): a
+# preview reads two catalog records per matching dataset, a removal three
+# plus the rule update; an hour holds a full campaign of either.
+RSE_DELETION_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "rse-deletion.py"
+RSE_DELETION_TIMEOUT = int(os.environ.get("EPICPROD_RSE_DELETION_TIMEOUT", "3600"))
 # The campaign configuration proposer (swf-monitor docs/PINGS.md, Pings
 # with a remedy): pings and remedies for editions without a Standard
 # Production configuration.
@@ -406,6 +414,7 @@ class EpicProdOpsAgent(BaseAgent):
 
     KNOWN_TYPES = {"fetch_payload_log", "submit_task", "submit_evgen_task",
                    "panda_task_operation", "panda_task_operations",
+                   "rse_deletion",
                    "panda_sandbox_keepalive",
                    "rucio_snapshot_update", "evgen_rucio_update", "evgen_register",
                    "catalog_import",
@@ -4017,6 +4026,121 @@ class EpicProdOpsAgent(BaseAgent):
                          findings=summary.get('findings', 0),
                          proposed=proposed,
                          withdrawn=summary.get('withdrawn', 0))
+
+    def _handle_rse_deletion(self, m):
+        """Preview or remove datasets on a disk RSE for the monitor's
+        removal page; one request per RSE at a time."""
+        phase = m.get("phase")
+        if phase not in ("preview", "execute") or not m.get("deletion_id"):
+            self.logger.error(f"PRODOPS rse_deletion: bad message {m!r}")
+            return
+        self.run_in_background(
+            self._do_rse_deletion, m,
+            dedup_key=f"rse_deletion:{m['deletion_id']}:{phase}",
+            label=f"rse_deletion {phase} {m.get('rse')}")
+
+    def _do_rse_deletion(self, m):
+        """Run the rse-deletion doer and record its plan or outcomes on the
+        request; push completion on success and failure alike."""
+        import tempfile
+        phase = m["phase"]
+        deletion_id = str(m["deletion_id"])
+        rse = str(m.get("rse") or "")
+        pattern = str(m.get("pattern") or "")
+        username = str(m.get("created_by") or "")
+        cmd = [sys.executable, str(RSE_DELETION_SCRIPT), "--phase", phase,
+               "--rse", rse, "--pattern", pattern]
+        names_file = None
+        if phase == "execute":
+            self._record_rse_deletion_state(deletion_id, 'running')
+            names_file = tempfile.NamedTemporaryFile(
+                'w', suffix='.json', prefix='rse-deletion-', delete=False)
+            json.dump(list(m.get("names") or []), names_file)
+            names_file.close()
+            cmd += ["--names-file", names_file.name]
+        self.logger.info(f"PRODOPS rse_deletion: {phase} {pattern} on {rse}")
+        t0 = time.monotonic()
+        out, diagnostic = {}, ''
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=RSE_DELETION_TIMEOUT)
+            for line in (p.stderr or "").splitlines()[-20:]:
+                self.logger.info(f"  rse-deletion: {line}")
+            try:
+                out = json.loads((p.stdout or "").strip().splitlines()[-1])
+            except (ValueError, IndexError):
+                diagnostic = f'doer rc={p.returncode} gave no result'
+            rc = p.returncode
+        except subprocess.TimeoutExpired:
+            rc, diagnostic = None, f'timed out after {RSE_DELETION_TIMEOUT}s'
+        finally:
+            if names_file:
+                try:
+                    os.unlink(names_file.name)
+                except OSError:
+                    pass
+        diagnostic = out.get('error') or diagnostic
+        if phase == "preview":
+            status = 'failed' if (diagnostic or rc != 0) else 'previewed'
+            self._record_rse_deletion_state(
+                deletion_id, status, diagnostic=diagnostic,
+                plan=out if status == 'previewed' else None)
+            totals = out.get('totals') or {}
+            self._log_action('rse_deletion_preview', t0,
+                             outcome='ok' if status == 'previewed' else 'error',
+                             reason=diagnostic, subject_type='rse',
+                             subject_key=rse, username=username,
+                             sublevel='low', message=pattern,
+                             matched=totals.get('datasets', 0),
+                             eligible=totals.get('eligible', 0))
+        else:
+            totals = out.get('totals') or {}
+            if diagnostic and not totals:
+                status = 'failed'
+            else:
+                status = 'partial' if totals.get('failed') else 'done'
+            self._record_rse_deletion_state(
+                deletion_id, status, diagnostic=diagnostic,
+                result=out if totals else None)
+            self._log_action('rse_deletion', t0,
+                             outcome='ok' if status == 'done' else 'error',
+                             reason=diagnostic, subject_type='rse',
+                             subject_key=rse, username=username,
+                             sublevel='high', live_default=True,
+                             level=logging.INFO if status == 'done' else logging.ERROR,
+                             message=f'{pattern}: removed {totals.get("removed", 0)} '
+                                     f'datasets ({totals.get("removed_bytes", 0) / 1e12:.2f} TB)',
+                             removed=totals.get('removed', 0),
+                             skipped=totals.get('skipped', 0),
+                             failed=totals.get('failed', 0))
+        self.send_message('/topic/epictopic', {
+            'msg_type': 'rse_deletion_done', 'deletion_id': deletion_id,
+            'phase': phase, 'rse': rse, 'status': status,
+            'ok': status in ('previewed', 'done')})
+
+    def _record_rse_deletion_state(self, deletion_id, status, *, diagnostic='',
+                                   plan=None, result=None):
+        """Persist an rse_deletion transition through the monitor API."""
+        headers = {}
+        if MONITOR_API_TOKEN:
+            headers['Authorization'] = f'Token {MONITOR_API_TOKEN}'
+        body = {'status': status, 'diagnostic': diagnostic}
+        if plan is not None:
+            body['plan'] = plan
+        if result is not None:
+            body['result'] = result
+        try:
+            response = requests.post(
+                f"{MONITOR_HTTP_URL.rstrip('/')}/api/panda/rse-deletions/"
+                f"{deletion_id}/state/",
+                json=body, headers=headers, timeout=60)
+            response.raise_for_status()
+            return True
+        except Exception as exc:
+            self.logger.error(
+                f"PRODOPS rse_deletion state post failed "
+                f"({deletion_id} {status}): {exc}")
+            return False
 
     def _record_panda_operation_state(self, operation_id, status, *,
                                       diagnostic='', observed_status='',

@@ -312,6 +312,86 @@ def task_operation_update(request, operation_id):
     return Response(operations.serialize_operation(record))
 
 
+@api_view(['POST'])
+@authentication_classes(_AUTH)
+@permission_classes([IsAuthenticated])
+def rse_deletion_request(request):
+    """Queue a live preview of removing a dataset pattern from a disk RSE
+    (rse_deletions.py); nothing is removed until it is confirmed."""
+    from . import rse_deletions
+    if is_tunnel_request(request):
+        return Response(
+            {'error': 'RSE removals are available on the internal monitor.'},
+            status=http_status.HTTP_403_FORBIDDEN)
+    try:
+        record = rse_deletions.request_preview(
+            rse=request.data.get('rse'), pattern=request.data.get('pattern'),
+            requested_by=getattr(request.user, 'username', '') or 'operator')
+    except rse_deletions.RseDeletionRequestError as exc:
+        return Response({'error': exc.detail}, status=exc.status)
+    return Response(rse_deletions.serialize(record),
+                    status=http_status.HTTP_202_ACCEPTED)
+
+
+@api_view(['GET'])
+@authentication_classes(_AUTH)
+@permission_classes([IsAuthenticated])
+def rse_deletion_detail(request, deletion_id):
+    """The durable state of one removal request, the SSE backstop."""
+    from monitor_app.models import RseDeletion
+    from . import rse_deletions
+    try:
+        record = RseDeletion.objects.get(pk=deletion_id)
+    except RseDeletion.DoesNotExist:
+        return Response({'error': 'Request not found.'},
+                        status=http_status.HTTP_404_NOT_FOUND)
+    return Response(rse_deletions.serialize(record))
+
+
+@api_view(['POST'])
+@authentication_classes(_AUTH)
+@permission_classes([IsAuthenticated])
+def rse_deletion_execute(request, deletion_id):
+    """Confirm a previewed removal: immediate and irreversible."""
+    from monitor_app.models import RseDeletion
+    from . import rse_deletions
+    if is_tunnel_request(request):
+        return Response(
+            {'error': 'RSE removals are available on the internal monitor.'},
+            status=http_status.HTTP_403_FORBIDDEN)
+    try:
+        record = RseDeletion.objects.get(pk=deletion_id)
+    except RseDeletion.DoesNotExist:
+        return Response({'error': 'Request not found.'},
+                        status=http_status.HTTP_404_NOT_FOUND)
+    try:
+        record = rse_deletions.request_execute(
+            record, confirm_rse=request.data.get('confirm_rse'),
+            confirmed_by=getattr(request.user, 'username', '') or 'operator')
+    except rse_deletions.RseDeletionRequestError as exc:
+        return Response({'error': exc.detail}, status=exc.status)
+    return Response(rse_deletions.serialize(record),
+                    status=http_status.HTTP_202_ACCEPTED)
+
+
+@api_view(['POST'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def rse_deletion_update(request, deletion_id):
+    """Token-authenticated lifecycle callback from the prod-ops agent."""
+    from . import rse_deletions
+    try:
+        record = rse_deletions.update_from_agent(
+            deletion_id,
+            status=str(request.data.get('status') or ''),
+            diagnostic=request.data.get('diagnostic') or '',
+            plan=request.data.get('plan'),
+            result=request.data.get('result'))
+    except rse_deletions.RseDeletionRequestError as exc:
+        return Response({'error': exc.detail}, status=exc.status)
+    return Response(rse_deletions.serialize(record))
+
+
 @api_view(['GET'])
 @authentication_classes(_AUTH)
 @permission_classes([AllowAny])

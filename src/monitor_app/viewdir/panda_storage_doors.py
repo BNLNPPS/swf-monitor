@@ -6,6 +6,8 @@ serve — with the settings that govern the cycle.
 Reads the cached product the cycle stored and computes nothing: it
 touches no door, no catalog and no PanDA. Nothing on this page acts,
 and the page says so: the canary reports and production operations act.
+Each production disk RSE links to its removal page
+(panda_rse_deletion.py), where datasets are removed.
 """
 import logging
 
@@ -58,7 +60,10 @@ def panda_storage_doors(request):
 
     row = CachedProduct.objects.filter(key=STATE_KEY).first()
     state = (row.value if row else None) or {}
+    from swf_epicprod.rse_deletion import DISK_RSES
     doors = [_row(rse, s) for rse, s in sorted((state.get('doors') or {}).items())]
+    for d in doors:
+        d['removable'] = d['rse'] in DISK_RSES
     settings = state.get('settings') or {}
     return render(request, 'monitor_app/panda_storage_doors.html', {
         'never_run': not state,

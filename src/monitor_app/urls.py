@@ -135,6 +135,7 @@ from .viewdir.snapper_api import snapper_series as dashboard_history
 from .viewdir.panda_node_guard import (panda_node_guard, panda_node_guard_json,
                                        panda_node_guard_set)
 from .viewdir.panda_storage_doors import panda_storage_doors
+from .viewdir.panda_rse_deletion import panda_rse_deletion
 from pcs.views import front_page as panda_front
 from .viewdir.idds_database import (
     idds_database_tables_list,
@@ -314,6 +315,9 @@ urlpatterns = [
     path('panda/node-guard/', panda_node_guard, name='panda_node_guard'),
     # The storage doors production writes through, used hourly
     path('panda/storage-doors/', panda_storage_doors, name='panda_storage_doors'),
+    # Remove datasets from a disk RSE where tape holds a complete copy
+    path('panda/storage-doors/<str:rse>/remove/', panda_rse_deletion,
+         name='panda_rse_deletion'),
     path('panda/node-guard/json/', panda_node_guard_json, name='panda_node_guard_json'),
     path('panda/node-guard/set/', panda_node_guard_set, name='panda_node_guard_set'),
     path('panda/jobs/', panda_jobs_list, name='panda_jobs_list'),

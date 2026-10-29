@@ -1239,6 +1239,60 @@ class PandaTaskOperation(models.Model):
         return f"{self.operation} PanDA task {self.jedi_task_id}: {self.status}"
 
 
+class RseDeletion(models.Model):
+    """One request to remove datasets from a disk RSE (swf-epicprod
+    docs/STORAGE.md, Removing datasets from an RSE): the operator's
+    pattern, the agent's live preview, the confirmation, and the
+    per-dataset outcome. The web tier only records and queues; the
+    production operations agent reads and changes the catalog."""
+
+    STATUS_CHOICES = [
+        ('previewing', 'Previewing'),
+        ('previewed', 'Previewed'),
+        ('queued', 'Queued for removal'),
+        ('running', 'Removing'),
+        ('done', 'Done'),
+        ('partial', 'Done with failures'),
+        ('failed', 'Failed'),
+    ]
+    PENDING_STATUSES = ('previewing', 'queued', 'running')
+    EXECUTING_STATUSES = ('queued', 'running')
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    rse = models.CharField(max_length=100, db_index=True)
+    pattern = models.CharField(max_length=1000)
+    requested_by = models.CharField(max_length=100, blank=True, default='')
+    confirmed_by = models.CharField(max_length=100, blank=True, default='')
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default='previewing', db_index=True)
+    diagnostic = models.TextField(blank=True, default='')
+    plan = models.JSONField(default=dict, blank=True)
+    result = models.JSONField(default=dict, blank=True)
+    requested_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    previewed_at = models.DateTimeField(null=True, blank=True)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'swf_rse_deletion'
+        ordering = ['-requested_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['rse'],
+                condition=models.Q(status__in=('queued', 'running')),
+                name='uniq_executing_rse_deletion',
+            ),
+        ]
+
+    @property
+    def is_pending(self):
+        return self.status in self.PENDING_STATUSES
+
+    def __str__(self):
+        return f"remove {self.pattern} from {self.rse}: {self.status}"
+
+
 class CapcomNotice(models.Model):
     """One discrete SWF event, buffered for feed consumers that poll
     /api/capcom/notices/ from their own side. External feed systems hold
