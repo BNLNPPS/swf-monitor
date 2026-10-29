@@ -7,7 +7,12 @@ legacy `epicproduction` jobs; trials (processing type `canary`) are excluded,
 and so are an Event Service queue's jobs created before its move to production,
 which were its commissioning trials whatever their label (SysConfig
 `compute_efficiency.commissioning_until`: Google ES 2026-10-25 17:36 ET,
-Perlmutter ES 2026-10-26 08:20 ET).
+Perlmutter ES 2026-10-26 08:20 ET). Trials after that move are excluded by
+task (SysConfig `compute_efficiency.commissioning_tasks`; Torre Wenaus,
+2026-10-29): Perlmutter's return to commissioning on 28 October, gun tasks
+41463 and 41469 of the serialized-handoff defect and 41479 and 41480, the
+first tasks of the new EVGEN Event Service workflow. None was a production
+run.
 It contains a site-by-period heatmap with core-hour volumes and selectable
 trend lines. The PanDA hub and the dashboard's Computing now heading link
 to this history.

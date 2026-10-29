@@ -24,6 +24,13 @@ DEFAULT_COMMISSIONING_UNTIL = {
     'BNL_ePIC_GOOGLE_es': '2026-10-25T21:36:37+00:00',
     'NERSC_Perlmutter_epic_es': '2026-10-26T12:20:35+00:00',
 }
+# Trials after a queue's move to production stay out of the production
+# sample too (Torre Wenaus, 2026-10-29: "MARK THEM AS TRIALS"): on Perlmutter,
+# 28 October's return to commissioning, the gun tasks of the serialized-handoff
+# defect and the first tasks of the new EVGEN Event Service workflow, none of
+# them production runs. SysConfig ``compute_efficiency.commissioning_tasks``
+# [JEDI task id].
+DEFAULT_COMMISSIONING_TASKS = [41463, 41469, 41479, 41480]
 DASHBOARD_SITES = (('osg', 'OSG', '#b48ee8'),
                    ('perlmutter', 'Perlmutter', '#e3b954'),
                    ('grex', 'GREX', '#7fce95'),
@@ -51,6 +58,15 @@ def commissioning_until():
     return out
 
 
+def commissioning_tasks():
+    """[JEDI task id] from SysConfig; entries that are not ids are skipped."""
+    from .models import SysConfig
+    value = SysConfig.get_setting('compute_efficiency.commissioning_tasks',
+                                  DEFAULT_COMMISSIONING_TASKS)
+    return [int(t) for t in (value if isinstance(value, list) else ())
+            if str(t).isdigit()]
+
+
 def query_days(start, end, production=False, finished_only=False):
     """One grouped database read; no per-job records leave the database."""
     pools = osg_pool_queues()
@@ -76,6 +92,10 @@ def query_days(start, end, production=False, finished_only=False):
         for queue, at in commissioning_until().items():
             where += (f" AND NOT (computingsite = '{queue}'"
                       f" AND creationtime < '{at.isoformat(sep=' ')}')")
+        tasks = commissioning_tasks()
+        if tasks:
+            # integers by construction, so written in place
+            where += f" AND COALESCE(jeditaskid, 0) NOT IN ({','.join(map(str, tasks))})"
     if finished_only:
         where += " AND jobstatus='finished'"
     # PanDA stores UTC timestamps without a timezone; datetime bounds retain
