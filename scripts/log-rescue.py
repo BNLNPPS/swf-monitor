@@ -236,10 +236,54 @@ def rescue(client, uploader, s3, entry, dry_run):
             except Occupied as exc:
                 return 'occupied', str(exc)
         ensure_open(client, scope, dataset)
+        if gfal_only(client, rse):
+            try:
+                return 'done', upload_xrootd(client, rse, scope, lfn, guid, dataset, path)
+            except Occupied as exc:
+                return 'occupied', str(exc)
         uploader.upload([{'path': path, 'rse': rse, 'did_scope': scope, 'did_name': lfn,
                           'guid': guid, 'dataset_scope': scope, 'dataset_name': dataset,
                           'register_after_upload': True}])
     return 'done', f'{key} -> {rse}, attached to {scope}:{dataset}'
+
+
+def gfal_only(client, rse):
+    """True when gfal2 is not installed here and every write protocol of the
+    RSE is gfal's (BNL_PROD_DISK_1, GREX's log RSE, lists davs and root, both
+    gfal): the upload client cannot write there, and the log goes by xrdcp
+    instead (``upload_xrootd``). gfal2 has no build for the agent's Python."""
+    try:
+        import gfal2  # noqa: F401
+        return False
+    except ImportError:
+        pass
+    writers = [p for p in client.get_protocols(rse)
+               if any((p['domains'].get(d) or {}).get('write') for d in ('lan', 'wan'))]
+    return bool(writers) and all(p['impl'].startswith('rucio.rse.protocols.gfal') for p in writers)
+
+
+def upload_xrootd(client, rse, scope, lfn, guid, dataset, path):
+    """The upload client's write and registration, by xrdcp: the log is
+    written to its deterministic root path at the RSE, never over a file
+    there, then registered there under the job's GUID with its size and
+    checksum and attached to its log dataset."""
+    pfn = next(iter(client.lfns2pfns(rse, [f'{scope}:{lfn}'], scheme='root',
+                                     operation='write').values()))
+    proc = subprocess.run(['xrdcp', '--nopbar', path, pfn], capture_output=True, text=True,
+                          timeout=600)
+    if proc.returncode != 0 and 'file exists' in (proc.stderr or proc.stdout).lower():
+        raise Occupied(f'{pfn} already holds a file; another attempt wrote this log name, '
+                       'and it is never overwritten. The held copy stays in the bucket until it expires.')
+    if proc.returncode != 0:
+        raise RuntimeError(f'xrdcp to {pfn} failed: {(proc.stderr or proc.stdout).strip()[:300]}')
+    size = os.path.getsize(path)
+    with open(path, 'rb') as fp:
+        adler = f'{zlib.adler32(fp.read()) & 0xffffffff:08x}'
+    client.add_replicas(rse=rse, files=[{'scope': scope, 'name': lfn, 'bytes': size,
+                                         'adler32': adler,
+                                         'meta': {'guid': str(guid).replace('-', '')}}])
+    client.attach_dids(scope=scope, name=dataset, dids=[{'scope': scope, 'name': lfn}])
+    return f'{pfn} by xrdcp ({size} B, ad:{adler}), attached to {scope}:{dataset}'
 
 
 def main():
