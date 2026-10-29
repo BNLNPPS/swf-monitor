@@ -7,7 +7,7 @@
 set -uo pipefail
 
 GITHUB_DIR="/data/wenauseic/github"
-NODE_PATH="/eic/u/wenauseic/.nvm/versions/node/v22.17.0/bin"
+NODE_PATH="/eic/u/wenauseic/.nvm/versions/node/v22.23.4/bin"
 VENV_BIN="$GITHUB_DIR/swf-testbed/.venv/bin"
 LOG="/tmp/mcp_servers_update.log"
 BOT_SERVICE="swf-panda-bot"
