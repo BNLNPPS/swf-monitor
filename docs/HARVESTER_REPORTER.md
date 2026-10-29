@@ -133,8 +133,11 @@ harvester's own database and does not reach the PanDA server.
 `scripts/perlmutter-harvester-reporter.py` runs every five minutes from the
 deployed release under the deployment account's cron and stores the record
 through `host_reports.store`, the ingest's write path; `--print` prints it
-and stores nothing. Its log is
-`/opt/swf-monitor/shared/logs/perlmutter-harvester-reporter.log`.
+and stores nothing. The crontab line:
+
+```
+1-56/5 * * * * bash -lc 'source ~/.env && timeout 240 /opt/swf-monitor/current/.venv/bin/python /opt/swf-monitor/current/scripts/perlmutter-harvester-reporter.py' >> /opt/swf-monitor/shared/logs/perlmutter-harvester-reporter.log 2>&1
+```
 `host_reports.HARVESTER_HOSTS` is the one list of harvester records that
 every reader takes: the comp snapshot, the queue page, worker admission,
 the GREX pilot regulator and the queue registry's drift check.
