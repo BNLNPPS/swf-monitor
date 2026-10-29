@@ -801,6 +801,22 @@ ACTION_DEFAULTS = {
         'sublevel': 'low', 'live': False,
         'description': "One cycle of the storage door checks.",
     },
+    # removing datasets from a disk RSE (swf-epicprod docs/STORAGE.md,
+    # Removing datasets from an RSE)
+    'rse_deletion_preview': {
+        'sublevel': 'low', 'live': False,
+        'description': "An operator's preview of removing a dataset pattern "
+                       "from a disk RSE: the datasets matched and those a "
+                       "complete tape copy makes removable. Changes nothing.",
+    },
+    'rse_deletion': {
+        'sublevel': 'high', 'live': True,
+        'description': "An operator's removal of the datasets matching a "
+                       "pattern from a disk RSE, only where tape holds a "
+                       "complete copy: who, the counts and bytes, and the "
+                       "removed datasets named. Immediate and irreversible "
+                       "on disk; the tape copies are untouched.",
+    },
     'evgen_register': {
         'sublevel': 'low', 'live': False,
         'description': "Register an EVGEN dataset's files in Rucio.",
