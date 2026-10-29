@@ -46,6 +46,9 @@ Capabilities:
   panda_task_operation — run a PanDA-native operation on an existing JEDI task:
                        pause/resume, increase attempts, or retry failed work.
   panda_task_operations — run one paced bulk pause/resume request.
+  rse_deletion       — preview, or remove, the datasets matching a pattern on
+                       a disk RSE where tape holds a complete copy
+                       (swf-epicprod docs/STORAGE.md, Removing datasets).
   panda_sandbox_keepalive — touch the sandbox tarballs of retryable tasks in
                        the PanDA server cache so the 7-day purge passes them
                        by (nightly catalog_sync chain step).
@@ -309,6 +312,19 @@ GKE_PILOT_CYCLE_TIMEOUT = int(os.environ.get("EPICPROD_GKE_PILOT_CYCLE_TIMEOUT",
 # tier (about an hour at the pass's pacing, STORAGE.md); the nightly full
 # pass lists the target campaigns' files. Three hours holds either.
 STORAGE_SWEEP_TIMEOUT = int(os.environ.get("EPICPROD_STORAGE_SWEEP_TIMEOUT", "10800"))
+# Removing datasets from a disk RSE (swf-epicprod docs/STORAGE.md): a
+# preview reads two catalog records per matching dataset, a removal three
+# plus the rule update; an hour holds a full campaign of either.
+RSE_DELETION_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "rse-deletion.py"
+RSE_DELETION_TIMEOUT = int(os.environ.get("EPICPROD_RSE_DELETION_TIMEOUT", "3600"))
+# How often a running removal writes its outcomes so far to the request.
+RSE_DELETION_PROGRESS_S = 5
+
+
+def _utc_now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
 # The campaign configuration proposer (swf-monitor docs/PINGS.md, Pings
 # with a remedy): pings and remedies for editions without a Standard
 # Production configuration.
@@ -406,6 +422,7 @@ class EpicProdOpsAgent(BaseAgent):
 
     KNOWN_TYPES = {"fetch_payload_log", "submit_task", "submit_evgen_task",
                    "panda_task_operation", "panda_task_operations",
+                   "rse_deletion",
                    "panda_sandbox_keepalive",
                    "rucio_snapshot_update", "evgen_rucio_update", "evgen_register",
                    "catalog_import",
@@ -450,6 +467,10 @@ class EpicProdOpsAgent(BaseAgent):
                          config_path=str(PRODOPS_CONFIG))
         self._deliberate = False
         self._campaign_progress_last_start = 0
+        # Removals from a disk RSE: the request running on each RSE, and
+        # the lock its request files are written under.
+        self._rse_deletion_lock = threading.RLock()
+        self._rse_deletion_running = {}
         self._action_log_session = requests.Session()
         self._system_status_thread = threading.Thread(
             target=self._system_status_periodic_loop,
@@ -4017,6 +4038,235 @@ class EpicProdOpsAgent(BaseAgent):
                          findings=summary.get('findings', 0),
                          proposed=proposed,
                          withdrawn=summary.get('withdrawn', 0))
+
+    def _handle_rse_deletion(self, m):
+        """Preview or remove datasets on a disk RSE for the monitor's
+        removal page. One removal per RSE runs at a time: a confirmation
+        that arrives while another request's removal runs on the same RSE
+        is refused on its own request; a repeat of the running one is
+        dropped."""
+        phase = m.get("phase")
+        deletion_id = str(m.get("deletion_id") or "")
+        rse = str(m.get("rse") or "")
+        if phase not in ("preview", "execute") or not deletion_id or not rse:
+            self.logger.error(f"PRODOPS rse_deletion: bad message {m!r}")
+            return
+        if phase == "preview":
+            self._record_rse_deletion_state(
+                deletion_id, 'previewing', start={
+                    'id': deletion_id, 'rse': rse,
+                    'pattern': str(m.get("pattern") or ""),
+                    'requested_by': str(m.get("created_by") or ""),
+                    'confirmed_by': '',
+                    'requested_at': m.get("requested_at") or _utc_now_iso()})
+            self.run_in_background(
+                self._do_rse_deletion, m,
+                dedup_key=f"rse_deletion:preview:{deletion_id}",
+                label=f"rse_deletion preview {rse}")
+            return
+        with self._rse_deletion_lock:
+            running = self._rse_deletion_running.get(rse)
+            if running == deletion_id:
+                self.logger.info(f"PRODOPS rse_deletion: {deletion_id} already removing")
+                return
+            if running or not self.run_in_background(
+                    self._do_rse_deletion, m,
+                    dedup_key=f"rse_deletion:execute:{rse}",
+                    label=f"rse_deletion execute {rse}"):
+                self._record_rse_deletion_state(
+                    deletion_id, 'failed',
+                    diagnostic=f'A removal from {rse} was already in progress; '
+                               'nothing was removed by this request.')
+                self.send_message('/topic/epictopic', {
+                    'msg_type': 'rse_deletion_done', 'deletion_id': deletion_id,
+                    'phase': phase, 'rse': rse, 'status': 'failed', 'ok': False})
+                return
+            self._rse_deletion_running[rse] = deletion_id
+
+    def _do_rse_deletion(self, m):
+        """Run the rse-deletion doer and record its plan or outcomes on the
+        request. A removal's outcomes stream from the doer one line per
+        dataset and are written to the request every
+        RSE_DELETION_PROGRESS_S while it runs, so a timeout or crash keeps
+        what was removed. Completion is pushed on
+        success and failure alike."""
+        phase = m["phase"]
+        rse = str(m.get("rse") or "")
+        try:
+            self._run_rse_deletion(m)
+        finally:
+            if phase == "execute":
+                with self._rse_deletion_lock:
+                    self._rse_deletion_running.pop(rse, None)
+
+    def _run_rse_deletion(self, m):
+        import tempfile
+        phase = m["phase"]
+        deletion_id = str(m["deletion_id"])
+        rse = str(m.get("rse") or "")
+        pattern = str(m.get("pattern") or "")
+        names = list(m.get("names") or [])
+        username = str(m.get("created_by") or "")
+        cmd = [sys.executable, str(RSE_DELETION_SCRIPT), "--phase", phase,
+               "--rse", rse, "--pattern", pattern]
+        names_file = None
+        if phase == "execute":
+            self._record_rse_deletion_state(
+                deletion_id, 'running', confirmed_by=username,
+                confirmed_at=m.get("confirmed_at") or _utc_now_iso())
+            names_file = tempfile.NamedTemporaryFile(
+                'w', suffix='.json', prefix='rse-deletion-', delete=False)
+            json.dump(names, names_file)
+            names_file.close()
+            cmd += ["--names-file", names_file.name]
+        self.logger.info(f"PRODOPS rse_deletion: {phase} {pattern} on {rse}")
+        t0 = time.monotonic()
+        outcomes, final, diagnostic = [], None, ''
+        timed_out = threading.Event()
+
+        def progress():
+            from swf_epicprod.rse_deletion import totals
+            return {'rse': rse, 'pattern': pattern, 'datasets': list(outcomes),
+                    'totals': totals(outcomes, len(names)), 'partial': True}
+
+        # stderr to a file: a pipe read only at the end would block a
+        # chatty doer once its buffer filled.
+        errlog = tempfile.TemporaryFile('w+')
+        try:
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                 stderr=errlog, text=True)
+            killer = threading.Timer(RSE_DELETION_TIMEOUT,
+                                     lambda: (timed_out.set(), p.kill()))
+            killer.start()
+            last_write = time.monotonic()
+            try:
+                for line in p.stdout:
+                    try:
+                        event = json.loads(line)
+                    except ValueError:
+                        continue
+                    kind = event.pop('event', '')
+                    if kind == 'outcome':
+                        outcomes.append(event)
+                        if time.monotonic() - last_write > RSE_DELETION_PROGRESS_S:
+                            self._record_rse_deletion_state(
+                                deletion_id, 'running', result=progress())
+                            last_write = time.monotonic()
+                    elif kind == 'result':
+                        final = event
+                    elif kind == 'error':
+                        diagnostic = str(event.get('error') or 'doer error')
+                p.wait()
+            finally:
+                killer.cancel()
+            errlog.seek(0)
+            for line in (errlog.read() or "").splitlines()[-20:]:
+                self.logger.info(f"  rse-deletion: {line}")
+            if timed_out.is_set():
+                diagnostic = f'timed out after {RSE_DELETION_TIMEOUT}s'
+            elif final is None and not diagnostic:
+                diagnostic = f'doer rc={p.returncode} gave no result'
+        except Exception as exc:                              # noqa: BLE001
+            diagnostic = f'doer could not run: {exc}'
+        finally:
+            errlog.close()
+            if names_file:
+                try:
+                    os.unlink(names_file.name)
+                except OSError:
+                    pass
+        if phase == "preview":
+            status = 'failed' if (diagnostic or final is None) else 'previewed'
+            self._record_rse_deletion_state(
+                deletion_id, status, diagnostic=diagnostic,
+                plan=final if status == 'previewed' else None)
+            totals = (final or {}).get('totals') or {}
+            self._log_action('rse_deletion_preview', t0,
+                             outcome='ok' if status == 'previewed' else 'error',
+                             reason=diagnostic, subject_type='rse',
+                             subject_key=rse, username=username,
+                             sublevel='low', message=pattern,
+                             request_id=deletion_id, pattern=pattern,
+                             status=status,
+                             matched=totals.get('datasets', 0),
+                             eligible=totals.get('eligible', 0),
+                             eligible_bytes=totals.get('eligible_bytes', 0))
+        else:
+            result = final if final is not None and not diagnostic else (
+                progress() if outcomes else None)
+            totals = (result or {}).get('totals') or {}
+            if diagnostic:
+                status = 'failed'
+            else:
+                status = 'partial' if totals.get('failed') else 'done'
+            self._record_rse_deletion_state(
+                deletion_id, status, diagnostic=diagnostic, result=result)
+            removed = [o.get('name') for o in (result or {}).get('datasets') or []
+                       if o.get('outcome') == 'removed']
+            # The action record is the record that stands: who, what and
+            # how much, with the removed datasets named.
+            self._log_action('rse_deletion', t0,
+                             outcome='ok' if status == 'done' else 'error',
+                             reason=diagnostic, subject_type='rse',
+                             subject_key=rse, username=username,
+                             sublevel='high', live_default=True,
+                             level=logging.INFO if status == 'done' else logging.ERROR,
+                             message=f'{pattern}: removed {totals.get("removed", 0)} '
+                                     f'datasets ({totals.get("removed_bytes", 0) / 1e12:.2f} TB) '
+                                     f'from {rse}',
+                             request_id=deletion_id, pattern=pattern,
+                             status=status,
+                             removed=totals.get('removed', 0),
+                             removed_files=totals.get('removed_files', 0),
+                             removed_bytes=totals.get('removed_bytes', 0),
+                             skipped=totals.get('skipped', 0),
+                             failed=totals.get('failed', 0),
+                             datasets=removed)
+        self.send_message('/topic/epictopic', {
+            'msg_type': 'rse_deletion_done', 'deletion_id': deletion_id,
+            'phase': phase, 'rse': rse, 'status': status,
+            'ok': status in ('previewed', 'done')})
+
+    def _record_rse_deletion_state(self, deletion_id, status, *, diagnostic='',
+                                   plan=None, result=None, start=None, **fields):
+        """Write a removal request's working state, the file the monitor's
+        removal page reads ($SWF_TMP_DIR/rse-deletions/<id>.json; no table
+        holds the requests). Replaced whole through a rename, so the page
+        never reads a half-written file. Never raises."""
+        try:
+            directory = Path(SWF_TMP_DIR) / "rse-deletions"
+            directory.mkdir(parents=True, exist_ok=True)
+            path = directory / f"{deletion_id}.json"
+            with self._rse_deletion_lock:
+                record = dict(start or {})
+                if not start:
+                    try:
+                        with open(path) as f:
+                            record = json.load(f)
+                    except (OSError, ValueError):
+                        record = {'id': deletion_id}
+                now = _utc_now_iso()
+                record.update(fields, status=status, updated_at=now)
+                if diagnostic or status != 'running':
+                    record['diagnostic'] = str(diagnostic or '')
+                if plan is not None:
+                    record['plan'] = plan
+                if result is not None:
+                    record['result'] = result
+                if status == 'previewed':
+                    record['previewed_at'] = now
+                if status in ('done', 'partial', 'failed'):
+                    record['completed_at'] = now
+                tmp = path.with_suffix('.tmp')
+                with open(tmp, 'w') as f:
+                    json.dump(record, f)
+                os.chmod(tmp, 0o644)
+                os.replace(tmp, path)
+            return True
+        except Exception as exc:                              # noqa: BLE001
+            self.logger.error(
+                f"PRODOPS rse_deletion state write failed ({deletion_id} {status}): {exc}")
+            return False
 
     def _record_panda_operation_state(self, operation_id, status, *,
                                       diagnostic='', observed_status='',

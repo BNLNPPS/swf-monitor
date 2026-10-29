@@ -48,6 +48,7 @@ BOARD_LABELS = {
     'evgen_register': 'EVGEN registration', 'evgen_events': 'EVGEN events',
     'storage_door_cycle': 'Storage doors', 'storage_door_verdict': 'Storage door',
     'storage_sweep': 'Storage sweep', 'stash_drain': 'Stash drain',
+    'rse_deletion': 'Disk removal',
     'system_status_refresh': 'System status', 'report_sweep': 'Report sweep',
     'log_rescue': 'Log rescue', 'catalog_sync': 'Catalog sync',
     'payload_log_fetch': 'Payload log fetch', 'declared_state_sync': 'Declared state',

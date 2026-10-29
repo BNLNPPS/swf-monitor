@@ -190,6 +190,19 @@ export REQUESTS_CA_BUNDLE=/opt/swf-monitor/current/full-chain.pem
 - `POST /api/panda/task-operations/{operation_id}/state/` - Token-authenticated
   prod-ops lifecycle callback. This is an internal executor endpoint, not a
   browser action.
+- `POST /api/panda/rse-deletions/` - Internal-monitor request, by the
+  operations role, to preview removing a dataset pattern from a production
+  disk RSE (`{"rse": "BNL-XRD", "pattern": "/RECO/26.03.0/*"}`). Queues the
+  prod-ops agent's live preview; removes nothing (swf-epicprod
+  `docs/STORAGE.md`, Removing datasets from an RSE).
+- `GET /api/panda/rse-deletions/{deletion_id}/` - Authenticated state of one
+  request as the agent last wrote it: status, the preview plan, and the
+  removal outcomes. 404 until the agent has taken the request.
+- `POST /api/panda/rse-deletions/{deletion_id}/execute/` - Internal-monitor
+  confirmation by the operations role (`{"confirm_rse": "<RSE>"}`, the RSE
+  typed back) of a previewed request less than an hour old. Removes the
+  datasets the preview found eligible, each checked again live; immediate
+  and irreversible. One removal per RSE runs at a time.
 
 ### System Agents
 - `GET /api/systemagents/` - List all agents

@@ -49,7 +49,8 @@
         <tbody>
         {% for d in doors %}
             <tr>
-                <td><strong>{{ d.rse }}</strong></td>
+                <td><strong>{{ d.rse }}</strong>
+                    {% if d.removable %}<div><a href="{% url 'monitor_app:panda_rse_deletion' rse=d.rse %}">Remove datasets</a></div>{% endif %}</td>
                 <td class="{{ d.verdict_class }}">{{ d.verdict }}</td>
                 <td>{{ d.reason_label }}
                     {% if d.said %}<div class="doors-said text-muted">{{ d.said|truncatechars:160 }}</div>{% endif %}

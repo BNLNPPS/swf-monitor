@@ -312,6 +312,73 @@ def task_operation_update(request, operation_id):
     return Response(operations.serialize_operation(record))
 
 
+def _rse_deletion_refusal(request):
+    """Why ``request`` may not act on an RSE removal, or None. Removals are
+    made on the internal monitor by the operations role (docs/AUTHORITY.md;
+    Torre Wenaus, 2026-10-29: "ops people can")."""
+    from monitor_app.authority import get_authority, is_ops
+    if is_tunnel_request(request):
+        return 'RSE removals are available on the internal monitor.'
+    if not is_ops(get_authority(getattr(request.user, 'username', '') or '')):
+        return ('RSE removals are made by the operations role; an '
+                'administrator can grant it on the User admin page.')
+    return None
+
+
+@api_view(['POST'])
+@authentication_classes(_AUTH)
+@permission_classes([IsAuthenticated])
+def rse_deletion_request(request):
+    """Queue a live preview of removing a dataset pattern from a disk RSE
+    (rse_deletions.py); nothing is removed until it is confirmed."""
+    from . import rse_deletions
+    refusal = _rse_deletion_refusal(request)
+    if refusal:
+        return Response({'error': refusal}, status=http_status.HTTP_403_FORBIDDEN)
+    try:
+        record = rse_deletions.request_preview(
+            rse=request.data.get('rse'), pattern=request.data.get('pattern'),
+            requested_by=request.user.username)
+    except rse_deletions.RseDeletionRequestError as exc:
+        return Response({'error': exc.detail}, status=exc.status)
+    return Response(rse_deletions.serialize(record),
+                    status=http_status.HTTP_202_ACCEPTED)
+
+
+@api_view(['GET'])
+@authentication_classes(_AUTH)
+@permission_classes([IsAuthenticated])
+def rse_deletion_detail(request, deletion_id):
+    """One removal request's state, as the agent last wrote it; the SSE
+    backstop. Not found until the agent has taken the request."""
+    from . import rse_deletions
+    record = rse_deletions.read_request(deletion_id)
+    if record is None:
+        return Response({'error': 'Request not found.'},
+                        status=http_status.HTTP_404_NOT_FOUND)
+    return Response(rse_deletions.serialize(record))
+
+
+@api_view(['POST'])
+@authentication_classes(_AUTH)
+@permission_classes([IsAuthenticated])
+def rse_deletion_execute(request, deletion_id):
+    """Confirm a previewed removal: immediate and irreversible."""
+    from . import rse_deletions
+    refusal = _rse_deletion_refusal(request)
+    if refusal:
+        return Response({'error': refusal}, status=http_status.HTTP_403_FORBIDDEN)
+    try:
+        record = rse_deletions.request_execute(
+            deletion_id, confirm_rse=request.data.get('confirm_rse'),
+            confirmed_by=request.user.username)
+    except rse_deletions.RseDeletionRequestError as exc:
+        return Response({'error': exc.detail}, status=exc.status)
+    return Response(rse_deletions.serialize(record),
+                    status=http_status.HTTP_202_ACCEPTED)
+
+
+
 @api_view(['GET'])
 @authentication_classes(_AUTH)
 @permission_classes([AllowAny])
