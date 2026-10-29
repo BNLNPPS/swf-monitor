@@ -295,6 +295,8 @@ The science storage figure (terabytes used) is yellow when a major store,
 one holding at least a tenth of the science data, is 88% full or more,
 and red at 94% (Torre Wenaus, 2026-10-29); its tooltip names the fullest
 major store.
+The Pressure front's ready figure is yellow when fewer than five
+production tasks are ready, none included (Torre Wenaus, 2026-10-29).
 A queue without Snapper history opens its queue details. Incomplete
 registrations are amber when nonzero and open the jobs with pending or
 unfinished payload registration in the same completion hour.

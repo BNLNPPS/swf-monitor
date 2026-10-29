@@ -744,6 +744,9 @@
     document.querySelectorAll('#flow > .flowcell').forEach((cell, i) => {
       if (values[i]) cell.querySelectorAll('.flowrow b').forEach((node, j) => text(node, number(values[i][j])));
     });
+    // Fewer than five ready tasks, none included, reads yellow (Torre Wenaus, 2026-10-29).
+    document.querySelector('#flow > .flowcell .flowrow b')
+      .classList.toggle('gold', front.ready_tasks != null && front.ready_tasks < 5);
     sites.forEach(site => renderSite(site, record.trends && record.trends.sites.find(row => row.id === site.id)));
     panels.forEach((panel, name) => {
       if (panel.querySelector('.metric') && !sites.some(site => (aliases[site.id] || site.name) === name))
