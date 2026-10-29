@@ -194,6 +194,52 @@ def _problem_lines(group_rows, rows, people):
     return lines
 
 
+def _operation_who_why(op, username, people, idle):
+    """(who, why) for a task operation from its operation record
+    (PandaTaskOperation): the front's task guard and its trip, the front's
+    idle move (``idle``: its ``idle_move`` record by operation id), a person
+    and their reason; the action record's ``username`` when it has none."""
+    if op is None:
+        return _who(username, people), ''
+    evidence = op.evidence or {}
+    source = str(op.source or '')
+    if source.startswith('front_task_failure_guard'):
+        from monitor_app.comp_snapshot import _guard_reason
+        return 'front task guard', _guard_reason(evidence) or ''
+    if source == 'front_idle_move':
+        move = idle.get(str(op.id)) or {}
+        why = f"{short_name(move.get('to') or evidence.get('site'))} idle"
+        if move.get('rows') and move.get('from'):
+            why += f"; {int(move['rows']):,} unstarted jobs waiting at {short_name(move['from'])}"
+        return 'front', why
+    return (_who(op.requested_by, people),
+            str(evidence.get('reason') or evidence.get('note') or ''))
+
+
+def task_operation_who_why(extra, at):
+    """(who, why) for the task operation one action record reports, read as
+    the curated page reads it; the dashboard's epicprod-live panel uses it
+    for a Move (COMP_SNAPSHOT.md, Live)."""
+    from monitor_app.epicprod_logging import EPICPROD_APP_NAME
+    from monitor_app.models import AppLog, PandaTaskOperation
+    task = str(extra.get('subject_key') or '')
+    op = (PandaTaskOperation.objects
+          .filter(jedi_task_id=int(task), operation=str(extra.get('operation') or ''),
+                  requested_at__lte=at)
+          .order_by('-requested_at').first() if task.isdigit() else None)
+    idle = {}
+    if op is not None and str(op.source or '') == 'front_idle_move':
+        move = (AppLog.objects.filter(app_name=EPICPROD_APP_NAME,
+                                      extra_data__action='idle_move',
+                                      extra_data__operation_id=str(op.id))
+                .values_list('extra_data', flat=True).first())
+        if move:
+            idle[str(op.id)] = move
+    names = {str(extra.get('username') or ''), str(getattr(op, 'requested_by', '') or '')}
+    people = _people([{'extra_data': {'username': n}} for n in names - {''}])
+    return _operation_who_why(op, extra.get('username'), people, idle)
+
+
 def _task_lines(group_rows, rows, people):
     """A line per task operation with who and why from its operation record
     (PandaTaskOperation), the pending and final records of one operation
@@ -221,20 +267,6 @@ def _task_lines(group_rows, rows, people):
                 found = op
         return found
 
-    def who_why(op, r):
-        if op is None:
-            return _who(r['extra_data'].get('username'), people), ''
-        evidence = op.evidence or {}
-        source = str(op.source or '')
-        if source.startswith('front_task_failure_guard'):
-            from monitor_app.comp_snapshot import _guard_reason
-            return 'front task guard', _guard_reason(evidence) or ''
-        if source == 'front_idle_move':
-            move = idle.get(str(op.id)) or {}
-            return 'front', f"{short_name(move.get('to') or evidence.get('site'))} idle"
-        return (_who(op.requested_by, people),
-                str(evidence.get('reason') or evidence.get('note') or ''))
-
     shown, moves, lines = set(), {}, []
     for r in group_rows:
         x = r['extra_data']
@@ -250,7 +282,7 @@ def _task_lines(group_rows, rows, people):
         if key in shown:
             continue  # the pending record of an operation shown at its final outcome
         shown.add(key)
-        who, why = who_why(op, r)
+        who, why = _operation_who_why(op, x.get('username'), people, idle)
         if operation == 'reassign' and len(tasks) == 1:
             moves.setdefault(tasks[0], []).append((r, who))
             continue

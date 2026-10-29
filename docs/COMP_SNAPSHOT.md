@@ -490,7 +490,12 @@ busiest 15 users and instances, and whose table fits the page, never
 scrolling sideways. The items are records of the epicprod
 live stream (`live_stream_q`, ACTION_STREAM.md) at level WARNING, ERROR
 or CRITICAL from the last 12 hours, newest first, at most ten, each with
-its time, level, title, detail and page (`logs/<id>/`). The records ride
+its time, level, title, detail and page (`logs/<id>/`). A task Move is
+normal operation, recorded at INFO while JEDI carries it out and when it
+completes, and stays on the screen at INFO for three hours (SysConfig
+`comp.live.move_hours`; Torre Wenaus, 2026-10-29); a Move that fails is a
+failure like any other. A full screen drops its oldest Moves before any
+warning or error. The records ride
 in the snapshot because the room reads it anonymously and the logs page
 is behind the login wall; they name tasks, queues, nodes and errors and
 carry no credential.
@@ -513,7 +518,12 @@ reason and the evidence:
 
 For a task operation it is the task and the operation's reading;
 otherwise the record's reason led by its subject. Both come from
-`live_notices.board_text`.
+`live_notices.board_text`. A Move's detail is the task, its route, who
+asked and why, from its operation record as the curated view reads it
+(`live_curated.task_operation_who_why`):
+
+    group.EIC...p4496.e106.s11.r11: GREX to OSG, by front: OSG idle;
+    9,987 unstarted jobs waiting at GREX
 
 A record leaves the floor when it is no longer news:
 

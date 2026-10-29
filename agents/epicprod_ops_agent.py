@@ -859,12 +859,16 @@ class EpicProdOpsAgent(BaseAgent):
                     'operation': operation, 'status': 'unverified',
                     'observed_status': observed_status,
                     'accepted': True, 'ok': False, 'error': reason})
+                # A Move JEDI is still carrying out is its normal course
+                # (Torre Wenaus, 2026-10-29: "a move is normal ops, should
+                # be info level"); a Move that never lands is an ERROR below.
                 self._log_action(
                     'panda_task_operation', t0, outcome='unverified',
                     reason=reason, subject_type='panda_task',
                     subject_key=jedi_task_id,
                     username=str(m.get('created_by') or ''),
-                    sublevel='high', live_default=True, level=logging.WARNING,
+                    sublevel='high', live_default=True,
+                    level=logging.INFO if operation == 'reassign' else logging.WARNING,
                     operation=operation, task_name=task_name,
                     **move_sites,
                     observed_status=observed_status,

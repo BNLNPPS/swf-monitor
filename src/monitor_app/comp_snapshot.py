@@ -102,6 +102,9 @@ JLAB_FLOW_BACKFILL_BINS = 4
 # The floor is the control room: live-now records only, the last 12 hours;
 # the logs page holds the history (Torre, 2026-10-22).
 LIVE_WINDOW_H = 12
+# A task Move is normal operation, shown at INFO for this long (SysConfig
+# comp.live.move_hours; Torre Wenaus, 2026-10-29: "make it 3hrs").
+LIVE_MOVE_HOURS = 3
 
 
 def _worst(levels):
@@ -1653,16 +1656,44 @@ def _latest_daily_assessment():
             'narration': x.get('narration')}
 
 
+def _live_move_hours():
+    """How long a task Move stays on the epicprod-live screen, SysConfig
+    ``comp.live.move_hours``."""
+    from monitor_app.models import SysConfig
+    value = SysConfig.get_setting('comp.live.move_hours', LIVE_MOVE_HOURS)
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+        return value
+    logger.warning('comp.live.move_hours %r is not a number of hours; using %s',
+                   value, LIVE_MOVE_HOURS)
+    return LIVE_MOVE_HOURS
+
+
+def _move_detail(extra, at, task_name):
+    """A Move's detail on the screen: the task, its route, who asked and
+    why (live_curated.task_operation_who_why), and its state unless done."""
+    from monitor_app.live_curated import task_operation_who_why
+    who, why = task_operation_who_why(extra, at)
+    text = (f"{short_name(extra.get('previous_site')) or '?'} to "
+            f"{short_name(extra.get('site')) or '?'}, by {who}")
+    if why:
+        text += f': {why}'
+    if extra.get('outcome') != 'ok':
+        text += f"; {extra.get('reason') or extra.get('outcome')}"
+    return f'{task_name}: {text}' if task_name else text
+
+
 def _live_records():
     """The epicprod-live screen: the newest warning and error records of
     the live stream, the logs page's live view (ACTION_STREAM.md), each
-    with its own page. The room reads the record anonymously and the logs
-    page is behind the login wall, so the records ride here. The floor is
-    live now: records from the window only, a node guard trip only for a
-    node new to the blacklist, and off it a record a ``live_cleared``
-    record names, a failure whose action has since run ok, and a record a
-    later one on its subject supersedes or repeats (COMP_SNAPSHOT.md,
-    Live)."""
+    with its own page, and a task Move at INFO for ``comp.live.move_hours``.
+    The room reads the record anonymously and the logs page is behind the
+    login wall, so the records ride here. The floor is live now: records
+    from the window only, a node guard trip only for a node new to the
+    blacklist, and off it a record a ``live_cleared`` record names, a
+    failure whose action has since run ok, and a record a later one on its
+    subject supersedes or repeats; a full screen drops its oldest Moves
+    before any warning or error (COMP_SNAPSHOT.md, Live)."""
+    from django.db.models import Q
     from monitor_app.epicprod_logging import EPICPROD_APP_NAME, live_stream_q
     from monitor_app.live_notices import (FAILURE_OUTCOMES, board_text, failure_key,
                                          site_node_guard_fields)
@@ -1673,7 +1704,12 @@ def _live_records():
                         extra_data__action='live_cleared')
                 .values_list('extra_data__cleared_ids', flat=True)):
         cleared.update(int(i) for i in ids or ())
-    rows = (AppLog.objects.filter(live_stream_q(), levelname__in=LIVE_LEVELS)
+    moves_since = timezone.now() - timedelta(hours=_live_move_hours())
+    rows = (AppLog.objects.filter(live_stream_q())
+            .filter(Q(levelname__in=LIVE_LEVELS)
+                    | Q(levelname='INFO', timestamp__gte=moves_since,
+                        extra_data__action='panda_task_operation',
+                        extra_data__operation='reassign'))
             .exclude(id__in=cleared)
             .order_by('-timestamp')
             .values('id', 'timestamp', 'levelname', 'message', 'instance_name',
@@ -1714,11 +1750,17 @@ def _live_records():
                     ranks = {}
             extra = site_node_guard_fields(extra, ranks)
         title, detail = board_text(r['message'], extra)
+        if extra.get('action') == 'panda_task_operation' and extra.get('operation') == 'reassign':
+            detail = _move_detail(extra, r['timestamp'], extra.get('task_name') or '')
         items.append({'id': r['id'], 'at': r['timestamp'].isoformat(),
                       'level': r['levelname'], 'title': title, 'detail': detail,
                       'link': f"{PUBLIC}/logs/{r['id']}/"})
-        if len(items) == LIVE_ITEMS:
+        if sum(1 for i in items if i['level'] != 'INFO') == LIVE_ITEMS:
             break
+    # A full screen gives way to warnings and errors: its oldest Moves go first.
+    moves = [i for i in items if i['level'] == 'INFO']
+    while len(items) > LIVE_ITEMS and moves:
+        items.remove(moves.pop())
     return {'link': f'{PUBLIC}/logs/epicprod-live/',
             'numbering': 'site', 'items': items, 'hours': LIVE_WINDOW_H,
             'counts': _live_counts(cutoff)}
