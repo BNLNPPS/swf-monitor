@@ -601,7 +601,10 @@
       const capacity = science.capacity;
       if (capacity) {
         const detail = document.querySelector('.science-storage .small');
-        const used = element('b', '', number(capacity.used_bytes == null ? null : capacity.used_bytes / 1e12));
+        const store = capacity.fill;
+        const used = element('b', store && store.level !== 'green' ? color(store.level) : '',
+          number(capacity.used_bytes == null ? null : capacity.used_bytes / 1e12));
+        if (store) used.title = 'Fullest major store: ' + store.rse + ' ' + number(store.fraction * 100) + '%';
         detail.replaceChildren(used, document.createTextNode(' / ' + number(capacity.limit_bytes == null ? null : capacity.limit_bytes / 1e12) +
           ' TB · ' + number(capacity.fraction == null ? null : capacity.fraction * 100) + '%'));
         const fill = document.querySelector('.science-storage .storefill i');

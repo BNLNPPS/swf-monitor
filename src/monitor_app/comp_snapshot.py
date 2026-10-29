@@ -1605,7 +1605,9 @@ LEVEL_ORDER = {'red': 0, 'amber': 1, 'grey': 2, 'green': 3}
 # The alarm engine's titles: 'task 40962 (failed) final-failure rate 100.0% —
 # <task name>'.
 TASK_ALARM_RE = re.compile(r'^task (\d+) \(([^)]*)\) final-failure rate ([\d.]+%) — (.*)$')
-DUE_RE = re.compile(r'^due in (\d+) days? \((\d{4}-\d\d-\d\d)\): (.*)$')
+# A ping event's title as the engine first recorded it (swf_alarms pings.py).
+DUE_RE = re.compile(r'^(?:due in \d+ days?|due today|overdue by \d+ days?) '
+                    r'\((\d{4}-\d\d-\d\d)\): (.*)$')
 
 
 def _active_alarms():
@@ -2053,7 +2055,29 @@ def _storage_capacity():
     output = next(({'rse': r['name'], 'used_bytes': r['used_bytes'], 'limit_bytes': r['limit_bytes'],
                     'fraction': r['fraction'], 'as_of': r['as_of']}
                    for r in rses if r['name'] == OUTPUT_RSE), None)
+    if output:
+        output['fill'] = _storage_fill(rses)
     return {'output': output, 'rses': rses}
+
+
+# A major store holds at least this share of the science data; the science
+# storage figure is amber when one is STORE_AMBER full, red at STORE_RED
+# (Torre Wenaus, 2026-10-29: "yellow when a major underlying store is 88%+,
+# red at 94%+").
+STORE_MAJOR_SHARE, STORE_AMBER, STORE_RED = 0.10, 0.88, 0.94
+
+
+def _storage_fill(rses):
+    """The fullest major store and its level: red, amber or green."""
+    held = [r for r in rses if r['used_bytes'] and r['fraction'] is not None]
+    total = sum(r['used_bytes'] for r in held)
+    major = [r for r in held if total and r['used_bytes'] / total >= STORE_MAJOR_SHARE]
+    if not major:
+        return None
+    fullest = max(major, key=lambda r: r['fraction'])
+    level = ('red' if fullest['fraction'] >= STORE_RED
+             else 'amber' if fullest['fraction'] >= STORE_AMBER else 'green')
+    return {'level': level, 'rse': fullest['name'], 'fraction': fullest['fraction']}
 
 
 FEED_SWITCH_REASONS = ('queue_off', 'queue_exempt')
@@ -2327,16 +2351,17 @@ def _report_items(front, sites, storage, alarms, assessment):
             continue
         seen.add(key)
         # The alarm engine selects approaching pings by their lead time.
-        # Their recorded title's countdown ages; display the due date.
+        # Their recorded title's countdown ages, and an overdue ping keeps
+        # it at severity alarm; display the due date.
         ping = a.get('severity') == 'ping'
-        due = DUE_RE.match(title) if ping else None
+        due = DUE_RE.match(title) if not task else None
         if task:
             number, state, rate, name = task.groups()
             text = f'Final failures {rate}, task {number} ({state}): {name}'
             key = f'alarm:task:{number}'
         elif due:
-            _days, date, what = due.groups()
-            text = f'Due {date}: {what}'
+            date, what = due.groups()
+            text = f"{'Due' if ping else 'Overdue, due'} {date}: {what}"
             key = f'due:{date}:{what}'
         else:
             text = f"{'Due' if ping else 'Alarm'}: {title.replace(' — ', ': ')}"

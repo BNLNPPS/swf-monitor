@@ -291,6 +291,10 @@ with server-side task filtering and pagination. The jobs title and
 completion chart follow task and execute-site filters; a whole-queue
 pie is omitted for a narrower selection. Task file totals open the task accounting rather than a
 job count. Storage capacity links select BNL-XRD and the capacity view.
+The science storage figure (terabytes used) is yellow when a major store,
+one holding at least a tenth of the science data, is 88% full or more,
+and red at 94% (Torre Wenaus, 2026-10-29); its tooltip names the fullest
+major store.
 A queue without Snapper history opens its queue details. Incomplete
 registrations are amber when nonzero and open the jobs with pending or
 unfinished payload registration in the same completion hour.
