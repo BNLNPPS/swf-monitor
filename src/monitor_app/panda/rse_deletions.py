@@ -19,6 +19,11 @@ from monitor_app.models import RseDeletion
 
 # A preview older than this is read again before anything is removed.
 PREVIEW_VALID = timedelta(hours=1)
+# A queued or running request not updated for this long has lost its
+# agent run (a lost message, an agent restart, a failed final post): past
+# the agent's removal timeout (an hour) with margin, and the agent posts
+# progress every half minute while it works.
+STALE_AFTER = timedelta(hours=2)
 
 
 class RseDeletionRequestError(Exception):
@@ -102,6 +107,7 @@ def request_execute(record, *, confirm_rse, confirmed_by):
              if d.get('eligible')]
     if not names:
         raise RseDeletionRequestError('The preview found nothing eligible.', 409)
+    release_stale(record.rse)
     try:
         with transaction.atomic():
             updated = (RseDeletion.objects
@@ -123,9 +129,24 @@ def request_execute(record, *, confirm_rse, confirmed_by):
     return record
 
 
+def release_stale(rse):
+    """Fail ``rse``'s queued or running requests that have not been
+    updated within STALE_AFTER, so a lost agent run does not hold the RSE
+    for good. Outcomes it recorded stay on the request."""
+    now = timezone.now()
+    return (RseDeletion.objects
+            .filter(rse=rse, status__in=RseDeletion.EXECUTING_STATUSES,
+                    updated_at__lt=now - STALE_AFTER)
+            .update(status='failed', completed_at=now, updated_at=now,
+                    diagnostic=('No outcome from the agent within '
+                                f'{int(STALE_AFTER.total_seconds() // 3600)} h; '
+                                'released. Any recorded outcomes are partial.')))
+
+
 AGENT_TRANSITIONS = {
     'previewed': ('previewing',),
-    'running': ('queued',),
+    # running repeats while the removal proceeds, carrying the outcomes so far.
+    'running': ('queued', 'running'),
     'done': ('queued', 'running'),
     'partial': ('queued', 'running'),
     'failed': ('previewing', 'queued', 'running'),

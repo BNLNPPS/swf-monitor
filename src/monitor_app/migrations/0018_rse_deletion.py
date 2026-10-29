@@ -5,7 +5,7 @@ import uuid
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('monitor_app', '0016_pandataskoperation_reassign'),
+        ('monitor_app', '0017_crashsignature_memory_class'),
     ]
 
     operations = [

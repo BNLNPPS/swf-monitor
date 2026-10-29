@@ -96,3 +96,28 @@ class RseDeletionApiTests(APITestCase):
         self.assertIsNotNone(rec.previewed_at)
         # previewed cannot jump to done without a confirmation.
         self.assertEqual(agent.post(url, {'status': 'done'}, format='json').status_code, 409)
+
+    def test_a_stale_executing_request_is_released_by_the_next_confirmation(self):
+        stale = self._previewed(status='running')
+        RseDeletion.objects.filter(pk=stale.pk).update(
+            updated_at=timezone.now() - timedelta(hours=3))
+        rec = self._previewed()
+        r = self.client.post(reverse('monitor_app:panda-rse-deletion-execute', args=[rec.id]),
+                             {'confirm_rse': 'BNL-XRD'}, format='json')
+        self.assertEqual(r.status_code, status.HTTP_202_ACCEPTED)
+        stale.refresh_from_db()
+        self.assertEqual(stale.status, 'failed')
+        self.assertIn('released', stale.diagnostic)
+
+    def test_running_repeats_with_progress_then_completes(self):
+        rec = self._previewed(status='queued')
+        url = reverse('monitor_app:panda-rse-deletion-update', args=[rec.id])
+        agent = APIClient()
+        agent.credentials(HTTP_AUTHORIZATION=f'Token {Token.objects.create(user=self.user).key}')
+        progress = {'datasets': [{'name': '/RECO/26.03.0/a', 'outcome': 'removed'}],
+                    'totals': {'requested': 1, 'removed': 1}, 'partial': True}
+        for body in ({'status': 'running'}, {'status': 'running', 'result': progress},
+                     {'status': 'done', 'result': progress}):
+            self.assertEqual(agent.post(url, body, format='json').status_code, 200, body)
+        rec.refresh_from_db()
+        self.assertEqual((rec.status, rec.result['totals']['removed']), ('done', 1))

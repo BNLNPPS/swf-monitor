@@ -14,7 +14,9 @@
         Removes every dataset matching a name pattern from {{ rse }}, and only
         where {{ tape_rse }} holds a complete copy: a tape rule in state OK with
         every file locked and none replicating or stuck. A dataset without one
-        is kept and listed with the reason. The preview reads the live catalog
+        is kept and listed with the reason, and so is one whose production task
+        is still active. The tape check is Rucio's lock state at {{ tape_rse }}.
+        The preview reads the live catalog
         and changes nothing; the removal expires the dataset's rule on
         {{ rse }}, and Rucio's deletion daemon then removes the replicas.
         <a href="{% url 'monitor_app:panda_storage_doors' %}">Storage doors</a>
@@ -162,7 +164,14 @@
         }
         if (rec.status === 'queued' || rec.status === 'running') {
             confirmBox.classList.add('d-none');
-            showStatus(`Removing from ${rse}…`, 'primary');
+            const done = rec.result && rec.result.datasets;
+            if (done) {
+                const t = rec.result.totals || {};
+                showStatus(`Removing from ${rse}… ${done.length} of ${t.requested || '?'} decided, ${t.removed || 0} removed.`, 'primary');
+                table.innerHTML = planTable(done, true);
+            } else {
+                showStatus(`Removing from ${rse}…`, 'primary');
+            }
             return;
         }
         closeWatch();
