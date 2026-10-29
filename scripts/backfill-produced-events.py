@@ -171,6 +171,9 @@ def main(argv):
         return 2
     doer = _doer()
     client = doer.rucio_client(proxy)
+    # The robot proxy stays the PanDA sign-in for tokens (swf_epicprod.jlab_auth).
+    if os.environ.get('X509_USER_PROXY'):
+        os.environ.setdefault('EPICPROD_PANDA_LOGIN_PROXY', os.environ['X509_USER_PROXY'])
     os.environ['X509_USER_PROXY'] = proxy
     scope, door, base = doer.RUCIO_SCOPE, doer.XRD_DOOR, doer.XRD_BASE
     t0 = time.monotonic()

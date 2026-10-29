@@ -309,14 +309,14 @@ def run_cycle(*, dry_run=False, created_by='storage-doors', force=False,
         path = canary_doors.probe_path(door['prefix'], cfg['probe_prefix'],
                                        cfg['probe_name'])
         # The door's credential as production now writes: a storage token
-        # where the door takes one (over TLS), else the proxy the cycle's
-        # script put in X509_USER_PROXY (swf_epicprod.jlab_auth).
+        # where the door takes one (over TLS), else the registrar's proxy,
+        # in the door command's environment only (swf_epicprod.jlab_auth).
         from swf_epicprod.jlab_auth import door_access
         report('credential', rse=rse, door=door['door'], path=path)
         url, env, how = door_access(
             door['door'], canary_doors.server_path(path),
             verbs=('storage.create', 'storage.modify', 'storage.read'),
-            proxy=os.environ.get('X509_USER_PROXY') or None)
+            proxy=os.environ.get('EVGEN_X509_PROXY') or None)
 
         def probe_command(command, timeout_s, stdin_text=None):
             phase = ('write' if os.path.basename(command[0]) == 'xrdcp'
