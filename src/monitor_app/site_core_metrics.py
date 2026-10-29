@@ -71,6 +71,12 @@ def build():
     queued = queues[google['queue']]
     queued['queued_cores'] = ready_capacity(queued['queued_jobs'], google['nodes'], google['cores_per_node'])
     queued['queued_core_demand'] = queued['queued_jobs'] * google['cores_per_node']
+    # Perlmutter's whole-node jobs declare 256 cores (two threads a core);
+    # each runs 128 work lanes, the unit its running figure counts, so a
+    # waiting job counts 128 (Torre Wenaus, 2026-10-29).
+    from swf_epicprod import perlmutter_production
+    perl = queues[perlmutter_production.QUEUE]
+    perl['queued_cores'] = perl['queued_jobs'] * int(perlmutter_production.SHAPE['slots'])
     return {'queues': dict(queues), 'ended': dict(history), 'google': google,
             'since': since.replace(tzinfo=timezone.utc).isoformat(), 'observed_at': now.isoformat()}
 

@@ -117,7 +117,9 @@ Job counts remain in the hover and drilldown. Queued values show core demand
 for the single-core native queues. Google shows the core capacity its waiting
 jobs can fill at the current node cap: ten jobs can feed all five 14-core
 workers, so the display reads 70 queued cores; hover retains ten jobs and
-identifies the capacity limit. The minute cache `site_core_metrics:v1` reads
+identifies the capacity limit. Perlmutter counts a waiting whole-node job
+at its node's 128 work lanes, the unit its running figure counts, not the
+256 cores the job declares (Torre Wenaus, 2026-10-29). The minute cache `site_core_metrics:v1` reads
 deduplicated production-job outcomes and queued demand from PanDA.
 
 Site plots label the white curve **cores** and read Snapper's recorded

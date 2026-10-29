@@ -494,7 +494,10 @@ its time, level, title, detail and page (`logs/<id>/`). A task Move is
 normal operation, recorded at INFO while JEDI carries it out and when it
 completes, and stays on the screen at INFO for three hours (SysConfig
 `comp.live.move_hours`; Torre Wenaus, 2026-10-29); a Move that fails is a
-failure like any other. A full screen drops its oldest Moves before any
+failure like any other. A task the front released from the ready buffer
+to a queue (its `front_decision` record with outcome `fed`) is shown the
+same way, one line per task (`Move ready buffer to Perlmutter · p4499.e106`),
+with why the queue took it. A full screen drops its oldest Moves before any
 warning or error. The records ride
 in the snapshot because the room reads it anonymously and the logs page
 is behind the login wall; they name tasks, queues, nodes and errors and
@@ -518,7 +521,8 @@ reason and the evidence:
 
 For a task operation it is the task and the operation's reading;
 otherwise the record's reason led by its subject. Both come from
-`live_notices.board_text`. A Move's detail is the task, its route, who
+`live_notices.board_text`. A Move's title names where from and where to
+(`Move GREX to OSG · task 41474`); its detail is the task, its route, who
 asked and why, from its operation record as the curated view reads it
 (`live_curated.task_operation_who_why`):
 

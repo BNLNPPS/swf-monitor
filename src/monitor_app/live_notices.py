@@ -84,7 +84,10 @@ def board_text(message, extra):
     if action == 'panda_task_operation':
         op = str(extra.get('operation') or '')
         task = extra.get('task_name') or f"task {extra.get('subject_key')}"
-        return (f"{OPERATION_LABELS.get(op, op.capitalize() or label)} · "
+        # A Move names where from and where to (Torre Wenaus, 2026-10-29).
+        route = (f" {short_name(extra['previous_site'])} to {short_name(extra['site'])}"
+                 if op == 'reassign' and extra.get('previous_site') and extra.get('site') else '')
+        return (f"{OPERATION_LABELS.get(op, op.capitalize() or label)}{route} · "
                 f"task {extra.get('subject_key')}",
                 f"{task}: {extra.get('reason') or message}")
     subject_type = extra.get('subject_type')

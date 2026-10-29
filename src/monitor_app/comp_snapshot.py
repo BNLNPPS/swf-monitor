@@ -1682,6 +1682,22 @@ def _move_detail(extra, at, task_name):
     return f'{task_name}: {text}' if task_name else text
 
 
+def _feed_text(extra):
+    """(title, detail) for a task the front released from the ready buffer
+    to a queue: where from and where to (Torre Wenaus, 2026-10-29: "eg from
+    ready buffer to perlmutter"), the task by its physics and evgen tags,
+    and why the queue took it."""
+    from monitor_app.live_notices import CONFIG_TAGS
+    queue = short_name(extra.get('subject_key')) or '?'
+    task = str(extra.get('candidate') or '')
+    tags = CONFIG_TAGS.search(task)
+    title = f'Move ready buffer to {queue}' + (f' · {tags.group(1)}' if tags else '')
+    why = (f"{queue} below its low mark: {extra.get('committed_h')} h committed "
+           f"of {extra.get('h_low')} to {extra.get('h_high')} h")
+    return title, (f'{task}: ready buffer to {queue}, by front: {why}' if task
+                   else f'ready buffer to {queue}, by front: {why}')
+
+
 def _live_records():
     """The epicprod-live screen: the newest warning and error records of
     the live stream, the logs page's live view (ACTION_STREAM.md), each
@@ -1709,7 +1725,9 @@ def _live_records():
             .filter(Q(levelname__in=LIVE_LEVELS)
                     | Q(levelname='INFO', timestamp__gte=moves_since,
                         extra_data__action='panda_task_operation',
-                        extra_data__operation='reassign'))
+                        extra_data__operation='reassign')
+                    | Q(levelname='INFO', timestamp__gte=moves_since,
+                        extra_data__action='front_decision', extra_data__outcome='fed'))
             .exclude(id__in=cleared)
             .order_by('-timestamp')
             .values('id', 'timestamp', 'levelname', 'message', 'instance_name',
@@ -1728,7 +1746,11 @@ def _live_records():
         if (extra.get('action') == 'node_guard_decision'
                 and extra.get('old_state') not in (None, '', 'clear')):
             continue
-        subject = _subject(r['instance_name'], extra)
+        # A task the front released from the ready buffer is a move of its
+        # own, about the task; the queue's next decision does not end it.
+        feed = extra.get('action') == 'front_decision' and extra.get('outcome') == 'fed'
+        subject = (json.dumps(['front_decision', extra.get('candidate')]) if feed
+                   else _subject(r['instance_name'], extra))
         if subject in shown:
             continue
         if str(extra.get('outcome') or '') in FAILURE_OUTCOMES:
@@ -1737,7 +1759,7 @@ def _live_records():
                 last_ok[key] = _last_ok(r['instance_name'], extra, key)
             if last_ok[key] and last_ok[key] > r['timestamp']:
                 continue
-        if _superseded(r['instance_name'], extra, r['timestamp']):
+        if not feed and _superseded(r['instance_name'], extra, r['timestamp']):
             continue
         shown.add(subject)
         if extra.get('action') == 'node_guard_decision':
@@ -1752,6 +1774,8 @@ def _live_records():
         title, detail = board_text(r['message'], extra)
         if extra.get('action') == 'panda_task_operation' and extra.get('operation') == 'reassign':
             detail = _move_detail(extra, r['timestamp'], extra.get('task_name') or '')
+        elif feed:
+            title, detail = _feed_text(extra)
         items.append({'id': r['id'], 'at': r['timestamp'].isoformat(),
                       'level': r['levelname'], 'title': title, 'detail': detail,
                       'link': f"{PUBLIC}/logs/{r['id']}/"})
@@ -2751,6 +2775,13 @@ def get_snapshot(refresh=False):
             elif site['id'] == 'google' and google:
                 trend['queued_cores'] = [ready_capacity(n, google['nodes'], google['cores_per_node'])
                                          if n is not None else None for n in trend['queued']]
+            elif perlmutter_production.QUEUE in ids:
+                # A waiting whole-node job counts its node's 128 work lanes,
+                # as the panel's figure does (site_core_metrics); the non-ES
+                # queue takes no production.
+                lanes = int(perlmutter_production.SHAPE['slots'])
+                trend['queued_cores'] = [n * lanes if n is not None else None
+                                         for n in trend['queued']]
             else:
                 # The native OSG/GREX queues use one core per queued job.
                 trend['queued_cores'] = list(trend['queued'])
