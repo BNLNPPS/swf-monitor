@@ -55,13 +55,15 @@ def query_days(start, end, production=False, finished_only=False):
     """One grouped database read; no per-job records leave the database."""
     pools = osg_pool_queues()
     key = execute_site_key_sql()
-    fields = '''computingsite, destinationsite AS dest_site,
+    fields = f'''computingsite, destinationsite AS dest_site,
         regexp_replace(COALESCE(modificationhost, ''), '^.*@', '') AS host,
         jobstatus, jeditaskid, endtime,
         CASE WHEN starttime IS NOT NULL AND endtime >= starttime THEN
           EXTRACT(EPOCH FROM (endtime-starttime)) *
           GREATEST(1, COALESCE(NULLIF(actualcorecount,0), NULLIF(corecount,0),1)) / 3600.0
-        END AS hours'''
+        END AS hours,
+        pandaid, piloterrorcode, starttime,
+        COALESCE(eventservice, 0) IN ({','.join(map(str, ES_CONSUMERS))}) AS es'''
     where = '''endtime >= %s AND endtime < %s
         AND jobstatus IN ('finished','failed','closed','cancelled')'''
     if production:
@@ -95,20 +97,67 @@ def query_days(start, end, production=False, finished_only=False):
       )
       SELECT endtime::date, computingsite, pool,
         CASE WHEN pool THEN {key} ELSE '' END AS execution,
-        COALESCE(SUM(hours) FILTER (WHERE jobstatus='finished'),0),
+        COALESCE(SUM(hours) FILTER (WHERE jobstatus='finished' AND NOT es),0),
         COALESCE(SUM(hours),0), COUNT(*), COUNT(*) FILTER (WHERE hours IS NULL),
         COALESCE(SUM(hours) FILTER (WHERE jobstatus='finished' AND jeditaskid={INCIDENT_TASK}),0),
         COALESCE(SUM(hours) FILTER (WHERE jeditaskid={INCIDENT_TASK}),0),
         COUNT(*) FILTER (WHERE jeditaskid={INCIDENT_TASK}),
-        COUNT(*) FILTER (WHERE jeditaskid={INCIDENT_TASK} AND hours IS NULL)
+        COUNT(*) FILTER (WHERE jeditaskid={INCIDENT_TASK} AND hours IS NULL),
+        COUNT(*) FILTER (WHERE es AND hours IS NOT NULL),
+        ARRAY_AGG(ARRAY[pandaid::text, jobstatus, COALESCE(piloterrorcode, 0)::text,
+                        starttime::text, endtime::text, hours::text])
+          FILTER (WHERE es AND hours IS NOT NULL)
       FROM located GROUP BY 1,2,3,4 ORDER BY 1,2,4'''
     with transaction.atomic(using='panda'):
         with connections['panda'].cursor() as cursor:
             cursor.execute("SET LOCAL statement_timeout = '180s'")
             cursor.execute(sql, bounds + [bounds[0]] + bounds + [pools])
             rows = cursor.fetchall()
-    return [[str(row[0]), row[1] or 'Unknown queue', bool(row[2]), row[3],
-             *[float(v or 0) for v in row[4:]]] for row in rows]
+    out = []
+    for row in rows:
+        values = [float(v or 0) for v in row[4:13]]
+        # An Event Service job's productive core-hours are its allocation
+        # times the share its slots spent processing events whose output
+        # was saved, whatever PanDA's status says (docs/COMPUTE_EFFICIENCY.md,
+        # Event Service jobs). Column 12 counts the Event Service jobs with
+        # timings, column 13 those whose record does not measure the share;
+        # for those PanDA's status stands, the only evidence there is.
+        unmeasured = 0
+        for pandaid, status, pilot_error, start, end, hours in row[13] or []:
+            fraction = es_saved_fraction(int(pandaid), status, int(pilot_error), start, end)
+            if fraction is None:
+                unmeasured += 1
+                fraction = 1.0 if status == 'finished' else 0.0
+            values[0] += float(hours) * fraction
+        values.append(float(unmeasured))
+        out.append([str(row[0]), row[1] or 'Unknown queue', bool(row[2]), row[3], *values])
+    return out
+
+
+# The Event Service job flavors that process event ranges (consumers, not
+# merges; panda/constants.py ES_JOB_FLAVORS).
+ES_CONSUMERS = (1, 3, 4, 5, 6)
+_es_fractions = {}
+
+
+def es_saved_fraction(pandaid, status, pilot_error, start, end):
+    """The share of an ended Event Service job's slot time spent processing
+    events whose output was saved (the job page's measured saved
+    processing, panda/queries.py es_slot_timeline), from the harness's own
+    record; None when the job has no record that measures it. A measured
+    value never changes, so it is kept for the process's life."""
+    if pandaid in _es_fractions:
+        return _es_fractions[pandaid]
+    from .panda.queries import es_harness_report, es_slot_timeline
+    job = {'pandaid': pandaid, 'jobstatus': status, 'piloterrorcode': pilot_error,
+           'starttime': start, 'endtime': end}
+    report = es_harness_report(connections['panda'], pandaid, job=job)
+    timeline = es_slot_timeline(job, report['raw']) if report else None
+    fraction = (timeline or {}).get('saved_processing_fraction')
+    if fraction is not None:
+        fraction = min(1.0, max(0.0, float(fraction)))
+        _es_fractions[pandaid] = fraction
+    return fraction
 
 
 def merge_days(previous, recent, reread_from):
@@ -139,7 +188,10 @@ def product(refresh=False, full=False):
 
 def _hours_summary(rows):
     finished, ended, jobs, missing = (sum(row[i] for row in rows) for i in range(4, 8))
+    # Rows built before the Event Service measure carry no columns 12-13.
+    es_jobs, es_unmeasured = (int(sum(row[i] for row in rows if len(row) > i)) for i in (12, 13))
     return {'finished': finished, 'ended': ended, 'jobs': int(jobs), 'missing': int(missing),
+            'es_jobs': es_jobs, 'es_unmeasured': es_unmeasured,
             'efficiency': 100 * finished / ended if ended >= MIN_HOURS else None}
 
 

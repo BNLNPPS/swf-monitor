@@ -270,22 +270,23 @@ A queue's parts:
 
   It is `red` also when jobs are queued and in the last hour no pilot
   waited, was submitted or started, unless the queue's running slots fill
-  the operator's worker limit (`pilot.queue.<queue>.worker_limit`): a
-  full queue is due no pilot, so the part is `green` and the limit is its
+  the operator's worker limit (`pilot.queue.<queue>.worker_limit`) or
+  harvester's own `maxWorkers` (Perlmutter's node ceiling): a full queue
+  is due no pilot, so the part is `green` and an operator's limit is its
   own Report line (Torre Wenaus, 2026-10-28, when GREX, full at its
   300-core limit, read red here). The two schedd rules need the OSG
   submit reporter's count and apply to the OSG queues only. `grey` when
   the report is more than fifteen minutes old or the limit harvester
   applies is not yet reported; otherwise `green`, with the counts in the
-  note.
+  note. A limit is fixed when the queue sets no ratio or a ratio of zero:
+  harvester then applies `nQueueLimitWorker` as it stands. The job-demand
+  cache age is not checked for the Perlmutter record, which cannot carry
+  it (HARVESTER_REPORTER.md, Perlmutter).
 
   A queue no harvester report names reads PanDA's own worker table
-  instead (`harvester_workers`, the workers running or submitted now):
-  NERSC's harvester is PanDA operations' and reports nothing to us, and
-  the Event Service queue's one worker at a time, with the next job
-  queued behind it, read `amber` until 26 October. `green` with a worker
-  running or submitted; otherwise `amber` with jobs queued, `grey`
-  without.
+  instead (`harvester_workers`, the workers running or submitted now).
+  `green` with a worker running or submitted; otherwise `amber` with jobs
+  queued, `grey` without.
 
   A queue the ops agent supplies with pilots instead of harvester
   (swf-epicprod `queues.AGENT_SUPPLIED`: BNL_ePIC_GOOGLE_es) reads its

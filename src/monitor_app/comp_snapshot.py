@@ -1538,7 +1538,7 @@ def _queue_drift():
     docs/QUEUE_REGISTRY.md, The drift check)."""
     from monitor_app.host_reports import latest
     from swf_epicprod import queues as registry
-    return registry.drift({key: latest(key) for key in registry.DRIFT_REPORTS})
+    return registry.drift({key: latest(key) for key in registry.drift_reports()})
 
 
 def _drift_items(drift):

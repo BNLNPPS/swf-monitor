@@ -7,7 +7,7 @@ enables per-job dispatch and container launching, and its transferred
 launcher implements omission of the dispatch-image filter. The bootstrap
 image is retained separately in `bootstrap_images`.
 
-A reporter on each harvester host (pandaharvester01, pandaharvester02, osgsub01) delivers to swf-monitor
+A reporter on each harvester host (pandaharvester01, pandaharvester02, osgsub01), and one for the Perlmutter harvester built from what it reports to the PanDA server (Perlmutter, below), delivers to swf-monitor
 what only that host knows about how its queues get work: when the harvester
 last asked PanDA for jobs for each queue, how many it asked for and got, and
 why it got none; how many workers it submitted and for which jobs; and every
@@ -100,6 +100,44 @@ harvester logs are world-readable, cron is permitted, the host's `python3`
 is 3.6.8, and the monitor answers over HTTPS. No change to the harvester,
 its configuration or its submit descriptions is part of installing the
 reporter.
+
+## Perlmutter
+
+The harvester `Perlmutter_test_1` serves the NERSC queues from a Perlmutter
+login node under PanDA operations' account (distcomp-services
+perlmutter-harvester/README.md). Its logs are in that account's scratch,
+`/pscratch/sd/x/xin/panda/log`, which the m3763 project cannot read, and its
+process table is not reachable. Its record, host key `perlmutter-harvester`,
+is built on pandaserver02 from what the harvester reports to the PanDA
+server and from its queue configuration, read through the NERSC IRI API
+under an m3763 member's token (`swf_epicprod/nersc_iri.py`):
+
+| Function | Source | Fields delivered |
+|---|---|---|
+| Heartbeat | `harvester_instances` | `instance`: start, last heartbeat and its age, version |
+| Launch limits | `panda_queueconfig.json` through IRI | per queue: the queued-worker limit, ratio, minimum and maximum, the maximum workers, the map type; the new workers last decided (`to_submit` in `harvester_worker_stats`) and the last submission |
+| Queue status | `panda_queueconfig.json` through IRI | `queue_status.status`: each queue's `queueStatus` |
+| Workers now, started, ended | `harvester_workers` | as the other records, from the workers the harvester reports; a worker not terminal after seven days is not counted live |
+| Workers submitted | `harvester_workers` | `submission`: per queue, the workers submitted in the interval |
+| Workers not finished | `harvester_workers` | per site over 24 hours, grouped by the harvester's diagnostic |
+| Errors | `harvester_dialogs` | `dialogs`: the harvester's ERROR and CRITICAL messages to the PanDA server over 24 hours, per module, with the latest |
+| Service metrics | `harvester_metrics` | the latest per login node: memory, CPU, scratch use, proxy lifetime |
+
+Job fetching, the adjuster's applied limit, failed calls and log freshness
+come from the logs and are error fields naming why. The Perlmutter queues
+run in pull mode (`mapType` NoJob), so their pilots fetch their own jobs
+and the harvester fetches none. Every queue there sets no ratio, so the
+limit in force is its `nQueueLimitWorker`. The job-demand cache is in the
+harvester's own database and does not reach the PanDA server.
+
+`scripts/perlmutter-harvester-reporter.py` runs every five minutes from the
+deployed release under the deployment account's cron and stores the record
+through `host_reports.store`, the ingest's write path; `--print` prints it
+and stores nothing. Its log is
+`/opt/swf-monitor/shared/logs/perlmutter-harvester-reporter.log`.
+`host_reports.HARVESTER_HOSTS` is the one list of harvester records that
+every reader takes: the comp snapshot, the queue page, worker admission,
+the GREX pilot regulator and the queue registry's drift check.
 
 ## Related
 

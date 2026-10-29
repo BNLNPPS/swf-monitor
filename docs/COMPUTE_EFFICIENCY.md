@@ -92,6 +92,22 @@ separately. Running jobs and idle pilot allocations are outside the metric.
 This is successful wall-time efficiency, distinct from the CPU-efficiency
 measure on Site compute usage.
 
+## Event Service jobs
+
+PanDA's status cannot measure an Event Service job: a job whose slots
+starved still ends finished, and a job cut by preemption fails with its
+closes saved. An Event Service consumer job (PanDA `eventservice` 1, 3, 4, 5
+or 6) therefore counts its allocated core-hours times its saved-processing
+share as successful, whatever its status: the share of its slot time spent
+processing events whose output was saved, from the harness's own record,
+the same measure its job page shows (EVENT_SERVICE_PLOTS.md). On
+Perlmutter, job 6071469 (task 41287), finished in PanDA while its ranges
+starved, has a share of 0.018; trial job 6087270 (task 41316), with no events
+in its PanDA record, 0.525. A job whose record does not measure the share
+keeps PanDA's status and is counted separately (`es_unmeasured`, beside
+`es_jobs`). The share of an ended job does not change and is kept for the
+life of the process.
+
 OSG queues are split by recorded execution site. Historical jobs without
 that field use the existing worker-host site mapping; Fir and CNAF host
 patterns are recognized explicitly. Unknown sites remain visible. Site

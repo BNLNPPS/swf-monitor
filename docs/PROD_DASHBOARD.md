@@ -243,7 +243,9 @@ productive average cores, with OSG, Perlmutter and GREX curves in each. Each plo
 overall last-24-hour figure and one overall monthly average since May.
 The current month is marked with an asterisk. All three use ended-job
 walltime times cores, without processor-performance weighting. Efficiency
-is the successful fraction; cores/day divides all ended core-hours by elapsed
+is the successful fraction; an Event Service job's successful part is its
+saved-processing share, not its PanDA status (COMPUTE_EFFICIENCY.md, Event
+Service jobs). Cores/day divides all ended core-hours by elapsed
 hours and includes failed work. Productive average cores is successful
 core-hours divided by elapsed hours, so it equals cores/day times efficiency.
 Running jobs and idle pilots are excluded. Monthly rates use calendar time,
