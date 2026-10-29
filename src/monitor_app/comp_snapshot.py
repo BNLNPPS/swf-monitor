@@ -1687,11 +1687,11 @@ def _feed_text(extra):
     to a queue: where from and where to (Torre Wenaus, 2026-10-29: "eg from
     ready buffer to perlmutter"), the task by its physics and evgen tags,
     and why the queue took it."""
-    from monitor_app.live_notices import CONFIG_TAGS
+    from monitor_app.live_notices import task_short
     queue = short_name(extra.get('subject_key')) or '?'
     task = str(extra.get('candidate') or '')
-    tags = CONFIG_TAGS.search(task)
-    title = f'Move ready buffer to {queue}' + (f' · {tags.group(1)}' if tags else '')
+    short = task_short(task)
+    title = f'Move ready buffer to {queue}' + (f' · {short}' if short else '')
     why = (f"{queue} below its low mark: {extra.get('committed_h')} h committed "
            f"of {extra.get('h_low')} to {extra.get('h_high')} h")
     return title, (f'{task}: ready buffer to {queue}, by front: {why}' if task

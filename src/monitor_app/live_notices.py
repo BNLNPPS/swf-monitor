@@ -71,6 +71,21 @@ NODE_REASONS = {
     'fixed_time': 'Kills jobs at a fixed run time',
 }
 CONFIG_TAGS = re.compile(r'\.(p\d+\.e\d+)\.')
+TASK_TAIL = re.compile(r'\.s\d+\.r\d+\.(.+)$')
+
+
+def task_short(name):
+    """A composed task name in a title's width: its physics and evgen tags
+    and whatever follows the simulation and reconstruction tags, so two
+    tasks of one configuration read apart ('p1109.e37 45to135deg',
+    'p1109.e37 130to177deg'; Torre Wenaus, 2026-10-29), '' when the name
+    carries no tags."""
+    name = str(name or '')
+    tags = CONFIG_TAGS.search(name)
+    if not tags:
+        return ''
+    tail = TASK_TAIL.search(name)
+    return tags.group(1) + (f' {tail.group(1)}' if tail else '')
 
 
 def board_text(message, extra):
@@ -95,8 +110,7 @@ def board_text(message, extra):
                        or (extra.get('subject_key') if subject_type == 'panda_queue' else None)
                        or (None if subject_type in TASK_SUBJECTS else extra.get('subject_label')))
     if not where:
-        tags = CONFIG_TAGS.search(str(extra.get('subject_key') or ''))
-        where = tags.group(1) if tags else ''
+        where = task_short(extra.get('subject_key'))
     detail = str(extra.get('reason') or extra.get('summary') or message)
     subject = str(extra.get('subject_label') or extra.get('subject_key') or '')
     if subject and subject not in detail:
