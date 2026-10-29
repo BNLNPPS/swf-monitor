@@ -87,11 +87,17 @@ DEFAULTS = {
     'not_nodes': ['pandaharvester01.sdcc.bnl.gov', 'osgsub01.sdcc.bnl.gov'],
     'fixed_min_jobs': 5,
     'fixed_time_ratio': 1.2,
+    'outlier_min_failures': 20,
+    'outlier_fraction': 0.5,
+    'outlier_ratio': 5.0,
+    'outlier_floor': 0.02,
+    'outlier_expiry_h': 2,
     'expiry_h': 24,
 }
 DECISION_KEYS = ('min_jobs', 'failed_fraction', 'fast_fraction', 'fast_ratio',
                  'storm_nodes', 'storm_minutes', 'not_nodes', 'fixed_min_jobs',
-                 'fixed_time_ratio')
+                 'fixed_time_ratio', 'outlier_min_failures', 'outlier_fraction',
+                 'outlier_ratio', 'outlier_floor', 'outlier_expiry_h')
 TRIPPED_STATES = {'shadow': 'would_exclude', 'live': 'excluded'}
 # The record's status as the decision record names it, per mode.
 RECORD_STATES = {'black_hole': TRIPPED_STATES, 'half_open': {'shadow': 'half_open', 'live': 'half_open'},
@@ -192,7 +198,11 @@ def window_rows(window_h, queues=()):
                     # the payload's registration exit, whatever the pilot's
                     # label; the fixed-time reading sets it aside
                     'registration': status == 'failed' and '78' in (str(exe or '').strip(),
-                                                                    str(trans or '').strip())})
+                                                                    str(trans or '').strip()),
+                    # the landing check's decline on an excluded node (exit
+                    # 80): the guard's own action, never evidence about the node
+                    'declined': status == 'failed' and '80' in (str(exe or '').strip(),
+                                                                str(trans or '').strip())})
     return out
 
 
@@ -283,7 +293,7 @@ def _readings(verdicts, rows, calib, cfg):
             readings[(queue, host)] = {
                 'tripped': v['state'] == 'tripped', 'reason': v['reason'], 'evidence': e,
                 'finished': e.get('finished', 0), 'fast_failed': e.get('fast_failed', 0),
-                'site': e.get('site', '')}
+                'site': e.get('site', ''), 'expiry_h': v.get('expiry_h')}
     for queue_name, host in (NodeState.objects.exclude(status='clear')
                              .values_list('queue__name', 'host')):
         key = (queue_name, host)
