@@ -70,6 +70,14 @@ SUBLEVEL_ORDER = {'high': 2, 'normal': 1, 'low': 0}
 # rendered on the log entry page and the live-policy page, so a stream reader
 # is never left guessing what an event was.
 ACTION_DEFAULTS = {
+    # the PanDA database's Event Service range rows (swf-epicprod
+    # docs/ES_EVENT_CLEANUP.md)
+    'es_event_cleanup': {
+        'sublevel': 'low', 'live': False,
+        'description': "The daily removal of the Event Service range rows "
+                       "(JEDI_Events) of tasks done or aborted more than three "
+                       "days ago: the rows removed and the tasks.",
+    },
     # the pressure front (swf-epicprod docs/CONTINUOUS_PRODUCTION.md,
     # The dispatcher)
     'front_decision': {
