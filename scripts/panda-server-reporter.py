@@ -48,6 +48,8 @@ SERVER_CFG = '/etc/panda/panda_server.cfg'
 OVERRIDES = '/opt/panda/etc/panda/schedconfig/schedconfig-overrides.json'
 # The throttler's reading of a pool: '<vo>:any ...: <pool> (<queue>, ...): '
 POOL_LINE = re.compile(r'(wlcg|epic):any [^:]*: (\w+) \(([\w, ]+)\): ')
+# A field of the throttler's REGULATION_OK decision line: key=value
+REGULATION_FIELD = re.compile(r'(\w+)=(\S+)')
 UNITS = ('panda_httpd', 'panda_daemon', 'panda_jedi', 'panda_mcp')
 DEFAULT_STATE = os.path.expanduser('~/.swf-panda-server-reporter')
 POST_TIMEOUT_S = 30
@@ -421,28 +423,39 @@ def jedi_regulation():
     path = os.path.join(LOG_DIR, 'panda-EpicProdJobThrottler.log')
     voices = {}
     pools = {}
+    unread = {'count': 0, 'latest': ''}
     try:
         with open(path, 'rb') as handle:
             handle.seek(0, os.SEEK_END)
             handle.seek(max(0, handle.tell() - 1024 * 1024))
             lines = handle.read().decode('utf-8', 'replace').splitlines()
         for line in lines:
-            # Fields added after exclusions= (accounting=, scope=, 2026-10-28)
-            # are read past: the decision is what the front checks.
-            match = re.search(r'REGULATION_OK vo=(wlcg|epic) mode=throttle lock=true exclusions=true'
-                              r'(?: \S+=\S+)*? decision=(PASS|SKIP)', line)
             stamp = re.search(r'\d{4}-\d\d-\d\d[ T]\d\d:\d\d:\d\d', line)
-            if match and stamp:
-                voices[match.group(1)] = {'at': stamp.group().replace(' ', 'T') + 'Z',
-                                          'decision': match.group(2)}
+            if 'REGULATION_OK' in line:
+                # The decision line is read as key=value fields in any order,
+                # so fields added or moved (accounting=, scope=, 2026-10-28)
+                # do not stop the reading. A line missing a field the front
+                # checks is counted unread with a sample, never dropped.
+                fields = dict(REGULATION_FIELD.findall(line.split('REGULATION_OK', 1)[1]))
+                verified = (fields.get('vo') in ('wlcg', 'epic')
+                            and fields.get('mode') == 'throttle'
+                            and fields.get('lock') == 'true'
+                            and fields.get('exclusions') == 'true'
+                            and fields.get('decision') in ('PASS', 'SKIP'))
+                if verified and stamp:
+                    voices[fields['vo']] = {'at': stamp.group().replace(' ', 'T') + 'Z',
+                                            'decision': fields['decision']}
+                elif not (stamp and fields.get('vo') and fields.get('decision')):
+                    unread['count'] += 1
+                    unread['latest'] = line[-300:]
             pool = POOL_LINE.search(line)
             if pool and stamp:
                 pools.setdefault(pool.group(1), {})[pool.group(2)] = {
                     'members': [q.strip() for q in pool.group(3).split(',') if q.strip()],
                     'at': stamp.group().replace(' ', 'T') + 'Z'}
-        return {'voices': voices, 'pools': pools}
+        return {'voices': voices, 'pools': pools, 'unread': unread}
     except OSError as exc:
-        return {'error': str(exc), 'voices': voices, 'pools': pools}
+        return {'error': str(exc), 'voices': voices, 'pools': pools, 'unread': unread}
 
 
 def queue_overrides():
@@ -461,7 +474,7 @@ def collect(state):
     """The record this run delivers; ``state`` is advanced in place."""
     started = time.time()
     record = {'host': HOST, 'collected_at': now_iso(),
-              'reporter_version': '1.2'}
+              'reporter_version': '1.3'}
     positions = state.setdefault('positions', {})
     last_run = state.get('last_run_at')
     first_run = not last_run

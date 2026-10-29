@@ -69,8 +69,10 @@ Two modes, chosen per subscription:
   working on the production host: each matched incident becomes one TJAI
   peer message to the SysConfig `notify_llm_resource` group (default
   `host:swf-testbed`, every session there), which the sessions' inbox
-  receivers wake on. Its subscription is `ai-sessions ← live_watch`, filters
-  `{"app_name": "epicprod", "severity": "alarm"}`, about four alarms a day.
+  receivers wake on. Its subscriptions are `ai-sessions ← live_watch` (about
+  four alarms a day) and `ai-sessions ← front_regulator_unverified` (the
+  pressure front's regulator gate holding every fed queue), both filtered
+  `{"app_name": "epicprod", "severity": "alarm"}`.
   It exists because the live watch's alarm of 2026-10-29 00:29 ET, a
   close-out defect holding four Google Event Service jobs open, reached only
   the operator's Capcom feed and no working session saw it for hours.
