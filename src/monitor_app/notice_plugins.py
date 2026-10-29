@@ -219,4 +219,106 @@ class MattermostLivePlugin:
         r.raise_for_status()
 
 
-PLUGINS = {'mattermost-live': MattermostLivePlugin()}
+TJAI_MCP_URL = os.environ.get('TJAI_MCP_URL', 'https://etaverse.com/tjai/mcp/')
+NOTIFY_PASS_MAX = 5     # per-pass message cap; overflow is logged, not dropped
+DEFAULT_NOTIFY_RESOURCE = 'host:swf-testbed'
+
+
+def _tjai_token():
+    """TJAI_MCP_TOKEN from the environment, else the account's ~/.env."""
+    if os.environ.get('TJAI_MCP_TOKEN'):
+        return os.environ['TJAI_MCP_TOKEN']
+    with open(os.path.expanduser('~/.env')) as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith('export '):
+                line = line[7:]
+            if line.startswith('TJAI_MCP_TOKEN='):
+                return line.split('=', 1)[1].strip().strip('"').strip("'")
+    raise RuntimeError('TJAI_MCP_TOKEN not found')
+
+
+def _tjai_call(tool, arguments):
+    """One TJAI MCP tool call; returns its text result, raises on any error."""
+    r = requests.post(TJAI_MCP_URL, timeout=HTTP_TIMEOUT, json={
+        'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call',
+        'params': {'name': tool, 'arguments': arguments}}, headers={
+        'Authorization': f'Bearer {_tjai_token()}',
+        'Accept': 'application/json, text/event-stream'})
+    r.raise_for_status()
+    resp = r.json()
+    if 'error' in resp:
+        raise RuntimeError(f"TJAI {tool}: {resp['error']}")
+    text = ''.join(c.get('text', '') for c in resp['result'].get('content', []))
+    if resp['result'].get('isError') or text.startswith('Error'):
+        raise RuntimeError(f'TJAI {tool}: {text[:500]}')
+    return text
+
+
+class NotifyLLMPlugin:
+    """Important alarms into the AI sessions working on this host.
+
+    Each matched incident becomes one TJAI peer message to every session
+    in the SysConfig ``notify_llm_resource`` group (default every session
+    on swf-testbed), which the sessions' inbox receivers wake on. An alarm
+    that reached only the operator's Capcom feed went unseen by the
+    working sessions for hours on 2026-10-29 (live watch 7200995). The
+    message ID derives from the log record, so a retry never duplicates."""
+
+    NATIVE_ID = 'swf-monitor-notify-llm'
+
+    def __init__(self):
+        self.sender_id = ''
+        self._sent = 0
+        self._skipped = 0
+
+    def start_pass(self):
+        self._sent = 0
+        self._skipped = 0
+        if not self.sender_id:
+            import json
+            reg = json.loads(_tjai_call('register_session', {
+                'native_id': self.NATIVE_ID, 'name': 'epicprod-alarms',
+                'host': 'swf-testbed', 'client': 'swf-monitor',
+                'delivery': 'pull', 'resources': []}))
+            self.sender_id = reg['id']
+            logger.info("notify-llm plugin sending as TJAI session %s",
+                        self.sender_id)
+
+    def deliver(self, row, extra):
+        if self._sent >= NOTIFY_PASS_MAX:
+            self._skipped += 1
+            return
+        import uuid
+        from monitor_app.models import SysConfig
+        resource = str(SysConfig.get_setting(
+            'notify_llm_resource', DEFAULT_NOTIFY_RESOURCE) or DEFAULT_NOTIFY_RESOURCE)
+        _tjai_call('send_message', {
+            'sender_id': self.sender_id, 'resource': resource,
+            'content': self._format(row, extra),
+            'message_id': str(uuid.uuid5(uuid.NAMESPACE_URL,
+                                         f'swf-monitor-notify-llm:applog:{row.id}'))})
+        self._sent += 1
+
+    def end_pass(self):
+        if self._skipped:
+            logger.warning("notify-llm: %d alarms over the per-pass cap of %d "
+                           "were not messaged; see the live view",
+                           self._skipped, NOTIFY_PASS_MAX)
+
+    def _format(self, row, extra):
+        """The alarm, its record, and what the receiving session does."""
+        stamp = timezone.localtime(row.timestamp).strftime('%H:%M %Z')
+        title = str(extra.get('operation') or extra.get('action') or 'alarm').replace('_', ' ')
+        subject = str(extra.get('subject_label') or extra.get('subject_key') or '')
+        detail = ' '.join(str(extra.get('narration') or extra.get('summary')
+                              or extra.get('reason') or row.message or '').split())
+        return (f"epicprod ALARM, {title}{' ' + subject if subject else ''}, {stamp}: "
+                f"{detail}\nRecord: {_link_base()}/logs/{row.id}/\n"
+                "The session on epicprod work assesses this now, acts on what is "
+                "its own, and puts the rest to Torre; once taken care of, "
+                f"epicprod_live_clear(ids=[{row.id}]).")
+
+
+PLUGINS = {'mattermost-live': MattermostLivePlugin(),
+           'notify-llm': NotifyLLMPlugin()}

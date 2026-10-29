@@ -65,6 +65,15 @@ Two modes, chosen per subscription:
   push outage never stalls buffered-pull delivery; the incident remains on the
   log record page. The `#epicprod-live` Mattermost publisher is the first
   plugin (`mattermost-live`); each plugin's settings live in SysConfig.
+  The `notify-llm` plugin puts important alarms in front of the AI sessions
+  working on the production host: each matched incident becomes one TJAI
+  peer message to the SysConfig `notify_llm_resource` group (default
+  `host:swf-testbed`, every session there), which the sessions' inbox
+  receivers wake on. Its subscription is `ai-sessions ← live_watch`, filters
+  `{"app_name": "epicprod", "severity": "alarm"}`, about four alarms a day.
+  It exists because the live watch's alarm of 2026-10-29 00:29 ET, a
+  close-out defect holding four Google Event Service jobs open, reached only
+  the operator's Capcom feed and no working session saw it for hours.
 
 Notice composition from the incident is deterministic: title from the operation
 when present, otherwise the action, plus `subject_label` when present, otherwise

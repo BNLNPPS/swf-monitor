@@ -31,6 +31,12 @@ DEFAULT_COMMISSIONING_UNTIL = {
 # them production runs. SysConfig ``compute_efficiency.commissioning_tasks``
 # [JEDI task id].
 DEFAULT_COMMISSIONING_TASKS = [41463, 41469, 41479, 41480]
+# Jobs whose loss came from a commissioning-grade defect of ours stay out of
+# the production sample (Torre Wenaus, 2026-10-29: "DO NOT ACCOUNT
+# INEFFICIENCIES ARISING TO PROD"): the four Google Event Service jobs the
+# broken close-out step could not close on 28-29 October. SysConfig
+# ``compute_efficiency.commissioning_jobs`` [PandaID].
+DEFAULT_COMMISSIONING_JOBS = [6341816, 6359213, 6359214, 6359215]
 DASHBOARD_SITES = (('osg', 'OSG', '#b48ee8'),
                    ('perlmutter', 'Perlmutter', '#e3b954'),
                    ('grex', 'GREX', '#7fce95'),
@@ -67,6 +73,15 @@ def commissioning_tasks():
             if str(t).isdigit()]
 
 
+def commissioning_jobs():
+    """[PandaID] from SysConfig; entries that are not ids are skipped."""
+    from .models import SysConfig
+    value = SysConfig.get_setting('compute_efficiency.commissioning_jobs',
+                                  DEFAULT_COMMISSIONING_JOBS)
+    return [int(j) for j in (value if isinstance(value, list) else ())
+            if str(j).isdigit()]
+
+
 def query_days(start, end, production=False, finished_only=False):
     """One grouped database read; no per-job records leave the database."""
     pools = osg_pool_queues()
@@ -96,6 +111,10 @@ def query_days(start, end, production=False, finished_only=False):
         if tasks:
             # integers by construction, so written in place
             where += f" AND COALESCE(jeditaskid, 0) NOT IN ({','.join(map(str, tasks))})"
+        jobs = commissioning_jobs()
+        if jobs:
+            # integers by construction, so written in place
+            where += f" AND pandaid NOT IN ({','.join(map(str, jobs))})"
     if finished_only:
         where += " AND jobstatus='finished'"
     # PanDA stores UTC timestamps without a timezone; datetime bounds retain

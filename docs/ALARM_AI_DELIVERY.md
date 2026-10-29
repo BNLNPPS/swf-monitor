@@ -1,6 +1,9 @@
 # Alarm delivery to running AI sessions
 
 Status: design; not implemented. Client interfaces reviewed 2026-09-12.
+Until it is, the notice router's `notify-llm` plugin delivers live-watch
+alarms to the AI sessions on swf-testbed as TJAI peer messages
+([NOTICE_ROUTING.md](NOTICE_ROUTING.md) § Delivery).
 
 This design specifies an implementation usable by all ePIC operations staff, derived from but independent of the capabilities of Torre Wenaus's TJAI AI assistant system.
 

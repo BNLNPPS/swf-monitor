@@ -12,7 +12,11 @@ task (SysConfig `compute_efficiency.commissioning_tasks`; Torre Wenaus,
 2026-10-29): Perlmutter's return to commissioning on 28 October, gun tasks
 41463 and 41469 of the serialized-handoff defect and 41479 and 41480, the
 first tasks of the new EVGEN Event Service workflow. None was a production
-run.
+run. Jobs whose loss came from a commissioning-grade defect of ours are
+excluded by PandaID (SysConfig `compute_efficiency.commissioning_jobs`;
+Torre Wenaus, 2026-10-29): Google Event Service jobs 6341816, 6359213,
+6359214 and 6359215, which the broken close-out step of 28-29 October left
+open until PanDA's lost-heartbeat timeout.
 It contains a site-by-period heatmap with core-hour volumes and selectable
 trend lines. The PanDA hub and the dashboard's Computing now heading link
 to this history.
