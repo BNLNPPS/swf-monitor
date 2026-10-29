@@ -2839,21 +2839,54 @@ def _reported_submission(queue_name):
 from ..host_reports import HARVESTER_HOSTS  # noqa: E402
 
 
-def _dialogs_eastern(dialogs):
-    """The record's harvester dialogs with each last time in Eastern Time
-    (the record keeps UTC ISO, as every host record does)."""
-    if not isinstance(dialogs, dict) or not isinstance(dialogs.get('modules'), dict):
+def _utc_eastern(value):
+    """A record's UTC time (ISO, or 'YYYY-MM-DD HH:MM:SS') in Eastern Time;
+    the value unchanged when it does not read as a time."""
+    try:
+        at = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+    except ValueError:
+        return value
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=dt_timezone.utc)
+    return at.astimezone(_EASTERN).strftime('%Y-%m-%d %H:%M ET')
+
+
+def _names_queue(message, queue):
+    return re.search(r'(?<!\w)' + re.escape(queue) + r'(?!\w)', message or '') is not None
+
+
+def _dialogs_for_queue(dialogs, queue_name, queues):
+    """The record's harvester dialogs as one queue's page shows them, times
+    in Eastern Time (the record keeps UTC, as every host record does): each
+    kind of message that names this queue or none of the harvester's
+    queues; the kinds naming its other queues are only counted, by queue,
+    so an error on a queue the harvester also serves does not read as this
+    queue's. A record from before the kinds (reporter 1.0) shows its
+    modules' latest messages."""
+    if not isinstance(dialogs, dict):
         return {}
-    modules = {}
-    for module, d in dialogs['modules'].items():
-        last = dict((d or {}).get('last') or {})
-        try:
-            at = datetime.fromisoformat(str(last.get('at')).replace('Z', '+00:00'))
-            last['at'] = at.astimezone(_EASTERN).strftime('%Y-%m-%d %H:%M ET')
-        except ValueError:
-            pass
-        modules[module] = dict(d or {}, last=last)
-    return dict(dialogs, modules=modules)
+    if not isinstance(dialogs.get('messages'), list):
+        if not isinstance(dialogs.get('modules'), dict):
+            return {}
+        return {'hours': dialogs.get('hours'), 'other_queues': {},
+                'messages': [dict(d or {}, module=module, first_at=None,
+                                  last=dict((d or {}).get('last') or {},
+                                            at=_utc_eastern(((d or {}).get('last') or {}).get('at'))))
+                             for module, d in dialogs['modules'].items()]}
+    others = [q for q in queues if q != queue_name]
+    shown, other_queues = [], {}
+    for k in dialogs['messages']:
+        if not isinstance(k, dict):
+            continue
+        message = (k.get('last') or {}).get('message')
+        named = next((q for q in others if _names_queue(message, q)), None)
+        if named and not _names_queue(message, queue_name):
+            other_queues[named] = other_queues.get(named, 0) + (k.get('count') or 0)
+            continue
+        shown.append(dict(k, first_at=_utc_eastern(k.get('first_at')),
+                          last=dict(k.get('last') or {}, at=_utc_eastern((k.get('last') or {}).get('at')))))
+    return {'hours': dialogs.get('hours'), 'messages': shown, 'other_queues': other_queues,
+            'messages_dropped': dialogs.get('messages_dropped')}
 
 
 def _reported_harvester(queue_name):
@@ -2888,7 +2921,10 @@ def _reported_harvester(queue_name):
             # no harvester logs): the page says so instead of reading zero
             'fetch_error': (record.get('fetching') or {}).get('error'),
             'submit_error': (record.get('submission') or {}).get('error'),
-            'dialogs': _dialogs_eastern(record.get('dialogs')),
+            'dialogs': _dialogs_for_queue(
+                record.get('dialogs'), queue_name,
+                [q.get('queue') for q in (db.get('launch_limits') or [])
+                 if isinstance(q, dict) and q.get('queue')]),
             'failed_calls': {d: v for d, v in calls.items()
                              if isinstance(v, dict) and v.get('failed')},
             # From the harvester's database and condor logs (reporter 1.1).
@@ -2896,7 +2932,9 @@ def _reported_harvester(queue_name):
             'workers_now': (db.get('workers_now') or {}).get(queue_name)
                            if isinstance(db.get('workers_now'), dict) else None,
             'ended': ((db.get('workers_ended') or {}).get('sites') or {}).get(queue_name),
-            'not_finished': nf_site,
+            'not_finished': dict(nf_site, reasons=[
+                dict(r, last_ended=_utc_eastern(r.get('last_ended'))) if isinstance(r, dict) else r
+                for r in (nf_site.get('reasons') or [])]) if isinstance(nf_site, dict) else nf_site,
             'admission_declines': db.get('admission_declines')
                                   if queue_name == 'BNL_OSG_PanDA_1' else None,
             'not_finished_hours': not_finished.get('hours'),

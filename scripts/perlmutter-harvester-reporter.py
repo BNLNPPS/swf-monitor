@@ -24,6 +24,7 @@ always only prints (CACHED_PRODUCTS.md, Contract).
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime, timedelta
@@ -39,7 +40,7 @@ from django.db import connections  # noqa: E402
 
 HOST_KEY = 'perlmutter-harvester'
 HARVESTER_ID = 'Perlmutter_test_1'
-VERSION = '1.0'
+VERSION = '1.1'
 SCHEMA = 'doma_panda'
 QUEUE_CONFIG = '/global/common/software/m3763/panda-harvester/etc/panda/panda_queueconfig.json'
 STATE_DIR = os.path.expanduser('~/.swf-harvester-reporter-' + HOST_KEY)
@@ -233,19 +234,30 @@ def submission(since, until):
 
 def dialogs(now):
     """The errors the harvester reported to the PanDA server over the last
-    DIALOG_HOURS, per module: count and the latest message."""
+    DIALOG_HOURS, per module (count and the latest message) and per kind
+    of message (the message with its numbers set aside), so one kind's
+    latest line never hides another's. The page shows a queue the kinds
+    that name it or name none of the harvester's queues."""
     found = rows(f'''SELECT modulename, messagelevel, creationtime, LEFT(diagmessage, {LINE_KEEP})
                      FROM {SCHEMA}.harvester_dialogs
                      WHERE harvester_id = %s AND creationtime > %s
                        AND messagelevel IN ('ERROR', 'CRITICAL')
                      ORDER BY creationtime DESC''', (HARVESTER_ID, now - timedelta(hours=DIALOG_HOURS)))
-    modules = {}
+    modules, kinds = {}, {}
     for module, level, at, message in found:
         m = modules.setdefault(module or '', {'count': 0, 'levels': {},
                                               'last': {'at': iso(at), 'level': level, 'message': message}})
         m['count'] += 1
         m['levels'][level] = m['levels'].get(level, 0) + 1
-    return {'hours': DIALOG_HOURS, 'modules': modules}
+        k = kinds.setdefault((module or '', re.sub(r'\d+', '#', message or '')),
+                             {'module': module or '', 'count': 0, 'levels': {}, 'first_at': None,
+                              'last': {'at': iso(at), 'level': level, 'message': message}})
+        k['count'] += 1
+        k['levels'][level] = k['levels'].get(level, 0) + 1
+        k['first_at'] = iso(at)
+    messages = sorted(kinds.values(), key=lambda k: k['last']['at'] or '', reverse=True)
+    return {'hours': DIALOG_HOURS, 'modules': modules, 'messages': messages[:REASONS_KEEP],
+            'messages_dropped': max(0, len(messages) - REASONS_KEEP)}
 
 
 def load_state():

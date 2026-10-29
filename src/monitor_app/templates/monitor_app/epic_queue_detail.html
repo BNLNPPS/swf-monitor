@@ -307,7 +307,7 @@
                         <ul class="mb-0 ps-3">
                         {% for r in harvester.not_finished.reasons %}
                         <li><strong>{{ r.count }}</strong> {{ r.status }}: {{ r.reason }}
-                            <span class="text-muted">({{ r.source }}; last {{ r.last_ended }} UTC{% for ex in r.examples %}{% if ex.batch_log %}; <a href="{{ ex.batch_log }}">worker {{ ex.workerid }} log</a>{% endif %}{% endfor %})</span></li>
+                            <span class="text-muted">({{ r.source }}; last {{ r.last_ended }}{% for ex in r.examples %}{% if ex.batch_log %}; <a href="{{ ex.batch_log }}">worker {{ ex.workerid }} log</a>{% endif %}{% endfor %})</span></li>
                         {% endfor %}
                         </ul>{% if harvester.not_finished.reasons_dropped %}<span class="text-muted">and {{ harvester.not_finished.reasons_dropped }} rarer reasons</span>{% endif %}
                         {% else %}none{% endif %}</td></tr>
@@ -316,9 +316,11 @@
                 <tr><td class="fw-bold text-danger">Harvester database</td>
                     <td>not read: {{ harvester.db_error }}</td></tr>
                 {% endif %}
-                {% if harvester.dialogs.modules %}
-                <tr><td class="fw-bold text-danger">Harvester's errors reported to PanDA, last {{ harvester.dialogs.hours }} h</td>
-                    <td style="word-break: break-word">{% for module, d in harvester.dialogs.modules.items %}{% if not forloop.first %}<br>{% endif %}{{ module }}: {{ d.count }}, last {{ d.last.at }}: {{ d.last.message }}{% endfor %}</td></tr>
+                {% if harvester.dialogs.messages or harvester.dialogs.other_queues %}
+                <tr><td class="fw-bold{% if harvester.dialogs.messages %} text-danger{% endif %}">Harvester's errors reported to PanDA, last {{ harvester.dialogs.hours }} h</td>
+                    <td style="word-break: break-word">{% for d in harvester.dialogs.messages %}{% if not forloop.first %}<br>{% endif %}{{ d.module }}: {{ d.count }}, {% if d.first_at and d.count > 1 %}{{ d.first_at }} to {% endif %}{{ d.last.at }}: {{ d.last.message }}{% empty %}none for this queue{% endfor %}
+                        {% if harvester.dialogs.messages_dropped %}<br><span class="text-muted">and {{ harvester.dialogs.messages_dropped }} rarer kinds</span>{% endif %}
+                        {% for q, n in harvester.dialogs.other_queues.items %}<br><span class="text-muted">{{ n }} about <a href="{% url 'monitor_app:epic_queue_detail' q %}">{{ q }}</a>, another queue this harvester serves</span>{% endfor %}</td></tr>
                 {% endif %}
                 {% for daemon, calls in harvester.failed_calls.items %}
                 <tr><td class="fw-bold text-danger">Failed calls to PanDA ({{ daemon }})</td>

@@ -120,11 +120,16 @@ under an m3763 member's token (`swf_epicprod/nersc_iri.py`):
 | Workers now, started, ended | `harvester_workers` | as the other records, from the workers the harvester reports; a worker not terminal after seven days is not counted live |
 | Workers submitted | `harvester_workers` | `submission`: per queue, the workers submitted in the interval |
 | Workers not finished | `harvester_workers` | per site over 24 hours, grouped by the harvester's diagnostic |
-| Errors | `harvester_dialogs` | `dialogs`: the harvester's ERROR and CRITICAL messages to the PanDA server over 24 hours, per module, with the latest |
+| Errors | `harvester_dialogs` | `dialogs`: the harvester's ERROR and CRITICAL messages to the PanDA server over 24 hours, per module with the latest, and per kind of message (the message with its numbers set aside) with its count, first and latest (reporter 1.1) |
 | Service metrics | `harvester_metrics` | the latest per login node: memory, CPU, scratch use, proxy lifetime |
 
 Job fetching, the adjuster's applied limit, failed calls and log freshness
-come from the logs and are error fields naming why. The Perlmutter queues
+come from the logs and are error fields naming why. The queue page shows a
+queue each kind of error that names it or names none of the harvester's
+queues; a kind that names another of its queues is only counted there,
+with a link to that queue's page, so an error on a queue we do not use
+(NERSC_Perlmutter_epic, the non-ES queue) does not read as the Event
+Service queue's. The Perlmutter queues
 run in pull mode (`mapType` NoJob), so their pilots fetch their own jobs
 and the harvester fetches none. Every queue there sets no ratio, so the
 limit in force is its `nQueueLimitWorker`. The job-demand cache is in the
