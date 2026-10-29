@@ -64,6 +64,9 @@ mcp>=1.26.0,<2
 teamcomms-ai @ git+https://github.com/wenaus/teamcomms-ai.git@c6b007dea7b1b5d756200efd835da9d4d4ff17c4
 wrangle-ai @ git+https://github.com/BNLNPPS/wrangle-ai.git@55d4def263187a9cab5d07b2f6a706dd9a4cd357
 httpx>=0.28,<1
+# Brotli comes in through weasyprint (fonttools[woff]); with it installed urllib3
+# and httpx decode br responses. 1.2.1 fixes the decoder RCE CVE-2026-111497.
+Brotli>=1.2.1
 # Starlette enters only via mcp. Pin past CVE-2026-48710 ("BadHost" Host-header
 # auth bypass; fixed in 1.0.1). See docs/MCP.md → Architecture.
 starlette>=1.2.1
