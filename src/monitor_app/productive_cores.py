@@ -29,13 +29,17 @@ REGISTRATION = {
 }
 
 
-def build(now=None):
+def build(now=None, reread_from=None):
+    """``reread_from`` (a date) rereads from that day instead of the last
+    seven, as after a task's relabel to trial (compute_efficiency.relabel_trial)."""
     now = now or datetime.now(timezone.utc)
     end = now.date()  # Completed UTC days only, never today's partial bin.
     start = end - timedelta(days=DAYS)
     component = CurrentComponent.objects.filter(scope='epicprod', name=COMPONENT).first()
     previous = (component.data or {}).get('daily', []) if component else []
     reread = max(start, end - timedelta(days=7)) if previous else start
+    if reread_from:
+        reread = max(start, min(reread, reread_from))
     rows = query_days(reread, end, production=True, finished_only=True)
     by_day = {}
     for row in rows:
@@ -78,5 +82,6 @@ def build(now=None):
     return value
 
 
-def product(refresh=False):
-    return get_product(KEY, build, 3600, refresh=refresh, async_first_fill=True)
+def product(refresh=False, reread_from=None):
+    builder = (lambda: build(reread_from=reread_from)) if reread_from else build
+    return get_product(KEY, builder, 3600, refresh=refresh, async_first_fill=True)

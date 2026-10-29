@@ -12,7 +12,14 @@ task (SysConfig `compute_efficiency.commissioning_tasks`; Torre Wenaus,
 2026-10-29): Perlmutter's return to commissioning on 28 October, gun tasks
 41463 and 41469 of the serialized-handoff defect and 41479 and 41480, the
 first tasks of the new EVGEN Event Service workflow. None was a production
-run. Jobs whose loss came from a commissioning-grade defect of ours are
+run. PCS trials, whose task names end in `.trial` or `.trialN`, are
+excluded by name. A production task in which a defect shows that
+commissioning validation was incomplete is relabelled a trial after the
+fact with swf-epicprod `scripts/trial-relabel.py`: it joins the list with
+who, when and why in the action stream, and the retained histories are
+rebuilt over its days (the efficiency history in full, productive cores
+from the task's start). Every production metric and the Prod tasks in
+flight page apply the one rule (`trial_sql`, `trial_tasks`). Jobs whose loss came from a commissioning-grade defect of ours are
 excluded by PandaID (SysConfig `compute_efficiency.commissioning_jobs`;
 Torre Wenaus, 2026-10-29): Google Event Service jobs 6341816, 6359213,
 6359214 and 6359215, which the broken close-out step of 28-29 October left

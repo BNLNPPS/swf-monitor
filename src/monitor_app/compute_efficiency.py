@@ -73,6 +73,72 @@ def commissioning_tasks():
             if str(t).isdigit()]
 
 
+# A PCS trial's PanDA task name carries its trial suffix, ``….trial`` or
+# ``….trial<N>``, before any physical suffix (swf-epicprod pcs/trials.py).
+TRIAL_NAME_PATTERN = r'\.trial[0-9]*(\.|$)'
+
+
+def trial_sql():
+    """SQL true for a job or task of a trial: its JEDI task on the trial
+    list, or a PCS trial by its name. Trials never count in a production
+    metric (Torre Wenaus, 2026-10-29), and a production task relabelled a
+    trial (``relabel_trial``) leaves every one through this condition."""
+    named = (f'COALESCE(jeditaskid, 0) IN (SELECT jeditaskid FROM "{PANDA_SCHEMA}".jedi_tasks'
+             f" WHERE taskname ~ '{TRIAL_NAME_PATTERN}')")
+    tasks = commissioning_tasks()
+    # integers by construction, so written in place
+    listed = f"COALESCE(jeditaskid, 0) IN ({','.join(map(str, tasks))}) OR " if tasks else ''
+    return f'({listed}{named})'
+
+
+def trial_tasks(task_ids):
+    """The trials among these JEDI task ids, by the rule of ``trial_sql``."""
+    ids = sorted({int(t) for t in task_ids if t})
+    if not ids:
+        return set()
+    with connections['panda'].cursor() as cursor:
+        cursor.execute(f'SELECT jeditaskid FROM "{PANDA_SCHEMA}".jedi_tasks'
+                       ' WHERE jeditaskid = ANY(%s) AND taskname ~ %s',
+                       [ids, TRIAL_NAME_PATTERN])
+        named = {row[0] for row in cursor.fetchall()}
+    return named | (set(commissioning_tasks()) & set(ids))
+
+
+def relabel_trial(task_ids, *, by, reason, decision_ref, production=False):
+    """Put PanDA tasks on the trial list, or with ``production`` take them
+    off, recording who, when and why in the action stream. A production
+    task found to be commissioning after the fact (a defect showing that
+    validation was incomplete) is relabelled this way; the retained
+    histories are then rebuilt over its days (swf-epicprod
+    scripts/trial-relabel.py). Returns (list before, list after, record)."""
+    from django.db import transaction
+    from .epicprod_logging import log_epicprod_action
+    from .models import SysConfig
+    if not str(reason or '').strip() or not str(decision_ref or '').strip():
+        raise ValueError('a reason and a decision reference are required')
+    ids = sorted({int(t) for t in task_ids})
+    key = 'compute_efficiency.commissioning_tasks'
+    with transaction.atomic():
+        SysConfig.objects.select_for_update().get(pk=1)
+        before = commissioning_tasks()
+        after = (sorted(set(before) - set(ids)) if production
+                 else sorted(set(before) | set(ids)))
+        if after == before:
+            return before, after, None
+        SysConfig.update_config({key: after}, username=by)
+        record = log_epicprod_action(
+            'trial-relabel', 'sysconfig_edit', username=by,
+            sublevel='high', live_default=True,
+            subject_type='panda_task', subject_key=','.join(map(str, ids)),
+            keys=[key], previous={key: before}, updated={key: after},
+            reason=reason, decision_ref=decision_ref,
+            summary=(f"PanDA task {', '.join(map(str, ids))} relabelled "
+                     f"{'production' if production else 'trial'}: {reason}"))
+        if record is None:
+            raise RuntimeError('trial relabel audit failed; change rolled back')
+    return before, after, record
+
+
 def commissioning_jobs():
     """[PandaID] from SysConfig; entries that are not ids are skipped."""
     from .models import SysConfig
@@ -107,10 +173,7 @@ def query_days(start, end, production=False, finished_only=False):
         for queue, at in commissioning_until().items():
             where += (f" AND NOT (computingsite = '{queue}'"
                       f" AND creationtime < '{at.isoformat(sep=' ')}')")
-        tasks = commissioning_tasks()
-        if tasks:
-            # integers by construction, so written in place
-            where += f" AND COALESCE(jeditaskid, 0) NOT IN ({','.join(map(str, tasks))})"
+        where += f' AND NOT {trial_sql()}'
         jobs = commissioning_jobs()
         if jobs:
             # integers by construction, so written in place

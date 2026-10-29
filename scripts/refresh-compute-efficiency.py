@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Refresh the retained efficiency history; hourly, with monthly --full reconciliation."""
 import argparse
+from datetime import date
 import json
 import os
 import sys
@@ -16,11 +17,13 @@ from monitor_app.productive_cores import product as productive_cores_product  # 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--full', action='store_true')
+    ap.add_argument('--reread-from', type=date.fromisoformat,
+                    help='reread daily production cores from this day (YYYY-MM-DD), not the last seven')
     args = ap.parse_args()
     result = product(refresh=True, full=args.full)
     if not result.get('value'):
         raise RuntimeError('Efficiency history did not produce a stored result')
-    daily_cores = productive_cores_product(refresh=True)
+    daily_cores = productive_cores_product(refresh=True, reread_from=args.reread_from)
     if not daily_cores.get('value'):
         raise RuntimeError('Daily production core history did not produce a stored result')
     print(json.dumps({'built_at': str(result['built_at']),
