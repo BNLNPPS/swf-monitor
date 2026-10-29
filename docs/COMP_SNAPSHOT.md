@@ -489,7 +489,9 @@ count the live rows it lists, not every record of the app, offering the
 busiest 15 users and instances, and whose table fits the page, never
 scrolling sideways. The items are records of the epicprod
 live stream (`live_stream_q`, ACTION_STREAM.md) at level WARNING, ERROR
-or CRITICAL from the last 12 hours, newest first, at most ten, each with
+or CRITICAL from the last 12 hours, newest first, every one the rules
+below keep (the dashboard's panel grows downward; Torre Wenaus,
+2026-10-29), each with
 its time, level, title, detail and page (`logs/<id>/`). A task Move is
 normal operation, recorded at INFO while JEDI carries it out and when it
 completes, and stays on the screen at INFO for three hours (SysConfig
@@ -497,8 +499,7 @@ completes, and stays on the screen at INFO for three hours (SysConfig
 failure like any other. A task the front released from the ready buffer
 to a queue (its `front_decision` record with outcome `fed`) is shown the
 same way, one line per task (`Move ready buffer to Perlmutter · p4499.e106`),
-with why the queue took it. A full screen drops its oldest Moves before any
-warning or error. The records ride
+with why the queue took it. The records ride
 in the snapshot because the room reads it anonymously and the logs page
 is behind the login wall; they name tasks, queues, nodes and errors and
 carry no credential.

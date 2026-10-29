@@ -83,10 +83,10 @@ OUTPUT_RSE = 'BNL-XRD'
 # A daily assessment's verdict as a health level (swf-epicprod
 # EPICPROD_ASSESSMENTS.md: ok | attention | alarm).
 VERDICT_LEVELS = {'ok': 'green', 'attention': 'amber', 'alarm': 'red'}
-# The epicprod-live screen: warning and error records only, five to ten
-# on screen (Torre, 2026-10-22).
+# The epicprod-live screen: warning and error records, every one the rules
+# keep; the panel grows downward (Torre Wenaus, 2026-10-29: "panel should
+# show what it is supposed to show. expands down").
 LIVE_LEVELS = ('WARNING', 'ERROR', 'CRITICAL')
-LIVE_ITEMS = 10
 # The floor's trend plots: twelve hours (Torre, 2026-10-22) in quarter-hour
 # bins, fine enough to show a ramp or a dip.
 TREND_HOURS = 12
@@ -1707,8 +1707,7 @@ def _live_records():
     from the window only, a node guard trip only for a node new to the
     blacklist, and off it a record a ``live_cleared`` record names, a
     failure whose action has since run ok, and a record a later one on its
-    subject supersedes or repeats; a full screen drops its oldest Moves
-    before any warning or error (COMP_SNAPSHOT.md, Live)."""
+    subject supersedes or repeats (COMP_SNAPSHOT.md, Live)."""
     from django.db.models import Q
     from monitor_app.epicprod_logging import EPICPROD_APP_NAME, live_stream_q
     from monitor_app.live_notices import (FAILURE_OUTCOMES, board_text, failure_key,
@@ -1779,12 +1778,6 @@ def _live_records():
         items.append({'id': r['id'], 'at': r['timestamp'].isoformat(),
                       'level': r['levelname'], 'title': title, 'detail': detail,
                       'link': f"{PUBLIC}/logs/{r['id']}/"})
-        if sum(1 for i in items if i['level'] != 'INFO') == LIVE_ITEMS:
-            break
-    # A full screen gives way to warnings and errors: its oldest Moves go first.
-    moves = [i for i in items if i['level'] == 'INFO']
-    while len(items) > LIVE_ITEMS and moves:
-        items.remove(moves.pop())
     return {'link': f'{PUBLIC}/logs/epicprod-live/',
             'numbering': 'site', 'items': items, 'hours': LIVE_WINDOW_H,
             'counts': _live_counts(cutoff)}

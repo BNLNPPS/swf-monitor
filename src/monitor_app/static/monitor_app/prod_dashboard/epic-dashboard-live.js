@@ -628,7 +628,7 @@
   }
 
   function renderReports(record) {
-    const rows = list(record.live).slice(0, 5).map(item => {
+    const rows = list(record.live).map(item => {
       const row = element('div', 'boardrow');
       row.append(element('time', '', et(item.at).replace(' ET', '')),
         anchor(item.link, color(item.level), item.title, item.detail));

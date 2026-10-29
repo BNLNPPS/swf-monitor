@@ -275,7 +275,9 @@ assessment or alarm records. The epicprod-live title opens the live
 stream's last day, curated (ACTION_STREAM.md, Curated view). Its panel
 shows the stream's warnings and errors from the last 12 hours, and task
 Moves at INFO, in grey, for three hours, with route, who and why on hover
-(COMP_SNAPSHOT.md, Live), newest first, one per subject; a failure that has recovered, a node guard
+(COMP_SNAPSHOT.md, Live), newest first, one per subject, every line the
+rules keep, in normal weight, the panel growing downward (Torre Wenaus,
+2026-10-29); a failure that has recovered, a node guard
 re-trip, a record a later one on its subject supersedes and a record an
 operator has answered leave it (COMP_SNAPSHOT.md, Live). OSG's
 fair-share hold is recorded at info level, so it never reaches the panel.
