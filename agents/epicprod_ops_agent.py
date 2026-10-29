@@ -1384,6 +1384,12 @@ class EpicProdOpsAgent(BaseAgent):
             selected = [selected]
         for name in selected:
             cmd += ["--only", str(name)]
+        # The self-scheduled refresh records as a cron run, so the channel
+        # treats it as the automated maintenance pass it is
+        # (live_notices.MAINTENANCE) and its failures stay off epicprod-live;
+        # a refresh someone asked for records no user and still reaches it.
+        source = str(m.get('source') or 'ops_agent')
+        username = 'five_minutely_cron' if source == 'ops_agent_periodic' else ''
         t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
@@ -1394,9 +1400,8 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'system_status_ready', 'ok': False, 'error': reason})
             self._log_action('system_status_refresh', t0, outcome='timeout',
-                             reason=reason,
-                             level=logging.ERROR,
-                             source=str(m.get('source') or 'ops_agent'))
+                             reason=reason, username=username,
+                             level=logging.ERROR, source=source)
             return
         ok = p.returncode == 0
         reason = ''
@@ -1414,9 +1419,9 @@ class EpicProdOpsAgent(BaseAgent):
             'msg_type': 'system_status_ready', 'ok': ok, 'error': reason})
         self._log_action('system_status_refresh', t0,
                          outcome='ok' if ok else 'error',
-                         reason=reason,
+                         reason=reason, username=username,
                          level=logging.INFO if ok else logging.ERROR,
-                         source=str(m.get('source') or 'ops_agent'))
+                         source=source)
 
     def _system_status_periodic_loop(self):
         """Keep cached system knowledge fresh without page-load probes."""
