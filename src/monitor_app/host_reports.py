@@ -26,15 +26,21 @@ from rest_framework.response import Response
 
 logger = logging.getLogger(__name__)
 
+# The harvester records (docs/HARVESTER_REPORTER.md), one per harvester
+# instance; every reader of harvester records takes this list.
+# `osgsub01-harvester` is the harvester reporter on osgsub01, whose own key
+# belongs to the OSG submit reporter. `perlmutter-harvester` is the
+# Perlmutter harvester's record, built on this host from what that
+# harvester reports to the PanDA server.
+HARVESTER_HOSTS = ('pandaharvester01', 'pandaharvester02', 'osgsub01-harvester',
+                   'perlmutter-harvester')
+
 # Hosts that may report. A reporter writes one key, so an unknown host
 # is refused rather than allowed to create keys in the shared store.
 # `bnl-scdf` is a pool rather than a host: the pool reporter runs here
 # and reports what its collector answers (docs/POOL_REPORTER.md), which
 # is the same kind of record from the same kind of reporter.
-# `osgsub01-harvester` is the harvester reporter on osgsub01, whose own key
-# belongs to the OSG submit reporter (docs/HARVESTER_REPORTER.md).
-REPORTING_HOSTS = {'osgsub01', 'pandaserver01', 'bnl-scdf', 'pandaharvester01',
-                   'pandaharvester02', 'osgsub01-harvester'}
+REPORTING_HOSTS = {'osgsub01', 'pandaserver01', 'bnl-scdf', *HARVESTER_HOSTS}
 
 # A record is a summary, not a payload. Anything larger is a reporter
 # defect and is refused with its size named, rather than stored.
@@ -64,6 +70,39 @@ def latest(host):
             'reported_at': row.built_at, 'age_seconds': age}
 
 
+class RecordRefused(ValueError):
+    """A record the store does not take; ``status`` is the HTTP answer."""
+
+    def __init__(self, message, status_code):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def store(host, record, by=''):
+    """Store ``record`` whole as ``host``'s latest; the one write path, for
+    the ingest and for a reporter running on this host. Returns
+    ``(reported_at, bytes)``; raises RecordRefused."""
+    from .models import CachedProduct
+
+    if host not in REPORTING_HOSTS:
+        raise RecordRefused("unknown reporting host '{}'".format(host),
+                            status.HTTP_404_NOT_FOUND)
+    if not isinstance(record, dict) or not record:
+        raise RecordRefused('the record must be a non-empty object',
+                            status.HTTP_400_BAD_REQUEST)
+    size = len(str(record))
+    if size > MAX_RECORD_BYTES:
+        raise RecordRefused('record of {} bytes exceeds the {} byte limit'.format(
+            size, MAX_RECORD_BYTES), status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
+    now = timezone.now()
+    CachedProduct.objects.update_or_create(
+        key=product_key(host),
+        defaults={'value': record, 'built_at': now, 'building_since': None},
+    )
+    logger.info('host report stored for %s (%d bytes) from %s', host, size, by or '?')
+    return now, size
+
+
 @api_view(['POST', 'GET'])
 # Token first and explicitly: the project declares no default
 # authenticators, so DRF would fall back to session and basic only and
@@ -77,8 +116,6 @@ def host_report(request, host):
     stored whole and unedited: a reporter delivers its own failures as
     fields, and rewriting the record here would lose them.
     """
-    from .models import CachedProduct
-
     if host not in REPORTING_HOSTS:
         return Response(
             {'error': "unknown reporting host '{}'".format(host)},
@@ -93,23 +130,10 @@ def host_report(request, host):
         return Response(found)
 
     record = request.data
-    if not isinstance(record, dict) or not record:
-        return Response({'error': 'the record must be a non-empty object'},
-                        status=status.HTTP_400_BAD_REQUEST)
-    size = len(str(record))
-    if size > MAX_RECORD_BYTES:
-        return Response(
-            {'error': 'record of {} bytes exceeds the {} byte limit'.format(
-                size, MAX_RECORD_BYTES)},
-            status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
-
-    now = timezone.now()
-    CachedProduct.objects.update_or_create(
-        key=product_key(host),
-        defaults={'value': record, 'built_at': now, 'building_since': None},
-    )
-    logger.info('host report stored for %s (%d bytes) from %s',
-                host, size, getattr(request.user, 'username', '?'))
+    try:
+        now, size = store(host, record, getattr(request.user, 'username', ''))
+    except RecordRefused as exc:
+        return Response({'error': str(exc)}, status=exc.status_code)
     if host == 'osgsub01':
         # a pool's throttle on our pilots is an incident (osg_throttle.py);
         # reading it never fails the ingest

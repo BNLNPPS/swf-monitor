@@ -7,7 +7,7 @@ from django.db import connections
 from django.utils import timezone
 
 from .cached_product import get_product
-from .host_reports import latest
+from .host_reports import HARVESTER_HOSTS, latest
 
 
 def osg_image_demand(memory_mb, cores):
@@ -109,7 +109,7 @@ def product(queues, hours=1, refresh=False):
 
 
 def startup_evidence(queues):
-    for host in ('osgsub01-harvester', 'pandaharvester01', 'pandaharvester02'):
+    for host in HARVESTER_HOSTS:
         report = latest(host) or {}
         data = ((report.get('record') or {}).get('harvester_db') or {}).get('admission_declines')
         if data and 'BNL_OSG_PanDA_1' in queues:

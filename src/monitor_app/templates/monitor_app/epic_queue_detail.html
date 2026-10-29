@@ -257,6 +257,10 @@
         </div>
         <div class="card-body p-0">
             <table class="table table-sm table-striped mb-0">
+                {% if harvester.fetch_error %}
+                <tr><td class="fw-bold" style="width:24%">Job fetches</td>
+                    <td>not read: {{ harvester.fetch_error }}</td></tr>
+                {% else %}
                 <tr><td class="fw-bold" style="width:24%">Last fetch</td>
                     <td>{% if harvester.fetch.last %}
                         {{ harvester.fetch.last.at }} (UTC): asked for {{ harvester.fetch.last.asked|default:"?" }},
@@ -269,8 +273,9 @@
                         {{ harvester.fetch.jobs_got|default:"0" }} jobs got,
                         <span class="{% if harvester.fetch.failed %}text-danger fw-bold{% endif %}">{{ harvester.fetch.failed|default:"0" }} failed</span>
                         {% for cls, n in harvester.fetch.errors.items %}{% if forloop.first %}({% endif %}{{ cls }} {{ n }}{% if forloop.last %}){% else %}, {% endif %}{% endfor %}</td></tr>
+                {% endif %}
                 <tr><td class="fw-bold">Workers</td>
-                    <td>{{ harvester.submit.workers_submitted|default:"0" }} submitted in the interval;
+                    <td>{% if harvester.submit_error %}not read: {{ harvester.submit_error }}{% else %}{{ harvester.submit.workers_submitted|default:"0" }} submitted in the interval;{% endif %}
                         {% if harvester.submit.workers_status %}
                         last read {{ harvester.submit.workers_status.nRunning }} running,
                         {{ harvester.submit.workers_status.nQueue }} queued,
@@ -310,6 +315,10 @@
                 {% if harvester.db_error %}
                 <tr><td class="fw-bold text-danger">Harvester database</td>
                     <td>not read: {{ harvester.db_error }}</td></tr>
+                {% endif %}
+                {% if harvester.dialogs.modules %}
+                <tr><td class="fw-bold text-danger">Harvester's errors reported to PanDA, last {{ harvester.dialogs.hours }} h</td>
+                    <td style="word-break: break-word">{% for module, d in harvester.dialogs.modules.items %}{% if not forloop.first %}<br>{% endif %}{{ module }}: {{ d.count }}, last {{ d.last.at }}: {{ d.last.message }}{% endfor %}</td></tr>
                 {% endif %}
                 {% for daemon, calls in harvester.failed_calls.items %}
                 <tr><td class="fw-bold text-danger">Failed calls to PanDA ({{ daemon }})</td>

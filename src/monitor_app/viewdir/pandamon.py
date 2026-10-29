@@ -2836,7 +2836,24 @@ def _reported_submission(queue_name):
     }
 
 
-HARVESTER_HOSTS = ('pandaharvester01', 'pandaharvester02', 'osgsub01-harvester')
+from ..host_reports import HARVESTER_HOSTS  # noqa: E402
+
+
+def _dialogs_eastern(dialogs):
+    """The record's harvester dialogs with each last time in Eastern Time
+    (the record keeps UTC ISO, as every host record does)."""
+    if not isinstance(dialogs, dict) or not isinstance(dialogs.get('modules'), dict):
+        return {}
+    modules = {}
+    for module, d in dialogs['modules'].items():
+        last = dict((d or {}).get('last') or {})
+        try:
+            at = datetime.fromisoformat(str(last.get('at')).replace('Z', '+00:00'))
+            last['at'] = at.astimezone(_EASTERN).strftime('%Y-%m-%d %H:%M ET')
+        except ValueError:
+            pass
+        modules[module] = dict(d or {}, last=last)
+    return dict(dialogs, modules=modules)
 
 
 def _reported_harvester(queue_name):
@@ -2867,6 +2884,11 @@ def _reported_harvester(queue_name):
             'interval_seconds': (record.get('interval') or {}).get('seconds'),
             'fetch': fetch or {},
             'submit': submit or {},
+            # a source the record could not read (the Perlmutter record has
+            # no harvester logs): the page says so instead of reading zero
+            'fetch_error': (record.get('fetching') or {}).get('error'),
+            'submit_error': (record.get('submission') or {}).get('error'),
+            'dialogs': _dialogs_eastern(record.get('dialogs')),
             'failed_calls': {d: v for d, v in calls.items()
                              if isinstance(v, dict) and v.get('failed')},
             # From the harvester's database and condor logs (reporter 1.1).

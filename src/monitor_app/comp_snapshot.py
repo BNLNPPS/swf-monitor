@@ -61,9 +61,13 @@ OSG_SUBMIT_HOST = 'osgsub01'
 # The harvester reporters (docs/HARVESTER_REPORTER.md); each record names
 # the queues its harvester serves. osgsub01's own key is the OSG submit
 # reporter's, which carries the schedd's idle pilots per queue.
-HARVESTER_REPORTS = ('osgsub01-harvester', 'pandaharvester01', 'pandaharvester02')
+from monitor_app.host_reports import HARVESTER_HOSTS as HARVESTER_REPORTS  # noqa: E402
 # The reporters run every five minutes; three missed runs make a record stale.
 REPORT_STALE_SECONDS = 900
+# How old a harvester's job-demand cache may be before its pilot supply is
+# in doubt; None where the record cannot carry it (the Perlmutter record is
+# built from the PanDA server, which the harvester's cache never reaches).
+DEMAND_MAX_AGE_SECONDS = {'osgsub01-harvester': 90, 'perlmutter-harvester': None}
 LEVELS = ('grey', 'green', 'amber', 'red')
 # The pilot's log stage-out error codes.
 LOG_STAGEOUT_CODES = (1137, 1151, 1152)
@@ -130,16 +134,29 @@ def _activity_part(finished, failed):
                  f'{finished} finished, {failed} failed in the last hour')
 
 
+def _fixed_limit(config):
+    """Whether harvester applies the queue's nQueueLimitWorker unchanged:
+    a launch-limits row whose ratio is unset or zero."""
+    ratio = (config or {}).get('n_queue_limit_worker_ratio')
+    try:
+        return ratio is None or int(ratio) == 0
+    except (ValueError, TypeError):
+        return False
+
+
 def effective_waiting_limit(config, applied, now):
     """Use the fixed DB limit or the last applied value carried by the reporter.
 
-    The adjuster skips its limit log when the waiting queue is already full.
-    Its timestamp records an event, not a heartbeat: freshness belongs to the
-    enclosing report, checked separately by ``_pilot_supply_part``.
+    The limit is fixed when no ratio is set or the ratio is zero: harvester
+    then applies nQueueLimitWorker as it stands (its db_proxy
+    get_worker_limits). The adjuster skips its limit log when the waiting
+    queue is already full. Its timestamp records an event, not a heartbeat:
+    freshness belongs to the enclosing report, checked separately by
+    ``_pilot_supply_part``.
     """
     config = config or {}
     try:
-        if int(config['n_queue_limit_worker_ratio']) == 0:
+        if _fixed_limit(config):
             return int(config['n_queue_limit_worker'])
     except (KeyError, ValueError, TypeError):
         pass
@@ -212,6 +229,15 @@ def _pilot_supply_part(p, queued, started_1h, submitted_1h, workers=None, operat
     if operator_limit and (p.get('running') or 0) >= operator_limit:
         return _part('green', p['running'], f"{p['running']} of the operator's limit of "
                                            f"{operator_limit} slots running: full, no pilot due")
+    try:
+        ceiling = int(p.get('max_workers'))
+    except (TypeError, ValueError):
+        ceiling = None
+    if ceiling and (p.get('running') or 0) >= ceiling:
+        # harvester starts no worker past its maxWorkers (Perlmutter's node
+        # ceiling, NERSC_PERLMUTTER.md), so a full queue is due no pilot
+        return _part('green', p['running'], f"{p['running']} of harvester's {ceiling} workers "
+                                           f"running: full, no pilot due")
     if queued and not waiting and not started_1h and not submitted_1h:
         return _part('red', 0, f"{queued} jobs queued, no pilot waiting, submitted "
                                f"or started in the last hour")
@@ -814,13 +840,13 @@ class _Build:
                 w = now.get(q) or {}
                 a = applied.get(q) or {}
                 limit = effective_waiting_limit(limits.get(q), a, self.now)
-                fixed = str((limits.get(q) or {}).get('n_queue_limit_worker_ratio')) == '0'
+                fixed = q in limits and _fixed_limit(limits[q])
                 adjustment_error = ((record.get('adjustment') or {}).get('read') or {}).get('error')
                 out[q] = {
                     'error': db.get('error') or now.get('error') or (
                         f'cannot read adjuster log: {adjustment_error}' if adjustment_error and not fixed else None),
                     'demand_age_seconds': demand_age,
-                    'demand_max_age_seconds': 90 if key == 'osgsub01-harvester' else 900,
+                    'demand_max_age_seconds': DEMAND_MAX_AGE_SECONDS.get(key, 900),
                     'report_stale_seconds': 180 if key == 'osgsub01-harvester' else REPORT_STALE_SECONDS,
                     # harvester's idle is a pilot evicted back to waiting
                     'waiting': int(w.get('submitted') or 0) + int(w.get('idle') or 0),
@@ -828,6 +854,7 @@ class _Build:
                     'limit': limit,
                     'limit_source': 'database' if fixed else 'adjuster',
                     'limit_at': a.get('at'),
+                    'max_workers': (limits.get(q) or {}).get('max_workers'),
                     'running': int(w.get('running') or 0),
                     'per_slot': PILOTS_PER_WORKER.get(q, 1),
                     'report': key,
