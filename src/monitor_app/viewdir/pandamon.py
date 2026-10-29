@@ -2859,8 +2859,8 @@ def _dialogs_for_queue(dialogs, queue_name, queues):
     """The record's harvester dialogs as one queue's page shows them, times
     in Eastern Time (the record keeps UTC, as every host record does): each
     kind of message that names this queue or none of the harvester's
-    queues; the kinds naming its other queues are only counted, by queue,
-    so an error on a queue the harvester also serves does not read as this
+    queues. A kind naming only another of its queues is not shown, so an
+    error on a queue the harvester also serves does not read as this
     queue's. A record from before the kinds (reporter 1.0) shows its
     modules' latest messages."""
     if not isinstance(dialogs, dict):
@@ -2868,24 +2868,22 @@ def _dialogs_for_queue(dialogs, queue_name, queues):
     if not isinstance(dialogs.get('messages'), list):
         if not isinstance(dialogs.get('modules'), dict):
             return {}
-        return {'hours': dialogs.get('hours'), 'other_queues': {},
+        return {'hours': dialogs.get('hours'),
                 'messages': [dict(d or {}, module=module, first_at=None,
                                   last=dict((d or {}).get('last') or {},
                                             at=_utc_eastern(((d or {}).get('last') or {}).get('at'))))
                              for module, d in dialogs['modules'].items()]}
     others = [q for q in queues if q != queue_name]
-    shown, other_queues = [], {}
+    shown = []
     for k in dialogs['messages']:
         if not isinstance(k, dict):
             continue
         message = (k.get('last') or {}).get('message')
-        named = next((q for q in others if _names_queue(message, q)), None)
-        if named and not _names_queue(message, queue_name):
-            other_queues[named] = other_queues.get(named, 0) + (k.get('count') or 0)
+        if not _names_queue(message, queue_name) and any(_names_queue(message, q) for q in others):
             continue
         shown.append(dict(k, first_at=_utc_eastern(k.get('first_at')),
                           last=dict(k.get('last') or {}, at=_utc_eastern((k.get('last') or {}).get('at')))))
-    return {'hours': dialogs.get('hours'), 'messages': shown, 'other_queues': other_queues,
+    return {'hours': dialogs.get('hours'), 'messages': shown,
             'messages_dropped': dialogs.get('messages_dropped')}
 
 

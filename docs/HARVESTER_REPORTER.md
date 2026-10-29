@@ -126,8 +126,8 @@ under an m3763 member's token (`swf_epicprod/nersc_iri.py`):
 Job fetching, the adjuster's applied limit, failed calls and log freshness
 come from the logs and are error fields naming why. The queue page shows a
 queue each kind of error that names it or names none of the harvester's
-queues; a kind that names another of its queues is only counted there,
-with a link to that queue's page, so an error on a queue we do not use
+queues; a kind that names only another of its queues is not shown there,
+so an error on a queue we do not use
 (NERSC_Perlmutter_epic, the non-ES queue) does not read as the Event
 Service queue's. The Perlmutter queues
 run in pull mode (`mapType` NoJob), so their pilots fetch their own jobs
