@@ -61,6 +61,7 @@ the old paths here. This repo's docs cover the platform services:
 - `SSE_RELAY.md` — the ActiveMQ → remote SSE relay this builds on.
 - `EXTERNAL_ACCESS.md` — the swf-remote proxy contract, including write-action trigger rules.
 - `TEAMCOMMS.md` — embedded TeamComms, devcloud authentication, request binding, identity and stream revalidation.
+- `WHATS_NEW.md` — the What's new page under Help: developments as versioned entry-store items with tags, importance, comments and votes; LLM items arrive as AI proposals; MCP list, get, propose and edit tools.
 - `USER_VIEW.md` — the user view: the reduced epicprod face behind the universal `user_view` parameter, its nav and conventions, and how a page tailors itself.
 - `SYSTEM_STATUS.md` — cached system status record and page.
 - `COMP_SNAPSHOT.md` — the comp snapshot: the computing centre room's live record (`swf_comp_snapshot`, `panda/comp/snapshot.json`).
