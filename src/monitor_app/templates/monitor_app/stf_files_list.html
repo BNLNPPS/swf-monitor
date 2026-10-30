@@ -35,9 +35,9 @@
 
 {% block initial_filters %}
 {
-    status: '{{ selected_status|default:"" }}',
-    machine_state: '{{ selected_machine_state|default:"" }}',
-    run_number: '{{ selected_run_number|default:"" }}'
+    status: '{{ selected_status|default:""|force_escape|escapejs }}',
+    machine_state: '{{ selected_machine_state|default:""|force_escape|escapejs }}',
+    run_number: '{{ selected_run_number|default:""|force_escape|escapejs }}'
 }
 {% endblock %}
 

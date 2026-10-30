@@ -64,10 +64,10 @@
 
 {% block initial_filters %}
 {
-    status: '{{ selected_status|default:"" }}',
-    username: '{{ selected_username|default:"" }}',
-    processingtype: '{{ selected_processingtype|default:"" }}',
-    queue: '{{ selected_queue|default:"" }}',
+    status: '{{ selected_status|default:""|force_escape|escapejs }}',
+    username: '{{ selected_username|default:""|force_escape|escapejs }}',
+    processingtype: '{{ selected_processingtype|default:""|force_escape|escapejs }}',
+    queue: '{{ selected_queue|default:""|force_escape|escapejs }}',
     days: '{{ days }}'
 }
 {% endblock %}

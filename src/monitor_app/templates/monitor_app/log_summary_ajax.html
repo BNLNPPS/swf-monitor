@@ -47,10 +47,10 @@
 
 {% block initial_filters %}
 {
-    app_name: '{{ selected_app|default:"" }}',
-    instance_type: '{{ selected_instance_type|default:"" }}',
-    instance_name: '{{ selected_instance|default:"" }}',
-    levelname: '{{ selected_levelname|default:"" }}'
+    app_name: '{{ selected_app|default:""|force_escape|escapejs }}',
+    instance_type: '{{ selected_instance_type|default:""|force_escape|escapejs }}',
+    instance_name: '{{ selected_instance|default:""|force_escape|escapejs }}',
+    levelname: '{{ selected_levelname|default:""|force_escape|escapejs }}'
 }
 {% endblock %}
 

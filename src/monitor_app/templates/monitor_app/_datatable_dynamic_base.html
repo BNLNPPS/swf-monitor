@@ -202,7 +202,10 @@ Filter field configuration format:
 
 <script>
 $(document).ready(function() {
-    // Initialize current filters
+    // Initialize current filters. Pages fill initial_filters with request
+    // values filtered force_escape|escapejs inside quotes: HTML-escaped
+    // text that no JS escape sequence can turn back into markup, since the
+    // filter badges are inserted as HTML.
     let currentFilters = {% block initial_filters %}{}{% endblock %};
 
     function formatQueryCount(value) {
@@ -311,7 +314,13 @@ $(document).ready(function() {
         document.getElementById('dt-product-refreshing').hidden =
             !json.product_refreshing;
         clearTimeout(productFollowup);
-        if (json.product_refreshing) productFollowup = setTimeout(function () {
+        // Follow the rebuild only while the page is attended; an
+        // unattended page keeps checking and catches up on return.
+        if (json.product_refreshing) productFollowup = setTimeout(function follow() {
+            if (window.swfPollGate && !window.swfPollGate.attended()) {
+                productFollowup = setTimeout(follow, 3000);
+                return;
+            }
             table.ajax.reload(null, false);
         }, 3000);
     });

@@ -28,9 +28,9 @@
 
 {% block initial_filters %}
 {
-    status: '{{ selected_status|default:"" }}',
-    stf_filename: '{{ selected_stf_filename|default:"" }}',
-    run_number: '{{ selected_run_number|default:"" }}'
+    status: '{{ selected_status|default:""|force_escape|escapejs }}',
+    stf_filename: '{{ selected_stf_filename|default:""|force_escape|escapejs }}',
+    run_number: '{{ selected_run_number|default:""|force_escape|escapejs }}'
 }
 {% endblock %}
 

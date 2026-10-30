@@ -4,11 +4,15 @@ import re
 
 SITES = ('UM_GREX_PanDA_1',)
 FIELDS = ('FreeMB', 'TotalMB', 'IFree', 'ITotal')
+# The alarm judges a worker volume by free fraction, free space and free
+# inodes; the worst sample by one measure need not be the worst by another.
+MEASURES = (lambda row: row['free_fraction'], lambda row: row['free_bytes'],
+            lambda row: row['free_inodes'] / row['total_inodes'] if row['total_inodes'] else 1)
 
 
 def summarize(rows, now=None):
     now = now or datetime.now(timezone.utc).timestamp()
-    volumes, running, reporting = {}, 0, 0
+    volumes, worst, running, reporting = {}, {}, 0, 0
     for site, pandaid, metrics in rows:
         running += 1
         values = {key: int(value) for key, value in
@@ -29,17 +33,25 @@ def summarize(rows, now=None):
                        free_inodes=values[label + 'IFree'],
                        total_inodes=values[label + 'ITotal'],
                        observed_at=stamp, pandaid=pandaid)
+            if label != 'ce':
+                # Worker volumes are distinct filesystems: keep the worst
+                # fresh sample by each measure the alarm judges.
+                for index, measure in enumerate(MEASURES):
+                    old = worst.get((key, index))
+                    if old is None or measure(row) < measure(old):
+                        worst[(key, index)] = row
+                continue
             old = volumes.get(key)
             # The CE spool is one shared filesystem: a newer sample observes
-            # cleanup that an older low sample cannot. Worker volumes are
-            # distinct, so keep their worst fresh measurement.
-            newer_ce = old is not None and label == 'ce' and stamp > old['observed_at']
-            worse = old is not None and row['free_fraction'] < old['free_fraction']
-            comparable = old is not None and (label != 'ce' or stamp == old['observed_at'])
-            if old is None or newer_ce or (comparable and worse):
+            # cleanup that an older low sample cannot.
+            if old is None or stamp > old['observed_at'] or (
+                    stamp == old['observed_at'] and row['free_fraction'] < old['free_fraction']):
                 volumes[key] = row
-    return dict(at=int(now), running_jobs=running, reporting_jobs=reporting,
-                volumes=list(volumes.values()))
+    rows = list(volumes.values())
+    for row in worst.values():
+        if not any(row is kept for kept in rows):
+            rows.append(row)
+    return dict(at=int(now), running_jobs=running, reporting_jobs=reporting, volumes=rows)
 
 
 def build():

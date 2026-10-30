@@ -216,11 +216,11 @@
 
 {% block initial_filters %}
 {
-    status: '{{ selected_status|default:"" }}',
-    username: '{{ selected_username|default:"" }}',
-    site: '{{ selected_site|default:"" }}',
+    status: '{{ selected_status|default:""|force_escape|escapejs }}',
+    username: '{{ selected_username|default:""|force_escape|escapejs }}',
+    site: '{{ selected_site|default:""|force_escape|escapejs }}',
     days: '{{ days }}',
-    taskid: '{{ selected_taskid|default:"" }}',
+    taskid: '{{ selected_taskid|default:""|force_escape|escapejs }}',
     execsite: '{{ selected_execsite|escapejs }}',
     registration: '{{ selected_registration|escapejs }}',
     ended_after: '{{ ended_after|escapejs }}',
