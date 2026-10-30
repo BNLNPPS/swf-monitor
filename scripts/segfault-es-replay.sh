@@ -56,7 +56,11 @@ echo "replay: run.sh exited ${rc} after $((ended - started)) s"
    "${SOCK}") > /dev/null 2>&1 || true
 pkill -f -- "--socket ${SOCK}" 2>/dev/null || true
 
-signal=$(grep -oE 'Handle signal: [0-9]+' state/resident.log 2>/dev/null | tail -1 | grep -oE '[0-9]+$')
+# The crash is the first crash-class signal DD4hep's handler reports (6, 7,
+# 8, 11); a SIGTERM after it is the request timeout ending a resident that
+# stalled after its signal, and a SIGTERM alone is no crash (41494, 2026-10-29:
+# SIGABRT, a stall, then SIGTERM at 1,800 s).
+signal=$(grep -oE 'Handle signal: (6|7|8|11)\b' state/resident.log 2>/dev/null | head -1 | grep -oE '[0-9]+$')
 gdb_rc=""
 if [ -n "${signal}" ] && [ -s out/unit-template.json.npsim.json ]; then
   # The request's npsim arguments as a cold run: the source's events cut to
@@ -125,14 +129,18 @@ stages = read('out/stages.log').strip().splitlines()
 gdb = read('out/gdb.log')
 stopped = next((l.split('Program received signal', 1)[1].strip().rstrip('.')
                 for l in gdb.splitlines() if 'Program received signal' in l), '')
+resident = read('state/resident.log')
+stalled = signal and 'Handle signal: 15' in resident
 if signal:
-    outcome, reason = 'crashed', f'resident npsim died on signal {signal}'
+    outcome, reason = 'crashed', f'resident npsim died on signal {signal}' + (
+        ', stalled after it and was killed at the request timeout' if stalled else '')
 elif reply and not reply.get('error'):
     outcome, reason = 'completed', ''
 else:
     outcome = 'inconclusive'
     reason = (f'run.sh exited {rc}' + (' (timed out)' if rc == '124' else '')
-              + ' with no simulation reply and no resident death'
+              + (' after the resident was killed at the request timeout with no crash signal'
+                 if 'Handle signal: 15' in resident else ' with no simulation reply and no resident death')
               + (f'; last stage: {stages[-1]}' if stages else ''))
 json.dump({'outcome': outcome, 'reason': reason, 'signal': int(signal) if signal else None,
            'payload_exit': int(rc), 'started_at': int(started), 'ended_at': int(ended),

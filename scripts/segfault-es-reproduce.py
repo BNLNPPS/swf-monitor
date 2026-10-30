@@ -41,6 +41,7 @@ import io
 import json
 import logging
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -191,6 +192,31 @@ def frames_of(gdb_text):
     return result if result.get('trace_status') == 'found' else None
 
 
+# DD4hep's handler names each signal the resident takes (state/resident.log).
+CRASH_SIGNAL_RE = re.compile(r'Handle signal: (6|7|8|11)\b')
+
+
+def resident_reading(local, result):
+    """(signal, outcome, reason) from the resident's own log as fetched: the
+    first crash-class signal is the crash; a SIGTERM after it is the request
+    timeout ending a resident that stalled after its signal; a SIGTERM alone
+    is no crash (41494, 2026-10-29: SIGABRT, a stall, then SIGTERM at
+    1,800 s, which a driver reading the last signal took for the crash)."""
+    path = os.path.join(local, 'state', 'resident.log')
+    text = open(path, errors='replace').read() if os.path.exists(path) else ''
+    killed = 'Handle signal: 15' in text
+    m = CRASH_SIGNAL_RE.search(text)
+    if m:
+        signal = int(m.group(1))
+        return signal, 'crashed', (f'resident npsim died on signal {signal}'
+                                   + (', stalled after it and was killed at the request timeout'
+                                      if killed else ''))
+    if result.get('outcome') == 'crashed' or killed:
+        return None, 'inconclusive', ('the resident was killed at the request timeout '
+                                      'with no crash signal')
+    return result.get('signal'), result['outcome'], result.get('reason') or ''
+
+
 def iso(epoch):
     return datetime.fromtimestamp(epoch, tz=dt_timezone.utc).isoformat() if epoch else None
 
@@ -278,8 +304,10 @@ def collect(args, rid, remote, local, pandaid):
                                           'reason': f'replay failed: {str(e)[:250]}',
                                           'ended_at': datetime.now(dt_timezone.utc).isoformat()})
         raise
-    signal = result.get('signal')
-    fields = {'outcome': result['outcome'], 'reason': result.get('reason') or '',
+    signal, outcome, reason = resident_reading(local, result)
+    if result.get('gdb', {}).get('stopped_on'):
+        reason += f"; the cold npsim under gdb stopped on {result['gdb']['stopped_on']}"
+    fields = {'outcome': outcome, 'reason': reason,
               'exit_code': 128 + signal if signal else result.get('payload_exit'),
               'signal': signal, 'started_at': iso(result.get('started_at')),
               'ended_at': iso(result.get('ended_at')),
@@ -287,7 +315,7 @@ def collect(args, rid, remote, local, pandaid):
               if result.get('ended_at') and result.get('started_at') else None,
               'gdb': result.get('gdb'), 'simulation_reply': result.get('simulation_reply')}
     trace = None
-    if result['outcome'] == 'crashed':
+    if outcome == 'crashed':
         gdb_log = os.path.join(local, 'out', 'gdb.log')
         trace = frames_of(open(gdb_log, errors='replace').read() if os.path.exists(gdb_log) else '')
         if trace is None:
@@ -305,7 +333,7 @@ def collect(args, rid, remote, local, pandaid):
         sig = CrashSignature.objects.get(key=args.key)
         merged = record_trace(sig, trace, pandaid, '')
     changed = reconcile(args.key, queue_diagnosis=queue_diagnosis)
-    return {'key': args.key, 'request_id': rid, 'outcome': result['outcome'], 'signal': signal,
+    return {'key': args.key, 'request_id': rid, 'outcome': outcome, 'signal': signal,
             'frame': (trace or {}).get('frame'), 'library': (trace or {}).get('library'),
             'merged_into': merged, 'reconcile': changed, 'evidence': local,
             'remote_dir': f'npps0:~/{remote}', 'seconds': int(time.time() - t0)}
@@ -319,8 +347,9 @@ def resume(args):
                   and e.get('mode') == 'host'), None) if sig else None
     if entry is None:
         raise ValueError(f'{args.key} has no host attempt {args.collect}')
-    if entry.get('outcome') != 'running':
-        raise ValueError(f"attempt {args.collect} has ended ({entry.get('outcome')})")
+    if entry.get('outcome') != 'running' and not args.again:
+        raise ValueError(f"attempt {args.collect} has ended ({entry.get('outcome')}); "
+                         f"--again records it once more from its evidence")
     return collect(args, args.collect, entry['remote_dir'], entry['evidence'], entry.get('pandaid'))
 
 
@@ -337,6 +366,8 @@ def main():
     ap.add_argument('--dry-run', action='store_true', help='print the plan, write nothing')
     ap.add_argument('--collect', metavar='REQUEST_ID',
                     help='take up the running host attempt REQUEST_ID of --key instead of starting one')
+    ap.add_argument('--again', action='store_true',
+                    help='--collect: record an ended attempt once more from its evidence on npps0')
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, stream=sys.stderr,
                         format='%(asctime)s %(name)s %(levelname)s %(message)s')
