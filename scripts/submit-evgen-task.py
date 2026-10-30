@@ -50,18 +50,81 @@ import urllib.parse
 import urllib.request
 
 RECORD_ATTEMPTS = 3
+# A payload canary's task priority: above the production band, so its one
+# job is dispatched ahead of the queue's production backlog.
+CANARY_TASK_PRIORITY = 1000
 RECORD_BACKOFF = 2          # seconds, multiplied by attempt number
 
 DEFAULT_PCLIENT_SETUP = os.path.expanduser("~/pclient/run/setup.sh")
 DEFAULT_AUTH_VO = "EIC.production"
 SUBMIT_TMP_ROOT = os.path.join(os.environ.get("SWF_TMP_DIR", "/data/swf-tmp"), "submit-evgen")
 BG_CONFIG_BASE = "https://eicweb.phy.anl.gov/EIC/campaigns/datasets/-/raw/{dataset_tag}/config_data"
+# A developer's payload canary (swf-epicprod docs/DEVELOPING_THE_PAYLOAD.md):
+# the payload of a pull request or branch, from a bare mirror of
+# swf-epicprod; switches named EPICPROD_SWITCH_*; the token file shipped
+# for a token-only canary.
+PAYLOAD_REPO = "BNLNPPS/swf-epicprod"
+PAYLOAD_SOURCE_MIRROR = os.environ.get(
+    "PAYLOAD_SOURCE_MIRROR", "/opt/swf-monitor/shared/payload-sources/swf-epicprod.git")
+PAYLOAD_REF_RE = re.compile(r"^(pr:\d{1,7}|(?:[A-Za-z0-9][A-Za-z0-9-]{0,38}:)?[A-Za-z0-9][A-Za-z0-9_./-]{0,199})$")
+PAYLOAD_SWITCH_RE = re.compile(r"^EPICPROD_SWITCH_[A-Z0-9_]{1,60}=[A-Za-z0-9_.,:/+=-]{0,200}$")
+TOKEN_SANDBOX_NAME = "bearer-token"
+# The panda canary credential's stand-in for the eicprod proxy: an expired
+# self-signed certificate. JLab's read door ignores a client certificate,
+# so the input still streams; nothing that checks a credential takes it,
+# so a write or a registration goes through a token or fails. That is the
+# job production runs after 2026-10-28, with the eicprod proxy expired.
+EXPIRED_CERT_NAME = "expired-placeholder-proxy"
+
+
+def _expired_placeholder(path):
+    """Write an expired self-signed certificate and its key to ``path``
+    (mode 0600; xrootd refuses wider)."""
+    import datetime as dt
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "epicprod canary expired placeholder")])
+    now = dt.datetime.now(dt.timezone.utc)
+    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
+            .public_key(key.public_key()).serial_number(x509.random_serial_number())
+            .not_valid_before(now - dt.timedelta(days=30))
+            .not_valid_after(now - dt.timedelta(days=1))
+            .sign(key, hashes.SHA256()))
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(cert.public_bytes(serialization.Encoding.PEM))
+        f.write(key.private_bytes(serialization.Encoding.PEM,
+                                  serialization.PrivateFormat.TraditionalOpenSSL,
+                                  serialization.NoEncryption()))
 
 # The submission kernel + the in-job dispatcher live beside this doer.
 HERE = os.path.dirname(os.path.abspath(__file__))
 KERNEL_SCRIPT = os.path.join(HERE, "evgen_panda_submit.py")
 DISPATCHER_SCRIPT = os.path.join(HERE, "evgen_job_dispatcher.py")
 MANAGE_PY = os.path.join(os.path.dirname(HERE), "src", "manage.py")
+
+
+def _check_destination_image(args, spec):
+    """Revalidate the final site/image after canary and trial overrides."""
+    try:
+        raw = _api_get(args.swf_monitor_url, '/pcs/api/prod-tasks/command/',
+                       {'name': args.task_name, 'fmt': 'admission',
+                        'site': spec.get('site') or '',
+                        'container': spec.get('containerImage') or ''}, args.token)
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode('utf-8', errors='replace')
+        try:
+            detail = json.loads(body).get('detail') or body[:500]
+        except ValueError:
+            detail = body[:500]
+        raise ValueError(f'destination admission refused: {detail}') from exc
+    result = json.loads(raw)
+    if (result.get('allowed') is not True or result.get('site') != spec.get('site')
+            or result.get('container_image') != spec.get('containerImage')):
+        raise ValueError(result.get('detail') or 'destination image admission was not confirmed')
 
 
 def _payload_dir():
@@ -161,7 +224,11 @@ def _reporting_env():
 
 
 def _stage_bg_files(env, sandbox):
-    """Copy or fetch BG_FILES into the worker sandbox when background mixing uses it."""
+    """Write, copy or fetch BG_FILES into the worker sandbox when background
+    mixing uses it. PCS sends the sources JSON it holds as BG_FILES_CONTENT
+    (swf-epicprod PCS_BACKGROUND_TAG.md, The sources JSON is held in PCS);
+    a submission without it downloads the file from config_data."""
+    content = env.pop('BG_FILES_CONTENT', None)
     bg_files = (env.get('BG_FILES') or '').strip()
     if not bg_files:
         return
@@ -170,7 +237,11 @@ def _stage_bg_files(env, sandbox):
         raise RuntimeError(f"invalid BG_FILES value: {bg_files!r}")
     target = os.path.join(sandbox, bg_base)
 
-    if os.path.isfile(bg_files):
+    if content:
+        with open(target, "w") as f:
+            f.write(content)
+        _log(f"staging BG_FILES {bg_base} from PCS")
+    elif os.path.isfile(bg_files):
         if os.path.abspath(bg_files) != os.path.abspath(target):
             shutil.copy(bg_files, target)
     else:
@@ -179,17 +250,60 @@ def _stage_bg_files(env, sandbox):
             f"{BG_CONFIG_BASE.format(dataset_tag=urllib.parse.quote(dataset_tag, safe=''))}/"
             f"{urllib.parse.quote(bg_files, safe='')}"
         )
-        _log(f"staging BG_FILES from {url}")
+        _log(f"staging BG_FILES from {url} (not stored in PCS)")
         urllib.request.urlretrieve(url, target)
     env['BG_FILES'] = bg_base
 
 
-def _assemble_sandbox(spec, proxy_path, root):
+def _git(args, cwd=None, timeout=180):
+    p = subprocess.run(["git"] + list(args), cwd=cwd, capture_output=True, text=True,
+                       timeout=timeout)
+    if p.returncode != 0:
+        raise RuntimeError(f"git {args[0]}: {(p.stderr or p.stdout).strip()[:300]}")
+    return p.stdout
+
+
+def _payload_from_ref(ref, dest):
+    """The payload of a pull request (pr:<N>), a branch, or a fork's branch
+    (<owner>:<branch>), fetched into the bare mirror and exported at its
+    commit under ``dest``. Returns (payload_dir, commit)."""
+    mirror = PAYLOAD_SOURCE_MIRROR
+    if not os.path.isdir(mirror):
+        os.makedirs(os.path.dirname(mirror), exist_ok=True)
+        _git(["clone", "--bare", "--quiet", f"https://github.com/{PAYLOAD_REPO}.git", mirror])
+    if ref.startswith("pr:"):
+        source, src_ref, local = "origin", f"refs/pull/{ref[3:]}/head", f"refs/canary/pr/{ref[3:]}"
+    elif ":" in ref:
+        owner, branch = ref.split(":", 1)
+        source = f"https://github.com/{owner}/{PAYLOAD_REPO.split('/')[1]}.git"
+        src_ref, local = f"refs/heads/{branch}", f"refs/canary/fork/{owner}/{branch}"
+    else:
+        source, src_ref, local = "origin", f"refs/heads/{ref}", f"refs/canary/branch/{ref}"
+    _git(["fetch", "--quiet", "--no-tags", source, f"+{src_ref}:{local}"], cwd=mirror)
+    commit = _git(["rev-parse", local], cwd=mirror).strip()
+    tar = subprocess.run(["git", "archive", commit, "swf_epicprod/payload"], cwd=mirror,
+                         capture_output=True, timeout=180)
+    if tar.returncode != 0:
+        raise RuntimeError(f"git archive {commit[:12]}: {tar.stderr.decode(errors='replace')[:300]}")
+    subprocess.run(["tar", "-x", "-C", dest], input=tar.stdout, check=True, timeout=180)
+    payload_dir = os.path.join(dest, "swf_epicprod", "payload")
+    if not os.path.isfile(os.path.join(payload_dir, "run.sh")):
+        raise RuntimeError(f"{ref} at {commit[:12]} has no swf_epicprod/payload/run.sh")
+    return payload_dir, commit
+
+
+def _assemble_sandbox(spec, proxy_path, root, payload_dir=None, token_path=None,
+                      ship_proxy=True):
     """Build the submission dir: spec.json + a sandbox/ holding the worker-facing
     files (manifest, env, dispatcher, proxy). Returns the submission dir path.
 
     The kernel and spec live OUTSIDE sandbox/ so they are not shipped to the
-    worker; only the four worker files travel in the tarball.
+    worker; only the four worker files travel in the tarball. A developer's
+    canary ships ``payload_dir`` instead of the deployed payload, and with
+    ``token_path`` ships that token as BEARER_TOKEN_FILE and no proxy. With
+    ``ship_proxy`` false it ships an expired self-signed certificate in the
+    proxy's place (EXPIRED_CERT_NAME), so the job has only the tokens it
+    gets from the PanDA server for anything that checks a credential.
     """
     os.makedirs(root, exist_ok=True)
     workdir = tempfile.mkdtemp(prefix=f"{spec['csvBase']}.", dir=root)
@@ -205,7 +319,21 @@ def _assemble_sandbox(spec, proxy_path, root):
     # basename rides here; run.sh reads X509_USER_PROXY back.
     proxy_base = os.path.basename(proxy_path)
     env = dict(spec.get('env') or {})
-    env['X509_USER_PROXY'] = proxy_base
+    if spec.get('workerProxy'):
+        env['X509_USER_PROXY'] = 'worker-proxy'
+        # ES closes start in a clean container and source this file again.
+        # Retain the pilot identity so tokens.py can request write tokens;
+        # the pilot's X.509 identity alone need not have output-door access.
+        env['PILOT_X509_USER_PROXY'] = '${PWD}/worker-proxy'
+    elif token_path:
+        env['BEARER_TOKEN_FILE'] = TOKEN_SANDBOX_NAME
+    elif not ship_proxy:
+        # Not empty and not absent: an empty X509_USER_PROXY fails xrootd's
+        # login at the read door (canary 40980), and an absent one leaves
+        # the pilot's proxy to stand in for a token that did not come.
+        env['X509_USER_PROXY'] = EXPIRED_CERT_NAME
+    else:
+        env['X509_USER_PROXY'] = proxy_base
     _stage_bg_files(env, sandbox)
     # The payload runs npsim and eicrecon with the task's core count as
     # their thread count, where the image supports it (swf-epicprod
@@ -226,12 +354,20 @@ def _assemble_sandbox(spec, proxy_path, root):
 
     # In-job dispatcher (named to match spec['exec']) and the proxy.
     shutil.copy(DISPATCHER_SCRIPT, os.path.join(sandbox, "evgen_job_dispatcher.py"))
-    shutil.copy(proxy_path, os.path.join(sandbox, proxy_base))
+    if spec.get('workerProxy'):
+        pass  # copied from the native pilot on the worker, never uploaded
+    elif token_path:
+        shutil.copy(token_path, os.path.join(sandbox, TOKEN_SANDBOX_NAME))
+        os.chmod(os.path.join(sandbox, TOKEN_SANDBOX_NAME), 0o600)
+    elif ship_proxy:
+        shutil.copy(proxy_path, os.path.join(sandbox, proxy_base))
+    else:
+        _expired_placeholder(os.path.join(sandbox, EXPIRED_CERT_NAME))
 
-    # The epicprod payload, whole, from the frozen package: the dispatcher
-    # runs sandbox/payload/run.sh. Its version rides on the submission
-    # record.
-    payload_dir = _payload_dir()
+    # The epicprod payload, whole, from the frozen package unless a
+    # developer's canary names another: the dispatcher runs
+    # sandbox/payload/run.sh. Its version rides on the submission record.
+    payload_dir = payload_dir or _payload_dir()
     shutil.copytree(payload_dir, os.path.join(sandbox, "payload"),
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     spec['payload_version'] = _payload_version(payload_dir)
@@ -249,6 +385,12 @@ def _sync_expected_inventory(task_name, spec_path):
     JEDI id needed for expected rows. Failure here must not turn a successful
     submission into a failed submission.
     """
+    with open(spec_path) as f:
+        submitted_spec = json.load(f)
+    if submitted_spec.get('event_service'):
+        # Closes contain event ranges, not one file per CSV chunk.
+        _log('ES coverage uses registered ranges; no fixed row inventory')
+        return
     if not os.path.isfile(MANAGE_PY):
         _log(f"WARNING: cannot sync expected inventory; manage.py not found: {MANAGE_PY}")
         return
@@ -303,18 +445,47 @@ def _outputs_to_create(spec, args):
     return list(spec.get('outputs') or [])
 
 
+def _require_fresh_bnl_namespace(spec):
+    """Refuse PanDA output/log collections, including JEDI's generated suffixes."""
+    from rucio.client import Client
+    from rucio.common.exception import DataIdentifierNotFound
+    names = _load_sibling('evgen_dataset_names.py').panda_dataset_names(spec)
+    if not names:
+        return
+    op = _load_sibling('panda-task-operation.py')
+    client = Client(rucio_host=op.RUCIO_URL, auth_host=op.RUCIO_URL,
+                    account=op.RUCIO_ACCOUNT, auth_type='x509_proxy',
+                    creds={'client_proxy': op.X509_PROXY}, ca_cert=None, vo=op.RUCIO_VO)
+    for name in names:
+        # JEDI's template ends in '/', but its actual dataset has a numeric
+        # suffix. The template container need not exist in Rucio at all.
+        stem = name.rstrip('/')
+        for exact in (name, stem):
+            try:
+                client.get_did(op.RUCIO_SCOPE, exact)
+            except DataIdentifierNotFound:
+                continue
+            raise RuntimeError(f"BNL Rucio name already used: {op.RUCIO_SCOPE}:{exact}")
+        matches = client.list_dids(op.RUCIO_SCOPE, filters={'name': stem + '.*'},
+                                   did_type='collection')
+        first = next(iter(matches), None)
+        if first is not None:
+            raise RuntimeError(f"BNL Rucio name already used: {op.RUCIO_SCOPE}:{first}")
+    # A log file can outlive its dataset. Its serial LFN would still collide.
+    if not spec.get('noLog'):
+        matches = client.list_dids(op.RUCIO_SCOPE,
+                                   filters={'name': spec['outDS'] + '.*.log.tgz'}, did_type='file')
+        first = next(iter(matches), None)
+        if first is not None:
+            raise RuntimeError(f"BNL Rucio log name already used: {op.RUCIO_SCOPE}:{first}")
+
+
 def _precreate_outputs(spec, args):
-    """Create the submission's output datasets in JLab Rucio before the
-    task goes to PanDA (swf-epicprod docs/RUCIO_REGISTRATION_CONTRACT.md
-    § 2): each with one replication rule as the payload's upload made
-    it (the production account, one copy, the output RSE, DATASET
-    grouping, the run's lifetime where it has one) and its metadata. An
-    existing dataset is accepted: a missing rule is added, absent
-    metadata set, and metadata that differs from the task's stops the
-    submission, since the same output name would hold different
-    physics. Returns the record of what was done, one entry per
-    dataset, for the submission record; raises RuntimeError with the
-    reason when the submission must not proceed."""
+    """Refuse occupied namespaces before creating fresh JLab output datasets.
+
+    All metadata and both catalogs are checked before the first creation.
+    Catalog errors fail closed; existing datasets are never amended here.
+    """
     outputs = _outputs_to_create(spec, args)
     if not outputs:
         raise RuntimeError("the spec names no output dataset to create")
@@ -324,67 +495,32 @@ def _precreate_outputs(spec, args):
     scope = evgen.RUCIO_SCOPE
     rse = str((spec.get('env') or {}).get('OUT_RSE') or 'EIC-XRD')
     lifetime = _output_lifetime_s(spec, args)
-    try:
-        client = evgen.rucio_client(args.proxy)
-    except Exception as e:                                    # noqa: BLE001
-        raise RuntimeError(f"JLab Rucio not reachable for the output datasets: {e}")
+    client = evgen.rucio_client(args.proxy)
+    _require_fresh_bnl_namespace(spec)
+    for out in outputs:
+        if out.get('metadata'):
+            validate_metadata(out['metadata'])
+        name = str(out['dataset'])
+        try:
+            client.get_did(scope, name)
+        except DataIdentifierNotFound:
+            continue
+        raise RuntimeError(f"JLab Rucio name already used: {scope}:{name}")
     record = []
     for out in outputs:
         name = str(out['dataset'])
         meta = out.get('metadata') or None
-        if meta:
-            validate_metadata(meta)
         rule = {'account': client.account, 'copies': 1, 'rse_expression': rse,
                 'grouping': 'DATASET', 'lifetime': lifetime}
-        entry = {'dataset': f"{scope}:{name}", 'level': out.get('level'), 'rse': rse}
         try:
-            # Existence is read first: the JLab server applies the metadata
-            # of an add_dataset call to a dataset that already exists before
-            # it answers that it exists, so creation is attempted only on a
-            # dataset that is not there.
-            try:
-                existing = client.get_metadata(scope, name, plugin='ALL')
-            except DataIdentifierNotFound:
-                existing = None
-            if existing is None:
-                client.add_dataset(scope=scope, name=name, meta=meta, rules=[rule], lifetime=lifetime)
-                entry.update(created=True, rule='added', metadata='set' if meta else 'none')
-                _log(f"output dataset {entry['dataset']}: created, rule added, "
-                     f"metadata {entry['metadata']}" + (f", lifetime {lifetime}s" if lifetime else ""))
-                record.append(entry)
-                continue
-            entry['created'] = False
-            rules = [r for r in client.list_did_rules(scope, name)
-                     if r.get('rse_expression') == rse]
-            if rules:
-                entry['rule'] = 'present'
-            else:
-                client.add_replication_rule([{'scope': scope, 'name': name}], copies=1,
-                                            rse_expression=rse, lifetime=lifetime,
-                                            grouping='DATASET')
-                entry['rule'] = 'added'
-            if meta:
-                absent = [k for k in meta if existing.get(k) is None]
-                differ = {k: (existing.get(k), v) for k, v in meta.items()
-                          if existing.get(k) is not None and existing.get(k) != v}
-                if differ:
-                    raise RuntimeError(
-                        f"output dataset {scope}:{name} exists with different metadata "
-                        f"than this task declares: " +
-                        ", ".join(f"{k}: dataset {a!r}, task {b!r}" for k, (a, b) in differ.items()))
-                for k in absent:
-                    client.set_metadata(scope, name, k, meta[k])
-                entry['metadata'] = f"filled:{','.join(absent)}" if absent else 'present'
-            else:
-                entry['metadata'] = 'none'
-        except RuntimeError:
-            raise
-        except Exception as e:                                # noqa: BLE001
-            raise RuntimeError(f"could not create output dataset {scope}:{name}: {e}")
-        _log(f"output dataset {entry['dataset']}: "
-             f"{'created' if entry['created'] else 'exists'}, rule {entry['rule']}, "
-             f"metadata {entry['metadata']}" + (f", lifetime {lifetime}s" if lifetime else ""))
+            client.add_dataset(scope=scope, name=name, meta=meta, rules=[rule], lifetime=lifetime)
+        except Exception as exc:
+            raise RuntimeError(f"could not create output dataset {scope}:{name}: {exc}") from exc
+        entry = dict(dataset=f"{scope}:{name}", level=out.get('level'), rse=rse,
+                     created=True, rule='added', metadata='set' if meta else 'none')
         record.append(entry)
+        _log(f"output dataset {entry['dataset']}: created, rule added, "
+             f"metadata {entry['metadata']}" + (f", lifetime {lifetime}s" if lifetime else ""))
     return record
 
 
@@ -467,6 +603,14 @@ def main():
                          "MB) the dispatcher puts on the payload, so a "
                          "reference run matches the production queue's "
                          "memory")
+    ap.add_argument("--es-input-files", default="",
+                    help="comma-separated file names of --es-input-dataset that the task takes, "
+                         "and no others: an input read where it resides, a catalog's own dataset "
+                         "(swf-epicprod evgen_es.catalog_input)")
+    ap.add_argument("--es-file-events", default="",
+                    help="with --es-input-files: each file's events, NAME=EVENTS comma-separated, "
+                         "the task at their sum (JEDI's useRealNumEvents with the counts the ePIC "
+                         "DDM interface gives the listing; swf-epicprod production_es file_events)")
     ap.add_argument("--es-input-dataset", default="",
                     help="payload canary as an Event Service job (swf-epicprod "
                          "NODE_EVENT_DISPATCHER.md): this PanDA input dataset "
@@ -480,6 +624,24 @@ def main():
                          "runs (BG_MERGER; swf-epicprod EPICPROD_PAYLOAD.md, "
                          "Background merging); timeframebuilder is for "
                          "validation only")
+    ap.add_argument("--canary-payload-ref", default="",
+                    help="payload canary: run the payload of this pull request "
+                         "(pr:<N>), branch (<branch>) or fork branch "
+                         "(<owner>:<branch>) of swf-epicprod instead of the "
+                         "deployed one (swf-epicprod docs/DEVELOPING_THE_PAYLOAD.md)")
+    ap.add_argument("--canary-switch", action="append", default=[],
+                    help="payload canary: EPICPROD_SWITCH_<NAME>=<value> in the "
+                         "job's environment; repeatable")
+    ap.add_argument("--canary-credential", choices=["x509", "token", "panda"], default="x509",
+                    help="payload canary: x509 ships the eicprod proxy (default); "
+                         "token ships no proxy and the token file of "
+                         "--canary-token-file as BEARER_TOKEN_FILE; panda ships "
+                         "an expired self-signed certificate in the proxy's place, "
+                         "so the job writes and registers only with the tokens it "
+                         "gets from the PanDA server, as after 2026-10-28")
+    ap.add_argument("--canary-token-file", default=os.environ.get("CANARY_TOKEN_FILE", ""),
+                    help="payload canary, token credential: the token file shipped "
+                         "(default $CANARY_TOKEN_FILE)")
     ap.add_argument("--canary-threads", type=int, default=0,
                     help="payload canary: cores the job requests and threads "
                          "npsim and eicrecon run with (where the image "
@@ -487,6 +649,9 @@ def main():
     ap.add_argument("--es-events-per-range", type=int, default=0,
                     help="Event Service canary: events per range "
                          "(nEventsPerWorker); with --es-input-dataset")
+    ap.add_argument("--es-worker-proxy", action="store_true",
+                    help="native ES canary: use the pilot's credential on the "
+                         "worker instead of uploading a proxy in the sandbox")
     ap.add_argument("--es-events", type=int, default=0,
                     help="Event Service canary: events of the input file the "
                          "job covers (nEventsPerJob and nEventsPerInputFile); "
@@ -516,6 +681,11 @@ def main():
                          "the rest back to the file; --es-events-per-range "
                          "is then the harness's unit, consecutive events "
                          "run as one chunk")
+    ap.add_argument("--es-fine-range-events", type=int, default=1,
+                    help="with --es-fine-grained: events per range "
+                         "(JEDI's nEventsPerFineGrainedRange, split rule FR); "
+                         "one by default; must divide --es-events-per-range, "
+                         "the harness's unit")
     ap.add_argument("--es-quantum-s", type=int, default=0,
                     help="Event Service canary: the loss quantum in seconds; "
                          "the harness's unit is this over the configuration's "
@@ -583,12 +753,39 @@ def main():
     ap.add_argument("--trial-queue", default="",
                     help="the PanDA queue a trial is sent to")
     args = ap.parse_args()
+    if args.es_worker_proxy and (not args.canary_stamp or not args.es_input_dataset):
+        _log('ERROR: --es-worker-proxy requires an Event Service canary')
+        return 2
     if bool(args.canary_stamp) != bool(args.canary_queue):
         _log("ERROR: --canary-stamp and --canary-queue go together")
         return 2
     if args.canary_defer_datasets and not args.canary_stamp:
         _log("ERROR: --canary-defer-datasets is for payload canaries only")
         return 2
+    # A developer's canary (swf-epicprod docs/DEVELOPING_THE_PAYLOAD.md):
+    # its settings are checked before anything is fetched or submitted.
+    developer = bool(args.canary_payload_ref or args.canary_switch
+                     or args.canary_credential != "x509")
+    if developer and not args.canary_stamp:
+        _log("ERROR: --canary-payload-ref, --canary-switch and --canary-credential "
+             "are for payload canaries only")
+        return 2
+    if args.canary_payload_ref and not PAYLOAD_REF_RE.match(args.canary_payload_ref):
+        _log(f"ERROR: payload source {args.canary_payload_ref!r} is not pr:<N>, "
+             f"<branch> or <owner>:<branch>")
+        return 2
+    for switch in args.canary_switch:
+        if not PAYLOAD_SWITCH_RE.match(switch):
+            _log(f"ERROR: switch {switch!r} is not EPICPROD_SWITCH_<NAME>=<value> "
+                 f"(value without spaces or shell characters)")
+            return 2
+    token_path = None
+    if args.canary_credential == "token":
+        token_path = args.canary_token_file
+        if not token_path or not os.path.isfile(token_path):
+            _log("ERROR: a token-only canary needs a token file, and none is configured "
+                 "(CANARY_TOKEN_FILE)")
+            return 2
 
     if not args.swf_monitor_url:
         _log("ERROR: no --swf-monitor-url / SWF_MONITOR_URL")
@@ -662,9 +859,14 @@ def main():
                   if args.canary_mem_limit_mb else "")
         spec['exec'] = (f"{prefix}python3 evgen_job_dispatcher.py payload-canary "
                         f"{spec['csvBase']} {args.canary_stamp}")
+        # Above the production band: a canary is one job whose point is a
+        # prompt verdict. At its PCS task's priority it waited behind every
+        # older production job of the same priority on the queue (2,875 at
+        # 900 on BNL_OSG_PanDA_1, 2026-10-24: about 16 hours), and the
+        # queue's scheduled canary went stale with it.
         spec.update(site=args.canary_queue, processingType='canary',
                     prodSourceLabel='test', userName='canary', nJobs=1,
-                    maxAttempt=1, skipScout=True)
+                    maxAttempt=1, skipScout=True, taskPriority=CANARY_TASK_PRIORITY)
         if args.canary_out_rse:
             spec['env'] = dict(spec.get('env') or {}, OUT_RSE=args.canary_out_rse)
             _log(f"canary outputs to {args.canary_out_rse}")
@@ -701,7 +903,9 @@ def main():
                          f"{args.es_measure_queue or args.canary_queue} ({m.get('jobs', 0)} finished "
                          f"jobs in {m.get('days')} days)")
                     return 2
-                args.es_events_per_range = max(1, int(round(args.es_quantum_s / float(m["s_per_event"]))))
+                # Whole ranges a unit: a multiple of --es-fine-range-events.
+                k = max(1, args.es_fine_range_events)
+                args.es_events_per_range = k * max(1, int(round(args.es_quantum_s / float(m["s_per_event"]) / k)))
                 _log(f"unit: {args.es_events_per_range} events = {args.es_quantum_s} s over "
                      f"{m['s_per_event']} s/event ({m['jobs']} finished jobs of the configuration on "
                      f"{m['queue']}, median {m['median_wall_s']} s for {m['median_events']} events)")
@@ -709,11 +913,20 @@ def main():
                 _log("ERROR: --es-input-dataset needs --es-events-per-range "
                      "(or --es-fine-grained) and --es-events")
                 return 2
+            if args.es_fine_range_events != 1 and (
+                    not args.es_fine_grained or args.es_fine_range_events < 1
+                    or args.es_events_per_range < 1
+                    or args.es_events_per_range % args.es_fine_range_events):
+                _log("ERROR: --es-fine-range-events needs --es-fine-grained and "
+                     "must divide --es-events-per-range")
+                return 2
             deadline = (f"ES_DEADLINE_S={int(args.es_deadline_s)} ES_MARGIN_S={int(args.es_margin_s)} "
                         if args.es_deadline_s else "")
-            # A fine-grained task's ranges are single events; the harness
-            # runs --es-events-per-range of them as one unit (the loss
-            # quantum, the chunk that names the outputs).
+            # A fine-grained task's ranges hold --es-fine-range-events events
+            # (one by default); the harness runs --es-events-per-range events
+            # of them as one unit (the loss quantum, the chunk that names the
+            # outputs). Ranges above one event need a batch-channel pilot,
+            # which counts events; the stock pilot counts ranges.
             per_unit = (f"ES_EVENTS_PER_UNIT={int(args.es_events_per_range)} "
                         if args.es_fine_grained and args.es_events_per_range > 0 else "")
             close = f"ES_CLOSE_S={int(args.es_close_s)} " if args.es_close_s > 0 else ""
@@ -732,6 +945,12 @@ def main():
                             f"{spec['csvBase']} {args.canary_stamp} "
                             f"$PILOT_EVENTRANGECHANNEL"
                             + (" --accessmode=direct" if args.es_direct_input else ""))
+            if args.es_worker_proxy:
+                if args.canary_credential != 'x509':
+                    _log('ERROR: --es-worker-proxy requires the x509 canary mode')
+                    return 2
+                spec['workerProxy'] = True
+                spec['exec'] = 'ES_WORKER_PROXY=1 ' + spec['exec']
             spec['nCore'] = 1 if es_slots == 'auto' else int(es_slots)
             if args.es_ram_per_core_mb > 0:
                 # The memory is per core, and a queue that declares a whole
@@ -747,11 +966,18 @@ def main():
             if args.es_direct_input:
                 # runGen takes the input as given (the kernel's --givenPFN)
                 spec['directInput'] = True
+            if args.es_input_files:
+                spec['inputFiles'] = [n for n in args.es_input_files.split(',') if n]
+            file_events = {}
+            for pair in [p for p in args.es_file_events.split(',') if p]:
+                name, _, count = pair.partition('=')
+                file_events[name] = int(count)
             spec.update(inputDataset=args.es_input_dataset, nFilesPerJob=1,
                         nEventsPerInputFile=int(args.es_events),
                         nEventsPerJob=int(args.es_events),
                         nEventsPerWorker=int(args.es_events_per_range),
                         fineGrainedProc=bool(args.es_fine_grained),
+                        fineGrainedRangeEvents=int(args.es_fine_range_events),
                         # The es_events storage's record reaches the pilot
                         # from the queue's published ddmendpoints.json
                         # (perlmutter/<queue>/, STORAGEDATA_SERVER_URL in
@@ -759,16 +985,23 @@ def main():
                         # executor resolves the storage id on the
                         # pilot-wide information service, which a job-level
                         # record does not reach (job 3494150).
-                        # No log dataset: the pilot makes an event-service
-                        # job's log tarball from the wrong directory and the
-                        # missing file fails the job after every range was
-                        # reported (3494150, pilot error 1165), which loses
-                        # the ranges; the worker record on the portal is the
-                        # log. The npps0 round trip ran the same way.
-                        noLog=True)
+                        # The job keeps its log dataset: an Event Service
+                        # job's pilot log is its only full account (the
+                        # worker record carries selected lines). The site
+                        # pilot of September made the ES log tarball from
+                        # the wrong directory (3494150, pilot error 1165);
+                        # the native pilot is tested on its own.
+                        )
+            if file_events:
+                if list(file_events) != spec.get('inputFiles'):
+                    _log('ERROR: --es-file-events must name the --es-input-files, in order')
+                    return 2
+                spec.pop('nEventsPerInputFile', None)
+                spec.update(epicFileEvents=file_events, nEventsPerJob=sum(file_events.values()),
+                            nEvents=sum(file_events.values()), nJobs=len(file_events))
             _log(f"event service canary: {args.es_events} events of "
                  f"{args.es_input_dataset} in ranges of "
-                 + (f"1 (fine-grained), units of {args.es_events_per_range or 1}"
+                 + (f"{args.es_fine_range_events} (fine-grained), units of {args.es_events_per_range or 1}"
                     if args.es_fine_grained else str(args.es_events_per_range)))
         _log(f"payload canary {spec['outDS']} on {args.canary_queue}: "
              f"row {spec['csvRows'][0]}"
@@ -813,12 +1046,49 @@ def main():
         _log(f"trial {spec['outDS']} on {spec.get('site') or '(brokered)'}: "
              f"{args.trial_events} events, outputs under "
              f"epic:/{args.trial_root}, lifetime {args.trial_lifetime_days}d")
+    # Recheck the final destination in the credentialed doer: a request
+    # queued before retirement, a trial or a payload canary bypasses the
+    # current PCS admission check. This creates tasks, never existing jobs.
+    from swf_epicprod.regulation import require_task_destination
+    try:
+        require_task_destination(spec.get('site'))
+        _check_destination_image(args, spec)
+    except Exception as exc:
+        _log(f"ERROR: {exc}")
+        _record_submission_failure(args, str(exc))
+        return 2
     if spec.get('site') in OBJECT_STORE_LOG_QUEUES:
         # The kernel drops the log dataset on noLog (evgen_panda_submit.py).
         spec['noLog'] = True
         _log(f"site {spec['site']}: no log dataset (object-store log stage-out)")
     _log(f"EVGEN spec for {args.task_name}: outDS={spec['outDS']} "
          f"nJobs={spec.get('nJobs')} skipScout={spec.get('skipScout')}")
+
+    # A developer's canary: its switches ride in the job's environment, its
+    # payload is fetched before anything is created, and the source, the
+    # commit and the credential ride on the submission record.
+    payload_override = None
+    if developer:
+        if args.canary_switch:
+            spec['env'] = dict(spec.get('env') or {},
+                               **dict(s.split('=', 1) for s in args.canary_switch))
+            _log(f"canary switches: {', '.join(args.canary_switch)}")
+        if args.canary_payload_ref:
+            try:
+                os.makedirs(SUBMIT_TMP_ROOT, exist_ok=True)
+                payload_override, commit = _payload_from_ref(
+                    args.canary_payload_ref,
+                    tempfile.mkdtemp(prefix="payload-ref.", dir=SUBMIT_TMP_ROOT))
+            except Exception as e:                                # noqa: BLE001
+                _log(f"ERROR: payload source {args.canary_payload_ref}: {e}")
+                _record_submission_failure(args, f"payload source {args.canary_payload_ref}: {e}")
+                return 3
+            spec['payload_ref'], spec['payload_commit'] = args.canary_payload_ref, commit
+            # The canary CLI reads this line onto the run.
+            _log(f"payload commit: {commit} ({args.canary_payload_ref})")
+        spec['canary_credential'] = args.canary_credential
+        spec['canary_switches'] = list(args.canary_switch)
+        _log(f"canary credential: {args.canary_credential}")
 
     # 2. The output datasets exist before the task does: created with
     # their rule and metadata under the production account, so the jobs
@@ -844,7 +1114,9 @@ def main():
 
     # 3. Assemble the sandbox.
     try:
-        workdir = _assemble_sandbox(spec, args.proxy, SUBMIT_TMP_ROOT)
+        workdir = _assemble_sandbox(spec, args.proxy, SUBMIT_TMP_ROOT,
+                                    payload_dir=payload_override, token_path=token_path,
+                                    ship_proxy=args.canary_credential != "panda")
     except Exception as e:
         _log(f"ERROR: could not assemble sandbox: {e}")
         _record_submission_failure(args, f"could not assemble sandbox: {e}")

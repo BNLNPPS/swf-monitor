@@ -45,6 +45,22 @@ Nothing on an existing row outside the crash fields is touched: the
 payload report the sweep files under ``data['payload_report']`` and the
 registrar's notes stay as they are.
 
+After the crash pass, the memory pass (SEGFAULT_DIAGNOSIS.md, Memory
+kills) finds the production tasks with a memory kill in the window,
+rebuilds their memory signatures over their whole life from aggregate
+queries (``monitor_app.segfaults.build_memory_signatures``; no row per
+killed job), and gives each signature that lacks them three
+representative jobs, ``phase = 'payload_memory'``: the shortest, median
+and longest time to kill among the kills whose manifest row resolves.
+``--memory-only --since 2026-07-01`` is its back-fill.
+
+After the bad-input pass, the Event Service pass (SEGFAULT_DIAGNOSIS.md,
+Event Service units) reads from swfdb the filed harness records of the
+Event Service jobs updated in the window and rebuilds, over every filed
+record of each task with a crashed unit, its ``esunit`` signatures
+(``monitor_app.segfaults.build_es_signatures``). ``--es-only --since
+2026-09-01`` is its back-fill.
+
 Django-bootstrap standalone script — usable by hand and as the nightly
 chain step::
 
@@ -80,7 +96,7 @@ from django.utils import timezone  # noqa: E402
 
 from monitor_app.epicprod_inventory import _prod_task_for_jeditaskid  # noqa: E402
 from monitor_app.epicprod_logging import log_epicprod_action  # noqa: E402
-from monitor_app.models import EpicProdJob  # noqa: E402
+from monitor_app.models import CrashSignature, EpicProdJob  # noqa: E402
 from monitor_app.panda.constants import PANDA_SCHEMA  # noqa: E402
 from pcs.manifests import expand, record_of  # noqa: E402
 from pcs.models import PandaTasks  # noqa: E402
@@ -89,6 +105,12 @@ CRASH_EXITS = ('134', '135', '136', '139')
 SIGNAL_NAMES = {6: 'SIGABRT', 7: 'SIGBUS', 8: 'SIGFPE', 11: 'SIGSEGV'}
 BATCH = 1000
 PHASE = 'payload_crash'
+MEMORY_PHASE = 'payload_memory'
+INPUT_PHASE = 'payload_input'
+MEMORY_REPRESENTATIVES = 3
+# Candidates tried around each anchor (shortest, median, longest) for a
+# representative whose manifest row resolves.
+MEMORY_CANDIDATES = 10
 
 JOB_FIELDS = (
     'pandaid', 'jeditaskid', 'jobname', 'computingsite', 'modificationhost',
@@ -445,13 +467,272 @@ def write_batch(jobs, manifests, chains, dry_run, counts):
             batch_size=BATCH)
 
 
+# ------------------------------------------------------------ memory kills
+
+MEMORY_JOB_FIELDS = JOB_FIELDS + ('minramcount', 'maxvmem')
+
+
+def memory_record(j, seq, row, seq_source):
+    """A memory-killed job's record, in the crash record's shape so the
+    reproduction, the local fragment and the package read it unchanged."""
+    digest = _digest(j.get('jobmetrics'))
+    stage = digest.get('stage') or ''
+    minutes = _minutes(j.get('starttime'), j.get('endtime'))
+    code = int(_num(j.get('piloterrorcode')) or 0)
+    mechanism = 'cgroup' if code == 1212 else 'eviction' if code == 1201 else 'sigkill'
+    maxrss, maxpss, maxvmem = _num(j.get('maxrss')), _num(j.get('maxpss')), _num(j.get('maxvmem'))
+    exit_text = str(j.get('transexitcode') or '')
+    return {
+        'kind': 'memory',
+        'mechanism': mechanism,
+        'exit_code': int(exit_text) if exit_text.isdigit() else None,
+        'signal': None,
+        'request_mb': _num(j.get('minramcount')),
+        'computingsite': j.get('computingsite') or '',
+        'modificationhost': j.get('modificationhost') or '',
+        'starttime': j['starttime'].isoformat() if j.get('starttime') else None,
+        'endtime': j['endtime'].isoformat() if j.get('endtime') else None,
+        'modificationtime': j['modificationtime'].isoformat() if j.get('modificationtime') else None,
+        'minutes': minutes,
+        'maxrss_mb': round(maxrss / 1024.0, 1) if maxrss else None,
+        'maxpss_mb': round(maxpss / 1024.0, 1) if maxpss else None,
+        'maxvmem_mb': round(maxvmem / 1024.0, 1) if maxvmem else None,
+        'cpuconsumptiontime': _num(j.get('cpuconsumptiontime')),
+        'piloterrorcode': code or None,
+        'piloterrordiag': (j.get('piloterrordiag') or '')[:300],
+        'taskname': j.get('taskname') or '',
+        'jobname': j.get('jobname') or '',
+        'attemptnr': _num(j.get('attemptnr')),
+        'seq_source': seq_source,
+        'row': row,
+        'stage': stage,
+        'digest': digest or None,
+        'recorded_at': datetime.now(dt_timezone.utc).isoformat(timespec='seconds'),
+    }
+
+
+def _memory_summary(rec):
+    from monitor_app.segfaults import MEMORY_MECHANISMS
+    label = MEMORY_MECHANISMS.get(rec['mechanism'], {}).get('label', 'removed')
+    when = f" after {rec['minutes']:g} min" if rec.get('minutes') is not None else ''
+    return (f"{rec.get('stage') or 'payload'} killed for memory ({label}) at "
+            f"{rec.get('maxrss_mb')} MB of a {rec.get('request_mb')} MB request{when} "
+            f"at {rec.get('computingsite') or 'unknown site'}")
+
+
+def _input_summary(rec):
+    when = f" after {rec['minutes']:g} min" if rec.get('minutes') is not None else ''
+    return (f"{rec.get('stage') or 'payload'} stopped on its error (exit 1){when} "
+            f"at {rec.get('computingsite') or 'unknown site'}")
+
+
+def memory_candidates(sig):
+    """The pandaids of a memory or bad-input signature's failures, by time
+    to failure."""
+    from monitor_app.segfaults import (MEMORY_MINUTES_SQL, MEMORY_STAGE_SQL, STAGE_LABELS,
+                                       input_fail_sql, is_input, memory_kill_sql)
+    tid = int((sig.tasks or [{}])[0].get('jeditaskid') or 0)
+    if not tid:
+        return []
+    cond, params = input_fail_sql() if is_input(sig) else memory_kill_sql()
+    stage = (sig.data or {}).get('stage') or ''
+    stage_cond, stage_params = '', []
+    if (sig.data or {}).get('split'):
+        if stage:
+            stage_cond = f' AND {MEMORY_STAGE_SQL} = ANY(%s)'
+            stage_params = [[k for k, v in STAGE_LABELS.items() if v == stage] + [stage]]
+        else:
+            stage_cond = f' AND {MEMORY_STAGE_SQL} IS NULL'
+    rows = _panda(
+        f"""SELECT j."pandaid", {MEMORY_MINUTES_SQL} AS minutes
+            FROM "{PANDA_SCHEMA}"."jobsarchived4" j
+            WHERE j."jeditaskid" = %s AND j."jobstatus" = 'failed' AND {cond}{stage_cond}
+            ORDER BY minutes NULLS LAST, j."pandaid" """,
+        [tid] + params + stage_params)
+    return [int(r['pandaid']) for r in rows]
+
+
+def _anchored(ids, anchor, step, taken):
+    """Up to MEMORY_CANDIDATES ids walking from ``anchor`` by ``step``,
+    none already taken."""
+    out, i = [], anchor
+    while 0 <= i < len(ids) and len(out) < MEMORY_CANDIDATES:
+        if ids[i] not in taken:
+            out.append(ids[i])
+        i += step
+    return out
+
+
+def memory_representatives(sig, manifests, chains, counts):
+    """Give a memory signature its representatives when it has fewer than
+    MEMORY_REPRESENTATIVES: the shortest, median and longest time to kill
+    among the kills whose manifest row resolves, written as EpicProdJob
+    rows of phase payload_memory and named on the signature. Kept once
+    chosen, so a reproduction requested against one stays valid."""
+    from monitor_app.segfaults import is_input, job_filter
+    bad_input = is_input(sig)
+    have = list(EpicProdJob.objects.filter(job_filter(sig)).values_list('pandaid', flat=True))
+    if len(have) >= MEMORY_REPRESENTATIVES:
+        return 0
+    ids = memory_candidates(sig)
+    if not ids:
+        return 0
+    taken = set(have)
+    anchors = [(0, 1), (len(ids) // 2, 1), (len(ids) - 1, -1)]
+    pool = []
+    for anchor, step in anchors:
+        pool.append(_anchored(ids, anchor, step, taken))
+    flat = sorted({p for group in pool for p in group})
+    fields = ', '.join(f'j."{f}"' for f in MEMORY_JOB_FIELDS)
+    jobs = {int(r['pandaid']): r for r in _panda(
+        f"""SELECT {fields}, t."taskname" FROM "{PANDA_SCHEMA}"."jobsarchived4" j
+            JOIN "{PANDA_SCHEMA}"."jedi_tasks" t ON t."jeditaskid" = j."jeditaskid"
+            WHERE j."pandaid" = ANY(%s)""", [flat])}
+    from_files = seq_numbers_from_files(flat)
+    missing = [p for p in flat if p not in from_files]
+    from_params = seq_numbers_from_params(missing) if missing else {}
+    now = timezone.now()
+    written = []
+    for group in pool:
+        if len(have) + len(written) >= MEMORY_REPRESENTATIVES:
+            break
+        for pid in group:
+            if pid in taken or pid not in jobs:
+                continue
+            j = jobs[pid]
+            tid = int(j['jeditaskid'])
+            seq, source = None, 'none'
+            if pid in from_files:
+                seq, source = from_files[pid], 'filestable4'
+            else:
+                seq = chains.seq(tid, pid)
+                if seq is not None:
+                    source = 'retry_chain'
+            if seq is None and pid in from_params:
+                seq, source = from_params[pid], 'jobparamstable'
+            row = manifests.row(tid, seq)
+            if row is None:
+                counts['memory_rows_unresolved'] += 1
+                continue
+            rec = memory_record(j, seq, row, source)
+            rec['container'] = manifests.container(tid)
+            if bad_input:
+                rec['kind'], rec['mechanism'] = 'input', 'stage_error'
+            obj = EpicProdJob.objects.filter(pandaid=pid).first() or EpicProdJob(pandaid=pid)
+            obj.jeditaskid = tid
+            obj.prod_task = manifests.prod_task(tid)
+            obj.seq_number = seq
+            obj.job_index = seq - 1
+            obj.status = 'failed'
+            obj.phase = INPUT_PHASE if bad_input else MEMORY_PHASE
+            obj.failure_summary = _input_summary(rec) if bad_input else _memory_summary(rec)
+            data = dict(obj.data or {})
+            data['crash'] = rec
+            obj.data = data
+            obj.last_refreshed_at = now
+            obj.updated_at = now
+            obj.save()
+            taken.add(pid)
+            written.append(pid)
+            break
+    if written:
+        data = dict(sig.data or {})
+        reps = list(dict.fromkeys(list(have) + written))
+        data['representatives'] = reps
+        data['rows_resolved'] = len(reps)
+        sig.data = data
+        sig.save(update_fields=['data', 'updated_at'])
+    return len(written)
+
+
+def memory_pass(since, manifests, chains, counts):
+    """The memory signatures of the tasks with a memory kill since
+    ``since``, rebuilt over their life, and their representatives."""
+    from monitor_app.segfaults import build_memory_signatures, memory_tasks
+    tids = memory_tasks(since)
+    log.info('memory pass: %d tasks with a memory kill since %s', len(tids),
+             since.isoformat(timespec='seconds'))
+    result = build_memory_signatures(tids)
+    reps = 0
+    for key in result['keys']:
+        sig = CrashSignature.objects.filter(key=key).first()
+        if sig is not None:
+            reps += memory_representatives(sig, manifests, chains, counts)
+    log.info('  %d memory signatures (%d new, %d retired), %d representatives written',
+             result['signatures'], result['created'], result['retired'], reps)
+    return {'memory_tasks': len(tids), 'memory_signatures': result['signatures'],
+            'memory_signatures_new': result['created'],
+            'memory_signatures_retired': result['retired'],
+            'memory_representatives': reps,
+            'memory_rows_unresolved': counts['memory_rows_unresolved']}
+
+
+def input_pass(since, manifests, chains, counts):
+    """The bad-input signatures of the tasks with such a failure since
+    ``since``, rebuilt over their life, and their representatives
+    (SEGFAULT_DIAGNOSIS.md, Bad input)."""
+    from monitor_app.segfaults import build_input_signatures, input_tasks, read_input_fatal
+    tids = input_tasks(since)
+    log.info('input pass: %d tasks with a bad-input failure since %s', len(tids),
+             since.isoformat(timespec='seconds'))
+    before = counts['memory_rows_unresolved']
+    result = build_input_signatures(tids)
+    reps = readings = 0
+    for key in result['keys']:
+        sig = CrashSignature.objects.filter(key=key).first()
+        if sig is not None:
+            reps += memory_representatives(sig, manifests, chains, counts)
+            sig.refresh_from_db()
+            readings += int(read_input_fatal(sig))
+    log.info('  %d bad-input signatures (%d new), %d representatives written, %d read',
+             result['signatures'], result['created'], reps, readings)
+    return {'input_tasks': len(tids), 'input_signatures': result['signatures'],
+            'input_signatures_new': result['created'],
+            'input_representatives': reps, 'input_readings': readings,
+            'input_rows_unresolved': counts['memory_rows_unresolved'] - before}
+
+
+def es_pass(since):
+    """The Event Service unit signatures of the tasks with a crashed unit
+    among the records filed since ``since``, rebuilt over all of each
+    task's filed records (SEGFAULT_DIAGNOSIS.md, Event Service units).
+    Reads swfdb alone."""
+    from monitor_app.segfaults import build_es_signatures, es_tasks
+    tids = es_tasks(since)
+    log.info('Event Service pass: %d tasks with a crashed unit since %s', len(tids),
+             since.isoformat(timespec='seconds'))
+    result = build_es_signatures(tids)
+    log.info('  %d Event Service unit signatures (%d new), %d unit crashes',
+             result['signatures'], result['created'], result['units'])
+    return {'es_tasks': len(tids), 'es_signatures': result['signatures'],
+            'es_signatures_new': result['created'], 'es_unit_crashes': result['units']}
+
+
 def run(args):
     since = _window(args)
     t0 = time.monotonic()
     counts = {'jobs_seen': 0, 'rows_added': 0, 'rows_updated': 0,
-              'seq_unresolved': 0, 'rows_unresolved': 0, 'tasks': set()}
+              'seq_unresolved': 0, 'rows_unresolved': 0, 'tasks': set(),
+              'memory_rows_unresolved': 0}
     log.info('window since %s%s', since.isoformat(timespec='seconds'),
              ' (dry run)' if args.dry_run else '')
+    if args.memory_only:
+        manifests = ManifestRows(establish=not args.no_manifest_establish)
+        summary = {'since': since.isoformat(timespec='seconds'), 'memory_only': True}
+        summary.update(memory_pass(since, manifests, RetryChains(), counts))
+        summary['seconds'] = round(time.monotonic() - t0, 1)
+        return summary, t0
+    if args.input_only:
+        manifests = ManifestRows(establish=not args.no_manifest_establish)
+        summary = {'since': since.isoformat(timespec='seconds'), 'input_only': True}
+        summary.update(input_pass(since, manifests, RetryChains(), counts))
+        summary['seconds'] = round(time.monotonic() - t0, 1)
+        return summary, t0
+    if args.es_only:
+        summary = {'since': since.isoformat(timespec='seconds'), 'es_only': True}
+        summary.update(es_pass(since))
+        summary['seconds'] = round(time.monotonic() - t0, 1)
+        return summary, t0
     jobs = crashed_jobs(since, args.limit)
     log.info('%d crash-class jobs in the record', len(jobs))
     manifests = ManifestRows(establish=not args.dry_run and not args.no_manifest_establish)
@@ -477,6 +758,12 @@ def run(args):
     }
     if not args.dry_run and not args.no_signatures:
         summary.update(signature_pass(sorted(counts['tasks']), args))
+    if not args.dry_run and not args.no_memory:
+        summary.update(memory_pass(since, manifests, chains, counts))
+    if not args.dry_run and not args.no_input:
+        summary.update(input_pass(since, manifests, chains, counts))
+    if not args.dry_run and not args.no_es:
+        summary.update(es_pass(since))
     summary['seconds'] = round(time.monotonic() - t0, 1)
     return summary, t0
 
@@ -531,6 +818,18 @@ def main():
                          'no job pass')
     ap.add_argument('--no-signatures', action='store_true',
                     help='the job pass only')
+    ap.add_argument('--no-memory', action='store_true',
+                    help='skip the memory pass')
+    ap.add_argument('--memory-only', action='store_true',
+                    help='the memory pass alone over the window (its back-fill)')
+    ap.add_argument('--no-input', action='store_true',
+                    help='skip the bad-input pass')
+    ap.add_argument('--input-only', action='store_true',
+                    help='the bad-input pass alone over the window (its back-fill)')
+    ap.add_argument('--no-es', action='store_true',
+                    help='skip the Event Service unit pass')
+    ap.add_argument('--es-only', action='store_true',
+                    help='the Event Service unit pass alone over the window (its back-fill)')
     ap.add_argument('--no-rows-lost', action='store_true',
                     help='skip the delivery lookup behind rows_lost')
     ap.add_argument('--no-manifest-establish', action='store_true',
@@ -568,6 +867,21 @@ def main():
         print(json.dumps({'error': str(e)[:300]}))
         return 1
     if not args.dry_run and not args.no_action:
+        memory = (f"{summary.get('memory_signatures', 0)} memory signatures "
+                  f"({summary.get('memory_signatures_new', 0)} new) over "
+                  f"{summary.get('memory_tasks', 0)} tasks, "
+                  f"{summary.get('memory_representatives', 0)} representatives written"
+                  if 'memory_signatures' in summary else '')
+        bad_input = (f"{summary.get('input_signatures', 0)} bad-input signatures "
+                     f"({summary.get('input_signatures_new', 0)} new) over "
+                     f"{summary.get('input_tasks', 0)} tasks, "
+                     f"{summary.get('input_representatives', 0)} representatives written"
+                     if 'input_signatures' in summary else '')
+        es_units = (f"{summary.get('es_signatures', 0)} Event Service unit signatures "
+                    f"({summary.get('es_signatures_new', 0)} new) over "
+                    f"{summary.get('es_tasks', 0)} tasks, "
+                    f"{summary.get('es_unit_crashes', 0)} unit crashes"
+                    if 'es_signatures' in summary else '')
         log_epicprod_action(
             args.instance, 'segfault_inventory', outcome='ok',
             duration_ms=int((time.monotonic() - t0) * 1000),
@@ -575,6 +889,12 @@ def main():
             message=(f"segfault signatures rebuilt: {summary.get('signatures')} "
                      f"({summary.get('signatures_new')} new) {summary.get('signature_classes')}"
                      if args.signatures else
+                     f"segfault inventory since {summary['since'][:10]}: {memory}"
+                     if args.memory_only else
+                     f"segfault inventory since {summary['since'][:10]}: {bad_input}"
+                     if args.input_only else
+                     f"segfault inventory since {summary['since'][:10]}: {es_units}"
+                     if args.es_only else
                      f"segfault inventory since {summary['since'][:10]}: "
                      f"{summary['jobs_seen']} crashed jobs, {summary['rows_added']} rows added, "
                      f"{summary['rows_updated']} updated, {summary['rows_unresolved']} rows "
@@ -582,7 +902,10 @@ def main():
                      f"{summary.get('manifests_established', 0)} manifests established "
                      f"({summary.get('manifests_unavailable', 0)} unavailable), "
                      f"{summary.get('signatures', 0)} signatures "
-                     f"({summary.get('signatures_new', 0)} new)"),
+                     f"({summary.get('signatures_new', 0)} new)"
+                     + (f"; {memory}" if memory else '')
+                     + (f"; {bad_input}" if bad_input else '')
+                     + (f"; {es_units}" if es_units else '')),
             **{k: v for k, v in summary.items() if isinstance(v, int) and not isinstance(v, bool)})
     print(json.dumps(summary))
     return 0

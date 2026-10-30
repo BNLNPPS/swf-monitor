@@ -13,6 +13,7 @@ from .views import (
     users_list,
 )
 from .host_reports import host_report
+from .worker_disk_space import worker_disk_space
 from .sse_views import sse_message_stream, sse_status
 from .panda import api as panda_api
 from .panda.corun_callback import corun_callback
@@ -69,6 +70,7 @@ urlpatterns = [
     # Host reporters push what only their own host can see
     # (docs/OSG_SUBMIT_REPORTER.md).
     path('host-reports/<str:host>/', host_report, name='host-report'),
+    path('worker-disk-space/', worker_disk_space, name='worker-disk-space'),
     # PanDA REST API — read-only JSON for external consumers.
     # See monitor_app/panda/api.py.
     path('panda/tasks/', panda_api.tasks_list, name='panda-api-tasks-list'),
@@ -85,6 +87,16 @@ urlpatterns = [
     path('panda/task-operations/<uuid:operation_id>/state/',
          panda_api.task_operation_update,
          name='panda-task-operation-update'),
+    # Removing datasets from a disk RSE (panda/rse_deletions.py).
+    path('panda/rse-deletions/',
+         panda_api.rse_deletion_request,
+         name='panda-rse-deletion-request'),
+    path('panda/rse-deletions/<uuid:deletion_id>/',
+         panda_api.rse_deletion_detail,
+         name='panda-rse-deletion-detail'),
+    path('panda/rse-deletions/<uuid:deletion_id>/execute/',
+         panda_api.rse_deletion_execute,
+         name='panda-rse-deletion-execute'),
     path('panda/jobs/', panda_api.jobs_list, name='panda-api-jobs-list'),
     path('panda/activity/', panda_api.activity, name='panda-api-activity'),
     path('panda/harvester-instances/', panda_api.harvester_instances,

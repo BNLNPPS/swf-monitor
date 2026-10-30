@@ -1,0 +1,5 @@
+<div class="prod-home-tabs swf-page-tabs">
+    <a class="{% if active_tab == 'nav' %}active{% endif %}" href="{% url 'monitor_app:prod_hub' %}?tab=nav">Nav</a>
+    <a class="{% if active_tab == 'dash' %}active{% endif %}" href="{% url 'monitor_app:prod_hub' %}?tab=dash">Dash</a>
+    <a class="{% if active_tab == 'ops' %}active{% endif %}" href="{% url 'monitor_app:prod_hub' %}?tab=ops">Ops</a>
+</div>

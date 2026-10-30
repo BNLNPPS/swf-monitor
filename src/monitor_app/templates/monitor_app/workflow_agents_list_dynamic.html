@@ -40,9 +40,9 @@
 
 {% block initial_filters %}
 {
-    agent_type: '{{ selected_type|default:"" }}',
-    status: '{{ selected_status|default:"" }}',
-    namespace: '{{ selected_namespace|default:"" }}'
+    agent_type: '{{ selected_type|default:""|force_escape|escapejs }}',
+    status: '{{ selected_status|default:""|force_escape|escapejs }}',
+    namespace: '{{ selected_namespace|default:""|force_escape|escapejs }}'
 }
 {% endblock %}
 

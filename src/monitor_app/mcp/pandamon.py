@@ -682,9 +682,12 @@ async def panda_segfault_findings() -> dict:
             (label, url), class, action (what production does), standing
             (open, fix named, fixed, accepted), fix, notes, model_reading
             (true when the entry is an LLM study's reading not yet checked
-            against its source), updated_by, updated_at, signatures (the
-            catalog entries with their counts), crashes, tasks, rows_lost,
-            events_lost.
+            against its source), detector_components, detector_point and
+            detector_geometry (where in the detector the finding lies: DD4hep
+            detector names, a point in DD4hep global coordinates in mm, the
+            geometry), detector_where (the same as one line), updated_by,
+            updated_at, signatures (the catalog entries with their counts),
+            crashes, tasks, rows_lost, events_lost.
         monitor_url: The findings page.
     """
     from monitor_app.segfaults import findings
@@ -713,6 +716,9 @@ async def panda_segfault_finding_set(
     sources: list = None,
     signatures: list = None,
     model_reading: bool = None,
+    detector_components: list = None,
+    detector_point: dict = None,
+    detector_geometry: str = None,
     changed_by: str = 'mcp',
 ) -> dict:
     """
@@ -739,6 +745,14 @@ async def panda_segfault_finding_set(
         signatures: The catalog keys the finding explains (default: name).
         model_reading: True when the entry is an LLM study's reading not
             yet checked against its source; cleared by whoever checks it.
+        detector_components: Where in the detector the finding lies, for
+            the ePIC detector model: DD4hep top-level detector names from
+            the epic compact files (e.g. ['BeamPipeB0']), each optionally
+            with a volume path below it ('BeamPipeB0/v_pipe_7').
+        detector_point: A point in DD4hep global coordinates, millimetres:
+            {'x': ..., 'y': ..., 'z': ...}, an unknown axis null.
+        detector_geometry: The geometry the names and point refer to
+            (e.g. 'epic 26.07.3 epic_craterlake').
         changed_by: Who writes (the version stamp).
 
     Returns:
@@ -752,12 +766,18 @@ async def panda_segfault_finding_set(
                            ('stage', stage), ('class', class_hint), ('action', action),
                            ('standing', standing), ('fix', fix), ('notes', notes),
                            ('sources', sources), ('signatures', signatures),
-                           ('model_reading', model_reading)):
+                           ('model_reading', model_reading),
+                           ('detector_components', detector_components),
+                           ('detector_point', detector_point),
+                           ('detector_geometry', detector_geometry)):
             if value is not None:
                 fields[key] = value
         if not fields:
             return {'error': 'nothing to set'}
-        entry, created = set_finding(name, fields, changed_by)
+        try:
+            entry, created = set_finding(name, fields, changed_by)
+        except ValueError as exc:
+            return {'error': str(exc)}
         return {'name': name, 'created': created, 'versions': entry.versions.count(),
                 'title': entry.title, 'standing': entry.status, 'data': entry.data}
     return await sync_to_async(_work)()
@@ -780,7 +800,11 @@ async def panda_segfault_reproduce(
     reference queue BNL_NPPS_GPU, one slot with known conditions, is named
     in ``queues`` only when the reading needs the host (a memory ceiling, a
     core dump, a stall watched live); it then carries the production
-    queue's memory limit. The request is recorded on the signature as it
+    queue's memory limit. A memory signature (class memory, key
+    'memory:task<N>[:stage]') is reproduced by default on the production
+    queue at the task's own request and on the reference queue with no
+    limit, where the row runs to its end and its peak memory and growth
+    are measured. The request is recorded on the signature as it
     is sent and appears on the runs page (/panda/segfaults/reproductions/)
     within a minute, which is how a session that takes an item from the
     nightly notice claims it: check the signature's attempts
@@ -792,7 +816,8 @@ async def panda_segfault_reproduce(
         pandaid: The crashed job to rerun (default: the representative
             with a resolved row).
         queues: The queues to run on (default: the production queue and
-            the second queue; add 'BNL_NPPS_GPU' for the reference run).
+            the second queue, or the reference queue for a memory
+            signature; add 'BNL_NPPS_GPU' for the reference run).
         requested_by: Who requests (recorded on the signature and the
             action stream).
 
@@ -812,10 +837,11 @@ async def panda_segfault_reproduce(
             plan = reproduction_plan(sig, pandaid)
         except ValueError as e:
             return {'error': str(e)}
-        chosen = [q for q in (queues or []) if q] or [
-            q for q in (plan['production_queue'], plan['elsewhere_queue']) if q]
+        chosen = [q for q in (queues or []) if q] or plan['default_queues']
         chosen = list(dict.fromkeys(chosen))
-        mem_limits = {q: (plan['maxrss_mb'] if q == REFERENCE_QUEUE else None) for q in chosen}
+        # A memory reproduction measures the row, so no run is limited.
+        mem_limits = {q: (plan['maxrss_mb'] if q == REFERENCE_QUEUE and not plan['memory'] else None)
+                      for q in chosen}
         try:
             entries = reproduce(sig, plan['pandaid'], chosen, mem_limits, requested_by)
         except (ValueError, RuntimeError) as e:

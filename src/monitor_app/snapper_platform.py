@@ -85,6 +85,10 @@ CONFIG_DEFAULTS = {
     "platform_stale_warn_fraction": 0.25,
     "platform_stale_warn_tier_minutes": 60,
     "platform_volume_warn_percent": 90,
+    # Isolated held pilots are worker diagnostics. Raise a platform alarm
+    # only when both their count and share indicate impaired submission.
+    "platform_submit_held_warn_min_workers": 10,
+    "platform_submit_held_warn_fraction": 0.1,
     # Silence of a submit-host daemon that ticks regardless of demand.
     # Measured cadence on that host: seconds for the busiest, a few
     # minutes for the credential manager.
@@ -605,8 +609,10 @@ SUBMIT_DAEMON_WARN_SECONDS = CONFIG_DEFAULTS[
     "platform_submit_daemon_warn_seconds"]
 
 # Daemons that tick regardless of demand, and are therefore the ones
-# whose silence is a fault.
-SUBMIT_HEARTBEAT_DAEMONS = ('db_proxy', 'propagator', 'job_fetcher',
+# whose silence is a fault. The database is judged by db_proxy_pool:
+# db_proxy's logger is held at INFO since 2026-10-18 16:53 ET (its DEBUG
+# SQL had filled 26 GB in a day), and at INFO it writes almost nothing.
+SUBMIT_HEARTBEAT_DAEMONS = ('db_proxy_pool', 'propagator', 'job_fetcher',
                             'monitor', 'watcher', 'sweeper', 'preparator',
                             'stager', 'cred_manager')
 
@@ -615,7 +621,7 @@ SUBMIT_HEARTBEAT_DAEMONS = ('db_proxy', 'propagator', 'job_fetcher',
 # htcondor_submitter sat quiet for 47 minutes with two workers running,
 # which a freshness verdict would have called a fault.
 SUBMIT_DEMAND_DAEMONS = ('submitter', 'htcondor_submitter',
-                         'htcondor_monitor', 'htcondor_sweeper')
+                         'htcondor_monitor', 'htcondor_sweeper', 'db_proxy')
 
 SUBMIT_DAEMONS = SUBMIT_HEARTBEAT_DAEMONS + SUBMIT_DEMAND_DAEMONS
 
@@ -623,24 +629,31 @@ SUBMIT_DAEMONS = SUBMIT_HEARTBEAT_DAEMONS + SUBMIT_DEMAND_DAEMONS
 # /var/log/panda (docs/PANDA_SERVER_REPORTER.md). The judged set writes
 # regardless of demand, at least once a minute on this deployment
 # (measured 2026-09-07 over five samples: 17 s at most for the first
-# group, about a minute for the JEDI task and message daemons).
+# group, about a minute for the JEDI task and message daemons; set again
+# 2026-10-21 for the server upgraded 2026-10-09 and back at log level
+# INFO since 2026-10-18).
 SERVER_HEARTBEAT_DAEMONS = (
-    'DBProxy', 'DBProxyPool', 'JediDBProxy', 'Entry', 'msg_bkr_utils',
-    'api_harvester', 'JobGenerator', 'EpicProdJobThrottler', 'JobThrottler',
+    'DBProxy', 'JediDBProxy', 'Entry', 'msg_bkr_utils',
+    'JobGenerator', 'EpicProdJobThrottler', 'JobThrottler',
     'TaskBuffer', 'TaskSetupper', 'TaskRefiner', 'ContentsFeeder',
-    'WatchDog', 'GenWatchDog', 'AsyncRequestWatchDog',
-    'async_request_processor', 'add_main', 'SiteMapper', 'daemons',
-    'panda_daemon_stdout', 'panda_jedi_stdout', 'JediTaskBuffer',
-    'JediMsgProcessor', 'PostProcessor', 'TaskCommando')
+    'WatchDog', 'daemons', 'panda_daemon_stdout', 'panda_jedi_stdout',
+    'JediMsgProcessor', 'PostProcessor')
 
 # Daemons and API logs that write only when there is work: pilot calls,
-# archiving, brokerage, the adder. Recorded, not judged.
+# archiving, brokerage, the adder, task commands. Recorded, not judged.
+# The second group writes nothing at INFO on the upgraded server: their
+# logs have been empty since the level went back to INFO on 2026-10-18,
+# while the daemons ran (the async request daemon starts and finishes
+# every ten seconds in the daemons log). api_harvester writes only its
+# errors at INFO.
 SERVER_DEMAND_DAEMONS = (
     'api_pilot', 'PilotRequests', 'copyArchive', 'adder', 'add_sub',
     'JobBroker', 'GenJobBroker', 'TaskBroker', 'JobSplitter',
     'configurator', 'Watcher', 'closer', 'setupper', 'RetrialModule',
     'api_statistics', 'api_metaconfig', 'api_system', 'api_job',
-    'api_task', 'token_cache', 'cache_schedconfig')
+    'api_task', 'token_cache', 'cache_schedconfig', 'TaskCommando',
+    'DBProxyPool', 'JediTaskBuffer', 'GenWatchDog', 'AsyncRequestWatchDog',
+    'async_request_processor', 'add_main', 'SiteMapper', 'api_harvester')
 
 SERVER_DAEMONS = SERVER_HEARTBEAT_DAEMONS + SERVER_DEMAND_DAEMONS
 
@@ -924,13 +937,22 @@ def assess(database, heartbeats, server, reporter_status, monitor_host,
             else "unknown")
     if submit_host:
         submit = _submit_host_projection(submit_host)
-        # Held workers are the submission side's own failure signal: a
-        # site refusing every submission holds them and nothing in the
-        # PanDA record says so. GREX held fifteen over thirteen hours
-        # with nothing raised.
-        held = (submit.get('workers') or {}).get('held')
-        verdict("submit_workers_held", bool(held),
-                known=held is not None)
+        # Require impact on submission: a few isolated holds in a working
+        # schedd must not become a persistent production alarm.
+        workers = submit.get('workers') or {}
+        counts = [workers.get(state) for state in ('idle', 'running', 'held')]
+        known = all(isinstance(n, int) and n >= 0 for n in counts)
+        total = sum(counts) if known else 0
+        held = workers.get('held')
+        min_held = int(thresholds.get(
+            "platform_submit_held_warn_min_workers",
+            CONFIG_DEFAULTS["platform_submit_held_warn_min_workers"]))
+        held_fraction = float(thresholds.get(
+            "platform_submit_held_warn_fraction",
+            CONFIG_DEFAULTS["platform_submit_held_warn_fraction"]))
+        verdict("submit_workers_held",
+                known and total > 0 and held >= min_held
+                and held / total >= held_fraction, known=known)
         # A submission daemon that has stopped writing is stopped.
         oldest = submit.get('daemon_oldest_log_seconds')
         verdict("submit_daemons",

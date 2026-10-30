@@ -42,9 +42,9 @@
 
 {% block initial_filters %}
 {
-    workflow_name: '{{ selected_workflow_name|default:"" }}',
-    workflow_type: '{{ selected_workflow_type|default:"" }}',
-    created_by: '{{ selected_created_by|default:"" }}'
+    workflow_name: '{{ selected_workflow_name|default:""|force_escape|escapejs }}',
+    workflow_type: '{{ selected_workflow_type|default:""|force_escape|escapejs }}',
+    created_by: '{{ selected_created_by|default:""|force_escape|escapejs }}'
 }
 {% endblock %}
 

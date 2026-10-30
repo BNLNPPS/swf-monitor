@@ -172,15 +172,21 @@ def fill_ghost(client, scope, lfn, rep, path):
         pfn = 'root://' + pfns[0].split('://', 1)[1]
     if pfn is None:
         raise RuntimeError(f'ghost {scope}:{lfn} names no replica path')
-    # A JLab door admits the JLab production proxy, not the BNL one, and its
-    # TLS refuses a proxy file readable by others, as the agent's BNL copy is
-    # (the payload-log fetch routes the same way).
+    # A JLab door takes a storage token for this one path, create only (a
+    # log is never overwritten), else the JLab production proxy, not the BNL
+    # one: its TLS refuses a proxy file readable by others, as the agent's
+    # BNL copy is (the payload-log fetch routes the same way).
     env = dict(os.environ)
     if '.jlab.org' in pfn.split('/')[2]:
-        jlab_proxy = os.environ.get('EVGEN_X509_PROXY', '')
-        if not jlab_proxy:
-            raise RuntimeError(f'EVGEN_X509_PROXY is not set; the JLab door at {pfn} needs it')
-        env['X509_USER_PROXY'] = jlab_proxy
+        from swf_epicprod.jlab_auth import door_access
+        door, _, door_path = pfn.partition('//')[2].partition('/')
+        url, env, how = door_access(f"{pfn.split('//')[0]}//{door}", f'/{door_path}',
+                                    verbs=('storage.create',),
+                                    proxy=os.environ.get('EVGEN_X509_PROXY') or None)
+        if how == 'none':
+            raise RuntimeError(f'the JLab door at {pfn} gave no storage token '
+                               'and EVGEN_X509_PROXY is not set')
+        pfn = f"{url}//{door_path.lstrip('/')}"
     proc = subprocess.run(['xrdcp', '--nopbar', path, pfn], capture_output=True, text=True,
                           timeout=600, env=env)
     if proc.returncode != 0 and 'file exists' in (proc.stderr or proc.stdout).lower():
@@ -230,10 +236,54 @@ def rescue(client, uploader, s3, entry, dry_run):
             except Occupied as exc:
                 return 'occupied', str(exc)
         ensure_open(client, scope, dataset)
+        if gfal_only(client, rse):
+            try:
+                return 'done', upload_xrootd(client, rse, scope, lfn, guid, dataset, path)
+            except Occupied as exc:
+                return 'occupied', str(exc)
         uploader.upload([{'path': path, 'rse': rse, 'did_scope': scope, 'did_name': lfn,
                           'guid': guid, 'dataset_scope': scope, 'dataset_name': dataset,
                           'register_after_upload': True}])
     return 'done', f'{key} -> {rse}, attached to {scope}:{dataset}'
+
+
+def gfal_only(client, rse):
+    """True when gfal2 is not installed here and every write protocol of the
+    RSE is gfal's (BNL_PROD_DISK_1, GREX's log RSE, lists davs and root, both
+    gfal): the upload client cannot write there, and the log goes by xrdcp
+    instead (``upload_xrootd``). gfal2 has no build for the agent's Python."""
+    try:
+        import gfal2  # noqa: F401
+        return False
+    except ImportError:
+        pass
+    writers = [p for p in client.get_protocols(rse)
+               if any((p['domains'].get(d) or {}).get('write') for d in ('lan', 'wan'))]
+    return bool(writers) and all(p['impl'].startswith('rucio.rse.protocols.gfal') for p in writers)
+
+
+def upload_xrootd(client, rse, scope, lfn, guid, dataset, path):
+    """The upload client's write and registration, by xrdcp: the log is
+    written to its deterministic root path at the RSE, never over a file
+    there, then registered there under the job's GUID with its size and
+    checksum and attached to its log dataset."""
+    pfn = next(iter(client.lfns2pfns(rse, [f'{scope}:{lfn}'], scheme='root',
+                                     operation='write').values()))
+    proc = subprocess.run(['xrdcp', '--nopbar', path, pfn], capture_output=True, text=True,
+                          timeout=600)
+    if proc.returncode != 0 and 'file exists' in (proc.stderr or proc.stdout).lower():
+        raise Occupied(f'{pfn} already holds a file; another attempt wrote this log name, '
+                       'and it is never overwritten. The held copy stays in the bucket until it expires.')
+    if proc.returncode != 0:
+        raise RuntimeError(f'xrdcp to {pfn} failed: {(proc.stderr or proc.stdout).strip()[:300]}')
+    size = os.path.getsize(path)
+    with open(path, 'rb') as fp:
+        adler = f'{zlib.adler32(fp.read()) & 0xffffffff:08x}'
+    client.add_replicas(rse=rse, files=[{'scope': scope, 'name': lfn, 'bytes': size,
+                                         'adler32': adler,
+                                         'meta': {'guid': str(guid).replace('-', '')}}])
+    client.attach_dids(scope=scope, name=dataset, dids=[{'scope': scope, 'name': lfn}])
+    return f'{pfn} by xrdcp ({size} B, ad:{adler}), attached to {scope}:{dataset}'
 
 
 def main():

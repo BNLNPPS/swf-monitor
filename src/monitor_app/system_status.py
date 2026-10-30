@@ -281,6 +281,113 @@ def _github_actions():
                    f'{len(GITHUB_REPOS)} repos', data)
 
 
+# The release cadence (swf-testbed docs/releases.md, the swf-release
+# skill): the work branch merges to main weekly, and main's merged
+# contributor work reaches the work branch as promptly. Read from bare
+# mirrors fetched over git, never the GitHub API, whose unauthenticated
+# budget the github-actions check already spends.
+RELEASE_REPOS = ['BNLNPPS/swf-monitor', 'BNLNPPS/swf-testbed', 'BNLNPPS/swf-common-lib']
+RELEASE_MIRROR_ROOT = os.environ.get('SWF_RELEASE_MIRROR_ROOT',
+                                     '/opt/swf-monitor/shared/release-mirrors')
+
+
+def _git(args, cwd=None, timeout=60):
+    p = subprocess.run(['git'] + list(args), cwd=cwd, capture_output=True,
+                       text=True, timeout=timeout)
+    if p.returncode != 0:
+        raise RuntimeError(f"git {args[0]}: {(p.stderr or p.stdout).strip()[:200]}")
+    return p.stdout
+
+
+def _release_mirror(repo, interval_s):
+    """The repo's bare mirror, cloned on first use and fetched when its
+    last fetch is older than ``interval_s``."""
+    path = os.path.join(RELEASE_MIRROR_ROOT, repo.split('/')[-1] + '.git')
+    if not os.path.isdir(path):
+        os.makedirs(RELEASE_MIRROR_ROOT, exist_ok=True)
+        _git(['clone', '--bare', '--quiet', f'https://github.com/{repo}.git', path], timeout=120)
+        _git(['config', 'remote.origin.fetch', '+refs/heads/*:refs/heads/*'], cwd=path)
+        _git(['fetch', '--quiet', '--prune', 'origin'], cwd=path, timeout=120)
+        return path
+    stamp = os.path.join(path, 'FETCH_HEAD')
+    if not os.path.exists(stamp) or time.time() - os.path.getmtime(stamp) >= interval_s:
+        _git(['fetch', '--quiet', '--prune', 'origin'], cwd=path, timeout=120)
+    return path
+
+
+def _first_parent_times(path, rng):
+    """Commit times of the first-parent line of a range: on main, its
+    merges; on a work branch, its own commits."""
+    return [int(t) for t in _git(['log', '--first-parent', '--format=%ct', rng], cwd=path).split()]
+
+
+def _release_cadence():
+    """Each core repo's work branch against main (SYSTEM_STATUS.md,
+    release-cadence). A warning, never an error: a late release is a
+    process condition, not a production failure. While it stands, the
+    release_overdue incident is recorded once per Eastern day."""
+    import re
+    from zoneinfo import ZoneInfo
+    days = float(SysConfig.get_setting('release_overdue_days', 7))
+    interval_s = 60 * float(SysConfig.get_setting('release_check_interval_minutes', 60))
+    now = time.time()
+    repos, late, errors = [], [], []
+    for repo in RELEASE_REPOS:
+        name = repo.split('/')[-1]
+        try:
+            path = _release_mirror(repo, interval_s)
+            heads = _git(['for-each-ref', '--format=%(refname:short)',
+                          'refs/heads/infra/baseline-v*'], cwd=path).split()
+            numbered = sorted((int(m.group(1)), h) for h in heads
+                              for m in [re.match(r'infra/baseline-v(\d+)$', h)] if m)
+            if not numbered:
+                errors.append(f'{name}: no infra/baseline-vN branch')
+                continue
+            work = numbered[-1][1]
+            ahead = _first_parent_times(path, f'main..{work}')
+            behind = _first_parent_times(path, f'{work}..main')
+        except Exception as exc:                              # noqa: BLE001
+            errors.append(f'{name}: {exc}')
+            continue
+        rec = {'repo': repo, 'work_branch': work,
+               'ahead': len(ahead), 'ahead_oldest_days': round((now - min(ahead)) / 86400, 1) if ahead else None,
+               'behind': len(behind), 'behind_oldest_days': round((now - min(behind)) / 86400, 1) if behind else None}
+        repos.append(rec)
+        if rec['ahead'] and rec['ahead_oldest_days'] > days:
+            late.append(f"{name}: {work} has {rec['ahead']} commits main lacks, the oldest "
+                        f"{rec['ahead_oldest_days']:g} days old; the release is overdue")
+        if rec['behind'] and rec['behind_oldest_days'] > days:
+            late.append(f"{name}: main has {rec['behind']} merges {work} lacks, the oldest "
+                        f"{rec['behind_oldest_days']:g} days old; production does not run them")
+    data = {'repos': repos, 'errors': errors, 'overdue_days': days}
+    previous = SystemStatus.objects.filter(name='release-cadence').only('data').first()
+    notified_on = ((previous.data if previous else None) or {}).get('notified_on')
+    if late:
+        summary = '; '.join(late)
+        today = datetime.now(ZoneInfo('America/New_York')).date().isoformat()
+        if notified_on != today:
+            from .epicprod_logging import log_epicprod_action
+            log_epicprod_action(
+                'ops-agent', 'release_overdue', subject_type='release',
+                subject_key=','.join(r['work_branch'] for r in repos), outcome='warning',
+                sublevel='normal', severity='warning', message=f'Release overdue: {summary}'[:500],
+                reason=summary[:500], url=f'{external_face_base_url()}/prod/panda/system/')
+            notified_on = today
+        data['notified_on'] = notified_on
+        return _status('release-cadence', 'ci', 'warning', summary, data)
+    data['notified_on'] = notified_on
+    if errors and not repos:
+        return _status('release-cadence', 'ci', 'warning',
+                       f'release cadence unreadable: {errors[0]}', data)
+    parts = []
+    for r in repos:
+        state = (f"{r['ahead']} commits ahead of main, oldest {r['ahead_oldest_days']:g} d"
+                 if r['ahead'] else 'nothing main lacks')
+        parts.append(f"{r['repo'].split('/')[-1]} {r['work_branch'].split('/')[-1]}: {state}")
+    summary = '; '.join(parts) + (f"; unreadable: {'; '.join(errors)}" if errors else '')
+    return _status('release-cadence', 'ci', 'warning' if errors else 'ok', summary, data)
+
+
 def _bot_usage():
     """Bot conversation volume from the recorded exchanges — informational,
     always ok: channel vs DM user turns over the last 7 and 30 days.
@@ -659,6 +766,7 @@ COLLECTORS = {
     'epic-devcloud-doc': lambda: _http_endpoint(
         'epic-devcloud-doc', f'{external_face_base_url()}/doc/'),
     'github-actions': _github_actions,
+    'release-cadence': _release_cadence,
     'bot-usage': _bot_usage,
     'snapper-testbed-scheduler': lambda: _snapper_scheduler('testbed'),
     'snapper-epicprod-scheduler': lambda: _snapper_scheduler('epicprod'),

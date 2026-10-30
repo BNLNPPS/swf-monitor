@@ -30,7 +30,10 @@ Params (read from the alarm config entry's data.params):
   threshold          float, required. e.g. 0.03 for 3%.
   since_days         int, default 1. How far back to look at PanDA data.
   username           str, optional (supports % LIKE wildcard upstream).
-  processingtype     str, optional.
+  processingtype     str, default 'epicproduction'. Alarms watch
+                     production only (Torre, 2026-10-22: a user's task
+                     failing at 100% was reported on the production
+                     floor); a config naming another type opts in.
   min_terminal_jobs  int, default 5. Noise floor: tasks with fewer
                      terminal jobs (nfailed + nfinished) are skipped.
   statuses           list[str], optional. Task statuses to consider;
@@ -63,8 +66,8 @@ PARAMS: dict[str, dict] = {
         "description": "optional task-owner filter (supports % LIKE)",
     },
     "processingtype": {
-        "type": str,
-        "description": "optional PanDA processingtype filter",
+        "type": str, "default": "epicproduction",
+        "description": "PanDA processingtype; production only unless set",
     },
     "min_terminal_jobs": {
         "type": int, "default": 5,
@@ -85,7 +88,7 @@ def task_failure_rate(client, params: dict):
     threshold = float(params["threshold"])
     since_days = int(params.get("since_days", 1))
     username = params.get("username")
-    processingtype = params.get("processingtype")
+    processingtype = params.get("processingtype") or "epicproduction"
     min_terminal = int(params.get("min_terminal_jobs", 5))
     statuses = params.get("statuses") or DEFAULT_STATUSES
 

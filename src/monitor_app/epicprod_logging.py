@@ -60,21 +60,29 @@ LIVE_POLICY_STATE_KEY = 'epicprod_live_policy'
 SUBLEVEL_VALUES = ('high', 'normal', 'low')
 SUBLEVEL_ORDER = {'high': 2, 'normal': 1, 'low': 0}
 
-# Catalog of known actions and their call-site declarations. This MUST mirror
-# the call sites (records carry the authoritative stamp; filters read the
-# record) — it exists so the live-policy page can show every known action
-# before/without records, and so new actions are declared in one greppable
-# place. sublevel: high = reaches everyone (news, digests), normal =
-# live-page watchers, low = verbose viewers only. live: the declared
-# live-stream recommendation, overridable at runtime. description: the
-# plain-English one-liner answering "what is this action" — rendered on the
-# log entry page and the live-policy page, so a stream reader is never left
-# guessing what an event was.
+# Catalog of known actions: each action's importance and live default when it
+# succeeds, by their meaning (docs/ACTION_STREAM.md, Publication axes): high =
+# a problem a person should look at now, normal = what people and the front
+# do to production, low = routine mechanics, never live by default. The write
+# applies it (publication, from AppLog.save), whoever writes the record; a
+# failure is high. ``outcomes`` gives one outcome its own declaration.
+# description: the plain-English one-liner answering "what is this action",
+# rendered on the log entry page and the live-policy page, so a stream reader
+# is never left guessing what an event was.
 ACTION_DEFAULTS = {
+    # the PanDA database's Event Service range rows (swf-epicprod
+    # docs/ES_EVENT_CLEANUP.md)
+    'es_event_cleanup': {
+        'sublevel': 'low', 'live': False,
+        'description': "The daily removal of the Event Service range rows "
+                       "(JEDI_Events) of tasks done or aborted more than three "
+                       "days ago: the rows removed and the tasks.",
+    },
     # the pressure front (swf-epicprod docs/CONTINUOUS_PRODUCTION.md,
     # The dispatcher)
     'front_decision': {
         'sublevel': 'low', 'live': False,
+        'outcomes': {'fed': {'sublevel': 'normal', 'live': True}},
         'description': "One queue's decision of the pressure front's cycle: "
                        "feed or hold, with the reason, the depth in hours, "
                        "the set points and the gates; recorded on every "
@@ -85,9 +93,21 @@ ACTION_DEFAULTS = {
         'description': "One cycle of the pressure front over the regulated "
                        "queues, with each queue's state.",
     },
+    # OSG pool throttles (docs/OSG_SUBMIT_REPORTER.md, Fair-share limit)
+    'osg_throttle': {
+        'sublevel': 'low', 'live': False,
+        'description': "A pool our OSG pilots run in held our submitter at "
+                       "its fair-share limit, so it gives our pilots no new "
+                       "slots (state held, informational: OSG's normal "
+                       "mode of operation), or released it after "
+                       "three consecutive clear readings (state lifted); "
+                       "read from each pool negotiator's last cycle by the "
+                       "OSG submit host reporter.",
+    },
     # the node guard (site-canary docs/NODE_GUARD.md)
     'node_guard_decision': {
         'sublevel': 'normal', 'live': True,
+        'outcomes': {'would_exclude': {'sublevel': 'low', 'live': False}},
         'description': "One node's verdict from the node guard's cycle: a "
                        "black hole tripped (would_exclude in shadow mode, "
                        "excluded live) or cleared after a trip, with the "
@@ -102,7 +122,7 @@ ACTION_DEFAULTS = {
     },
     # the preemption close-out (swf-epicprod swf_epicprod/es_closeout.py)
     'es_closeout': {
-        'sublevel': 'normal', 'live': True,
+        'sublevel': 'low', 'live': False,
         'description': "One Event Service job at a preemptible queue closed "
                        "after its node was lost: the ranges of every close "
                        "that stood credited and the job finished, or why "
@@ -145,6 +165,11 @@ ACTION_DEFAULTS = {
         'description': "Record a ping's obligation as fulfilled; its alarm "
                        "event clears on the engine's next tick.",
     },
+    'prodconfig_vo': {
+        'sublevel': 'normal', 'live': False,
+        'description': "Change a production configuration's VO for future "
+                       "submissions; existing task identities stay unchanged.",
+    },
     'standard_prodconfig_create': {
         'sublevel': 'normal', 'live': True,
         'description': "Create a campaign edition's Standard Production "
@@ -180,32 +205,32 @@ ACTION_DEFAULTS = {
     },
     # ops agent
     'task_submit': {
-        'sublevel': 'high', 'live': True,
+        'sublevel': 'normal', 'live': True,
         'description': "Submit a campaign task to PanDA through the prun doer "
                        "under the production credential and record the "
                        "returned JEDI task id.",
     },
     'evgen_task_submit': {
-        'sublevel': 'high', 'live': True,
+        'sublevel': 'normal', 'live': True,
         'description': "Submit an external-EVGEN campaign task to PanDA/JEDI "
                        "via the client API: build the task parameters, "
                        "assemble and upload the sandbox, record the JEDI "
                        "task id.",
     },
     'panda_task_operation': {
-        'sublevel': 'high', 'live': True,
+        'sublevel': 'normal', 'live': True,
         'description': "Run a native PanDA operation on an existing JEDI "
                        "task: pause or resume the task, raise the allowed "
                        "attempt count, or retry failed work.",
     },
     'rucio_sweep': {
-        'sublevel': 'high', 'live': True,
+        'sublevel': 'low', 'live': False,
         'description': "Refresh the JLab Rucio output snapshot for the "
                        "current (and last) campaign and rematch produced "
                        "RECO/FULL datasets onto each task's recorded outputs.",
     },
     'campaign_instancing': {
-        'sublevel': 'high', 'live': True,
+        'sublevel': 'normal', 'live': True,
         'description': "Operator-fired campaign instancing: populate the "
                        "target campaign's working catalog from the source "
                        "campaign's continuing physics configurations — "
@@ -214,14 +239,14 @@ ACTION_DEFAULTS = {
                        "identities left to curation.",
     },
     'campaign_promoted': {
-        'sublevel': 'high', 'live': True,
+        'sublevel': 'normal', 'live': True,
         'description': "Operator-clicked campaign lifecycle rotation: the "
                        "named (producing) campaign becomes current, the "
                        "incumbent current becomes last, the incumbent last "
                        "becomes past.",
     },
     'past_import': {
-        'sublevel': 'high', 'live': True,
+        'sublevel': 'low', 'live': False,
         'description': "Pull the eic/epic-prod bookkeeping clone and re-run "
                        "the idempotent FULL/RECO past-campaign output "
                        "ingest, keeping every campaign's recorded "
@@ -229,7 +254,7 @@ ACTION_DEFAULTS = {
                        "production team publishes.",
     },
     'rucio_reconcile': {
-        'sublevel': 'normal', 'live': True,
+        'sublevel': 'low', 'live': False,
         'description': "Firsthand reconciliation of a producing "
                        "campaign's catalog records against its fetched "
                        "Rucio snapshot: known DIDs updated, unknown DIDs "
@@ -238,7 +263,7 @@ ACTION_DEFAULTS = {
                        "to curation.",
     },
     'rucio_arrivals': {
-        'sublevel': 'normal', 'live': True,
+        'sublevel': 'low', 'live': False,
         'description': "New files landed in JLab Rucio since the last "
                        "arrivals sweep, counted by campaign and location "
                        "across all versions — the signal behind the "
@@ -255,24 +280,24 @@ ACTION_DEFAULTS = {
                        "rucio_arrivals event.",
     },
     'evgen_sweep': {
-        'sublevel': 'high', 'live': True,
+        'sublevel': 'low', 'live': False,
         'description': "Assimilate the JLab Rucio EVGEN input inventory "
                        "(epic:/EVGEN/*) and resolve each catalog request to "
                        "the registered input dataset(s) that realize it.",
     },
     'catalog_import': {
-        'sublevel': 'high', 'live': True,
+        'sublevel': 'low', 'live': False,
         'description': "Import the production CSV manifest catalog: create "
                        "or update campaign task records from the source rows.",
     },
     'association_sweep': {
-        'sublevel': 'high', 'live': True,
+        'sublevel': 'low', 'live': False,
         'description': "Associate recent PanDA tasks with campaign tasks; "
                        "unmatched direct group.EIC submissions are "
                        "auto-intaken as adopted tasks.",
     },
     'catalog_sync': {
-        'sublevel': 'high', 'live': True,
+        'sublevel': 'low', 'live': False,
         'description': "Nightly composite chain (cron 02:15): csv import, "
                        "epic-prod past ingest, questionnaire import, "
                        "association sweep, Rucio output snapshot, Rucio "
@@ -281,12 +306,12 @@ ACTION_DEFAULTS = {
                        "record is the catalog-freshness timestamp.",
     },
     'agent_shutdown': {
-        'sublevel': 'high', 'live': True,
+        'sublevel': 'normal', 'live': True,
         'description': "Deliberate stop of the production ops agent via the "
                        "message-bus back door; systemd leaves it stopped.",
     },
     'payload_log_fetch': {
-        'sublevel': 'normal', 'live': False,
+        'sublevel': 'low', 'live': False,
         'description': "Fetch one PanDA job's payload log tarball from Rucio "
                        "over xrootd and extract it into the shared cache for "
                        "the job page.",
@@ -298,7 +323,7 @@ ACTION_DEFAULTS = {
                        "job.",
     },
     'segfault_inventory': {
-        'sublevel': 'normal', 'live': True,
+        'sublevel': 'low', 'live': False,
         'description': "The crash-class inventory pass "
                        "(scripts/segfault-inventory.py): payload crashes "
                        "(exit 134/135/136/139) read from the PanDA record "
@@ -310,7 +335,7 @@ ACTION_DEFAULTS = {
                        "SEGFAULT_DIAGNOSIS.md).",
     },
     'segfault_dig': {
-        'sublevel': 'normal', 'live': True,
+        'sublevel': 'low', 'live': False,
         'description': "A crash signature's dig (scripts/segfault-dig.py): "
                        "one representative crashed job's payload log "
                        "fetched through the doer and its backtrace read "
@@ -335,6 +360,16 @@ ACTION_DEFAULTS = {
                        "agent; the outcome (reproduced, site_dependent, "
                        "not_reproduced, inconclusive) settles on the "
                        "signature from the runs' payload reports.",
+    },
+    'segfault_es_reproduction': {
+        'sublevel': 'normal', 'live': False,
+        'description': "An Event Service unit signature's crash request "
+                       "replayed on npps0 (scripts/segfault-es-reproduce.py): "
+                       "the request run again through run.sh with the "
+                       "resident simulation and, on a resident death, as a "
+                       "cold npsim under gdb; carries the outcome (crashed, "
+                       "completed, inconclusive), the signal and the frame "
+                       "(swf-epicprod SEGFAULT_DIAGNOSIS.md, Event Service units).",
     },
     'segfault_reproduction_reconcile': {
         'sublevel': 'low', 'live': False,
@@ -373,7 +408,7 @@ ACTION_DEFAULTS = {
                        "only for a changed alarm.",
     },
     'segfault_diagnosis_triggered': {
-        'sublevel': 'normal', 'live': True,
+        'sublevel': 'low', 'live': False,
         'description': "A crash signature's LLM study submitted to corun-ai "
                        "(scripts/segfault-diagnosis-trigger.py): the evidence "
                        "bundle stored as a hidden page and the run created "
@@ -393,14 +428,14 @@ ACTION_DEFAULTS = {
                        "quarantined or failed run.",
     },
     'segfault_finding_set': {
-        'sublevel': 'normal', 'live': True,
+        'sublevel': 'low', 'live': False,
         'description': "A segfault finding created or updated: the curated "
                        "reading of one crashing frame in the entry store "
                        "(kind finding, context segfault), versioned and "
                        "stamped; through the MCP tool or REST.",
     },
     'segfault_package': {
-        'sublevel': 'normal', 'live': True,
+        'sublevel': 'low', 'live': False,
         'description': "A crashed job's reproduction package built for a "
                        "software expert (scripts/segfault-repro-package.py): "
                        "the run script, the payload, the row, the "
@@ -413,6 +448,15 @@ ACTION_DEFAULTS = {
                        "rows for services, agents, and external monitor "
                        "endpoints.",
     },
+    'release_overdue': {
+        'sublevel': 'normal', 'live': False,
+        'description': "The release cadence check found a core repo's work "
+                       "branch past release_overdue_days without a merge to "
+                       "main, or main carrying merges the work branch lacks "
+                       "for as long (docs/SYSTEM_STATUS.md, release-cadence). "
+                       "Recorded once per Eastern day while it stands; "
+                       "Capcom receives it as a warning.",
+    },
     'snapper_publication_too_large': {
         'sublevel': 'normal', 'live': False,
         'description': "A Snapper component publication rejected at "
@@ -422,12 +466,12 @@ ACTION_DEFAULTS = {
                        "receives it as an alarm.",
     },
     'questionnaire_import': {
-        'sublevel': 'normal', 'live': True,
+        'sublevel': 'low', 'live': False,
         'description': "Import the PWG/DSC production-request questionnaire "
                        "CSV: create or update request records.",
     },
     'questionnaire_automatch': {
-        'sublevel': 'normal', 'live': False,
+        'sublevel': 'low', 'live': False,
         'description': "LLM matching of production requests to catalog tasks "
                        "using the full tag map; each new match logs its own "
                        "questionnaire_match_found record, and a run with new "
@@ -457,17 +501,24 @@ ACTION_DEFAULTS = {
     },
     # web and MCP
     'sysconfig_edit': {
-        'sublevel': 'high', 'live': True,
+        'sublevel': 'normal', 'live': True,
         'description': "Operator edit of the SysConfig system-configuration "
                        "document on the System page.",
     },
     'live_policy_edit': {
-        'sublevel': 'high', 'live': True,
+        'sublevel': 'normal', 'live': True,
         'description': "Operator change to an action's live-stream override "
                        "on the live-policy page.",
     },
+    'live_cleared': {
+        'sublevel': 'low', 'live': False,
+        'description': "Live records taken off the computing centre's "
+                       "epicprod-live screen once the operator's question "
+                       "about them is answered: the record ids and why. The "
+                       "records themselves are unchanged.",
+    },
     'host_reporter_install': {
-        'sublevel': 'high', 'live': True,
+        'sublevel': 'normal', 'live': True,
         'description': "A host reporter installed on a service host it "
                        "observes (docs/PANDA_SERVER_REPORTER.md, "
                        "docs/OSG_SUBMIT_REPORTER.md): token, environment "
@@ -567,11 +618,11 @@ ACTION_DEFAULTS = {
     },
     # web entity lifecycle and operator actions
     'campaign_set_current': {
-        'sublevel': 'high', 'live': True,
+        'sublevel': 'normal', 'live': True,
         'description': "Operator designation of the current campaign.",
     },
     'evgen_mark_obsolete': {
-        'sublevel': 'high', 'live': True,
+        'sublevel': 'normal', 'live': True,
         'description': "PWG triage mark on EVGEN entries: set or clear the "
                        "obsolete flag on the ticked paths, with the setter, "
                        "time, and reason recorded.",
@@ -583,7 +634,7 @@ ACTION_DEFAULTS = {
                        "Bookkeeping, not news: verbose viewers only.",
     },
     'campaign_set_last': {
-        'sublevel': 'high', 'live': True,
+        'sublevel': 'normal', 'live': True,
         'description': "Operator designation of the last (previous) campaign.",
     },
     'questionnaire_match_add': {
@@ -700,7 +751,214 @@ ACTION_DEFAULTS = {
         'description': "Record a trial's measured cost on the edition it "
                        "proves; bookkeeping, read from the edition.",
     },
+    # Actions recorded before they were catalogued (review of 2026-10-28)
+    'production_finding': {
+        'sublevel': 'high', 'live': True,
+        'description': "A material production finding or resolution, posted "
+                       "to epicprod-live for the people and the assessments "
+                       "(docs/NOTICE_ROUTING.md, Findings and resolutions).",
+    },
+    'task_failure_guard': {
+        'sublevel': 'high', 'live': True,
+        'description': "The front's task guard asked to pause a task whose "
+                       "jobs fail, with the trip's evidence: production "
+                       "stopped a task by itself.",
+    },
+    'task_failure_guard_shadow': {
+        'sublevel': 'low', 'live': False,
+        'description': "What the task guard's shadow rule would have paused; "
+                       "it pauses nothing.",
+    },
+    'idle_move': {
+        'sublevel': 'low', 'live': False,
+        'description': "The front's request to move a task's unstarted work "
+                       "to an idle queue; the Move itself is the task "
+                       "operation record.",
+    },
+    'google_production': {
+        'sublevel': 'low', 'live': False,
+        'outcomes': {'submitted': {'sublevel': 'normal', 'live': True}},
+        'description': "One pass of the Google feeder; submitted when it "
+                       "released work to the Google Event Service queue.",
+    },
+    'perlmutter_production': {
+        'sublevel': 'low', 'live': False,
+        'outcomes': {'submitted': {'sublevel': 'normal', 'live': True}},
+        'description': "One pass of the Perlmutter feeder; submitted when it "
+                       "released work to the Perlmutter Event Service queue.",
+    },
+    'gke_pilot_cycle': {
+        'sublevel': 'low', 'live': False,
+        'description': "One cycle of the GKE pilot controller that supplies "
+                       "the Google queue's workers.",
+    },
+    'stash_drain': {
+        'sublevel': 'low', 'live': False,
+        'description': "The failover stash's drain pass, registering stashed "
+                       "outputs in JLab Rucio.",
+    },
+    'log_rescue': {
+        'sublevel': 'low', 'live': False,
+        'description': "The hourly pass moving logs held in the stage-out "
+                       "bucket into BNL Rucio.",
+    },
+    'registrar': {
+        'sublevel': 'low', 'live': False,
+        'description': "The hourly pass completing pending output "
+                       "registrations.",
+    },
+    'storage_door_cycle': {
+        'sublevel': 'low', 'live': False,
+        'description': "One cycle of the storage door checks.",
+    },
+    # removing datasets from a disk RSE (swf-epicprod docs/STORAGE.md,
+    # Removing datasets from an RSE)
+    'rse_deletion_preview': {
+        'sublevel': 'low', 'live': False,
+        'description': "An operator's preview of removing a dataset pattern "
+                       "from a disk RSE: the datasets matched and those a "
+                       "complete tape copy makes removable. Changes nothing.",
+    },
+    'rse_deletion': {
+        'sublevel': 'high', 'live': True,
+        'description': "An operator's removal of the datasets matching a "
+                       "pattern from a disk RSE, only where tape holds a "
+                       "complete copy: who, the counts and bytes, and the "
+                       "removed datasets named. Immediate and irreversible "
+                       "on disk; the tape copies are untouched.",
+    },
+    'evgen_register': {
+        'sublevel': 'low', 'live': False,
+        'description': "Register an EVGEN dataset's files in Rucio.",
+    },
+    'evgen_register_request': {
+        'sublevel': 'low', 'live': False,
+        'description': "A request to register an EVGEN dataset, queued for "
+                       "the operations agent.",
+    },
+    'evgen_events': {
+        'sublevel': 'low', 'live': False,
+        'description': "Count an EVGEN dataset's events.",
+    },
+    'dataset_expected_events_set': {
+        'sublevel': 'low', 'live': False,
+        'description': "Set a dataset's expected events; bookkeeping of the "
+                       "EVGEN intake.",
+    },
+    'task_evgen_input': {
+        'sublevel': 'low', 'live': False,
+        'description': "Link a task to its EVGEN input; bookkeeping.",
+    },
+    'segfault_notice': {
+        'sublevel': 'low', 'live': False,
+        'description': "The nightly notice of crash signatures needing a "
+                       "reproduction or a reading.",
+    },
+    'segfault_study': {
+        'sublevel': 'low', 'live': False,
+        'description': "Queue studies of traced crash signatures.",
+    },
+    'prodtask_priority_set': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Set a production task's priority.",
+    },
+    'prod_request_priority_set': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Set a production request's priority.",
+    },
+    'prodtask_trial': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Compose a trial of a production task at a site.",
+    },
+    'prodtask_unplace': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Return a placed task whose work has not started to "
+                       "the front, which places it again.",
+    },
+    'worker_limit': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Set or clear an operator's worker (core) limit at a "
+                       "Harvester queue, with its reason.",
+    },
+    'feed_auto_on': {
+        'sublevel': 'normal', 'live': True,
+        'description': "The front turned a queue's feed back on by its "
+                       "automatic return, with the evidence.",
+    },
+    'attempt_manifest_repair': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Repair a task's attempt manifest from its submitted "
+                       "input.",
+    },
+    'osg_direct_pilot_deployment': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Direct OSG production pilots deployed and verified "
+                       "running production work.",
+    },
+    'osg_image_dispatch_promoted': {
+        'sublevel': 'normal', 'live': True,
+        'description': "OSG production moved to pilots that declare their "
+                       "payload image, with the trials behind the move.",
+    },
+    'native_image_dispatch_trial': {
+        'sublevel': 'normal', 'live': True,
+        'description': "A trial of pilots that declare their payload image, "
+                       "with its outcome.",
+    },
+    'osg_rerun_log_collision': {
+        'sublevel': 'high', 'live': True,
+        'description': "A finding that a rerun reused older log names, with "
+                       "the failures it caused.",
+    },
+    'google_operating_admission': {
+        'sublevel': 'normal', 'live': True,
+        'description': "The Google queue admitted among the front's "
+                       "operating sites, with how its work is fed.",
+    },
+    'physics_config_requestors_set': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Set the requesters of physics configurations.",
+    },
+    'resolution': {
+        'sublevel': 'normal', 'live': True,
+        'description': "The resolution of an earlier finding, posted to "
+                       "epicprod-live: cause, fix, deployment and verified "
+                       "recovery.",
+    },
 }
+
+
+FAILURE_LEVELS = frozenset({'ERROR', 'CRITICAL'})
+_uncatalogued = set()
+
+
+def publication(extra, levelname=''):
+    """Set an action record's importance (``sublevel``) and live default by
+    their meaning (ACTION_STREAM.md, Importance), in place, at the write:
+    a failure (an error, timeout, partial or unrecorded outcome, or a record
+    at ERROR) is high and live, a maintenance pass's failure normal; any
+    other record takes its action's catalog declaration, the outcome's own
+    where the catalog declares one. A low record is never live by default.
+    An action the catalog lacks keeps its call site's values and is logged
+    once, so it is catalogued."""
+    from .live_notices import FAILURE_OUTCOMES, MAINTENANCE
+    action = str(extra.get('action') or '')
+    outcome = str(extra.get('outcome') or '')
+    declared = ACTION_DEFAULTS.get(action)
+    if outcome in FAILURE_OUTCOMES or levelname in FAILURE_LEVELS:
+        sublevel, live = ('normal' if action in MAINTENANCE else 'high'), True
+    elif declared:
+        entry = dict(declared, **(declared.get('outcomes') or {}).get(outcome, {}))
+        sublevel, live = entry['sublevel'], entry['live']
+    else:
+        if action not in _uncatalogued:
+            _uncatalogued.add(action)
+            logger.warning('epicprod action %s is not in ACTION_DEFAULTS: its importance '
+                           'stays as its call site declared it', action)
+        return extra
+    extra['sublevel'] = sublevel
+    extra['live_default'] = bool(live) and sublevel != 'low'
+    return extra
 
 
 def action_description(action):
@@ -732,10 +990,9 @@ def log_epicprod_action(instance, action, *, subject_type='', subject_key='',
         outcome: 'ok' or 'error' (conventional; free-form refinements allowed).
         duration_ms: measured execution time; required in spirit for sweeps
             and other timed operations.
-        sublevel: the event's declared importance — 'high' (reaches
-            everyone: news, digests, email), 'normal' (live-page watchers),
-            'low' (verbose viewers only). AUTHORITATIVE: change it by
-            changing the event, not at runtime.
+        sublevel: the importance for an action the catalog lacks; a
+            catalogued action's comes from ACTION_DEFAULTS at the write
+            (publication), and a failure's is high.
         live_default: the event's declared RECOMMENDATION for the live
             stream ("interesting to some humans, now"). The effective live
             decision is the epicprod_live_policy override (runtime attention

@@ -2,7 +2,7 @@
 
 {% block initial_filters %}
 {
-    is_active: '{{ selected_is_active|default:"" }}'
+    is_active: '{{ selected_is_active|default:""|force_escape|escapejs }}'
 }
 {% endblock %}
 

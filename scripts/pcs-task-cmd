@@ -100,6 +100,17 @@ def _do_submit(base_url, name):
         sys.stderr.write(f'Could not parse taskParamMap JSON: {e}\n')
         return 1
 
+    # A task without a site is placed by JEDI's brokerage after the job
+    # throttler has chosen what to generate, so the throttler cannot hold
+    # it off a saturated queue (swf-epicprod EPIC_JOB_THROTTLER.md). PCS
+    # places every task; one with no site is refused here, as the EVGEN
+    # submitter refuses it.
+    if not str(task_params.get('site') or '').strip():
+        sys.stderr.write(
+            f'{name}: the task names no site; place it in PCS first '
+            f'(swf-epicprod CONTINUOUS_PRODUCTION.md, Placement)\n')
+        return 1
+
     # 2. Lazy-import pandaclient — only required for --submit path.
     try:
         from pandaclient import Client  # noqa: WPS433

@@ -25,6 +25,7 @@ from django.db import connections
 from django.utils import timezone
 
 from .constants import PANDA_SCHEMA
+from swf_epicprod.regulation import CAPACITY_POOLS
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ FAST_FAILURE_FLOOR_S = 20 * 60
 # in the window: one fast trial job read a p90 start latency of 0.04 h at
 # UM_GREX_PanDA_1 (2026-09-30). Below it the queue reads uncalibrated.
 CALIBRATION_MIN_JOBS = 20
-CALIBRATION_CACHE_KEY = 'panda:queue-census:calibration:v3'
+CALIBRATION_CACHE_KEY = 'panda:queue-census:calibration:v4'
 CALIBRATION_TTL_S = 3600
 # JEDI task statuses that end a task (as monitor_app.snapper_panda reads them).
 TASK_TERMINAL_STATUSES = ('done', 'finished', 'failed', 'broken', 'aborted',
@@ -74,52 +75,97 @@ def _live_counts():
     return out
 
 
+# The production tasks sent to a queue and not ended, by processing type
+# (_tasks_active says why): one selection for the front's count, which also
+# leaves out paused tasks, and for the lists behind it (sent_production_tasks_by_queue).
+_SENT_TASKS_WHERE = (
+    '"processingtype" = \'epicproduction\' AND ("status" IS NULL OR "status" NOT IN ('
+    + ', '.join(['%s'] * len(TASK_TERMINAL_STATUSES)) + '))')
+_ACTIVE_TASKS_WHERE = _SENT_TASKS_WHERE + " AND \"status\" IS DISTINCT FROM 'paused'"
+
+
 def _tasks_active():
     """Per queue, the production tasks pinned to it that have not
-    ended (canary and other test tasks excluded). By processing type,
-    not VO: production tasks carry ``wlcg`` (the VO the server was
-    commissioned under, set by the Standard Production configuration),
-    the test and canary paths carry ``epic``; a VO filter here had read
-    a queue with three live production tasks as none."""
-    placeholders = ', '.join(['%s'] * len(TASK_TERMINAL_STATUSES))
+    ended and are not paused (canary and other test tasks excluded).
+    By processing type, not VO: production tasks carry ``wlcg`` (the
+    VO the server was commissioned under, set by the Standard
+    Production configuration), the test and canary paths carry
+    ``epic``; a VO filter here had read a queue with three live
+    production tasks as none. A paused task generates no jobs until an
+    operator resumes it, so it does not count toward the front's task
+    cap: three tasks paused on 2026-08-17 had held BNL_OSG_EPIC_PROD_1
+    at its cap with nothing running."""
     sql = f"""
         SELECT COALESCE("site", 'unknown'), COUNT(*)
         FROM "{PANDA_SCHEMA}"."jedi_tasks"
-        WHERE "processingtype" = 'epicproduction'
-          AND ("status" IS NULL OR "status" NOT IN ({placeholders}))
+        WHERE {_ACTIVE_TASKS_WHERE}
         GROUP BY 1
     """
     with connections['panda'].cursor() as cursor:
         cursor.execute(sql, list(TASK_TERMINAL_STATUSES))
         return {str(site): int(n or 0) for site, n in cursor.fetchall()}
+
+
+def sent_production_tasks_by_queue():
+    """{queue: [(JEDI task id, status), ...]} of every production task sent to
+    a queue and not ended, paused ones included, newest first: the selection
+    the front counts (_tasks_active, which leaves out paused tasks). The PCS
+    page of production tasks in flight lists the PCS tasks behind them."""
+    sql = f"""
+        SELECT COALESCE("site", 'unknown'), "jeditaskid", "status"
+        FROM "{PANDA_SCHEMA}"."jedi_tasks"
+        WHERE {_SENT_TASKS_WHERE}
+        ORDER BY "jeditaskid" DESC
+    """
+    out = {}
+    with connections['panda'].cursor() as cursor:
+        cursor.execute(sql, list(TASK_TERMINAL_STATUSES))
+        for queue, task_id, status in cursor.fetchall():
+            out.setdefault(str(queue), []).append((int(task_id), status or ''))
+    return out
+
+
+def sent_production_tasks(queues):
+    """(JEDI task id, status) of the production tasks sent to ``queues`` and
+    not ended, newest first (sent_production_tasks_by_queue)."""
+    by_queue = sent_production_tasks_by_queue()
+    return sorted((row for q in dict.fromkeys(queues) for row in by_queue.get(q, [])),
+                  key=lambda row: -row[0])
+
+
+def ungenerated_by_task():
+    """Per non-terminal, unpaused production task, ``(queue, rows)``: the
+    rows JEDI has not generated jobs for, ``nFilesToBeUsed - nFilesUsed``
+    on the task's input dataset (the largest input where a task carries
+    several, as an EVGEN task carries two pseudo inputs with one count).
+    The census sums it per queue; the computing centre's task board shows
+    it per task (COMP_SNAPSHOT.md, Tasks)."""
+    placeholders = ', '.join(['%s'] * len(TASK_TERMINAL_STATUSES))
+    sql = f"""
+        SELECT COALESCE(t."site", 'unknown') AS site, t."jeditaskid",
+               MAX(GREATEST(COALESCE(d."nfilestobeused", 0) - COALESCE(d."nfilesused", 0), 0))
+        FROM "{PANDA_SCHEMA}"."jedi_tasks" t
+        JOIN "{PANDA_SCHEMA}"."jedi_datasets" d ON d."jeditaskid" = t."jeditaskid"
+        WHERE t."processingtype" = 'epicproduction'
+          AND (t."status" IS NULL OR t."status" NOT IN ({placeholders}, 'paused'))
+          AND d."type" IN ('input', 'pseudo_input') AND d."masterid" IS NULL
+        GROUP BY 1, 2
+    """
+    with connections['panda'].cursor() as cursor:
+        cursor.execute(sql, list(TASK_TERMINAL_STATUSES))
+        return {int(tid): (str(site), int(n or 0)) for site, tid, n in cursor.fetchall()}
 
 
 def _ungenerated():
     """Per queue, the rows of its non-terminal production tasks that
-    JEDI has not generated jobs for: ``nFilesToBeUsed - nFilesUsed`` on
-    each task's input dataset (the largest input where a task carries
-    several, as an EVGEN task carries two pseudo inputs with one count).
-    The work committed to a queue beyond its activated pool; the
-    pressure front's phase-two depth counts it once the ePIC job
-    throttler paces generation (swf-epicprod CONTINUOUS_PRODUCTION.md,
-    Two regulators)."""
-    placeholders = ', '.join(['%s'] * len(TASK_TERMINAL_STATUSES))
-    sql = f"""
-        SELECT site, SUM(remaining) FROM (
-            SELECT COALESCE(t."site", 'unknown') AS site, t."jeditaskid",
-                   MAX(GREATEST(COALESCE(d."nfilestobeused", 0) - COALESCE(d."nfilesused", 0), 0)) AS remaining
-            FROM "{PANDA_SCHEMA}"."jedi_tasks" t
-            JOIN "{PANDA_SCHEMA}"."jedi_datasets" d ON d."jeditaskid" = t."jeditaskid"
-            WHERE t."processingtype" = 'epicproduction'
-              AND (t."status" IS NULL OR t."status" NOT IN ({placeholders}))
-              AND d."type" IN ('input', 'pseudo_input') AND d."masterid" IS NULL
-            GROUP BY 1, 2
-        ) per_task
-        GROUP BY 1
-    """
-    with connections['panda'].cursor() as cursor:
-        cursor.execute(sql, list(TASK_TERMINAL_STATUSES))
-        return {str(site): int(n or 0) for site, n in cursor.fetchall()}
+    JEDI has not generated jobs for (``ungenerated_by_task``). The work
+    committed to a queue beyond its activated pool; the pressure front's
+    phase-two depth counts it once the ePIC job throttler paces generation
+    (swf-epicprod CONTINUOUS_PRODUCTION.md, Two regulators)."""
+    per = {}
+    for site, rows in ungenerated_by_task().values():
+        per[site] = per.get(site, 0) + rows
+    return per
 
 
 def _calibration():
@@ -140,6 +186,10 @@ def _calibration():
           AND "starttime" IS NOT NULL AND "endtime" > NOW() - INTERVAL %s
         GROUP BY 1
     """
+    pool_unions = ''.join(' UNION ALL SELECT %s, t, d FROM ev WHERE s = ANY(%s)'
+                          for _ in CAPACITY_POOLS)
+    pool_params = [value for pool, members in CAPACITY_POOLS.items()
+                   for value in (f'pool:{pool}', list(members))]
     peak_sql = f"""
         WITH ev AS (
             SELECT "computingsite" AS s, "starttime" AS t, 1 AS d
@@ -153,13 +203,13 @@ def _calibration():
             SELECT "computingsite", "starttime", 1
             FROM "{PANDA_SCHEMA}"."jobsactive4"
             WHERE "jobstatus" IN ('running', 'starting') AND "starttime" IS NOT NULL
-        )
+        ), expanded AS (SELECT * FROM ev {pool_unions})
         SELECT s, MAX(run) FROM (
             SELECT s, SUM(d) OVER (PARTITION BY s ORDER BY t, d ROWS UNBOUNDED PRECEDING) AS run
-            FROM ev) x
+            FROM expanded) x
         GROUP BY s
     """
-    out = {}
+    out, pools = {}, {}
     with connections['panda'].cursor() as cursor:
         cursor.execute(walltime_sql, [days])
         for site, n, med, p90, start_p90 in cursor.fetchall():
@@ -172,11 +222,14 @@ def _calibration():
                 'p90_start_latency_h': (round(float(start_p90) / 3600.0, 2)
                                         if start_p90 is not None else None),
             })
-        cursor.execute(peak_sql, [days, days])
+        cursor.execute(peak_sql, [days, days] + pool_params)
         for site, peak in cursor.fetchall():
-            out.setdefault(str(site), {})['peak_running'] = int(peak or 0)
+            if str(site).startswith('pool:'):
+                pools[str(site)[5:]] = int(peak or 0)
+            else:
+                out.setdefault(str(site), {})['peak_running'] = int(peak or 0)
     return {'built_at': timezone.now().isoformat(), 'days': CALIBRATION_DAYS,
-            'queues': out}
+            'queues': out, 'pools': pools}
 
 
 def calibration(refresh=False):
@@ -190,26 +243,51 @@ def calibration(refresh=False):
     return built
 
 
+def _explained_tasks():
+    """Failure-scoped rules; unreadable findings exempt no failures."""
+    try:
+        from monitor_app.segfaults import finding_failure_rules
+        return finding_failure_rules()
+    except Exception:  # noqa: BLE001
+        logger.exception('census: findings unreadable; the gate window counts every failure')
+        return {}
+
+
 def _gate_window(calib_queues):
     """Per queue over the last GATE_HOURS hours: finished and failed
-    production jobs, and the failures that died fast."""
+    production jobs, and the failures that died fast. Only failures matching a finding in task, failure mechanism or exit code,
+    and payload stage count as explained. Other failures of the same task
+    remain in the queue gate."""
+    from monitor_app.segfaults import memory_kill_sql, matching_failure_finding
+    memory_sql, memory_params = memory_kill_sql()
     rows = []
     with connections['panda'].cursor() as cursor:
         cursor.execute(f"""
             SELECT "computingsite", "jobstatus",
-                   EXTRACT(EPOCH FROM ("endtime" - "starttime"))
-            FROM "{PANDA_SCHEMA}"."jobsarchived4"
+                   EXTRACT(EPOCH FROM ("endtime" - "starttime")), "jeditaskid",
+                   {memory_sql}, COALESCE(NULLIF(j."exeerrorcode", 0)::text, j."transexitcode"),
+                   substring(j."jobmetrics" from 'payloadStage=([A-Za-z_]+)')
+            FROM "{PANDA_SCHEMA}"."jobsarchived4" j
             WHERE "processingtype" = 'epicproduction'
               AND "endtime" > NOW() - INTERVAL %s
               AND "jobstatus" IN ('finished', 'failed')
-        """, [f"{GATE_HOURS} hours"])
+        """, memory_params + [f"{GATE_HOURS} hours"])
         rows = cursor.fetchall()
+    explained = _explained_tasks()
     out = {}
-    for site, status, seconds in rows:
+    for site, status, seconds, task, memory, exit_code, stage in rows:
         site = str(site)
-        g = out.setdefault(site, {'finished': 0, 'failed': 0, 'fast_failed': 0})
+        g = out.setdefault(site, {'finished': 0, 'failed': 0, 'fast_failed': 0,
+                                  'explained': 0, 'explained_by': []})
         if status == 'finished':
             g['finished'] += 1
+            continue
+        fid = matching_failure_finding(explained.get(int(task), []),
+                                        memory=memory, exit_code=exit_code, stage=stage) if task is not None else None
+        if fid:
+            g['explained'] += 1
+            if fid not in g['explained_by']:
+                g['explained_by'].append(fid)
             continue
         g['failed'] += 1
         med_h = (calib_queues.get(site) or {}).get('median_walltime_h')
@@ -238,7 +316,8 @@ def queue_census(refresh=False):
         running = sum(v['jobs'] for s, v in by_status.items() if s in RUNNING)
         finishing = sum(v['jobs'] for s, v in by_status.items() if s in FINISHING)
         c = calib_queues.get(name) or {}
-        g = gate.get(name) or {'finished': 0, 'failed': 0, 'fast_failed': 0}
+        g = gate.get(name) or {'finished': 0, 'failed': 0, 'fast_failed': 0,
+                               'explained': 0, 'explained_by': []}
         peak = int(c.get('peak_running') or 0)
         ceiling = max(peak, running)
         med_h = c.get('median_walltime_h')
@@ -266,9 +345,31 @@ def queue_census(refresh=False):
                 'finished': g['finished'],
                 'failed': g['failed'],
                 'fast_failed': g['fast_failed'],
+                'explained': g['explained'],
+                'explained_by': g['explained_by'],
                 'useful_rate_per_h': round(g['finished'] / GATE_HOURS, 2),
             },
         }
+    for pool, members in CAPACITY_POOLS.items():
+        present = [queues[q] for q in members if q in queues]
+        ceiling = max(int((calib.get('pools') or {}).get(pool, 0)),
+                      sum(q['running'] for q in present))
+        runnable_h = ungenerated_h = 0.0
+        calibrated = ceiling > 0
+        for q in present:
+            med = q['calibration']['median_walltime_h']
+            if (q['not_started'] or q['ungenerated']) and not med:
+                calibrated = False
+            if med and ceiling:
+                runnable_h += q['not_started'] * med / ceiling
+                ungenerated_h += q['ungenerated'] * med / ceiling
+        for q in present:
+            q['capacity_pool'] = pool
+            q['ceiling'] = ceiling
+            q['hours_at_capacity'] = (round(q['not_started'] * q['calibration']['median_walltime_h'] / ceiling, 2)
+                                      if ceiling and q['calibration']['median_walltime_h'] else None)
+            q['pool_runnable_h'] = round(runnable_h, 2) if calibrated else None
+            q['pool_ungenerated_h'] = round(ungenerated_h, 2) if calibrated else None
     return {
         'observed_at': observed_at.isoformat(),
         'calibration_built_at': calib.get('built_at'),

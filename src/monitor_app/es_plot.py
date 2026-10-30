@@ -1,6 +1,8 @@
 """The core occupancy plot of an Event Service job: one lane per core the
 job works (one single-threaded payload instance each)
-along the job's own clock, each unit a bar (green done, red failed; after a sudden end, light
+along the job's own clock. Measured initialization, event processing and
+setup/output handling have distinct segments; legacy aggregate time stays
+unseparated. Processing carries its output outcome (green saved, red failed; after a sudden end, light
 yellow the processing cut off and dark yellow the units whose output
 never left the node), each core's processed events at its right and their total on the closes
 lane, the closes on their own lane, the harness's span, the pilot's head and
@@ -27,8 +29,11 @@ INTERRUPTED = '#f5d76e'   # processing cut off by a sudden end (preemption)
 UNSHIPPED = '#d49a00'     # finished, its output never left the node
 RUNNING = '#7fc8a9'       # an allocation's job still running
 UNIT_COLOR = {'done': DONE, 'failed': FAILED, 'interrupted': INTERRUPTED, 'unshipped': UNSHIPPED,
-              'running': RUNNING}
+              'running': RUNNING, 'awaiting': '#879d66'}
 IDLE = 'rgba(128,128,128,0.18)'
+INITIALIZATION = '#d97706'
+OVERHEAD = '#64748b'
+UNSEPARATED = '#8a7f91'
 
 
 def _tick_step(wall_s):
@@ -74,8 +79,10 @@ def slot_plot_svg(tl):
         y = TOP + i * LANE_H
         # Compact lanes are labelled every eighth, the label centred on its lane.
         if i % label_every == 0:
+            # A pool member's lane carries its own label (reco N).
+            label = row.get('label') or f"{lane_label} {row['index']}"
             parts.append(f'<text x="{LEFT - 8}" y="{y + label_dy:.1f}" text-anchor="end" fill="currentColor">'
-                         f'{lane_label} {row["index"]}</text>')
+                         f'{escape(label)}</text>')
         parts.append(f'<rect x="{LEFT}" y="{y + pad}" width="{plot_w:.1f}" height="{LANE_H - 2 * pad}" fill="{IDLE}"/>')
         for u in row['units']:
             x0, x1 = x(u['start_s']), x(u['end_s'])
@@ -84,8 +91,23 @@ def slot_plot_svg(tl):
                 f"{u.get('unit_id') or 'unit'}: {u['status']}, {u.get('events') or 0} events, "
                 f"{(u['end_s'] - u['start_s']) / 60:.1f} min from {u['start_s'] / 60:.1f} min"
                 + (f"; output shipped in close {u['close']}" if u.get('close') else '')))
-            parts.append(f'<rect x="{x0:.1f}" y="{y + pad}" width="{max(1.5, x1 - x0):.1f}" height="{LANE_H - 2 * pad}" '
-                         f'fill="{color}"><title>{title}</title></rect>')
+            segments = u.get('segments')
+            if segments:
+                for segment in segments:
+                    phase = segment['phase']
+                    a, b = x(segment['start_s']), x(segment['end_s'])
+                    fill = (INITIALIZATION if phase == 'initialization' else
+                            OVERHEAD if phase == 'overhead' else
+                            UNSEPARATED if phase == 'unseparated' else color)
+                    label = {'initialization': 'initialization', 'overhead': 'setup / output handling',
+                             'unseparated': 'unit time; initialization and processing not separately measured',
+                             'simulation': 'simulation events', 'reconstruction': 'reconstruction events'}[phase]
+                    detail = escape(f"{label}: {segment['end_s'] - segment['start_s']:.2f} s; ")
+                    parts.append(f'<rect x="{a:.1f}" y="{y + pad}" width="{max(.2, b - a):.1f}" '
+                                 f'height="{LANE_H - 2 * pad}" fill="{fill}"><title>{detail}{title}</title></rect>')
+            else:
+                parts.append(f'<rect x="{x0:.1f}" y="{y + pad}" width="{max(1.5, x1 - x0):.1f}" height="{LANE_H - 2 * pad}" '
+                             f'fill="{color}"><title>{title}</title></rect>')
             # A slim white line where the unit starts: consecutive units
             # on a core read as one bar without it.
             if x1 - x0 >= 3:
@@ -111,10 +133,11 @@ def slot_plot_svg(tl):
         parts.append(f'<rect x="{LEFT}" y="{y + 3}" width="{plot_w:.1f}" height="{LANE_H - 6}" fill="{IDLE}"/>')
         for c in tl.get('closes') or []:
             x0, x1 = x(c['start_s']), x(c['end_s'])
-            title = escape(f"close {c.get('index')}: {'registered' if c.get('ok') else 'failed'}, "
+            outcome = 'running' if c.get('running') else 'registered' if c.get('ok') else 'failed'
+            title = escape(f"close {c.get('index')}: {outcome}, "
                            f"{(c['end_s'] - c['start_s']):.0f} s from {c['start_s'] / 60:.1f} min")
             parts.append(f'<rect x="{x0:.1f}" y="{y + 3}" width="{max(2.0, x1 - x0):.1f}" height="{LANE_H - 6}" '
-                         f'fill="{CLOSE if c.get("ok") else FAILED}"><title>{title}</title></rect>')
+                         f'fill="{CLOSE if c.get("ok") or c.get("running") else FAILED}"><title>{title}</title></rect>')
     # The cut of a preemption: a red line through the lanes.
     if tl.get('cut_s') is not None:
         xc = x(tl['cut_s'])

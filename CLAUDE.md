@@ -1,25 +1,22 @@
-# swf-monitor — Claude Code Guidelines
+# swf-monitor
 
-The common monitor, web, and database services of the swf platform: Django web
-app, REST API, MCP server, and the platform machinery (action stream, SysConfig,
-alarms, SSE relay), hosting the production applications installed from
-`swf-epicprod` and running the ePIC production-operations agent. Part of the SWF
-core (coordinated branches with `swf-testbed` and `swf-common-lib`).
-Shared workspace rules — doc-first, git policy, environment — live in the
-workspace `../CLAUDE.md`. This file is the repo's doc index and the one pattern
-every designer/implementer should hold in mind. The official system-level
-documentation for the whole WFMS is <https://epic-wfms-docs.readthedocs.io>
-(workspace repo `epic-wfms-docs/`); this repo's docs carry the implementation
-detail beneath it.
-
-The workspace rule "Stay Within Scope Without Stopping" is mandatory here:
-do not overreach beyond the requested change, and do not respond to a scope
-correction by stopping or discarding the requested work. Keep the valid part,
-remove only the unauthorized part, and continue inside the clarified boundary.
+Start from the SWF workspace guide, `../swf-testbed/CLAUDE.md`
+(<https://github.com/BNLNPPS/swf-testbed/blob/main/CLAUDE.md>): the
+system, the workspace, how to work, production and collaboration. This
+file adds what is particular to swf-monitor, the platform's monitor, web
+and database services: the Django web app, REST API, MCP server, and the
+platform machinery (action stream, SysConfig, alarms, SSE relay), hosting
+the production applications installed from `swf-epicprod` and running
+the production operations agent. It is a core repository, developed on
+the current `infra/baseline-vNN` branch with swf-testbed and
+swf-common-lib. This file is the repository's doc index and carries the
+one pattern every designer and implementer holds in mind; its documents
+carry the implementation detail beneath the WFMS documentation
+(<https://epic-wfms-docs.readthedocs.io>).
 
 ## Key pattern — credentialed async action with live browser push
 
-We are building a live, automated, responsive production system. The standard way
+The system is a live, automated, responsive production system. The standard way
 to add a credentialed, slow, or hang-prone capability is the prod-ops agent
 pattern — not a poller, not a blocking request, and never a credential in the web
 tier:
@@ -66,11 +63,16 @@ the old paths here. This repo's docs cover the platform services:
 - `TEAMCOMMS.md` — embedded TeamComms, devcloud authentication, request binding, identity and stream revalidation.
 - `USER_VIEW.md` — the user view: the reduced epicprod face behind the universal `user_view` parameter, its nav and conventions, and how a page tailors itself.
 - `SYSTEM_STATUS.md` — cached system status record and page.
+- `COMP_SNAPSHOT.md` — the comp snapshot: the computing centre room's live record (`swf_comp_snapshot`, `panda/comp/snapshot.json`).
+- `PROD_DASHBOARD.md` — the production dashboard for collaborators, fed by the comp snapshot, the room as its proving ground (plan).
 - `SNAPPER.md`, `SNAPPER_ERRORS.md`, `SNAPPER_PLATFORM.md`, `SNAPPER_STORAGE.md`, `SNAPPER_CATALOG.md`, `PANDA_SERVER_REPORTER.md` — Snapper operations in SWF; the error-state component and errors view; the platform-health component, Platform view, and the pandaserver01 reporter; the Storage view over the storage record; the JLab Rucio catalog component and Catalog view. All four are in production.
 - `ERROR_ATTRIBUTION.md` — correcting unreliable PanDA error labels at a single service root: rule lifetimes, evidence grades, representative-job digs, payload/pilot channels.
 - `CACHED_PRODUCTS.md` — uniform long-build caching: serve stored, rebuild behind, Update button; use this, never a new hand-rolled cache.
+- `COMPUTE_EFFICIENCY.md` — retained successful-job core-hour history, site heatmap and month/week trends, and scheduled refresh.
+- `EVENT_SERVICE_PLOTS.md` — task and job core timelines from finished reports and timestamped harness snapshots.
 - `INCLUSIVE_FILTER.md` — the two house facet filters: the inclusive filter (every value stays listed, selections widen, one URL key `f`) for views that assemble a set, and the narrowing filter (one parameter per facet, the intersection, every bar counted within the selection) for the operations views; pages switch to them one at a time.
 - `PRODUCTION_DEPLOYMENT.md` — deploying swf-monitor.
+- `SCRIPTS.md` — the standalone scripts in `scripts/`: the Django header, arguments, stderr progress and the JSON summary line, the action record, and how to run one by hand.
 - `API_REFERENCE.md` — REST API surface.
 - `MCP.md`, `MCP_TOOL_REFERENCE.md`, `MCP_CLIENTS.md`, `PANDA_BOT.md` — MCP server overview, tool catalog, client setup, and the DISpatcher Mattermost bot (MCP client).
 - `alarms.md`, `ALARM_QUEUE.md` — the alarm engine; the alarm queue design: lifecycle transitions, per-subscriber feeds with read state, automated response (design).
@@ -84,7 +86,7 @@ the old paths here. This repo's docs cover the platform services:
 
 Material production findings and resolutions must be reported in
 `epicprod-live`, with affected scope, current status and supporting evidence.
-Private dialog, TJAI coordination and commits are not substitutes. Follow
+Private dialog, LLM messages and commits are not substitutes. Follow
 `docs/NOTICE_ROUTING.md` (Findings and resolutions); this is forward-only,
 not a requirement to backfill historical investigations.
 
@@ -175,6 +177,11 @@ page template:
   via `{% load swf_fmt %}` and
   `<td class="{{ value|state_class }}">{{ value }}</td>` (or
   `task_badge`/`job_badge` for badge form). Never a bare status cell.
+- **Short names**: a concise setting (the computing-centre floor, board
+  lines, compact tables, titles) shows a site, queue or resource name
+  through the one filter, `{{ name|short }}` in templates or
+  `monitor_app.short_names.short_name` in code (ComputeCanada-Fir reads
+  Fir). A new abbreviation is added there, never in a page or view.
 - **Names and fields**: do not wrap human-facing names, identifiers, field
   paths, policies, publishers, or resolvers in `<code>`. The active theme
   renders code text red, which signals an error. Use a descriptive title and,
@@ -182,6 +189,7 @@ page template:
 
 ## Deploy
 
+Maintainers deploy on the production host (pandaserver02):
 `sudo bash deploy-swf-monitor.sh branch <current infra/baseline-vNN>` — pulls from
 git, so commit + push first. Run it in the foreground.
 

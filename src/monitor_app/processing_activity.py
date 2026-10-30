@@ -1,0 +1,129 @@
+"""Payload parallelism of running production jobs, separate from allocation."""
+import re
+from collections import defaultdict
+from datetime import datetime, timezone
+
+from django.db import connections, transaction
+
+from .cached_product import get_product
+from .models import CachedProduct, EpicProdJob
+from .panda.queries import PANDA_SCHEMA
+
+KEY = 'processing_activity:v1'
+TTL = 60
+ES_STALE_SECONDS = 600
+ES_EVENTS_WINDOW_S = 3600
+
+
+def payload_threads(corecount, actualcorecount, eventservice, metrics, record, now):
+    """ES busy work lanes, or the native payload's selected thread width.
+
+    Each ES work lane runs one single-threaded payload. Native multicore
+    allocations need the chosen payloadThreads report; allocation alone
+    cannot establish that the payload uses those cores.
+    """
+    if eventservice:
+        if not isinstance(record, dict) or not record.get('written_at'):
+            return None
+        if record.get('ended_at'):
+            return 0
+        age = now - float(record['written_at'])
+        if not 0 <= age <= ES_STALE_SECONDS or 'in_flight' not in record:
+            return None
+        return len({unit['slot'] for unit in record['in_flight'] if 'slot' in unit})
+    chosen = re.search(r'(?:^|\s)payloadThreads=(\d+)(?:\s|$)', metrics or '')
+    if chosen:
+        return int(chosen[1])
+    # A native one-core job launches one processing thread. Do not turn an
+    # unmeasured multicore reservation into an equivalent thread count.
+    if int(corecount or 1) == 1 and int(actualcorecount or 1) == 1:
+        return 1
+    return None
+
+
+def closed_events_since(record, since):
+    """The events in an Event Service harness record's closes that stood
+    (registered their output) at or after ``since``, epoch seconds: the
+    queue's production in that window, since an ES job finishes once in
+    hours and its work arrives close by close."""
+    if not isinstance(record, dict):
+        return 0
+    return sum(int(c.get('events') or 0) for c in record.get('closes') or ()
+               if isinstance(c, dict) and c.get('ok') and float(c.get('ended_at') or 0) >= since)
+
+
+def build():
+    now = datetime.now(timezone.utc)
+    sql = f'''SELECT pandaid, computingsite, COALESCE(destinationsite,''),
+                     corecount, actualcorecount, eventservice, jobmetrics
+              FROM "{PANDA_SCHEMA}".jobsactive4
+              WHERE jobstatus='running' AND workinggroup='EIC'
+                AND (prodsourcelabel='managed' OR processingtype='epicproduction')
+                AND COALESCE(processingtype,'') <> 'canary' '''
+    with transaction.atomic(using='panda'):
+        with connections['panda'].cursor() as cursor:
+            cursor.execute("SET LOCAL statement_timeout = '20s'")
+            cursor.execute(sql)
+            rows = cursor.fetchall()
+    records = dict(EpicProdJob.objects.filter(pandaid__in=[r[0] for r in rows if r[5]])
+                   .values_list('pandaid', 'data'))
+    def empty():
+        return {'known_threads': 0, 'jobs': 0, 'unknown_jobs': 0,
+                'events_1h': 0, 'events_unknown_jobs': 0}
+    queues, executors = defaultdict(empty), defaultdict(empty)
+    for pid, queue, destination, cores, actual, es, metrics in rows:
+        record = ((records.get(pid) or {}).get('es_record') or {}).get('record')
+        threads = payload_threads(cores, actual, es, metrics, record, now.timestamp())
+        for bucket in (queues[queue], executors[destination] if queue.startswith('BNL_OSG') else None):
+            if bucket is None:
+                continue
+            bucket['jobs'] += 1
+            bucket['unknown_jobs'] += threads is None
+            bucket['known_threads'] += threads or 0
+    # Event Service events in the last hour, from the closes that stood in the
+    # records of the queue's ES jobs, running or ended within the hour. A job
+    # with no record yet is counted as unknown, never as none.
+    since = now.timestamp() - ES_EVENTS_WINDOW_S
+    ended_sql = f'''SELECT pandaid, computingsite FROM "{PANDA_SCHEMA}".jobsarchived4
+                    WHERE endtime >= %s AND workinggroup='EIC' AND COALESCE(eventservice, 0) <> 0
+                      AND (prodsourcelabel='managed' OR processingtype='epicproduction')
+                      AND COALESCE(processingtype,'') <> 'canary' '''
+    with transaction.atomic(using='panda'):
+        with connections['panda'].cursor() as cursor:
+            cursor.execute("SET LOCAL statement_timeout = '20s'")
+            cursor.execute(ended_sql, [datetime.fromtimestamp(since, timezone.utc).replace(tzinfo=None)])
+            ended = cursor.fetchall()
+    es_jobs = [(pid, queue) for pid, queue, _d, _c, _a, es, _m in rows if es] + list(ended)
+    missing = [pid for pid, _q in es_jobs if pid not in records]
+    if missing:
+        records.update(EpicProdJob.objects.filter(pandaid__in=missing).values_list('pandaid', 'data'))
+    for pid, queue in es_jobs:
+        record = ((records.get(pid) or {}).get('es_record') or {}).get('record')
+        if isinstance(record, dict):
+            queues[queue]['events_1h'] += closed_events_since(record, since)
+        else:
+            queues[queue]['events_unknown_jobs'] += 1
+    # A count is never blanked. While any job of a queue or execution site is
+    # unmeasured (an Event Service job before its first shipped record, a
+    # multicore job without its thread report), the last complete count
+    # stands until a complete one replaces it, and never below the part now
+    # measured; with no complete count yet, the measured part.
+    previous = (CachedProduct.objects.filter(key=KEY)
+                .values_list('value', flat=True).first()) or {}
+    for scope, buckets in (('queues', queues), ('executors', executors)):
+        held = previous.get(scope) or {}
+        for name, bucket in buckets.items():
+            if not bucket['unknown_jobs']:
+                bucket['threads'], bucket['threads_at'] = bucket['known_threads'], now.isoformat()
+                continue
+            last = held.get(name) or {}
+            if (last.get('threads') is not None and last.get('threads_at')
+                    and last['threads'] > bucket['known_threads']):
+                bucket['threads'], bucket['threads_at'] = last['threads'], last['threads_at']
+            else:
+                bucket['threads'], bucket['threads_at'] = bucket['known_threads'], None
+    return {'queues': dict(queues), 'executors': dict(executors), 'observed_at': now.isoformat()}
+
+
+def product(refresh=False):
+    return get_product(KEY, build, TTL, refresh=refresh, async_first_fill=True)

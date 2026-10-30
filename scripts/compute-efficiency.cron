@@ -1,0 +1,3 @@
+# Retained daily history: hourly recent-day refresh; monthly full reconciliation.
+17 * * * * wenauseic /opt/swf-monitor/current/.venv/bin/python /opt/swf-monitor/current/scripts/refresh-compute-efficiency.py >> /data/wenauseic/swf-monitor/compute-efficiency.log 2>&1
+27 3 1 * * wenauseic /opt/swf-monitor/current/.venv/bin/python /opt/swf-monitor/current/scripts/refresh-compute-efficiency.py --full >> /data/wenauseic/swf-monitor/compute-efficiency.log 2>&1

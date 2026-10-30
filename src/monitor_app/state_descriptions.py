@@ -47,7 +47,7 @@ STATE_DESCRIPTIONS = {
     'prepared': 'Inputs prepared, awaiting job generation',
     'registered': 'Registered in the system',
     'submitting': 'Job submission in progress',
-    'throttled': 'Rate-limited by the broker',
+    'throttled': 'Held from dispatch by a task pause or throttling policy',
     'paused': 'Paused — resumable',
 
     # Workflow / agent states

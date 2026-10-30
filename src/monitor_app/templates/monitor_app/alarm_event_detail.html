@@ -17,6 +17,10 @@
 
     <table class="table table-sm mb-3" style="max-width:900px;">
         <tbody>
+            {% if event.context_data.jeditaskid %}
+            <tr><th style="width:200px;">Task</th>
+                <td><a href="{% url 'monitor_app:panda_task_detail' jeditaskid=event.context_data.jeditaskid %}">{{ event.context_data.jeditaskid }}</a>{% if event.context_data.taskname %} &middot; {{ event.context_data.taskname }}{% endif %}</td></tr>
+            {% endif %}
             <tr><th style="width:200px;">entry_id</th>
                 <td><code>{{ event.entry_id }}</code></td></tr>
             <tr><th>State</th>
@@ -47,6 +51,8 @@
                         <th style="width: 260px;"><code>{{ k }}</code></th>
                         {% if k == 'status' %}
                             <td class="{{ v|state_class }}">{{ v }}</td>
+                        {% elif k == 'jeditaskid' and v %}
+                            <td><a href="{% url 'monitor_app:panda_task_detail' jeditaskid=v %}">{{ v }}</a></td>
                         {% else %}
                             <td>{{ v }}</td>
                         {% endif %}

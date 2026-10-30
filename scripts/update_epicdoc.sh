@@ -14,6 +14,7 @@ echo "=== epicdoc update $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 
 # Repos referenced in ingest_docs.yaml
 REPOS=(
+    epic-wfms-docs
     swf-testbed
     swf-monitor
     swf-common-lib

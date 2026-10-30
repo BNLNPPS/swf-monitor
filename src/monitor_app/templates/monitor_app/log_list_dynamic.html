@@ -18,14 +18,33 @@
 
 {% block initial_filters %}
 {
-    app_name: '{{ selected_app|default:"" }}',
-    instance_name: '{{ selected_instance|default:"" }}',
-    username: '{{ selected_username|default:"" }}',
-    levelname: '{{ selected_levelname|default:"" }}',
-    sublevel: '{{ selected_sublevel|default:"" }}',
-    module: '{{ selected_module|default:"" }}',
+    app_name: '{{ selected_app|default:""|force_escape|escapejs }}',
+    instance_name: '{{ selected_instance|default:""|force_escape|escapejs }}',
+    username: '{{ selected_username|default:""|force_escape|escapejs }}',
+    levelname: '{{ selected_levelname|default:""|force_escape|escapejs }}',
+    sublevel: '{{ selected_sublevel|default:""|force_escape|escapejs }}',
+    module: '{{ selected_module|default:""|force_escape|escapejs }}',
+    hours: '{{ selected_hours|default:""|force_escape|escapejs }}',
     live: '{% if live_mode %}1{% endif %}'
 }
+{% endblock %}
+
+{% block extra_styles %}
+<style>
+/* The logs table fits the page: no horizontal scroll (Torre Wenaus,
+   2026-10-28). Fixed layout at full width, long words break in their cells. */
+#main-table{table-layout:fixed;width:100% !important}
+#main-table td,#main-table th{overflow-wrap:anywhere}
+#main-table th:nth-child(1){width:8% !important}
+#main-table th:nth-child(2){width:6% !important}
+#main-table th:nth-child(3){width:8% !important}
+#main-table th:nth-child(4){width:8% !important}
+#main-table th:nth-child(5){width:5% !important}
+#main-table th:nth-child(6){width:6% !important}
+#main-table th:nth-child(7){width:43% !important}
+#main-table th:nth-child(8){width:9% !important}
+#main-table th:nth-child(9){width:7% !important}
+</style>
 {% endblock %}
 
 {% block default_order %}[[0, 'desc']]{% endblock %} <!-- Order by timestamp descending -->
@@ -66,6 +85,10 @@ if (currentFilters.module) {
 
 if (currentFilters.live === '1') {
     badges.push('<span class="badge bg-success me-1">Live stream</span>');
+}
+
+if (currentFilters.hours) {
+    badges.push(`<span class="badge bg-info me-1">Last ${currentFilters.hours} h</span>`);
 }
 
 if (badges.length > 0) {

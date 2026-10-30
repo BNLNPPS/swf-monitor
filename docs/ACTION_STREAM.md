@@ -43,15 +43,35 @@ Any additional keys are free counts and context (`rows_added=…`,
 
 Two independent axes govern publication; neither touches log level.
 
-**`sublevel`** — the event's importance, declared at the call site,
-AUTHORITATIVE: changing it means changing the event, in code, in git. It says
-*which humans* an event reaches (the UI presents it as **Importance**, and
-filters on it as an at-or-above **importance threshold**):
+**`sublevel`** — the event's importance (the UI presents it as
+**Importance**, and filters on it as an at-or-above **importance
+threshold**). It means one thing (Torre Wenaus, 2026-10-28: "high should be
+made to MEAN something"):
 
-- `high` — everyone, including digest and email audiences (submissions,
-  sweeps, failures, configuration changes)
-- `normal` — live-page watchers (fetches, syncs, assessments)
-- `low` — deliberately verbose viewers only (routine mechanics)
+- `high` — a problem a person should look at now: a failure of production
+  work or of the machinery behind it, a stop production made by itself (the
+  front's task guard pausing a task), a finding of a production problem;
+- `normal` — what people and the front do to production and what it
+  delivers: submissions, task operations, settings, limits, trials,
+  priorities, work released to a site, node exclusions, assessments,
+  recoveries, and a maintenance pass's failure, which the alarms follow;
+- `low` — routine mechanics: maintenance passes, imports, sweeps and syncs
+  that succeed, bookkeeping, pilot cycles, and the step records behind an
+  event another record reports. A low event is never live by default.
+
+The catalog (`ACTION_DEFAULTS`, below) declares each action's importance
+and live default when it succeeds, and where one outcome matters more than
+the rest, that outcome's own (`outcomes`: a front decision that `fed`, a
+feeder pass that `submitted`). A failure (an `error`, `timeout`, `partial`
+or `unrecorded` outcome, or a record at ERROR) is `high` and live, a
+maintenance pass's failure `normal`. These are set at the write, whoever
+writes the record (the web tier, the MCP tools, the cron runners, the ops
+agent's REST posts): `AppLog.save` applies `epicprod_logging.publication`,
+so a call site's own values are not consulted for a catalogued action. An
+action missing from the catalog keeps its call site's values and is logged
+as uncatalogued. Over the seven days before the rule, 68 records would have
+been `high` (37 guard pauses, the rest failures and findings) against more
+than 1,500 declared so.
 
 **`live`** — a special category: "interesting to some humans, now." Each
 event declares a `live_default` recommendation; the effective decision is the
@@ -108,9 +128,10 @@ Rules of the road:
 
 1. Declare every new action in `ACTION_DEFAULTS`
    (`monitor_app/epicprod_logging.py`) — the greppable catalog the live-policy
-   page reads. It MUST mirror the call sites. Every declaration carries a
+   page reads and the write applies (Publication axes): its importance and
+   live default are the record's, by the meaning above. Every declaration carries a
    plain-English `description` — the one-liner answering "what is this
-   action", rendered on the log entry page and the live-policy page so a
+   action", available in the log entry's technical details and on the live-policy page so a
    stream reader is never left guessing what an event was.
 2. Timed operations pass the start time; every sweep reports its execution
    time to the log.
@@ -118,6 +139,12 @@ Rules of the road:
    `outcome: error` with no why is itself a silent failure. The web and MCP
    tiers put the cause in the message text; the agent's `_log_action` takes
    `reason=` and exposes it in both the record and the message.
+   An interrupted storage-door cycle also carries its last flushed probe
+   progress: the storage element, catalog door address, probe path and
+   current check, together with completed checks. The doer flushes each
+   stage before it runs, so a signal or timeout preserves the subject.
+   Older failures without that progress explicitly say the door was not
+   recorded; a current cached reading is not evidence of a past probe.
 4. Requester identity travels in the message (`created_by`, `owner`,
    `requested_by`) and is recorded at execution. Anonymous open-face requests
    record an empty username.
@@ -128,13 +155,48 @@ Rules of the road:
 
 **Operators.** The Logs page (`/logs/`, Logs in the epicprod nav, pre-filtered
 `?app_name=epicprod`) is the first live channel: the *Live stream* toggle
-(`?live=1`) shows live events with 30-second auto-refresh. Each record's log
-entry page embeds the action's catalog description, so what an `evgen_sweep`
-or `catalog_sync` *is* reads directly off the record. The
+(`?live=1`) shows live events with 30-second auto-refresh; `hours=N`
+narrows the list and its filter counts to the last N hours. Each record's log
+entry page leads with its verdict and summary, falling back to narration or
+the log message when no summary was recorded. Timestamp, origin, subject,
+requester and duration form a compact metadata line. Distinct reasons and
+narration follow the summary; reported fields use labelled values and lists.
+Repeated summary/narration is shown once. The action definition, source and
+process identifiers, original message and complete recorded data remain in
+expandable technical details. Rendering does not change the stored record. The
 [live-policy page](../src/monitor_app/templates/monitor_app/live_policy.html)
 at `/logs/live-policy/` lists every known action with its declared sublevel,
 live default, current override, and effective state — overrides editable in
 place when signed in, each save itself logged (`live_policy_edit`).
+
+**Curated view.** The dashboard's epicprod-live title opens
+`/logs/epicprod-live/`: the live stream's last 24 hours (`?hours=N`, at
+most a week) as a reader wants them, in six groups, one line per event,
+newest first in each, with who and why (Torre Wenaus, 2026-10-28, asking
+for considered curation in place of the raw list). The groups, in
+`monitor_app/live_curated.py`:
+
+- Problems: warnings and errors, one line per subject (the newest, as the
+  dashboard's panel keeps them), with how often it recurred and whether it
+  has since recovered, ended or been answered;
+- Findings and decisions: findings, settings, core limits, trials,
+  priorities and every other action no rule names, until it is given its
+  place;
+- Task operations: submissions, pauses, resumes, finishes and moves, with
+  who and why from the operation record (`PandaTaskOperation`: the front's
+  task guard and its trip, the front's idle move, a person and their
+  reason), an operation's pending and final records shown once, a task's
+  moves on one line;
+- Feeds: work released to a site by the front or a site's own feeder;
+- Node guard: nodes newly excluded;
+- Assessments: registrations, with their verdicts.
+
+Left out, and counted on the page: machinery (the maintenance passes,
+routine imports and sweeps, pilot cycles, segfault bookkeeping, the EVGEN
+intake's own steps), the steps behind an event another line reports (the
+idle move behind a Move, the guard's pause request behind a Pause), and
+OSG's fair-share hold, which Production now carries. The page links to the
+live stream view, which keeps every record.
 
 **Mattermost.** The `#epicprod-live` channel is fed by the publisher
 (`manage.py publish_epicprod_live`, systemd unit `swf-epicprod-live`) — a

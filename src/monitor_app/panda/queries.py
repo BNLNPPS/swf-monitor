@@ -30,7 +30,7 @@ from .sql import (
     build_union_query_dt, build_union_count, build_union_count_by_field,
     build_task_count, build_task_count_by_field,
     build_search_clauses,
-    row_to_dict, extract_errors, like_or_eq,
+    row_to_dict, extract_errors, like_or_eq, site_clause,
 )
 
 logger = logging.getLogger(__name__)
@@ -724,29 +724,43 @@ def list_jobs(days=7, status=None, username=None, site=None,
 
 
 def diagnose_jobs(days=7, username=None, site=None, taskid=None,
-                  reqid=None, error_component=None, limit=None, before_id=None):
+                  reqid=None, error_component=None, limit=None, before_id=None,
+                  execsite=None, ended_after=None, ended_before=None,
+                  status=None, error_code=None):
     """Diagnose failed PanDA jobs with full error details."""
     # An explicit limit is always honored. The default is 500, or the
     # complete population when scoped to a specific task.
     if limit is None:
         limit = 100000 if taskid else 500
     cutoff = timezone.now() - timedelta(days=days)
-    where = [
-        '"modificationtime" >= %s',
-        # = ANY(array) rather than IN (tuple): psycopg3 adapts a Python
-        # tuple as a composite record literal, which breaks the SQL.
-        '"jobstatus" = ANY(%s)',
-    ]
-    params = [cutoff, list(FAULTY_STATUSES)]
+    selected = [value for value in str(status or '').split(',') if value]
+    if any(value not in FAULTY_STATUSES for value in selected):
+        return {'error': 'Diagnostics accepts only terminal failure statuses'}
+    where = ['"jobstatus" = ANY(%s)']
+    params = [selected or list(FAULTY_STATUSES)]
+    if ended_after is not None and ended_before is not None:
+        where.extend(['"endtime" > %s', '"endtime" <= %s'])
+        params.extend([ended_after, ended_before])
+    else:
+        where.append('"modificationtime" >= %s')
+        params.append(cutoff)
+    if execsite:
+        where.append('"destinationsite" = %s')
+        params.append(execsite)
 
     if username:
         clause, val = like_or_eq('produsername', username)
         where.append(clause)
         params.append(val)
     if site:
-        clause, val = like_or_eq('computingsite', site)
-        where.append(clause)
-        params.append(val)
+        sites = [value.strip() for value in site.split(',') if value.strip()]
+        if len(sites) > 1:
+            where.append('"computingsite" = ANY(%s)')
+            params.append(sites)
+        else:
+            clause, val = like_or_eq('computingsite', site)
+            where.append(clause)
+            params.append(val)
     if taskid:
         where.append('"jeditaskid" = %s')
         params.append(taskid)
@@ -756,7 +770,15 @@ def diagnose_jobs(days=7, username=None, site=None, taskid=None,
     if error_component:
         comp = next((c for c in ERROR_COMPONENTS if c['name'] == error_component), None)
         if comp:
-            where.append(f'"{comp["code"]}" != 0')
+            if error_code is not None:
+                try:
+                    value = int(error_code)
+                except (TypeError, ValueError):
+                    return {'error': 'Error code must be an integer'}
+                where.append(f'"{comp["code"]}" = %s')
+                params.append(value)
+            else:
+                where.append(f'"{comp["code"]}" != 0')
     if before_id:
         where.append('"pandaid" < %s')
         params.append(before_id)
@@ -1234,7 +1256,7 @@ def _declared_failures(conn, time_filter, time_params, dest_join, destse_params,
 def error_summary(days=10, username=None, site=None, destinationse=None,
                   taskid=None, error_source=None, limit=20,
                   ended_after=None, ended_before=None, status=None,
-                  classified=False):
+                  classified=False, execsite=None):
     """Aggregate error summary across failed PanDA jobs, ranked by frequency."""
     # When scoped to a specific task, return all error patterns
     if taskid:
@@ -1274,11 +1296,20 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
             filters += ' AND "produsername" = %s'
         extra_params.append(username)
     if site:
-        if '%' in site:
+        sites = [value.strip() for value in site.split(',') if value.strip()]
+        if len(sites) > 1:
+            placeholders = ', '.join(['%s'] * len(sites))
+            filters += f' AND "computingsite" IN ({placeholders})'
+            extra_params.extend(sites)
+        elif '%' in site:
             filters += ' AND "computingsite" LIKE %s'
+            extra_params.append(site)
         else:
             filters += ' AND "computingsite" = %s'
-        extra_params.append(site)
+            extra_params.append(site)
+    if execsite:
+        filters += ' AND "destinationsite" = %s'
+        extra_params.append(execsite)
     destse_filter = ''
     destse_params = []
     if destinationse:
@@ -1469,21 +1500,24 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
     count_params = []
     for table in ['jobsactive4', 'jobsarchived4']:
         count_parts.append(f"""
-            SELECT j."jobstatus", COUNT(*)
+            SELECT j."jobstatus", j."jeditaskid", COUNT(*)
             FROM "{PANDA_SCHEMA}"."{table}" j
             {dest_join}
             WHERE {time_filter}
               AND j."jobstatus" IN ('failed','cancelled','closed')
               AND ({any_nonzero})
               {filters}
-            GROUP BY 1
+            GROUP BY 1, 2
         """)
         count_params.extend(destse_params + time_params + extra_params)
     status_counts = {}
+    task_counts = {}
     try:
         with conn.cursor() as cursor:
             cursor.execute(' UNION ALL '.join(count_parts), count_params)
-            for job_status, job_count in cursor.fetchall():
+            for job_status, job_taskid, job_count in cursor.fetchall():
+                if job_taskid and (not status_list or job_status in status_list):
+                    task_counts[int(job_taskid)] = task_counts.get(int(job_taskid), 0) + int(job_count or 0)
                 status_counts[str(job_status)] = (
                     status_counts.get(str(job_status)) or 0
                 ) + int(job_count or 0)
@@ -1546,12 +1580,16 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
         # restriction applied — the basis of the status filter chips,
         # and the visibility of whatever the filter excludes.
         "status_counts": status_counts,
+        "task_counts": [{"taskid": task, "count": count}
+                        for task, count in sorted(task_counts.items(),
+                                                  key=lambda item: (-item[1], item[0]))],
         # The failures under a declared downtime, per declaration.
         "declared": declared,
         "filters": {
             "days": days,
             "username": username,
             "site": site,
+            "execsite": execsite,
             "taskid": taskid,
             "error_source": error_source,
             "status": ','.join(status_list) if status_list else None,
@@ -1782,10 +1820,18 @@ QUEUE_SUMMARY_FIELDS = [
 
 
 def list_queues(vo=None, status=None, state=None, search=None):
-    """List PanDA queues from schedconfig_json with summary fields."""
+    """List current PanDA queues from schedconfig_json with summary fields."""
+    from swf_epicprod.regulation import RETIRED_QUEUES
+
     conn = connections['panda']
     where = []
     params = []
+
+    retired = list(RETIRED_QUEUES)  # one reading of the live registry view
+    if retired:
+        placeholders = ', '.join(['%s'] * len(retired))
+        where.append(f'"panda_queue" NOT IN ({placeholders})')
+        params.extend(retired)
 
     if vo:
         where.append(""""data"->>'vo_name' = %s""")
@@ -2040,7 +2086,8 @@ def get_queue(panda_queue):
 
 
 def job_outcomes(days=7, site=None, start_time=None, end_time=None,
-                 include_closed=False):
+                 include_closed=False, execsite=None, taskid=None,
+                 registration=None, username=None):
     """Completed-job outcomes over time for the jobs page's graphical
     view: finished/failed/cancelled counts per Eastern-time bucket, and
     closed when asked for (never-run jobs; see get_activity), each with
@@ -2069,9 +2116,23 @@ def job_outcomes(days=7, site=None, start_time=None, end_time=None,
     filters = ''
     extra_params = []
     if site:
-        clause, val = like_or_eq('computingsite', site)
+        clause, vals = site_clause(site)
         filters += f' AND {clause}'
-        extra_params.append(val)
+        extra_params.extend(vals)
+    if execsite:
+        filters += ' AND "destinationsite" = %s'
+        extra_params.append(execsite)
+    if taskid:
+        filters += ' AND "jeditaskid" = %s'
+        extra_params.append(int(taskid))
+    if username:
+        clause, values = _effective_username_filter('produsername', username)
+        filters += ' AND ' + clause
+        extra_params.extend(values)
+    clause, values = _registration_clause(registration)
+    if clause:
+        filters += ' AND ' + clause
+        extra_params.extend(values)
     statuses = ('finished', 'failed', 'cancelled') + (
         ('closed',) if include_closed else ())
     where = (
@@ -2141,6 +2202,10 @@ def job_outcomes(days=7, site=None, start_time=None, end_time=None,
         'bins': [b.isoformat() for b in bins],
         'series': series,
         'site': site or '',
+        'taskid': int(taskid) if taskid else None,
+        'execsite': execsite or '',
+        'username': username or '',
+        'registration': registration or '',
         'window': {'start': window_start.isoformat(),
                    'end': window_end.isoformat(),
                    'days': days, 'timezone': 'America/New_York'},
@@ -2184,6 +2249,18 @@ UNRESOLVED_LABEL = 'unresolved (bare hostname)'
 
 
 SITE_KEY_PREFIX = 'site:'
+
+
+def execute_site_key_sql():
+    """Shared execution-site key for rows exposing host and dest_site."""
+    return (
+        "CASE WHEN COALESCE(dest_site, '') <> '' THEN 'site:' || dest_site "
+        "WHEN host ~ '^(osgsub|pandaharvester)' THEN 'submit-host' "
+        "WHEN host ~* '^fc[0-9]{4,6}([.]|$)' THEN 'site:ComputeCanada-Fir' "
+        "WHEN host LIKE '%%.cnaf.infn.it' THEN 'site:CNAF' "
+        "WHEN host ~* '^CRUSH-OSG' THEN 'site:SU-ITS' "
+        r"ELSE COALESCE(substring(host from '([^.]+\.[^.]+)$'), '') END"
+    )
 
 
 def execute_site_label(key):
@@ -2423,11 +2500,7 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
             # host; else the last two labels of the execute host
             # ("<slot>@<host>" or "<host>"); else '' for a bare hostname.
             host_expr = 'regexp_replace(COALESCE("modificationhost", \'\'), \'^.*@\', \'\')'
-            key_expr = (
-                "CASE WHEN COALESCE(dest_site, '') <> '' THEN 'site:' || dest_site "
-                "WHEN host ~ '^(osgsub|pandaharvester)' THEN 'submit-host' "
-                r"ELSE COALESCE(substring(host from '([^.]+\.[^.]+)$'), '') END"
-            )
+            key_expr = execute_site_key_sql()
             pool_where = base_where + ' AND "computingsite" = ANY(%s)'
             pool_params = base_params + [pool_queues]
             sql = f"""
@@ -3301,15 +3374,19 @@ def study_job(pandaid, include_batch_reason=False, include_log_analysis=True,
 # ── Event Service ────────────────────────────────────────────────────────────
 
 ES_RANGE_ROW_CAP = 60
+ES_SNAPSHOT_STALE_S = 600  # Two five-minute collection intervals.
 
 
 def es_events_per_range(splitrule):
-    """The task's events per range, from the ES= term of its split rule.
+    """The task's events per range, from its split rule.
 
     JEDI writes ``nEventsPerWorker`` into ``jedi_tasks.splitrule`` as
-    ``ES=<n>`` (``NE=100,ES=10,...``), which spares the taskparams JSON.
+    ``ES=<n>`` (``NE=100,ES=10,...``), which spares the taskparams JSON. A
+    fine-grained task has no ES= term; with our server's local
+    ``nEventsPerFineGrainedRange`` it carries ``FR=<n>`` instead.
     """
-    m = re.search(r'(?:^|,)ES=(\d+)', splitrule or '')
+    m = (re.search(r'(?:^|,)ES=(\d+)', splitrule or '')
+         or re.search(r'(?:^|,)FR=(\d+)', splitrule or ''))
     return int(m.group(1)) if m else None
 
 
@@ -3400,7 +3477,11 @@ def _es_range_query(conn, where_sql, params, cap, consumer_ids=None):
                     'error_code': ecode,
                     'error_diag': ediag,
                 })
-    for _pid, status, attempt in latest_bookkeeping.values():
+    for key, (_pid, status, attempt) in latest_bookkeeping.items():
+        # A completed successor owns the range now. An earlier jobset's
+        # cancelled copy is history, not a cancellation of the saved work.
+        if status == 4 and distinct[key][1]:
+            continue
         _count(range_counts, (status,), status, attempt, None)
     return {
         'total': total,
@@ -3524,44 +3605,66 @@ def task_harness_rollup(jeditaskid, limit=2000):
     with their events, the unit wall's middle and tail and the seconds
     an event costs (unit wall over its events), the closes with their
     events and wall, and every job's untaken-at-deadline mark. From the
-    job reports in the metatable (finished jobs), capped at ``limit``
+    job reports in the metatable or filed harness snapshots, capped at ``limit``
     jobs; None when no job of the task carries a harness report. Never
     raises: one card on a page."""
     conn = connections['panda']
     try:
         with conn.cursor() as cursor:
             cursor.execute(
-                f'SELECT m."pandaid", m."metadata", j."starttime", j."endtime" '
-                f'FROM "{PANDA_SCHEMA}"."metatable" m '
-                f'JOIN "{PANDA_SCHEMA}"."jobsarchived4" j ON j."pandaid" = m."pandaid" '
-                f'WHERE j."jeditaskid" = %s ORDER BY m."pandaid" DESC LIMIT %s',
-                [int(jeditaskid), int(limit)])
+                f'SELECT j."pandaid", m."metadata", j."starttime", j."endtime", '
+                f'j."jobstatus", j."actualcorecount", j."corecount", j."piloterrorcode" FROM ('
+                f'SELECT "pandaid", "starttime", "endtime", "jobstatus", "actualcorecount", "corecount", "piloterrorcode" '
+                f'FROM "{PANDA_SCHEMA}"."jobsactive4" WHERE "jeditaskid" = %s UNION '
+                f'SELECT "pandaid", "starttime", "endtime", "jobstatus", "actualcorecount", "corecount", "piloterrorcode" '
+                f'FROM "{PANDA_SCHEMA}"."jobsarchived4" WHERE "jeditaskid" = %s) j '
+                f'LEFT JOIN "{PANDA_SCHEMA}"."metatable" m ON j."pandaid" = m."pandaid" '
+                f'ORDER BY j."pandaid" DESC LIMIT %s',
+                [int(jeditaskid), int(jeditaskid), int(limit)])
             rows = cursor.fetchall()
     except Exception as e:
         logger.error(f"harness rollup query failed for task {jeditaskid}: {e}")
         return None
     from ..es_plot import slot_plot_svg
+    from ..models import EpicProdJob
+    try:
+        filed = dict(EpicProdJob.objects.filter(
+            pandaid__in=[row[0] for row in rows]).values_list('pandaid', 'data'))
+    except Exception as exc:
+        logger.error('harness snapshot lookup failed for task %s: %s', jeditaskid, exc)
+        filed = {}
     jobs = 0
     slots = []
     unit_walls, unit_events, spe = [], [], []
     done = failed = events_done = 0
     closes, close_walls, close_events, close_failed = 0, [], 0, 0
+    close_saved, close_unfinished = 0, 0
     deadline_marks = 0
     busy_s = allocated_s = 0.0
     heads, tails = [], []
     plots = []
-    for pandaid, raw, jstart, jend in rows:
+    seen = set()
+    for pandaid, raw, jstart, jend, status, actual_cores, cores, pilot_error in rows:
+        if pandaid in seen:
+            continue
+        seen.add(pandaid)
         try:
             metadata = json.loads(raw) if isinstance(raw, str) else raw
         except (ValueError, TypeError):
             continue
         es = metadata.get('es') if isinstance(metadata, dict) else None
+        if not isinstance(es, dict) or es.get('shipped_closes'):
+            # No report, or one whose shipped closes' units are in the store
+            # only: the filed record, joined whole (es_records.load).
+            record = ((filed.get(pandaid) or {}).get('es_record') or {}).get('record')
+            es = es_record_report(record, status, loss_confirmed=pilot_error == 1256) or es
         if not isinstance(es, dict):
             continue
         jobs += 1
         # The slots' occupancy of this job, for the task's total and the
         # newest jobs' plots.
-        tl = es_slot_timeline({'starttime': jstart, 'endtime': jend}, es)
+        tl = es_slot_timeline({'starttime': jstart, 'endtime': jend,
+                               'actualcorecount': actual_cores, 'corecount': cores}, es)
         if tl:
             busy_s += tl['busy_s']
             allocated_s += tl['allocated_s']
@@ -3574,7 +3677,9 @@ def task_harness_rollup(jeditaskid, limit=2000):
             slots.append(int(es['slots']))
         if es.get('untaken_at_deadline'):
             deadline_marks += 1
-        for u in es.get('ranges_done') or []:
+        completed = ((es.get('ranges_done') or []) + (es.get('ranges_awaiting_close') or [])
+                     + (es.get('ranges_unshipped') or []))
+        for u in completed:
             if not isinstance(u, dict):
                 continue
             done += 1
@@ -3592,10 +3697,13 @@ def task_harness_rollup(jeditaskid, limit=2000):
                 continue
             closes += 1
             if c.get('ok'):
+                close_saved += 1
                 close_events += int(c.get('events') or 0)
-            else:
+            elif c.get('running'):
+                close_unfinished += 1
+            elif not c.get('running'):
                 close_failed += 1
-            if c.get('wall_s') is not None:
+            if not c.get('running') and c.get('wall_s') is not None:
                 close_walls.append(float(c['wall_s']))
     if not jobs:
         return None
@@ -3608,6 +3716,7 @@ def task_harness_rollup(jeditaskid, limit=2000):
         'unit_wall_p90_s': round(walls[min(len(walls) - 1, int(0.9 * len(walls)))], 1) if walls else None,
         's_per_event_median': round(_median(spe), 2) if spe else None,
         'closes': closes, 'closes_failed': close_failed, 'close_events': close_events,
+        'closes_saved': close_saved, 'closes_unfinished': close_unfinished,
         'close_wall_median_s': _median(close_walls),
         'deadline_marks': deadline_marks,
         'capped': len(rows) >= limit,
@@ -3630,7 +3739,11 @@ def es_slot_timeline(job, es):
     record (payload 0.21.4); an older record is laid out greedily onto
     lanes, which is what the slots did since each runs one unit at a
     time. None when the job has no start and end."""
+    from ..es_timing import unit_segments, phase_totals, turnaround, member_segments
+    from ..es_timing import pooled as es_pooled, epoch as es_epoch
     start, end = job.get('starttime'), job.get('endtime')
+    if es.get('observed_at') and (not end or es.get('live') or es.get('incomplete')):
+        end = datetime_from_epoch(es['observed_at'])
     if not start or not end:
         return None
     from datetime import datetime, timezone as _tz
@@ -3651,20 +3764,61 @@ def es_slot_timeline(job, es):
     # later gave up on its heartbeat.
     cut = (es.get('preempted') or {}).get('at')
     if cut and (es.get('preempted') or {}).get('real'):
-        t1 = min(t1, float(cut))
+        # A reaped job can retain an endtime from its last heartbeat,
+        # earlier than payload activity independently shipped afterward.
+        t1 = float(cut)
     nslots = int(es.get('slots') or 0) or 1
-    units = []
+    found = []
     for status, key in (('done', 'ranges_done'), ('failed', 'ranges_failed'),
-                        ('interrupted', 'ranges_interrupted'), ('unshipped', 'ranges_unshipped')):
+                        ('interrupted', 'ranges_interrupted'), ('unshipped', 'ranges_unshipped'),
+                        ('running', 'ranges_running'), ('awaiting', 'ranges_awaiting_close')):
         for u in es.get(key) or []:
             if not isinstance(u, dict) or u.get('started_at') is None:
                 continue
             us = float(u['started_at'])
             ue = float(u.get('ended_at') or (us + float(u.get('wall_s') or 0)))
-            units.append({'unit_id': u.get('unit_id'), 'status': status,
-                          'start_s': us - t0, 'end_s': ue - t0,
-                          'events': int(u.get('events_reconstructed') or u.get('events') or 0),
-                          'slot': u.get('slot'), 'close': u.get('close')})
+            found.append((status, u, us, ue))
+    # A reconstruction on a shared pool member runs off the unit's core. Under
+    # asynchronous reconstruction the slot takes its next unit as soon as the
+    # simulation ends, so a pooled unit holds its core until the next unit on
+    # the same slot starts; a slot's last unit, until its simulation ended.
+    by_slot = {}
+    for item in found:
+        by_slot.setdefault(item[1].get('slot'), []).append(item)
+    asynchronous = False
+    for items in by_slot.values():
+        items.sort(key=lambda item: item[2])
+        asynchronous |= any(es_pooled(a[1]) and b[2] < a[3] - 1 for a, b in zip(items, items[1:]))
+    core_end = {}
+    for items in by_slot.values():
+        for item, following in zip(items, items[1:] + [None]):
+            status, u, us, ue = item
+            end = ue
+            if asynchronous and es_pooled(u):
+                simulated = es_epoch((u.get('simulation') or {}).get('ended_at')) or ue
+                end = min(ue, following[2]) if following else min(ue, max(us, simulated))
+            core_end[id(u)] = end
+    units, member_units = [], {}
+    for status, u, us, ue in found:
+        end = core_end[id(u)]
+        units.append({'unit_id': u.get('unit_id'), 'status': status,
+                      'start_s': us - t0, 'end_s': end - t0,
+                      'events': int(u.get('events_reconstructed') or u.get('events') or 0),
+                      'segments': unit_segments(dict(u, ended_at=end), t0, t1,
+                                                without_reconstruction=es_pooled(u)),
+                      'slot': u.get('slot'), 'close': u.get('close')})
+        if es_pooled(u):
+            parts = member_segments(u, t0, t1)
+            if parts:
+                reconstruction = u['reconstruction']
+                member_units.setdefault(int(reconstruction['pool_member']), []).append({
+                    'unit_id': u.get('unit_id'), 'status': status, 'events': 0,
+                    'reconstructed': int(u.get('events_reconstructed') or 0),
+                    'start_s': parts[0]['start_s'], 'end_s': parts[-1]['end_s'], 'segments': parts,
+                    'close': u.get('close'),
+                    'title': (f"{u.get('unit_id')}: reconstruction of {int(u.get('events_reconstructed') or 0)} "
+                              f"events from core {u.get('slot')} on member {reconstruction['pool_member']}, "
+                              f"{float(reconstruction.get('pool_wait_s') or 0):.1f} s waiting for the member")})
     units.sort(key=lambda u: u['start_s'])
     lanes = {}
     if all(u['slot'] is not None for u in units) and units:
@@ -3686,7 +3840,7 @@ def es_slot_timeline(job, es):
     for c in es.get('closes') or []:
         if isinstance(c, dict) and c.get('started_at') is not None:
             cs = float(c['started_at'])
-            closes.append({'index': c.get('index'), 'ok': bool(c.get('ok')),
+            closes.append({'index': c.get('index'), 'ok': bool(c.get('ok')), 'running': bool(c.get('running')),
                            'start_s': cs - t0,
                            'end_s': float(c.get('ended_at') or (cs + float(c.get('wall_s') or 0))) - t0})
     wall = t1 - t0
@@ -3705,12 +3859,28 @@ def es_slot_timeline(job, es):
     if es.get('started_at'):
         harness = {'start_s': float(es['started_at']) - t0,
                    'end_s': (float(es['ended_at']) - t0) if es.get('ended_at') else None}
+    timing = phase_totals(units)
+    # Pool members' lanes follow the cores' and count apart from them: the
+    # members run on the node's spare hardware threads, not the job's cores.
+    member_rows = []
+    for member in sorted(member_units):
+        mu = sorted(member_units[member], key=lambda u: u['start_s'])
+        member_rows.append({'index': member, 'label': f'reco {member}', 'units': mu,
+                            'right_text': f"{sum(u['reconstructed'] for u in mu if u['status'] == 'done'):,} ev"})
+    members = phase_totals([u for row in member_rows for u in row['units']]) if member_rows else {}
     return {
         'wall_s': round(wall, 1), 'slots': max(nslots, len(lanes)),
+        **timing, **turnaround(lanes.values()),
+        'saved_processing_fraction': (round(timing['saved_processing_s'] / allocated, 3)
+                                      if allocated and timing['measured_units'] else None),
+        'members': len(member_rows),
+        'member_processing_s': members.get('processing_s'),
+        'member_saved_processing_s': members.get('saved_processing_s'),
+        'member_initialization_s': members.get('initialization_s'),
         # The cores the batch job holds, which may exceed the cores it works
         # (npps0: 6 of 8, a memory limit).
         'cores_allocated': int(job.get('actualcorecount') or job.get('corecount') or 0) or None,
-        'rows': slot_rows, 'closes': closes, 'harness': harness,
+        'rows': slot_rows + member_rows, 'closes': closes, 'harness': harness,
         'busy_s': round(busy, 1), 'allocated_s': round(allocated, 1),
         'busy_fraction': round(busy / allocated, 3) if allocated else None,
         'head_idle_s': round(min(r['head_idle_s'] for r in slot_rows), 1) if slot_rows else None,
@@ -3718,7 +3888,20 @@ def es_slot_timeline(job, es):
         'lanes_from_record': all(u['slot'] is not None for u in units) and bool(units),
         'cut_s': round(float(cut) - t0, 1) if cut else None,
         'cut_real': bool((es.get('preempted') or {}).get('real')),
+        'live': bool(es.get('live')),
+        'incomplete': bool(es.get('incomplete')),
+        'normal_end': bool(es.get('ended_at')),
+        'observed_at': datetime_from_epoch(es['observed_at']).isoformat() if es.get('observed_at') else None,
+        'snapshot_stale': bool(es.get('live') and es.get('observed_at') and
+                               timezone.now().timestamp() - float(es['observed_at']) > ES_SNAPSHOT_STALE_S),
+        'compact_lanes': nslots > 64,
     }
+
+
+def datetime_from_epoch(value):
+    """An aware UTC timestamp from a harness clock reading."""
+    from datetime import datetime, timezone as _tz
+    return datetime.fromtimestamp(float(value), _tz.utc)
 
 
 _PILOT_TASK_RE = re.compile(r'(?:pilotlog-task|-task)(\d+)')
@@ -3928,20 +4111,27 @@ def allocation_of_job(pandaid):
     return (row[0], int(row[1])) if row else None
 
 
-def es_from_shipped_record(pandaid):
+def es_from_shipped_record(pandaid, job_status=None, *, loss_confirmed=False):
     """The ``es`` block of a job that ended without its final report, from
     the record the harness shipped off the node as it went (swf-epicprod
     payload/es/es_record.py), as the sweep filed it under
-    ``EpicProdJob.data['es_record']``. The record's last write is the cut:
-    the units then in flight were cut off, the units finished and not yet
-    in a close that stood never left the node, and a close running at the
-    cut is lost with them. None when no record was filed."""
+    ``EpicProdJob.data['es_record']``. A confirmed worker loss makes the
+    last observation the cut; otherwise it remains an incomplete snapshot.
+    None when no record was filed."""
     from ..models import EpicProdJob
     job = EpicProdJob.objects.filter(pandaid=int(pandaid)).only('data').first()
     rec = ((job.data or {}).get('es_record') or {}).get('record') if job else None
+    return es_record_report(rec, job_status, loss_confirmed=loss_confirmed)
+
+
+def es_record_report(rec, job_status, *, loss_confirmed=False):
+    """A missing final record alone does not establish worker loss."""
     if not isinstance(rec, dict) or not rec.get('written_at'):
         return None
     cut = float(rec['written_at'])
+    terminal = job_status in ('finished', 'failed', 'closed', 'cancelled')
+    lost = terminal and not rec.get('ended_at') and loss_confirmed
+    incomplete = terminal and not rec.get('ended_at') and not lost
     interrupted = [dict(u, status='interrupted', ended_at=cut,
                         wall_s=round(cut - float(u.get('started_at') or cut), 1))
                    for u in rec.get('in_flight') or []]
@@ -3954,24 +4144,34 @@ def es_from_shipped_record(pandaid):
             per_close.setdefault(int(u['close']), []).append(u.get('unit_id'))
     closes = [dict(c, units=per_close.get(int(c.get('index') or 0), []))
               for c in rec.get('closes') or []] + [
-        {'index': c.get('index'), 'ok': False, 'outcome': 'cut off', 'units': list(c.get('units') or []),
+        {'index': c.get('index'), 'ok': False, 'running': not lost,
+         'outcome': ('cut off' if lost else 'unfinished at last snapshot' if incomplete
+                     else (c.get('progress') or {}).get('stage') or 'running'),
+         'units': list(c.get('units') or []), 'progress': c.get('progress'),
+         'wall_s': None if lost else round(max(0, cut - float(c.get('started_at') or cut)), 1),
          'started_at': c.get('started_at'), 'ended_at': cut} for c in rec.get('closing') or []]
     return {
         'kind': 'event_service', 'stamp': rec.get('stamp'), 'slots': rec.get('slots'),
+        'started_at': rec.get('started_at'), 'ended_at': rec.get('ended_at'),
+        'observed_at': cut, 'live': not terminal and not rec.get('ended_at'),
+        'incomplete': incomplete,
         'payload_version': rec.get('payload_version', ''),
         'ranges_done': rec.get('done') or [], 'ranges_failed': rec.get('failed') or [],
-        'ranges_interrupted': interrupted, 'ranges_unshipped': unshipped, 'closes': closes,
+        'ranges_interrupted': interrupted if lost else [],
+        'ranges_unshipped': unshipped if lost else [], 'closes': closes,
+        'ranges_running': [dict(u, status='running') for u in interrupted] if not lost else [],
+        'ranges_awaiting_close': [dict(u, status='awaiting') for u in unshipped] if not lost else [],
         'preempted': {
             'real': True, 'at': cut,
             'after_s': round(cut - float(rec.get('started_at') or cut), 1),
             'interrupted_units': len(interrupted),
             'interrupted_events': sum(int(u.get('events') or 0) for u in interrupted),
             'unshipped_units': len(unshipped),
-            'unshipped_events': sum(int(u.get('events') or 0) for u in unshipped)},
+            'unshipped_events': sum(int(u.get('events') or 0) for u in unshipped)} if lost else None,
     }
 
 
-def es_harness_report(conn, pandaid):
+def es_harness_report(conn, pandaid, job=None):
     """The node harness's account of an Event Service job, from the job
     report the pilot shipped as metadata (evgen_job_dispatcher.py es
     mode: the summary under ``es``, every unit's record with its events,
@@ -3999,14 +4199,23 @@ def es_harness_report(conn, pandaid):
             logger.error(f"job metadata unparsable for job {pandaid}: {e}")
             return None
     es = metadata.get('es') if isinstance(metadata, dict) else None
+    if isinstance(es, dict) and es.get('shipped_closes'):
+        # The report carries only units no close shipped; the filed record,
+        # joined whole (swf-epicprod es_records.load), has them all.
+        whole = es_from_shipped_record(pandaid, (job or {}).get('jobstatus'),
+                                      loss_confirmed=(job or {}).get('piloterrorcode') == 1256)
+        if whole is not None:
+            es = dict(whole, closes=es.get('closes') or whole.get('closes'))
     if not isinstance(es, dict):
-        es = es_from_shipped_record(pandaid)
+        es = es_from_shipped_record(pandaid, (job or {}).get('jobstatus'),
+                                   loss_confirmed=(job or {}).get('piloterrorcode') == 1256)
         if es is None:
             return None
         metadata = {'payload_version': es.get('payload_version', '')}
     units = []
     for status, key in (('done', 'ranges_done'), ('failed', 'ranges_failed'),
-                        ('interrupted', 'ranges_interrupted'), ('unshipped', 'ranges_unshipped')):
+                        ('interrupted', 'ranges_interrupted'), ('unshipped', 'ranges_unshipped'),
+                        ('running', 'ranges_running'), ('awaiting', 'ranges_awaiting_close')):
         for u in es.get(key) or []:
             if not isinstance(u, dict):
                 continue
@@ -4029,6 +4238,7 @@ def es_harness_report(conn, pandaid):
     for c in es.get('closes') or []:
         if isinstance(c, dict):
             closes.append({'index': c.get('index'), 'outcome': c.get('outcome'),
+                           'running': bool(c.get('running')),
                            'events': c.get('events'), 'units': len(c.get('units') or []),
                            'wall_s': c.get('wall_s'), 'did': (c.get('did') or '').split('/')[-1],
                            'message': c.get('message') or '', 'ok': bool(c.get('ok'))})
@@ -4070,7 +4280,7 @@ def event_service_for_job(job, task_info):
         'events_per_range': es_events_per_range((task_info or {}).get('splitrule')),
         'ranges': ranges,
         'verdict': es_verdict(job),
-        'report': es_harness_report(connections['panda'], job.get('pandaid')),
+        'report': es_harness_report(connections['panda'], job.get('pandaid'), job=job),
     }
     if out['report']:
         out['report']['timeline'] = es_slot_timeline(job, out['report']['raw'])
@@ -4087,9 +4297,25 @@ TASK_ORDER_COLUMNS = {f: f'"{f}"' for f in TASK_LIST_FIELDS}
 
 # Searchable columns for DataTables global search
 JOB_SEARCH_FIELDS = ['pandaid', 'jeditaskid', 'produsername', 'jobstatus',
-                     'computingsite', 'transformation']
+                     'computingsite', 'destinationsite', 'transformation']
+INCOMPLETE_REGISTRATION_OUTCOMES = ('pending', 'unfinished')
 TASK_SEARCH_FIELDS = ['jeditaskid', 'taskname', 'status', 'username',
                       'processingtype', 'workinggroup', 'transpath']
+
+
+def task_history_days(taskid):
+    """A window covering a task's entire lifetime, including its first day."""
+    with connections['panda'].cursor() as cursor:
+        cursor.execute(
+            f'SELECT "creationdate" FROM "{PANDA_SCHEMA}"."jedi_tasks" '
+            'WHERE "jeditaskid" = %s', [int(taskid)])
+        row = cursor.fetchone()
+    if not row or not row[0]:
+        raise ValueError(f'Task {taskid} has no creation time')
+    created = row[0]
+    if timezone.is_naive(created):
+        created = timezone.make_aware(created, timezone=dt_timezone.utc)
+    return max(1, (timezone.now() - created).days + 1)
 
 
 def _job_window_filter(days, ended_after=None, ended_before=None):
@@ -4101,31 +4327,63 @@ def _job_window_filter(days, ended_after=None, ended_before=None):
     return ['"modificationtime" >= %s'], [cutoff]
 
 
+def _status_clause(status):
+    """A status filter's clause. ``queued`` is the census's not-started
+    set (panda.census.NOT_STARTED), what the comp snapshot counts as a
+    queue's queued jobs; any other value is one job status."""
+    if status == 'queued':
+        from .census import NOT_STARTED
+        return ('"jobstatus" IN (' + ', '.join(['%s'] * len(NOT_STARTED)) + ')',
+                list(NOT_STARTED))
+    return '"jobstatus" = %s', [status]
+
+
+def _registration_clause(registration):
+    """The payload registration subset used by the dashboard and job list."""
+    if registration != 'incomplete':
+        return '', []
+    return ('"processingtype" = %s AND "jobstatus" = %s AND '
+            '("jobmetrics" LIKE %s OR "jobmetrics" LIKE %s)',
+            ['epicproduction', 'finished'] + [
+                f'%payloadRegistration={outcome}%'
+                for outcome in INCOMPLETE_REGISTRATION_OUTCOMES])
+
+
 def _job_list_where(days, status=None, username=None, site=None,
                     taskid=None, reqid=None,
-                    ended_after=None, ended_before=None):
+                    ended_after=None, ended_before=None, execsite=None,
+                    registration=None):
     """The WHERE clauses and parameters a jobs-list request selects.
 
     Closed jobs (never run, disposed of by JEDI; see get_activity) are
     left out unless the request asks for them by status: they are a
     question about the task record, not a listing anyone reads
-    through."""
+    through. ``execsite`` is the execute site the pilot reported
+    (``destinationsite``: an OSG glidein's site)."""
     where, params = _job_window_filter(
         days, ended_after=ended_after, ended_before=ended_before)
+    clause, values = _registration_clause(registration)
+    if clause:
+        where.append(clause)
+        params.extend(values)
 
     if status:
-        where.append('"jobstatus" = %s')
-        params.append(status)
+        clause, vals = _status_clause(status)
+        where.append(clause)
+        params.extend(vals)
     else:
         where.append('"jobstatus" <> \'closed\'')
+    if execsite:
+        where.append('"destinationsite" = %s')
+        params.append(execsite)
     if username:
         clause, vals = _effective_username_filter('produsername', username)
         where.append(clause)
         params.extend(vals)
     if site:
-        clause, val = like_or_eq('computingsite', site)
+        clause, vals = site_clause(site)
         where.append(clause)
-        params.append(val)
+        params.extend(vals)
     if taskid:
         where.append('"jeditaskid" = %s')
         params.append(int(taskid))
@@ -4137,14 +4395,16 @@ def _job_list_where(days, status=None, username=None, site=None,
 
 def job_request_size(days=7, status=None, username=None, site=None,
                      taskid=None, reqid=None,
-                     ended_after=None, ended_before=None):
+                     ended_after=None, ended_before=None, execsite=None,
+                     registration=None):
     """How many jobs a jobs-list request covers, before anything is built
     for it: the number the page judges the request by. None when the
     count fails (logged), so the caller can proceed as asked."""
     where, params = _job_list_where(
         days, status=status, username=username, site=site,
         taskid=taskid, reqid=reqid,
-        ended_after=ended_after, ended_before=ended_before)
+        ended_after=ended_after, ended_before=ended_before,
+        execsite=execsite, registration=registration)
     count_sql, count_params = build_union_count(where, params)
     try:
         with connections['panda'].cursor() as cursor:
@@ -4158,12 +4418,14 @@ def job_request_size(days=7, status=None, username=None, site=None,
 def list_jobs_dt(days=7, status=None, username=None, site=None,
                  taskid=None, reqid=None,
                  order_by='"pandaid" DESC', limit=100, offset=0, search=None,
-                 ended_after=None, ended_before=None):
+                 ended_after=None, ended_before=None, execsite=None,
+                 registration=None):
     """List PanDA jobs for DataTables (returns rows, total, filtered counts)."""
     where, params = _job_list_where(
         days, status=status, username=username, site=site,
         taskid=taskid, reqid=reqid,
-        ended_after=ended_after, ended_before=ended_before)
+        ended_after=ended_after, ended_before=ended_before, execsite=execsite,
+        registration=registration)
 
     conn = connections['panda']
 
@@ -4218,7 +4480,7 @@ def list_jobs_dt(days=7, status=None, username=None, site=None,
     return rows, total, filtered
 
 
-def build_tasks_window(days=7, cap=5000):
+def build_tasks_window(days=7, cap=5000, status=None):
     """Build the full tasks window for the cached tasks-list product.
 
     Every task in the days window (newest first, capped) with the batch
@@ -4235,9 +4497,13 @@ def build_tasks_window(days=7, cap=5000):
     cutoff = timezone.now() - timedelta(days=days)
     where = ['COALESCE("modificationtime", "creationdate") >= %s']
     params = [cutoff]
-    _stale = _stale_task_filter()
-    where.append(_stale['clause'])
-    params.extend(_stale['params'])
+    if status:
+        where.append('"status" = %s')
+        params.append(status)
+    else:
+        _stale = _stale_task_filter()
+        where.append(_stale['clause'])
+        params.extend(_stale['params'])
 
     field_list = ', '.join(f'"{f}"' for f in TASK_LIST_FIELDS)
     sql = f"""
@@ -4280,14 +4546,19 @@ def build_tasks_window(days=7, cap=5000):
 
 def job_filter_counts(days=7, status=None, username=None, site=None,
                       taskid=None, reqid=None,
-                      ended_after=None, ended_before=None):
-    """Get filter option counts for job list (status, user, site)."""
+                      ended_after=None, ended_before=None, execsite=None,
+                      registration=None):
+    """Get filter option counts for job list (status, user, site, task)."""
     base_where, base_params = _job_window_filter(
         days, ended_after=ended_after, ended_before=ended_before)
+    clause, values = _registration_clause(registration)
+    if clause:
+        base_where.append(clause)
+        base_params.extend(values)
 
-    if taskid:
-        base_where.append('"jeditaskid" = %s')
-        base_params.append(int(taskid))
+    if execsite:
+        base_where.append('"destinationsite" = %s')
+        base_params.append(execsite)
     if reqid:
         base_where.append('"reqid" = %s')
         base_params.append(int(reqid))
@@ -4299,6 +4570,7 @@ def job_filter_counts(days=7, status=None, username=None, site=None,
         ('jobstatus', 'status', status),
         ('produsername', 'username', username),
         ('computingsite', 'site', site),
+        ('jeditaskid', 'taskid', taskid),
     ]
 
     for db_field, filter_name, current_value in filter_config:
@@ -4314,6 +4586,20 @@ def job_filter_counts(days=7, status=None, username=None, site=None,
             if other_name != filter_name and other_value:
                 if other_name == 'username':
                     clause, vals = _effective_username_filter(other_db_field, other_value)
+                    where.append(clause)
+                    params.extend(vals)
+                    continue
+                if other_name == 'status':
+                    clause, vals = _status_clause(other_value)
+                    where.append(clause)
+                    params.extend(vals)
+                    continue
+                if other_name == 'taskid':
+                    where.append('"jeditaskid" = %s')
+                    params.append(int(other_value))
+                    continue
+                if other_name == 'site':
+                    clause, vals = site_clause(other_value)
                     where.append(clause)
                     params.extend(vals)
                     continue
@@ -4342,6 +4628,9 @@ def job_filter_counts(days=7, status=None, username=None, site=None,
                 rows = cursor.fetchall()
                 if filter_name == 'username':
                     result[filter_name] = _aggregate_effective_user_counts(rows)
+                elif filter_name == 'taskid':
+                    # As text, the form the page's filter state holds.
+                    result[filter_name] = [(str(row[0]), row[1]) for row in rows]
                 else:
                     result[filter_name] = [(row[0], row[1]) for row in rows]
         except Exception as e:
@@ -4358,9 +4647,10 @@ def task_filter_counts(days=7, status=None, username=None,
     base_where = ['COALESCE("modificationtime", "creationdate") >= %s']
     base_params = [cutoff]
 
-    _stale = _stale_task_filter()
-    base_where.append(_stale['clause'])
-    base_params.extend(_stale['params'])
+    if not status:
+        _stale = _stale_task_filter()
+        base_where.append(_stale['clause'])
+        base_params.extend(_stale['params'])
 
     conn = connections['panda']
     result = {}

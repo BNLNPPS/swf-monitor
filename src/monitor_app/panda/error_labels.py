@@ -166,6 +166,13 @@ PILOT_LABELS = {
 }
 
 
+# The server's DDM (adder) codes: 200 is the registration refusal, the
+# diagnostic naming the file and the mismatch (bytes, checksum, duplicate).
+DDM_LABELS = {
+    200: "Could not add files to DDM (registration refused)",
+}
+
+
 def category_label(component, code):
     """Human label for an error category, e.g. 'pilot 1099 - Failed to stage-in file'."""
     try:
@@ -177,5 +184,7 @@ def category_label(component, code):
         message = PILOT_LABELS.get(code)
     elif component == "taskbuffer":
         message = TASKBUFFER_LABELS.get(code)
+    elif component == "ddm":
+        message = DDM_LABELS.get(code)
     base = f"{component} {code}"
     return f"{base} - {message}" if message else base

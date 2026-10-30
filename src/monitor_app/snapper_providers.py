@@ -415,6 +415,8 @@ def _delivery_curve_values(state):
 
 _QUEUE_STACK_CACHE = {'members': (
     'NERSC_Perlmutter_epic',
+    'BNL_OSG_PanDA_1',
+    # Keep the draining queue's actual usage and historical series visible.
     'BNL_OSG_EPIC_PROD_1',
     'UM_GREX_PanDA_1',
     'BNL_ePIC_GOOGLE',
@@ -459,6 +461,19 @@ def _queue_stack_members():
     return _QUEUE_STACK_CACHE['members']
 
 
+def _plotted_job_states(by_status):
+    """The plotted in-flight job states of one recorded PanDA state: every
+    lifecycle state the plots show, zero where the record holds none (the
+    PanDA adapter lists only the states that hold jobs, so a state that
+    empties would otherwise keep its last count on the curve), and any
+    other state the record carries."""
+    by_status = by_status or {}
+    states = {s: 0 for s in _JOB_LIFECYCLE_EARLY + _JOB_LIFECYCLE_LATE + ('running',)}
+    states.update({s: int(n or 0) for s, n in by_status.items()})
+    return {s: n for s, n in states.items()
+            if s != 'starting' and s not in _EPICPROD_DISABLED_PLOT_JOB_STATES}
+
+
 def _site_curve_values(panda):
     """Per-site job lifecycle curves from the sites maps recorded in
     every snap: the in-flight population by status (submission through
@@ -472,11 +487,8 @@ def _site_curve_values(panda):
     # of named queues and one 'other' band carrying every remaining
     # queue, so the stack always sums to the whole running-core count.
     for site, block in job_sites.items():
-        for status, count in (block.get('by_status_now') or {}).items():
-            if (status == 'starting'
-                    or status in _EPICPROD_DISABLED_PLOT_JOB_STATES):
-                continue
-            values[f'sj_{site}_{status}'] = int(count or 0)
+        for status, count in _plotted_job_states(block.get('by_status_now')).items():
+            values[f'sj_{site}_{status}'] = count
         if block.get('running_cores_now') is not None:
             cores = int(block.get('running_cores_now') or 0)
             values[f'sjc_{site}'] = cores
@@ -697,11 +709,8 @@ def _epicprod_curve_values(state):
     tasks_now = (panda.get('tasks') or {}).get('in_flight_now') or {}
     if jobs_now:
         values['running_cores'] = int(jobs_now.get('running_cores') or 0)
-        for status, count in (jobs_now.get('by_status') or {}).items():
-            if (status == 'starting'
-                    or status in _EPICPROD_DISABLED_PLOT_JOB_STATES):
-                continue
-            values[f'job_{status}'] = int(count or 0)
+        for status, count in _plotted_job_states(jobs_now.get('by_status')).items():
+            values[f'job_{status}'] = count
         type_states = jobs_now.get('by_type_status') or {}
         for ptype, count in (jobs_now.get('by_type') or {}).items():
             states = type_states.get(ptype) or {}
@@ -3919,8 +3928,7 @@ def _errors_breakdown(data, ctx, window_from=None, window_to=None,
     # Diagnostic patterns aggregate live from the job records over the
     # same bounds; a single-task filter restricts the query itself,
     # a multi-task selection filters the aggregated rows.
-    from .error_corrections import correction as _correction
-    from .error_corrections import match as _match
+    from .error_corrections import reading as _error_reading
     patterns = []
     window_patterns = 0
     for (comp, code, _pattern, diag, count, rep, taskids,
@@ -3956,9 +3964,7 @@ def _errors_breakdown(data, ctx, window_from=None, window_to=None,
         # whose label a rule marks unreliable presents as its real
         # failure modes — one row per mode, each with its own count,
         # core-hours and a representative job of that mode.
-        rule = _match(comp, code, diag)
-        corr = (_correction(rule, exit_counts or {})
-                if rule is not None else None)
+        corr = _error_reading(comp, code, diag, exit_counts, sites=site_list)
         if corr and corr['modes']:
             for m in corr['modes']:
                 if len(patterns) < MAX_PATTERNS:
@@ -5798,9 +5804,11 @@ def _series_cache(key, builder, refresh=False):
     # day-granular focus backstop.
     # The Platform focus (param 'platform') likewise plots components
     # that advance every refresh cycle, and the Storage focus (param
-    # 'rse') a record that advances with every storage pass.
+    # 'rse') a record that advances with every storage pass. Site job
+    # histories are live too, rather than day-granular focus products.
     if (':focus:task:' in key or ':focus:platform:' in key
-            or ':focus:rse:' in key or ':focus:catalog:' in key):
+            or ':focus:rse:' in key or ':focus:catalog:' in key
+            or ':focus:site:' in key):
         ttl_seconds = 90
     else:
         ttl_seconds = 6 * 3600 if ':focus:' in key else 90

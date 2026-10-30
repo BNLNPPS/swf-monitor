@@ -242,6 +242,16 @@ class AppLog(models.Model):
     def __str__(self):
         return f'{self.timestamp} - {self.app_name}:{self.instance_name} - {self.get_level_display()} - {self.message}'
 
+    def save(self, *args, **kwargs):
+        # An action record's importance and live default are set by their
+        # meaning at the write, whoever writes it: the web tier, the MCP
+        # tools, the ops agent's REST posts (ACTION_STREAM.md, Importance).
+        if (self._state.adding and self.app_name == 'epicprod'
+                and isinstance(self.extra_data, dict) and self.extra_data.get('action')):
+            from .epicprod_logging import publication
+            publication(self.extra_data, self.levelname)
+        super().save(*args, **kwargs)
+
 """
 Django models for the SWF Fast Monitoring Agent database.
 
@@ -692,6 +702,21 @@ class PersistentState(models.Model):
             obj.save()
             return obj.state_data
     
+    @classmethod
+    def next_number(cls, name, start=1):
+        """The next number of the counter ``name``, atomically: it only
+        rises, so no number is given twice. Kept as ``next_<name>``; a new
+        counter begins at ``start``."""
+        from django.db import transaction
+        with transaction.atomic():
+            obj, created = cls.objects.select_for_update().get_or_create(
+                id=1, defaults={'state_data': {}})
+            key = f'next_{name}'
+            current = int(obj.state_data.get(key) or start)
+            obj.state_data[key] = current + 1
+            obj.save()
+            return current
+
     @classmethod
     def get_next_run_number(cls):
         """Get next run number atomically and update last run info."""
@@ -1378,7 +1403,8 @@ class CrashSignature(models.Model):
     LEVELS = (('record', 'record'), ('trace', 'trace'),
               ('reproduction', 'reproduction'))
     CLASSES = (('storm', 'storm'), ('configuration_dead', 'configuration dead'),
-               ('sparse', 'sparse'), ('abort', 'abort'), ('mixed', 'mixed'))
+               ('sparse', 'sparse'), ('abort', 'abort'), ('mixed', 'mixed'),
+               ('memory', 'memory'))
     STATUSES = (('new', 'new'), ('digging', 'digging'), ('traced', 'traced'),
                 ('reproducing', 'reproducing'), ('reproduced', 'reproduced'),
                 ('not_reproduced', 'not reproduced'), ('diagnosed', 'diagnosed'),

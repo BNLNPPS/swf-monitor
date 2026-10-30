@@ -12,6 +12,7 @@ from django.shortcuts import render, redirect
 from django.http import JsonResponse, HttpResponse
 from django.urls import reverse
 from django.conf import settings
+from django.utils import timezone
 
 import json
 import logging
@@ -112,7 +113,7 @@ JOB_COLUMNS = [
     {'name': 'jeditaskid', 'title': 'Task ID', 'orderable': True},
     {'name': 'produsername', 'title': 'User', 'orderable': True},
     {'name': 'jobstatus', 'title': 'Status', 'orderable': True},
-    {'name': 'computingsite', 'title': 'Site', 'orderable': True},
+    {'name': 'computingsite', 'title': 'Queue', 'orderable': True},
     {'name': 'transformation', 'title': 'Transformation', 'orderable': True},
     {'name': 'creationtime', 'title': 'Created', 'orderable': True},
     {'name': 'endtime', 'title': 'Ended', 'orderable': True},
@@ -125,7 +126,11 @@ JOB_FIELD_NAMES = [c['name'] for c in JOB_COLUMNS]
 # Map DataTables column index to SQL ORDER BY expression
 JOB_ORDER_MAP = {
     0: '"pandaid"', 1: '"jeditaskid"', 2: '"produsername"',
-    3: '"jobstatus"', 4: '"computingsite"', 5: '"transformation"',
+    3: '"jobstatus"',
+    4: ('CASE WHEN "computingsite" IN (\'BNL_OSG_PanDA_1\', \'BNL_OSG_EPIC_PROD_1\') '
+        'THEN COALESCE("destinationsite", \'\') '
+        'ELSE "computingsite" END'),
+    5: '"transformation"',
     6: '"creationtime"', 7: '"endtime"', 9: '"corecount"',
 }
 
@@ -330,7 +335,22 @@ def _get_jobs_days(request):
     """The jobs page's window in days: whole days from the selector, or
     the fraction of a day the page narrowed a too-large request to
     (``_judge_jobs_request``), which its table and count calls carry
-    back. Default 7."""
+    back. Default 7. ``hours`` sets it in hours when ``days`` is not
+    given: the computing-centre floor's displays cover 12 hours and its
+    links say hours=12 (Torre Wenaus, 2026-10-22)."""
+    taskid = request.GET.get('taskid', '').strip()
+    if taskid.isdigit() and (request.GET.get('days') == 'all' or
+                            not any(key in request.GET for key in ('days', 'hours'))):
+        from ..panda.queries import task_history_days
+        return task_history_days(taskid)
+    if 'days' not in request.GET and request.GET.get('hours'):
+        try:
+            hours = float(request.GET['hours'])
+        except (ValueError, TypeError):
+            hours = 0
+        if hours > 0:
+            days = hours / 24
+            return int(days) if days == int(days) else days
     raw = request.GET.get('days', 7)
     try:
         days = float(raw)
@@ -360,7 +380,8 @@ def _window_label(days):
 
 
 def _judge_jobs_request(days, status, username, site, taskid,
-                        ended_after, ended_before):
+                        ended_after, ended_before, execsite=None,
+                        registration=None):
     """Examine what a jobs-list request asks for before building it.
 
     Counts the jobs the request covers; over JOBS_PAGE_CAP the window
@@ -369,9 +390,14 @@ def _judge_jobs_request(days, status, username, site, taskid,
     for, (days, ended_after, ended_before), and a notice for the page
     when it was narrowed, or None. A count that fails leaves the
     request as asked."""
+    # A task is an indexed, server-side selection with paged rows. Never
+    # silently replace its requested history with an all-site size limit.
+    if taskid:
+        return days, ended_after, ended_before, None
     asked = job_request_size(
         days=days, status=status, username=username, site=site,
-        taskid=taskid, ended_after=ended_after, ended_before=ended_before)
+        taskid=taskid, ended_after=ended_after, ended_before=ended_before,
+        execsite=execsite, registration=registration)
     if asked is None or asked <= JOBS_PAGE_CAP:
         return days, ended_after, ended_before, None
     asked_label = (
@@ -386,7 +412,8 @@ def _judge_jobs_request(days, status, username, site, taskid,
             days = days / 2
         count = job_request_size(
             days=days, status=status, username=username, site=site,
-            taskid=taskid, ended_after=ended_after, ended_before=ended_before)
+            taskid=taskid, ended_after=ended_after, ended_before=ended_before,
+            execsite=execsite, registration=registration)
         if count is None or count <= JOBS_PAGE_CAP:
             break
     shown_label = (
@@ -416,15 +443,19 @@ def _get_ended_window(request):
     return after, before
 
 
-def _days_context(days):
+def _days_context(days, options=DAYS_OPTIONS):
     """Build days selector context for templates."""
     return {
         'days': days,
         'days_options': [
             {'value': value, 'label': label, 'active': value == days}
-            for value, label in DAYS_OPTIONS
+            for value, label in options
         ],
     }
+
+
+# The jobs page also offers the floor's 12 hours.
+JOBS_DAYS_OPTIONS = [(0.5, '12h')] + DAYS_OPTIONS
 
 
 # ── Activity overview ────────────────────────────────────────────────────────
@@ -713,7 +744,8 @@ def compute_usage_data(request):
 
 def _jobs_outcomes_product(days, site, refresh,
                            ended_after=None, ended_before=None,
-                           include_closed=False):
+                           include_closed=False, execsite=None, taskid=None,
+                           registration=None, username=None):
     """Completed-job outcome series (finished/failed per bin with
     cumulative integrals) for the jobs page's graphical view, served
     as a cached product; closed jobs only when the page was asked for
@@ -724,7 +756,8 @@ def _jobs_outcomes_product(days, site, refresh,
         outcomes = job_outcomes(
             days=days, site=site or None,
             start_time=ended_after, end_time=ended_before,
-            include_closed=include_closed)
+            include_closed=include_closed, execsite=execsite, taskid=taskid,
+            registration=registration, username=username)
         if outcomes.get('error'):
             raise RuntimeError(outcomes['error'])
         return outcomes
@@ -733,7 +766,8 @@ def _jobs_outcomes_product(days, site, refresh,
         f':{ended_after.isoformat()}:{ended_before.isoformat()}'
         if ended_after is not None and ended_before is not None else '')
     return get_product(
-        f"jobs_outcomes:v3:{days}:{site or ''}{exact_key}"
+        f"jobs_outcomes:v4:{days}:{site or ''}:{execsite or ''}:{taskid or ''}:"
+        f"{registration or ''}:{username or ''}{exact_key}"
         f"{':closed' if include_closed else ''}", build,
         ttl_seconds=300, refresh=refresh)
 
@@ -773,12 +807,20 @@ def panda_jobs_list(request):
     days = _get_jobs_days(request)
     ended_after, ended_before = _get_ended_window(request)
     selected_site = request.GET.get('site', '')
+    selected_execsite = request.GET.get('execsite', '')
+    selected_registration = ('incomplete' if request.GET.get('registration') == 'incomplete' else '')
+    # A task id is a number; anything else filters nothing.
+    selected_taskid = request.GET.get('taskid', '').strip()
+    if not selected_taskid.isdigit():
+        selected_taskid = ''
     # The request is examined before anything is built for it: too
     # large an ask is narrowed to its newest slice and the page says so.
     days, ended_after, ended_before, request_notice = _judge_jobs_request(
         days, request.GET.get('status', '') or None,
         request.GET.get('username', '') or None, selected_site or None,
-        request.GET.get('taskid', '') or None, ended_after, ended_before)
+        selected_taskid or None, ended_after, ended_before,
+        execsite=selected_execsite or None,
+        registration=selected_registration or None)
     if ended_after is not None:
         et = ZoneInfo(settings.TIME_ZONE)
         ended_range_label = (
@@ -789,15 +831,28 @@ def panda_jobs_list(request):
     else:
         description = f'Production jobs from the {_window_label(days)}.'
         jobs_window_label = _window_label(days)
-    if selected_site:
-        site_url = reverse('monitor_app:epic_queue_detail', args=[selected_site])
-        description += f'<br><a href="{site_url}">Site info for <strong>{selected_site}</strong></a>'
+    # site= takes one queue or several comma-separated: a floor site's live
+    # queues together (Torre Wenaus, 2026-10-22).
+    site_queues = [q.strip() for q in selected_site.split(',') if q.strip()]
+    if site_queues:
+        description += '<br>PanDA queue: ' + ', '.join(
+            f'<a href="{reverse("monitor_app:epic_queue_detail", args=[q])}">'
+            f'<strong>{escape(q)}</strong></a>' for q in site_queues)
+    if selected_execsite:
+        description += f'<br>Execution queue: <strong>{escape(selected_execsite)}</strong>'
+    if request.GET.get('status') == 'queued':
+        description += '<br>Queued: defined, waiting, assigned, activated and sent jobs'
+    if selected_registration:
+        description += '<br>Finished jobs with data registration recorded as pending or unfinished.'
     refresh = request.GET.get('refresh') == '1'
     try:
         outcomes_product = _jobs_outcomes_product(
             days, selected_site, refresh,
             ended_after=ended_after, ended_before=ended_before,
-            include_closed=request.GET.get('status', '') == 'closed')
+            include_closed=request.GET.get('status', '') == 'closed',
+            execsite=selected_execsite or None, taskid=selected_taskid or None,
+            registration=selected_registration or None,
+            username=request.GET.get('username', '') or None)
         job_outcomes_data = outcomes_product['value'] or {
             'error': 'Outcome history is building — reload shortly.'}
         if outcomes_product['value'] and outcomes_product['built_at']:
@@ -810,7 +865,7 @@ def panda_jobs_list(request):
         logger.error('jobs outcomes build failed: %s', e)
         job_outcomes_data = {'error': str(e)}
     job_outcomes_pie = None
-    if selected_site:
+    if len(site_queues) == 1 and not (selected_execsite or selected_taskid or selected_registration or request.GET.get('username')):
         try:
             job_outcomes_pie = _jobs_site_pie_product(
                 days, selected_site, refresh,
@@ -822,7 +877,10 @@ def panda_jobs_list(request):
         'job_outcomes': job_outcomes_data,
         'job_outcomes_pie': job_outcomes_pie,
         'request_notice': request_notice,
-        'table_title': 'PanDA Jobs',
+        'table_title': ('PanDA Jobs - Task ' + selected_taskid if selected_taskid
+                        else 'PanDA Jobs - ' + selected_execsite if selected_execsite
+                        else 'PanDA Jobs'),
+        'reload_on_filter_change': True,
         'table_description': description,
         'ajax_url': reverse('monitor_app:panda_jobs_datatable_ajax'),
         'filter_counts_url': reverse('monitor_app:panda_jobs_filter_counts'),
@@ -832,12 +890,17 @@ def panda_jobs_list(request):
         'filter_fields': [
             {'name': 'status', 'label': 'Status', 'type': 'select'},
             {'name': 'username', 'label': 'User', 'type': 'select'},
-            {'name': 'site', 'label': 'Site', 'type': 'select'},
+            {'name': 'site', 'label': 'PanDA queue', 'type': 'select'},
+            # The floor's site name opens this list; a task narrows it
+            # (Torre Wenaus, 2026-10-22).
+            {'name': 'taskid', 'label': 'Task', 'type': 'select'},
         ],
         'selected_status': request.GET.get('status', ''),
         'selected_username': request.GET.get('username', ''),
         'selected_site': request.GET.get('site', ''),
-        'selected_taskid': request.GET.get('taskid', ''),
+        'selected_taskid': selected_taskid,
+        'selected_execsite': selected_execsite,
+        'selected_registration': selected_registration,
         'ended_after': (ended_after.isoformat()
                         if ended_after is not None else ''),
         'ended_before': (ended_before.isoformat()
@@ -849,7 +912,7 @@ def panda_jobs_list(request):
                            '48h' if days <= 2 else
                            '7d' if days <= 7 else '30d'),
     }
-    context.update(_days_context(days))
+    context.update(_days_context(days, JOBS_DAYS_OPTIONS))
     return render(request, 'monitor_app/panda_jobs_list.html', context)
 
 
@@ -874,9 +937,14 @@ def panda_jobs_datatable_ajax(request):
         order_by=order_by, limit=dt.length, offset=dt.start,
         search=dt.search_value or None,
         ended_after=ended_after, ended_before=ended_before,
+        execsite=request.GET.get('execsite', '') or None,
+        registration=request.GET.get('registration', '') or None,
     )
 
     window_params = {'days': days}
+    for key in ('status', 'username', 'site', 'taskid', 'execsite', 'registration'):
+        if request.GET.get(key):
+            window_params[key] = request.GET[key]
     if ended_after is not None:
         window_params.update({
             'ended_after': ended_after.isoformat(),
@@ -891,9 +959,14 @@ def panda_jobs_datatable_ajax(request):
             'monitor_app:panda_jobs_list',
             **{**window_params, 'username': job['produsername']}
         ) if job.get('produsername') else None
+        is_pool = job.get('computingsite') in ('BNL_OSG_PanDA_1', 'BNL_OSG_EPIC_PROD_1')
+        queue_name = (job.get('destinationsite') or '—') if is_pool else job.get('computingsite') or ''
+        queue_params = {**window_params, 'site': job.get('computingsite')}
+        if job.get('destinationsite') and is_pool:
+            queue_params['execsite'] = job['destinationsite']
         jobs_by_site_url = _url_with_query(
             'monitor_app:panda_jobs_list',
-            **{**window_params, 'site': job['computingsite']}
+            **queue_params
         ) if job.get('computingsite') else None
         jobs_by_status_url = _url_with_query(
             'monitor_app:panda_jobs_list',
@@ -905,7 +978,7 @@ def panda_jobs_datatable_ajax(request):
             f'<a href="{task_url}">{job["jeditaskid"]}</a>' if task_url else str(job.get('jeditaskid', '')),
             f'<a href="{jobs_by_user_url}">{job["produsername"]}</a>' if jobs_by_user_url else '',
             _fill_cell(job['jobstatus'], job['jobstatus'], jobs_by_status_url) if job.get('jobstatus') else '',
-            f'<a href="{jobs_by_site_url}">{job["computingsite"]}</a>' if jobs_by_site_url else '',
+            f'<a href="{jobs_by_site_url}" title="PanDA queue: {escape(job["computingsite"])}">{escape(queue_name)}</a>' if jobs_by_site_url else '',
             _linkify(job.get('transformation', '') or ''),
             _fmt_dt(job.get('creationtime')),
             _fmt_dt(job.get('endtime')),
@@ -928,7 +1001,9 @@ def panda_jobs_filter_counts(request):
     counts = job_filter_counts(days=days, status=status, username=username,
                                site=site, taskid=taskid, reqid=reqid,
                                ended_after=ended_after,
-                               ended_before=ended_before)
+                               ended_before=ended_before,
+                               execsite=request.GET.get('execsite', '') or None,
+                               registration=request.GET.get('registration', '') or None)
     return JsonResponse({'filter_counts': counts})
 
 
@@ -953,8 +1028,8 @@ def panda_tasks_list(request):
         # The retry's target queue choices: the cached PanDA queue
         # inventory, the names the retry validator accepts.
         'panda_queue_names': list(
-            PandaQueue.objects.order_by('queue_name')
-            .values_list('queue_name', flat=True)),
+            PandaQueue.objects.exclude(queue_name__in=settings.CANARY_CLOSED_QUEUES)
+            .order_by('queue_name').values_list('queue_name', flat=True)),
         # A Move's targets: the production queues (front.queues).
         'production_queues': _production_queues(),
         'table_description': f'JEDI tasks from the last {days} days.',
@@ -1062,12 +1137,12 @@ def _format_task_row(task, days, *, controls_operable):
     ]
 
 
-def _build_tasks_window_product(days):
+def _build_tasks_window_product(days, status=None):
     """Builder for the cached tasks-window product: the raw task record
     per row. Cells render at SERVE time in request context — a builder
     can run in a background thread with no script prefix, and rendered
     reverse() links stored from there are dead (CLAUDE.md)."""
-    window = build_tasks_window(days=days, cap=TASKS_WINDOW_CAP)
+    window = build_tasks_window(days=days, cap=TASKS_WINDOW_CAP, status=status)
     rows = [{'raw': task} for task in window['tasks']]
     return {'rows': rows, 'count': window['count'],
             'truncated': window['truncated'], 'days': days}
@@ -1088,10 +1163,10 @@ def panda_tasks_datatable_ajax(request):
     dt = DataTablesProcessor(request, TASK_FIELD_NAMES,
                              default_order_column=0, default_order_direction='desc')
     days = _get_days(request)
-
+    status = request.GET.get('status', '') or None
     product = get_product(
-        f'panda_tasks_window:v2:{days}',
-        lambda: _build_tasks_window_product(days),
+        f'panda_tasks_window:v3:{days}:{status or ""}',
+        lambda: _build_tasks_window_product(days, status=status),
         ttl_seconds=TASKS_WINDOW_TTL_SECONDS,
         refresh=request.GET.get('refresh') == '1',
     )
@@ -1234,9 +1309,10 @@ def panda_job_detail(request, pandaid):
     data.update(inventory_for_job_context(data))
     data['epicprod_diagnosis'] = diagnosis_for_study_data(
         data, epicprod_job=data.get('epicprod_job'))
-    # A crashed job's card names its segfault-catalog signature; swfdb only.
+    # A crashed job's card names its segfault-catalog signature, a memory
+    # signature's representative its memory signature; swfdb only.
     epicprod_job = data.get('epicprod_job')
-    if epicprod_job is not None and epicprod_job.phase == 'payload_crash':
+    if epicprod_job is not None and epicprod_job.phase in ('payload_crash', 'payload_memory'):
         from ..segfaults import signature_for_job
         data['crash_signature'] = signature_for_job(pandaid)
     return render(request, 'monitor_app/panda_job_detail.html', data)
@@ -1872,7 +1948,7 @@ def panda_task_detail(request, jeditaskid):
 # ── Error summary ────────────────────────────────────────────────────────────
 
 def panda_errors_list(request):
-    days = _get_days(request)
+    days = _get_jobs_days(request)
     ended_after, ended_before = _get_ended_window(request)
     if ended_after is not None:
         et = ZoneInfo(settings.TIME_ZONE)
@@ -1883,12 +1959,18 @@ def panda_errors_list(request):
     else:
         description = (
             f'Top error patterns across failed jobs in the last {days} days.')
+    scope = request.GET.get('execsite') or request.GET.get('site') or ''
+    if scope:
+        description += f' Queue: {escape(scope)}.'
     context = {
         'table_title': 'PanDA Error Summary',
         'table_description': description,
         'ajax_url': reverse('monitor_app:panda_errors_datatable_ajax'),
         'columns': ERROR_COLUMNS,
         'selected_site': request.GET.get('site', ''),
+        'selected_execsite': request.GET.get('execsite', ''),
+        'task_filter_parameters': [(key, value) for key, values in request.GET.lists()
+                                   if key != 'taskid' for value in values],
         'selected_error_source': request.GET.get('error_source', ''),
         # Default excludes closed (workflow disposals, not actual
         # errors); the chips show every state present with its count.
@@ -1914,7 +1996,8 @@ def panda_segfaults(request):
     from ..narrowing_filter import Facet, NarrowingFilter
     from ..reproductions import (REPRODUCTION_STATE_LABELS, REPRODUCTION_STATE_ORDER, attempts,
                                  counts_by_signature, global_counts, reproduction_states)
-    from ..segfaults import CLASS_LABELS, CLASS_ORDER, STATUS_LABELS, catalog
+    from ..segfaults import (CLASS_LABELS, CLASS_ORDER, KIND_LABELS, KIND_ORDER, STATUS_LABELS,
+                             catalog)
     rows_all, _class_counts = catalog()
     # The reproduction attempts per row, active and ended, each attempt
     # counted once; a trace-level row carries its members' attempts; and
@@ -1930,6 +2013,10 @@ def panda_segfaults(request):
         r['repro_state'] = states.get(r['key'], '')
         r['repro_state_label'] = REPRODUCTION_STATE_LABELS.get(r['repro_state'], r['repro_state'])
     facets = [
+        # A segfault or a himem job (SEGFAULT_DIAGNOSIS.md, Memory kills):
+        # the first split a reader makes.
+        Facet('kind', 'Kind', lambda r: r['kind'],
+              display=lambda v: KIND_LABELS.get(v, v), order=KIND_ORDER),
         Facet('class', 'Class', lambda r: r['class'],
               display=lambda v: CLASS_LABELS.get(v, v), order=CLASS_ORDER),
         Facet('exit', 'Exit code', lambda r: str(r['exit_code'])),
@@ -1948,7 +2035,9 @@ def panda_segfaults(request):
         'rows': rows_all,
         'shown': shown,
         'total': len(rows_all),
-        'crashes_total': sum(r['crashes'] for r in rows_all if r['level'] == 'record'),
+        'crashes_total': sum(r['crashes'] for r in rows_all
+                             if r['level'] == 'record' and r['kind'] == 'segfault'),
+        'memory_kills_total': sum(r['crashes'] for r in rows_all if r['kind'] == 'himem'),
         'repro_counts': global_counts(att),
         'run_needed': sum(1 for r in rows_all if r['repro_state'] == 'run_needed' and r['level'] == 'record'),
         'narrowing_filter': flt.context(rows_all, facets, request),
@@ -1966,6 +2055,7 @@ def panda_segfault_reproductions(request):
     from ..reproductions import (PHASE_LABELS, PHASE_ORDER, RESULT_LABELS, RESULT_ORDER,
                                  attempts, counts_by_signature, freshness, global_counts,
                                  reproduction_states)
+    from ..segfaults import KIND_LABELS, KIND_ORDER
     rows_all = attempts()
     # The signatures that still need a run, for the link to the catalog's
     # run-needed selection (monitor_app/reproductions.py).
@@ -1975,6 +2065,8 @@ def panda_segfault_reproductions(request):
     states = reproduction_states(sig_rows, counts_by_signature(rows_all, members))
     run_needed = sum(1 for r in sig_rows if states.get(r['key']) == 'run_needed' and r['level'] == 'record')
     facets = [
+        Facet('kind', 'Kind', lambda r: r['kind'],
+              display=lambda v: KIND_LABELS.get(v, v), order=KIND_ORDER),
         Facet('phase', 'Execution', lambda r: r['phase'],
               display=lambda v: PHASE_LABELS.get(v, v), order=PHASE_ORDER),
         Facet('result', 'Result', lambda r: r['result'],
@@ -2199,15 +2291,79 @@ def panda_segfault_diagnose(request, key):
     return JsonResponse({'queued': True, 'key': key})
 
 
+# The tasks an error row names its input samples for, most failures first.
+ERROR_SAMPLE_TASKS = 3
+
+
+def _task_samples(taskids):
+    """Each JEDI task's input sample as PCS records it, below ``/EVGEN/``:
+    ``{40856: 'DIS/BeAGLE1.03.02-3.1/eAu/9x100/q2_10to100'}``, the first
+    of its paths with the count of any others. An internal-EVGEN task
+    names the sample its jobs generate; a task PCS does not know is left
+    out. Local reads only (ProdTask.evgen_paths, with the tag scan done
+    once for the page)."""
+    taskids = {int(t) for t in taskids if t}
+    if not taskids:
+        return {}
+    try:
+        from pcs.commands import internal_evgen_sample
+        from pcs.models import (PandaTasks, evgen_paths_by_tags, evgen_paths_for,
+                                evgen_paths_for_tags)
+    except ImportError:
+        return {}
+    out, by_tags = {}, None
+    for link in (PandaTasks.objects.filter(jedi_task_id__in=taskids)
+                 .select_related('prod_task__dataset', 'prod_task__prod_config')):
+        task = link.prod_task
+        try:
+            paths = evgen_paths_for(task.inputs, task.input_source_location)
+            if not paths and task.dataset_id:
+                cfg = task.get_effective_config()
+                if str((cfg.get('data') or {}).get('workflow_mode') or '') == 'internal_evgen':
+                    paths = [internal_evgen_sample(task)[0]]
+                else:
+                    if by_tags is None:
+                        by_tags = evgen_paths_by_tags()
+                    paths = evgen_paths_for_tags(task.dataset, by_tags)
+        except Exception:  # noqa: BLE001 - a sample name is a courtesy, never a failure
+            logger.warning('error summary: no sample for task %s', link.jedi_task_id, exc_info=True)
+            continue
+        if paths:
+            first = str(paths[0])
+            first = first[len('/EVGEN/'):] if first.startswith('/EVGEN/') else first.lstrip('/')
+            out[link.jedi_task_id] = first + (f' (+{len(paths) - 1})' if len(paths) > 1 else '')
+    return out
+
+
+def _error_samples_html(task_counts, samples):
+    """The muted line under an error row naming its tasks' samples:
+    ``Input: 40856 DIS/BeAGLE1.03.02-3.1/eAu/9x100/q2_10to100``, each task
+    linked, at most ERROR_SAMPLE_TASKS of them."""
+    parts = []
+    for tc in task_counts[:ERROR_SAMPLE_TASKS]:
+        taskid = tc.get('taskid')
+        if not taskid:
+            continue
+        url = reverse('monitor_app:panda_task_detail', kwargs={'jeditaskid': taskid})
+        sample = samples.get(int(taskid))
+        parts.append(f'<a href="{url}">{taskid}</a>' + (f' {escape(sample)}' if sample else ''))
+    if not parts:
+        return ''
+    more = len(task_counts) - ERROR_SAMPLE_TASKS
+    tail = f' (+{more} more)' if more > 0 else ''
+    return f'<div class="text-muted small">Input: {"; ".join(parts)}{tail}</div>'
+
+
 def panda_errors_datatable_ajax(request):
     from ..cached_product import get_product
 
     dt = DataTablesProcessor(request, [c['name'] for c in ERROR_COLUMNS],
                              default_order_column=3, default_order_direction='desc')
-    days = _get_days(request)
+    days = _get_jobs_days(request)
     ended_after, ended_before = _get_ended_window(request)
     username = request.GET.get('username', '') or None
     site = request.GET.get('site', '') or None
+    execsite = request.GET.get('execsite', '') or None
     error_source = request.GET.get('error_source', '') or None
     # Terminal-state filter, one status or CSV. The default excludes
     # closed: the server disposed of those jobs for workflow reasons,
@@ -2221,12 +2377,12 @@ def panda_errors_datatable_ajax(request):
     # full faulty-job population (multi-second under failure churn), so
     # requests serve the stored summary and rebuilds run behind them.
     product = get_product(
-        f'panda_errors:v6:{days}:{username or ""}:{site or ""}'
+        f'panda_errors:v8:{days}:{username or ""}:{site or ""}:{execsite or ""}'
         f':{error_source or ""}:{status or ""}:{int(classified)}:'
         f'{taskid or ""}:'
         f'{ended_after.isoformat() if ended_after else ""}:'
         f'{ended_before.isoformat() if ended_before else ""}',
-        lambda: error_summary(days=days, username=username, site=site,
+        lambda: error_summary(days=days, username=username, site=site, execsite=execsite,
                               error_source=error_source, limit=200,
                               taskid=taskid,
                               ended_after=ended_after,
@@ -2245,6 +2401,7 @@ def panda_errors_datatable_ajax(request):
         # population, and the selection this response was built under.
         'status_counts': result.get('status_counts') or {},
         'status_selected': status,
+        'task_counts': result.get('task_counts') or [],
         # The failures under a declared downtime, per declaration.
         'declared': result.get('declared'),
     }
@@ -2253,11 +2410,21 @@ def panda_errors_datatable_ajax(request):
         return dt.create_response([], 0, 0, extra=product_extra)
 
     errors = result.get('errors', [])
+    # A newly fetched representative log can explain a stored pattern
+    # immediately, without rescanning the job population.
+    from ..error_corrections import apply_to_summary
+    apply_to_summary(errors)
     total = len(errors)
+    samples = _task_samples(tc['taskid'] for err in errors
+                            for tc in (err.get('task_counts') or [])[:ERROR_SAMPLE_TASKS])
 
     data = []
     for err in errors:
-        diag_url = reverse('monitor_app:panda_diagnostics_list') + f'?days={days}&error_source={err["error_source"]}'
+        diag_params = {key: value for key, value in request.GET.items()
+                       if key in ('site', 'execsite', 'taskid', 'status', 'hours',
+                                  'ended_after', 'ended_before')}
+        diag_params.update(days=days, error_source=err['error_source'], error_code=err['error_code'])
+        diag_url = reverse('monitor_app:panda_diagnostics_list') + '?' + urlencode(diag_params)
         users_str = ', '.join(err.get('users', [])[:5])
         if len(err.get('users', [])) > 5:
             users_str += f' (+{len(err["users"]) - 5})'
@@ -2270,6 +2437,12 @@ def panda_errors_datatable_ajax(request):
         # Bootstrap shows as the one immediate tooltip. An inner
         # title= span would add a second, delayed native floater.
         diag_text = escape(err.get('error_diag', '') or '')
+        witness = err.get('payload_evidence')
+        if witness:
+            witness_url = reverse('monitor_app:panda_job_detail', args=[witness['pandaid']])
+            diag_text = (f'{escape(witness["summary"])} '
+                         f'(<a href="{witness_url}">sample {witness["pandaid"]}</a>)'
+                         f'<div class="text-muted small">Reported: {diag_text}</div>')
         # The correction root: a label a rule marks unreliable renders
         # its corrected reading first, the reported text beneath it.
         # Average run time before this error ended the job; patterns
@@ -2289,11 +2462,18 @@ def panda_errors_datatable_ajax(request):
         if corr and not modes:
             modes = [{'reading': corr['label'],
                       'count': err.get('count', 0)}]
-        if modes:
+        if witness:
+            rows_out = [(diag_text, str(err.get('count', 0)))]
+        elif modes:
             rows_out = [(escape(m['reading']), str(m['count']))
                         for m in modes]
         else:
             rows_out = [(diag_text, str(err.get('count', 0)))]
+        # What the failing jobs ran on: each task's input sample, so the
+        # row names the generator and sample, not only a task number.
+        sample_html = _error_samples_html(err.get('task_counts') or [], samples)
+        if sample_html:
+            rows_out = [(text + sample_html, count) for text, count in rows_out]
         for cell_text, cell_count in rows_out:
             data.append([
                 f'<a href="{diag_url}">{err["error_source"]}</a>',
@@ -2312,10 +2492,13 @@ def panda_errors_datatable_ajax(request):
 # ── Diagnostics ──────────────────────────────────────────────────────────────
 
 def panda_diagnostics_list(request):
-    days = _get_days(request)
+    days = _get_jobs_days(request)
     context = {
         'table_title': 'PanDA Job Diagnostics',
-        'table_description': f'Failed jobs with error details from the last {days} days.',
+        'table_description': 'Up to 500 newest jobs matching the selected failure window and filters.',
+        'diagnostic_filters': {key: request.GET.get(key, '') for key in
+            ('username', 'site', 'taskid', 'execsite', 'status', 'error_source',
+             'error_code', 'ended_after', 'ended_before')},
         'ajax_url': reverse('monitor_app:panda_diagnostics_datatable_ajax'),
         'columns': DIAG_COLUMNS,
     }
@@ -2326,15 +2509,19 @@ def panda_diagnostics_list(request):
 def panda_diagnostics_datatable_ajax(request):
     dt = DataTablesProcessor(request, [c['name'] for c in DIAG_COLUMNS],
                              default_order_column=0, default_order_direction='desc')
-    days = _get_days(request)
+    days = _get_jobs_days(request)
     username = request.GET.get('username', '') or None
     site = request.GET.get('site', '') or None
     taskid = request.GET.get('taskid', '') or None
     error_source = request.GET.get('error_source', '') or None
 
+    ended_after, ended_before = _get_ended_window(request)
     result = diagnose_jobs(days=days, username=username, site=site,
                            taskid=taskid, error_component=error_source,
-                           limit=500)
+                           limit=500, execsite=request.GET.get('execsite') or None,
+                           ended_after=ended_after, ended_before=ended_before,
+                           status=request.GET.get('status') or None,
+                           error_code=request.GET.get('error_code'))
 
     if 'error' in result:
         return dt.create_response([], 0, 0)
@@ -2536,7 +2723,8 @@ def _node_declines_product():
         logger.error('node declines product carries an error: %s',
                      value['error'])
         return []
-    return value.get('nodes') or []
+    return [row for row in value.get('nodes') or []
+            if row.get('site') not in settings.CANARY_CLOSED_QUEUES]
 
 
 def _exclusions_context():
@@ -2559,7 +2747,8 @@ def _exclusions_context():
 
     context = {
         'exclusion_as_of': osg_exclusions.AS_OF,
-        'exclusion_queues': ', '.join(osg_exclusions.QUEUES),
+        'exclusion_queues': ', '.join(q for q in osg_exclusions.QUEUES
+                                    if q not in settings.CANARY_CLOSED_QUEUES),
         'exclusion_totals': osg_exclusions.totals(),
     }
     report = latest('osgsub01') or {}
@@ -2600,8 +2789,9 @@ def _exclusions_context():
         'exclusion_reported_at': report.get('reported_at'),
         'exclusion_age_seconds': report.get('age_seconds'),
         'exclusion_file_modified': live.get('modified'),
-        'exclusion_queues': ', '.join(live.get('queues')
-                                      or osg_exclusions.QUEUES),
+        'exclusion_queues': ', '.join(q for q in (live.get('queues')
+                                      or osg_exclusions.QUEUES)
+                                    if q not in settings.CANARY_CLOSED_QUEUES),
         'exclusion_pool': (report.get('record') or {}).get('pool') or {},
     })
     return context
@@ -2646,7 +2836,55 @@ def _reported_submission(queue_name):
     }
 
 
-HARVESTER_HOSTS = ('pandaharvester01', 'pandaharvester02', 'osgsub01-harvester')
+from ..host_reports import HARVESTER_HOSTS  # noqa: E402
+
+
+def _utc_eastern(value):
+    """A record's UTC time (ISO, or 'YYYY-MM-DD HH:MM:SS') in Eastern Time;
+    the value unchanged when it does not read as a time."""
+    try:
+        at = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+    except ValueError:
+        return value
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=dt_timezone.utc)
+    return at.astimezone(_EASTERN).strftime('%Y-%m-%d %H:%M ET')
+
+
+def _names_queue(message, queue):
+    return re.search(r'(?<!\w)' + re.escape(queue) + r'(?!\w)', message or '') is not None
+
+
+def _dialogs_for_queue(dialogs, queue_name, queues):
+    """The record's harvester dialogs as one queue's page shows them, times
+    in Eastern Time (the record keeps UTC, as every host record does): each
+    kind of message that names this queue or none of the harvester's
+    queues. A kind naming only another of its queues is not shown, so an
+    error on a queue the harvester also serves does not read as this
+    queue's. A record from before the kinds (reporter 1.0) shows its
+    modules' latest messages."""
+    if not isinstance(dialogs, dict):
+        return {}
+    if not isinstance(dialogs.get('messages'), list):
+        if not isinstance(dialogs.get('modules'), dict):
+            return {}
+        return {'hours': dialogs.get('hours'),
+                'messages': [dict(d or {}, module=module, first_at=None,
+                                  last=dict((d or {}).get('last') or {},
+                                            at=_utc_eastern(((d or {}).get('last') or {}).get('at'))))
+                             for module, d in dialogs['modules'].items()]}
+    others = [q for q in queues if q != queue_name]
+    shown = []
+    for k in dialogs['messages']:
+        if not isinstance(k, dict):
+            continue
+        message = (k.get('last') or {}).get('message')
+        if not _names_queue(message, queue_name) and any(_names_queue(message, q) for q in others):
+            continue
+        shown.append(dict(k, first_at=_utc_eastern(k.get('first_at')),
+                          last=dict(k.get('last') or {}, at=_utc_eastern((k.get('last') or {}).get('at')))))
+    return {'hours': dialogs.get('hours'), 'messages': shown,
+            'messages_dropped': dialogs.get('messages_dropped')}
 
 
 def _reported_harvester(queue_name):
@@ -2677,6 +2915,14 @@ def _reported_harvester(queue_name):
             'interval_seconds': (record.get('interval') or {}).get('seconds'),
             'fetch': fetch or {},
             'submit': submit or {},
+            # a source the record could not read (the Perlmutter record has
+            # no harvester logs): the page says so instead of reading zero
+            'fetch_error': (record.get('fetching') or {}).get('error'),
+            'submit_error': (record.get('submission') or {}).get('error'),
+            'dialogs': _dialogs_for_queue(
+                record.get('dialogs'), queue_name,
+                [q.get('queue') for q in (db.get('launch_limits') or [])
+                 if isinstance(q, dict) and q.get('queue')]),
             'failed_calls': {d: v for d, v in calls.items()
                              if isinstance(v, dict) and v.get('failed')},
             # From the harvester's database and condor logs (reporter 1.1).
@@ -2684,7 +2930,11 @@ def _reported_harvester(queue_name):
             'workers_now': (db.get('workers_now') or {}).get(queue_name)
                            if isinstance(db.get('workers_now'), dict) else None,
             'ended': ((db.get('workers_ended') or {}).get('sites') or {}).get(queue_name),
-            'not_finished': nf_site,
+            'not_finished': dict(nf_site, reasons=[
+                dict(r, last_ended=_utc_eastern(r.get('last_ended'))) if isinstance(r, dict) else r
+                for r in (nf_site.get('reasons') or [])]) if isinstance(nf_site, dict) else nf_site,
+            'admission_declines': db.get('admission_declines')
+                                  if queue_name == 'BNL_OSG_PanDA_1' else None,
             'not_finished_hours': not_finished.get('hours'),
             'db_error': db.get('error'),
         }
@@ -2820,7 +3070,8 @@ def epic_queues_list(request):
 
     # What the OSG submission excludes, and what the payload declined.
     declines_rows = sorted(
-        ({'queue': q, **d} for q, d in declines.items()),
+        ({'queue': q, **d} for q, d in declines.items()
+         if q not in settings.CANARY_CLOSED_QUEUES),
         key=lambda r: r['count'], reverse=True)
 
     return render(request, 'monitor_app/epic_queues_list.html', {
@@ -2951,12 +3202,23 @@ def epic_queue_detail(request, queue_name):
     other = {k: v for k, v in config.items() if k not in shown}
 
     # The same outcomes pie the jobs page shows when filtered to this
-    # queue, over the standing 2-week window (the embedded site history
-    # that stood beside it is gone: _jobs_site_pie_product).
+    # queue, over the standing 2-week window, or the hours= window the
+    # computing-centre floor's links carry (hours=12, Torre Wenaus,
+    # 2026-10-22). The embedded site history that stood beside it is
+    # gone: _jobs_site_pie_product.
+    outcomes_days = 14
+    try:
+        hours = float(request.GET.get('hours') or 0)
+    except ValueError:
+        hours = 0
+    if hours > 0:
+        outcomes_days = hours / 24
+        if outcomes_days == int(outcomes_days):
+            outcomes_days = int(outcomes_days)
     site_outcomes_pie = None
     try:
         site_outcomes_pie = _jobs_site_pie_product(
-            14, queue_name, request.GET.get('refresh') == '1')['value']
+            outcomes_days, queue_name, request.GET.get('refresh') == '1')['value']
     except Exception as e:                                   # noqa: BLE001
         logger.error('site outcomes pie failed for queue detail: %s', e)
 
@@ -2974,6 +3236,8 @@ def epic_queue_detail(request, queue_name):
         'other': other,
         'config_json': json_mod.dumps(config, indent=2, default=str),
         'site_outcomes_pie': site_outcomes_pie,
+        'outcomes_window_label': ('last 2 weeks' if outcomes_days == 14
+                                  else _window_label(outcomes_days)),
         'declines': _landing_declines_product().get(queue_name),
         'observed': _with_measurements(_queue_observed_product(queue_name), queue_name),
         'declines_days': SPARK_SPAN_DAYS,

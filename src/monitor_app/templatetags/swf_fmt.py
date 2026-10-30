@@ -25,6 +25,14 @@ _EASTERN = ZoneInfo('America/New_York')
 _UNKNOWN_STATE_COLOR = '#6c757d'  # neutral gray fallback
 
 
+@register.filter(name='short')
+def short(value):
+    """The concise form of a site, queue or resource name, the one filter
+    every concise setting uses (monitor_app/short_names.py)."""
+    from monitor_app.short_names import short_name
+    return short_name(value)
+
+
 @register.filter(name='is_url')
 def is_url(value):
     """True for HTTP(S) URL strings.

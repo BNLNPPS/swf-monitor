@@ -193,21 +193,18 @@ def probe_reading(rucio_url, timeout_seconds, did):
         return {"status": r.status_code}
 
     def read():
-        # The production account through the proxy the ops agent holds
-        # (EVGEN_X509_PROXY, the registrar's credential); without one the
-        # read is recorded as not made, never as the catalog's fault.
+        # The production account by a token from the PanDA server, else
+        # through the proxy the ops agent holds (swf_epicprod.jlab_auth,
+        # the registrar's credential).
         import os
-        from rucio.client import Client
-        proxy = os.environ.get("EVGEN_X509_PROXY", "")
-        if not proxy or not os.path.exists(proxy):
-            raise RuntimeError("no proxy (EVGEN_X509_PROXY) on this host; read not made")
+        from swf_epicprod.jlab_auth import rucio_client
         scope, name = did.split(":", 1)
         base = f"{parsed.scheme or 'https'}://{host}:{port}"
-        client = Client(rucio_host=base, auth_host=base, account="eicprod",
-                        auth_type="x509_proxy", creds={"client_proxy": proxy},
-                        timeout=float(timeout_seconds))
+        client = rucio_client(account="eicprod", host=base,
+                              proxy=os.environ.get("EVGEN_X509_PROXY") or None,
+                              timeout=float(timeout_seconds))
         meta = client.get_metadata(scope, name)
-        return {"did": did, "found": bool(meta)}
+        return {"did": did, "found": bool(meta), "auth": client.jlab_auth}
 
     return {"host": host, "port": port, "timeout_s": float(timeout_seconds),
             "tls": _timed("tls", tls, timeout_seconds),

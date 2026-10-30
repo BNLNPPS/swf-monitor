@@ -65,10 +65,25 @@ Two modes, chosen per subscription:
   push outage never stalls buffered-pull delivery; the incident remains on the
   log record page. The `#epicprod-live` Mattermost publisher is the first
   plugin (`mattermost-live`); each plugin's settings live in SysConfig.
+  The `notify-llm` plugin puts important alarms in front of the AI sessions
+  working on the production host: each matched incident becomes one TJAI
+  peer message to the SysConfig `notify_llm_resource` group (default
+  `host:swf-testbed`, every session there), which the sessions' inbox
+  receivers wake on. Its subscriptions are `ai-sessions ← live_watch` (about
+  four alarms a day) and `ai-sessions ← front_regulator_unverified` (the
+  pressure front's regulator gate holding every fed queue), both filtered
+  `{"app_name": "epicprod", "severity": "alarm"}`.
+  It exists because the live watch's alarm of 2026-10-29 00:29 ET, a
+  close-out defect holding four Google Event Service jobs open, reached only
+  the operator's Capcom feed and no working session saw it for hours.
 
-Notice composition from the incident is deterministic: title from the operation
-when present, otherwise the action, plus `subject_label` when present, otherwise
-`subject_key`; detail from `narration`/`reason`/`summary` where present, URL to
+Notice composition from the incident is deterministic: the title is the live
+screen's (`live_notices.board_text`, COMP_SNAPSHOT.md, Live), what happened and
+to what, never the action's name alone (Torre Wenaus, 2026-10-29): an assessment
+reads by its verdict and its narration's first sentence (`Live watch alarm:
+BNL-XRD read-handshake failures remained unresolved ...`); a task pause or
+resume keeps `pause: <subject>`, the form Capcom files those notices by;
+detail from `narration`/`reason`/`summary` where present, URL to
 the log record, severity from the outcome, dedup key from the record id.
 Composition belongs to the router, not to emitters or subscribers. Incidents
 may carry `severity` (how bad — e.g. an assessment verdict) and `url`
@@ -159,7 +174,13 @@ and its eventual resolution in `epicprod-live`. A private dialog, commit,
 TJAI coordination message or assessment alone does not complete reporting.
 Each report identifies the incident and affected campaign, tasks or endpoint,
 states what is known and what remains uncertain, links supporting evidence,
-and gives the action or owner. A resolution references the original incident,
+and gives the action or owner. Information the assessments should weigh that
+arrives outside the record, by mail, in a draft or in dialog (a site's own
+account of a cause, an operator's decision and its reason), is posted the same
+way: the assessments read nothing else (Torre Wenaus, 2026-10-28, after the
+daily assessment called GREX's registration losses unexplained while GREX's
+admins had given their 1 Gb/s uplink as the cause by mail).
+A resolution references the original incident,
 distinguishes identified cause, implemented fix, deployment and verified
 recovery, and states any remaining scope limitation. Report new evidence and
 state changes, not every investigative step or routine successful check.

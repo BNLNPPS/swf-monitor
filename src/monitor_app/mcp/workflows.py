@@ -894,6 +894,7 @@ async def swf_stop_workflow(execution_id: str) -> dict:
 
 
 @mcp.tool()
+@requires_authority
 async def swf_end_execution(execution_id: str) -> dict:
     """
     End a running workflow execution by setting its status to 'terminated'.

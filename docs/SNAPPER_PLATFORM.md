@@ -118,8 +118,9 @@ load, memory and volumes. Verdicts cover held workers, daemon silence,
 and the harvester and schedd processes. The daemons are split: only
 those that tick regardless of demand are judged, because the submitters
 write only when there is work and their quiet on an idle host is
-correct. Question: was the submission side working, and where were
-pilots allowed to go. A site refusing every submission — GREX for
+correct. The database is judged by its connection pool's log, since
+db_proxy's own is held at INFO and is nearly silent. Question: was the
+submission side working, and where were pilots allowed to go. A site refusing every submission — GREX for
 thirteen hours on 2026-09-06, unnoticed — holds workers here and
 appears nowhere else.
 
@@ -251,7 +252,8 @@ platform component above.**
    panel, since on the request axis it is a hairline; *daemon silence*
    as the oldest log age among the judged daemons, those that write
    regardless of demand (the pilot API, copyArchive, the brokers and
-   the adder write only when there is work and are recorded, not
+   the adder write only when there is work, and some daemons write
+   nothing at the server's log level INFO; those are recorded, not
    judged); *database reachability from the server host* as TCP
    connect latency. All present when the reporter reports.
 5b. *Batch pool* — the claimed fraction on its own 0–1 scale; the
@@ -346,6 +348,15 @@ warning and clears when it leaves — and the per-alarm email gate,
 recipients, and renotification window are edited on the alarms
 dashboard. Capcom carries nothing from this path: the alarm is the
 notice.
+
+Held submit workers raise a warning only when both the count and fraction
+cross their configured thresholds: at least 10 workers and at least 10%
+of the schedd's idle, running and held workers by default
+(`platform_submit_held_warn_min_workers`,
+`platform_submit_held_warn_fraction`). Missing population counts give an
+unknown verdict. Isolated holds remain in the worker record; the alarm
+clears on the next engine tick after a publication falls below either
+threshold. Production now reads the same alarm lifecycle.
 
 A `panda-platform` System Status collector reads the latest published
 component so the platform state enters the System page and the health

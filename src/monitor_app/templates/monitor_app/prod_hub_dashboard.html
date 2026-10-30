@@ -1,0 +1,20 @@
+{% extends 'base.html' %}
+
+{% block title %}epicprod — Production dashboard{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-0">
+    {% include 'monitor_app/_prod_home_tabs.html' %}
+    <iframe id="prod-dashboard-frame" title="ePIC production dashboard" srcdoc="{{ dashboard_html|force_escape }}" style="display:block;width:100%;height:650px;border:0;"></iframe>
+</div>
+<script>
+(() => {
+    const frame = document.getElementById('prod-dashboard-frame');
+    function fit() {
+        frame.style.height = Math.max(200, window.innerHeight - frame.getBoundingClientRect().top - 8) + 'px';
+    }
+    window.addEventListener('resize', fit);
+    fit();
+})();
+</script>
+{% endblock %}

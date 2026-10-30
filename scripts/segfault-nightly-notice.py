@@ -138,7 +138,9 @@ def census():
             # from another run of the same row.
             counts['settled_unread'] += 1
             need_reading.append(row)
-        elif s['runnable']:
+        elif s['runnable'] or s.get('es_unit'):
+            # An Event Service unit signature is runnable by its request on
+            # npps0 (SEGFAULT_DIAGNOSIS.md, Event Service units).
             counts['untraced_runnable'] += 1
             need_run.append(row)
         else:
@@ -178,7 +180,9 @@ def compose(counts, need_run, need_read, need_reading, limit):
     lines.append(
         "Someone swf take it: a reproduction is requested on the record with panda_segfault_reproduce(key) "
         "or the signature page's Reproduce; the runs page shows what is already requested, so check it "
-        f"before submitting. A reading is written with panda_segfault_finding_set. {CATALOG_URL}")
+        f"before submitting; an es_unit signature (an Event Service unit) is replayed on npps0 with "
+        f"scripts/segfault-es-reproduce.py --key <key>. A reading is written with "
+        f"panda_segfault_finding_set. {CATALOG_URL}")
     return '\n'.join(lines)
 
 

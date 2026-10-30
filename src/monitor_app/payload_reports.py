@@ -239,15 +239,20 @@ def file_report(pandaid, report, source_key, jeditaskid=None, node=''):
         return False
 
 
-def es_record_candidates(since):
-    """Event Service jobs that ended in the window: ``[(pandaid, jeditaskid)]``.
+def es_record_candidates(since, running_only=False):
+    """Ended Event Service jobs, or only running jobs when requested.
 
     Whatever their status: a preempted fine-grained job whose heartbeat
     runs out is archived finished when some of its ranges were credited
     (panda-server ``archiveJob``, fine-grained branch), so the failed-job
     candidates would never reach its record.
     """
-    sql = f"""
+    if running_only:
+        sql = f'''SELECT "pandaid", "jeditaskid" FROM "{PANDA_SCHEMA}"."jobsactive4"
+                  WHERE "eventservice" > 0 AND "jobstatus" = 'running' '''
+        params = []
+    else:
+        sql = f"""
         SELECT "pandaid", "jeditaskid" FROM "{PANDA_SCHEMA}"."jobsactive4"
         WHERE "eventservice" IS NOT NULL AND "eventservice" > 0
           AND "jobstatus" IN ('finished', 'failed', 'closed', 'cancelled')
@@ -256,17 +261,18 @@ def es_record_candidates(since):
         SELECT "pandaid", "jeditaskid" FROM "{PANDA_SCHEMA}"."jobsarchived4"
         WHERE "eventservice" IS NOT NULL AND "eventservice" > 0
           AND "modificationtime" >= %s
-    """
+        """
+        params = [since, since]
     try:
         with connections['panda'].cursor() as cursor:
-            cursor.execute(sql, [since, since])
+            cursor.execute(sql, params)
             return [(int(p), int(j) if j else None) for p, j in cursor.fetchall()]
     except Exception as e:                                    # noqa: BLE001
         logger.error(f'payload report sweep: Event Service candidate query failed: {e}')
         return []
 
 
-def file_es_records(client, bucket, prefix, since, dry_run=False):
+def file_es_records(client, bucket, prefix, since, dry_run=False, running_only=False):
     """File each ended Event Service job's shipped record (``es.json``, the
     harness's record as it stood at its last write, swf-epicprod
     payload/es/es_record.py) under ``EpicProdJob.data['es_record']``. It is
@@ -275,11 +281,17 @@ def file_es_records(client, bucket, prefix, since, dry_run=False):
     Read before the failed-job pass deletes a job's objects; returns the
     job ids filed."""
     filed = []
-    for pandaid, jeditaskid in es_record_candidates(since):
+    for pandaid, jeditaskid in es_record_candidates(since, running_only=running_only):
         key = f'{prefix}{pandaid}/es.json'
         try:
-            body = client.get_object(Bucket=bucket, Key=key)['Body'].read()
-            record = json.loads(body.decode('utf-8'))
+            # The job's record with its shipped closes' units joined in
+            # (swf-epicprod swf_epicprod/es_records.py): the whole account,
+            # however the harness divided it.
+            from swf_epicprod import es_records
+            record = es_records.load(client, bucket, prefix, pandaid)
+            if (not isinstance(record, dict) or record.get('kind') != 'es_record'
+                    or str(record.get('pandaid')) != str(pandaid)):
+                raise ValueError('The harness record does not match the requested job')
         except Exception as e:                                # noqa: BLE001
             if 'NoSuchKey' not in str(e) and 'Not Found' not in str(e):
                 logger.error(f'payload report sweep: {key} unreadable: {e}')
@@ -302,6 +314,14 @@ def file_es_records(client, bucket, prefix, since, dry_run=False):
         except Exception as e:                                # noqa: BLE001
             logger.error(f'payload report sweep: cannot file the Event Service record of {pandaid}: {e}')
     return filed
+
+
+def refresh_running_es_records():
+    """File running jobs' snapshots without changing their PanDA state."""
+    store = sweeper_client()
+    if store is None:
+        raise RuntimeError('The Event Service report reader credential is unavailable')
+    return file_es_records(*store, since=None, running_only=True)
 
 
 def delete_keys(client, bucket, keys):

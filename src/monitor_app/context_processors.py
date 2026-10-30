@@ -195,6 +195,7 @@ def _active_nav(request):
         'pcs_datasets': namespace == 'pcs' and url_name in pcs_dataset_names,
         'pcs_evgen_inputs': namespace == 'pcs' and url_name in (
             'evgen_inputs', 'evgen_inputs_update'),
+        'pcs_status_grids': namespace == 'pcs' and url_name == 'status_grids',
         'pcs_storage': namespace == 'pcs' and url_name in (
             'storage_listings', 'storage_listings_home'),
         'snapper_storage': (namespace == 'snapper_ai'
@@ -204,6 +205,7 @@ def _active_nav(request):
         'pcs_configs': namespace == 'pcs' and url_name in pcs_config_names,
         'pcs_tasks': namespace == 'pcs' and url_name in pcs_task_names,
         'pcs_trials': namespace == 'pcs' and url_name in ('trials_list', 'trial_detail'),
+        'pcs_in_flight': namespace == 'pcs' and url_name == 'prod_tasks_in_flight',
         'campaigns': namespace == 'pcs' and url_name in pcs_catalog_names,
         'workflows': namespace == 'monitor_app' and url_name in workflow_names,
         'files': namespace == 'monitor_app' and url_name in file_names,
@@ -263,10 +265,16 @@ def _active_nav(request):
             'panda_diagnostics_datatable_ajax',
         },
         'sites': namespace == 'monitor_app' and url_name in {
+            'compute_efficiency',
+            'compute_efficiency_data',
             'compute_usage',
             'compute_usage_data',
             'epic_queues_list',
             'epic_queue_detail',
+        },
+        'compute_efficiency': namespace == 'monitor_app' and url_name in {
+            'compute_efficiency',
+            'compute_efficiency_data',
         },
         'compute_usage': namespace == 'monitor_app' and url_name in {
             'compute_usage',

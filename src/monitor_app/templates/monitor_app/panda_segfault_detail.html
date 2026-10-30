@@ -6,10 +6,22 @@
 {% block content %}
 <div class="container-fluid">
     <p class="mb-2"><a href="{% url 'monitor_app:panda_segfaults' %}">Segfault Catalog</a> &raquo; {{ sig.key }}</p>
+    {% if sig.class == 'memory' %}
+    <h1>Memory: {{ sig.signal_name }}{% if sig.stage %}, {{ sig.stage }}{% endif %}{% if sig.configuration.prod_task %}, {{ sig.configuration.prod_task }}{% endif %}</h1>
+    <p class="mb-3">
+        <strong>{{ sig.crashes }}</strong> jobs killed for memory{% if sig.rate_pct %}, <strong>{{ sig.rate_pct }}</strong> of the task's finished plus failed jobs{% endif %};
+        time to kill p10 / p50 <strong>{{ sig.minutes_p10|default_if_none:'' }} / {{ sig.minutes_p50|default_if_none:'' }}</strong> min
+    {% elif sig.es_unit %}
+    <h1>{{ sig.class_label }}: {% if sig.exit_code %}exit {{ sig.exit_code }} ({{ sig.signal_name }}){% else %}resident simulation {{ sig.signal_name }}{% endif %}{% if sig.stage %}, {{ sig.stage }}{% endif %}{% if sig.configuration.prod_task %}, {{ sig.configuration.prod_task }}{% endif %}</h1>
+    <p class="mb-3">
+        <strong>{{ sig.crashes }}</strong> unit crashes on <strong>{{ sig.es_requests }}</strong> distinct requests{% if sig.rate_pct %}, {{ sig.rate_pct }} of the units the task's filed records ran{% endif %};
+        time into the request p10 / p50 <strong>{{ sig.minutes_p10|default_if_none:'' }} / {{ sig.minutes_p50|default_if_none:'' }}</strong> min
+    {% else %}
     <h1>{{ sig.class_label }}: exit {{ sig.exit_code }} ({{ sig.signal_name }}){% if sig.configuration.prod_task %}, {{ sig.configuration.prod_task }}{% endif %}</h1>
     <p class="mb-3">
         <strong>{{ sig.crashes }}</strong> crashed jobs{% if sig.rate_pct %}, <strong>{{ sig.rate_pct }}</strong> of the task's finished plus failed jobs{% endif %};
         time to death p10 / p50 <strong>{{ sig.minutes_p10|default_if_none:'' }} / {{ sig.minutes_p50|default_if_none:'' }}</strong> min
+    {% endif %}
         {% if sig.data.minutes_p25 is not None %}(p25 {{ sig.data.minutes_p25 }}, p75 {{ sig.data.minutes_p75 }}){% endif %};
         <strong>{{ sig.hosts|default_if_none:'' }}</strong> hosts; first seen {{ sig.first_seen|fmt_dt }}, last seen {{ sig.last_seen|fmt_dt }}.
         Status <strong>{{ sig.status_label }}</strong>, level {{ sig.level }}.
@@ -53,26 +65,64 @@
             {% endif %}
 
             <h4>Queues</h4>
+            {% if sig.class == 'memory' %}
+            <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
+                <thead><tr><th>Queue</th><th>Removal</th><th>Kills</th><th>Hosts</th><th>Request (MB)</th><th>Peak RSS median (MB)</th><th>Peak RSS max (MB)</th></tr></thead>
+                <tbody>
+                {% for s in sig.sites %}<tr><td>{{ s.site }}</td><td>{{ s.mechanism }}</td><td>{{ s.crashes }}</td><td>{{ s.hosts }}</td><td>{{ s.request_mb|default_if_none:'' }}</td><td>{{ s.rss_p50_mb|default_if_none:'' }}</td><td>{{ s.rss_max_mb|default_if_none:'' }}</td></tr>{% endfor %}
+                </tbody>
+            </table>
+
+            <h4>Memory</h4>
+            <p>
+                Request {{ sig.memory.request_mb.0|default_if_none:'' }}{% if sig.memory.request_mb.1 != sig.memory.request_mb.0 %} to {{ sig.memory.request_mb.1|default_if_none:'' }}{% endif %} MB;
+                peak resident memory of the killed jobs, as the pilot measured it: median <strong>{{ sig.memory.rss_p50_mb|default_if_none:'' }}</strong> MB, maximum <strong>{{ sig.memory.rss_max_mb|default_if_none:'' }}</strong> MB;
+                proportional set size median {{ sig.memory.pss_p50_mb|default_if_none:'' }} MB.
+                Removals: {% for m, n in sig.memory.mechanisms.items %}{{ m }} {{ n }}{% if not forloop.last %}, {% endif %}{% endfor %}.
+            </p>
+            {% if sig.memory_measured.rss_max_mb is not None %}
+            <p>
+                Measured by reproduction: job <a href="{% url 'monitor_app:panda_job_detail' pandaid=sig.memory_measured.canary_pandaid %}">{{ sig.memory_measured.canary_pandaid }}</a>
+                on {{ sig.memory_measured.queue }} ({{ sig.memory_measured.role }}), stage {{ sig.memory_measured.stage }}{% if sig.memory_measured.events is not None %}, {{ sig.memory_measured.events }} events{% endif %}:
+                peak RSS <strong>{{ sig.memory_measured.rss_max_mb }}</strong> MB, PSS {{ sig.memory_measured.pss_max_mb|default_if_none:'' }} MB, virtual {{ sig.memory_measured.vmem_max_mb|default_if_none:'' }} MB{% if sig.memory_measured.request_mb %}, against a {{ sig.memory_measured.request_mb }} MB request{% endif %}.
+                {% if sig.memory_measured.growth_kb_per_s is not None %}Proportional memory from {{ sig.memory_measured.memory_start_mb|default_if_none:'' }} MB, growing {{ sig.memory_measured.growth_kb_per_s }} kB/s over {{ sig.memory_measured.span_s|fmt_duration }}{% if sig.memory_measured.fit_quality is not None %} (linear fit R² {{ sig.memory_measured.fit_quality }}){% endif %}.{% endif %}
+            </p>
+            {% else %}
+            <p class="text-muted">No measurement yet: a reproduction on the reference queue runs the row to its end and measures its peak and growth.</p>
+            {% endif %}
+            {% else %}
             <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
                 <thead><tr><th>Queue</th><th>Crashes</th><th>Hosts</th></tr></thead>
                 <tbody>
                 {% for s in sig.sites %}<tr><td>{{ s.site }}</td><td>{{ s.crashes }}</td><td>{{ s.hosts }}</td></tr>{% endfor %}
                 </tbody>
             </table>
+            {% endif %}
 
             <h4>Loss</h4>
+            {% if sig.class == 'memory' %}
+            <p class="text-muted">{{ sig.rows_lost_note }}; {{ sig.data.rows_resolved }} representative{{ sig.data.rows_resolved|pluralize }} with a resolved manifest row.</p>
+            {% else %}
             <p>
                 {% if sig.rows_lost is not None %}<strong>{{ sig.rows_lost }}</strong> crashed rows with no delivered output in any attempt, <strong>{{ sig.events_lost }}</strong> events; {% endif %}
                 {{ sig.data.rows_resolved }} of {{ sig.crashes }} crashed jobs have their manifest row resolved{% if sig.data.rows_unresolved %} ({{ sig.data.rows_unresolved }} unresolved){% endif %}.
                 <span class="text-muted">{{ sig.rows_lost_note }}</span>
             </p>
+            {% endif %}
         </div>
         <div class="col-lg-6">
+            {% if sig.class == 'memory' %}
+            {% if sig.data.split %}<p class="text-muted">This task's memory kills split by stage: this entry holds its {% if sig.stage %}{{ sig.stage }}{% else %}kills of no recorded stage{% endif %}{% if sig.split_keys %}; the rest: {% for k in sig.split_keys %}<a href="{% url 'monitor_app:panda_segfault_detail' key=k %}">{{ k }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}.</p>{% endif %}
+            {% else %}
             <h4>Trace</h4>
             {% if sig.trace.frames %}
-            <p>{{ sig.trace.program }}{% if sig.trace.stage %}, stage {{ sig.trace.stage }}{% endif %}{% if sig.trace.events_processed is not None %}, {{ sig.trace.events_processed }} events processed{% endif %}; from job
+            <p>{{ sig.trace.program }}{% if sig.trace.stage %}, stage {{ sig.trace.stage }}{% endif %}{% if sig.trace.events_processed is not None %}, {{ sig.trace.events_processed }} events processed{% endif %};
+               {% if sig.trace.form == 'gdb' %}from gdb on the request's replay on npps0 (the request of job
+               <a href="{% url 'monitor_app:panda_job_detail' pandaid=sig.trace.source_pandaid %}">{{ sig.trace.source_pandaid }}</a>),
+               {% else %}from job
                <a href="{% url 'monitor_app:panda_job_detail' pandaid=sig.trace.source_pandaid %}">{{ sig.trace.source_pandaid }}</a>
-               (<a href="{% url 'monitor_app:panda_payload_log' sig.trace.source_pandaid %}" target="_blank" rel="noopener">payload log</a>), read {{ sig.trace.dug_at|fmt_dt }}.
+               (<a href="{% url 'monitor_app:panda_payload_log' sig.trace.source_pandaid %}" target="_blank" rel="noopener">payload log</a>),
+               {% endif %}read {{ sig.trace.dug_at|fmt_dt }}.
                Crashing frame: <strong>{{ sig.trace.frame }}</strong>{% if sig.trace.library %} in {{ sig.trace.library }}{% endif %}.</p>
             <pre class="small">{% for line in sig.trace.frames %}{{ line }}
 {% endfor %}</pre>
@@ -93,9 +143,10 @@
                 <span id="dig-status" class="text-muted small"></span>
             </form>
             {% endif %}
+            {% endif %}
 
             <h4>Reproduction</h4>
-            {% if sig.reproduction_outcome %}<p>Outcome: <strong>{{ sig.reproduction_outcome }}</strong> (reproduced: both runs crashed; site_dependent: the production run alone; not_reproduced: neither; inconclusive: a run failed for another reason).</p>{% endif %}
+            {% if sig.reproduction_outcome %}{% if sig.class == 'memory' %}<p>Outcome: <strong>{{ sig.reproduction_outcome }}</strong> (reproduced: the reference run's peak reached the request, or the production run was killed again with no measurement against it; site_dependent: the production run was killed and the reference peak stayed below the request; not_reproduced: neither; inconclusive: a run failed for another reason).</p>{% else %}<p>Outcome: <strong>{{ sig.reproduction_outcome }}</strong> (reproduced: both runs crashed; site_dependent: the production run alone; not_reproduced: neither; inconclusive: a run failed for another reason).</p>{% endif %}{% endif %}
             {% if sig.attempts %}
             <p class="mb-1"><strong>{{ sig.attempt_counts.active }}</strong> active, <strong>{{ sig.attempt_counts.ended }}</strong> ended{% if sig.data.members %}, the members' attempts included{% endif %}; execution and result apart, read from the runs as last collected:
                <a href="{% url 'monitor_app:panda_segfault_reproductions' %}?signature={{ sig.key|urlencode }}">these attempts among all reproduction runs</a>.</p>
@@ -120,7 +171,9 @@
             {% else %}
             <p class="text-muted">No reproduction run yet.</p>
             {% endif %}
-            {% if sig.level == 'record' %}
+            {% if sig.es_unit %}
+            <p>An Event Service unit is replayed on npps0 by its request (the input, the events and the request seed), through the payload as the slot ran it and then under gdb for the frame: scripts/segfault-es-reproduce.py --key {{ sig.key }}. A payload canary of a manifest row runs under the per-event seed and does not replay the unit.</p>
+            {% elif sig.level == 'record' %}
             <form id="repro-form" class="mb-3" method="post" action="{% url 'monitor_app:panda_segfault_reproduce' key=sig.key %}" data-key="{{ sig.key }}" data-plan-url="{% url 'monitor_app:panda_segfault_reproduce' key=sig.key %}">
                 {% csrf_token %}
                 <div class="d-flex align-items-center gap-2 flex-wrap">
@@ -132,7 +185,7 @@
                 <div class="d-flex align-items-center gap-3 flex-wrap mt-1">
                     <label class="small"><input type="checkbox" name="queue" id="repro-prod-queue" value="" checked> production queue <span id="repro-prod-name"></span></label>
                     <label class="small"><input type="checkbox" name="queue" id="repro-elsewhere-queue" value="" checked> second queue <span id="repro-elsewhere-name"></span></label>
-                    <label class="small" title="The reference queue has one slot and known conditions (memory ceiling, core dumps, a debugger on the host); ask for it when the reading needs the host"><input type="checkbox" name="queue" value="BNL_NPPS_GPU"> reference queue BNL_NPPS_GPU, memory limit
+                    <label class="small" title="The reference queue has one slot and known conditions (memory ceiling, core dumps, a debugger on the host); ask for it when the reading needs the host"><input type="checkbox" name="queue" id="repro-ref-queue" value="BNL_NPPS_GPU"> reference queue BNL_NPPS_GPU, memory limit
                         <input type="text" id="repro-mem" class="form-control form-control-sm d-inline-block" style="max-width: 7em;" placeholder="MB" title="RLIMIT_AS on the payload for the reference run, set from the production queue's maxrss; clear it to run unlimited"></label>
                 </div>
             </form>
@@ -162,6 +215,11 @@
             {% endif %}
 
             <h4>Diagnosis</h4>
+            {% if sig.class == 'memory' %}
+            <p class="text-muted">The LLM study reads a crashing frame and is not run for a memory signature; its reading is a finding written from the measurement.</p>
+            {% if sig.finding_anchor %}<p>The curated reading: <a href="{% url 'monitor_app:panda_segfault_findings' %}#{{ sig.finding_anchor }}">Segfault Findings</a>.</p>{% endif %}
+            {% if sig.verdict %}<p>Verdict: <strong>{{ sig.verdict }}</strong></p>{% endif %}
+            {% else %}
             {% if sig.finding_anchor %}<p>The curated reading of this crashing frame: <a href="{% url 'monitor_app:panda_segfault_findings' %}#{{ sig.finding_anchor }}">Segfault Findings</a>.</p>{% endif %}
             {% if sig.verdict %}<p>Verdict: <strong>{{ sig.verdict }}</strong></p>{% endif %}
             {% if sig.data.diagnosis.state == 'covered' %}
@@ -176,13 +234,34 @@
                 <button type="submit" id="diagnose-button" class="btn btn-sm btn-success" title="Submit the signature's LLM study (the codoc run over the trace, the code and the known issues) through the production operations agent">Diagnose</button>
                 <span id="diagnose-status" class="text-muted small"></span>
             </form>
+            {% endif %}
             {% ai_assessment_panel sig.data 'Diagnoses' %}
         </div>
     </div>
 
-    <h4>Crashed jobs{% if sig.jobs_total > sig.jobs|length %} <span class="text-muted">(latest {{ sig.jobs|length }} of {{ sig.jobs_total }})</span>{% endif %}</h4>
+    {% if sig.es_unit %}
+    <h4>Crash requests</h4>
+    <p class="text-muted small mb-1">Each request the task's units sent the resident simulation and died on, from the jobs' filed harness records; a request that crashed on every pass that reached it is deterministic in its input, events and seed.</p>
     <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
-        <thead><tr><th>Job</th><th>Task</th><th>Seq</th><th>Row</th><th>Site</th><th>Host</th><th>Minutes</th><th>Max RSS (MB)</th><th>Stage</th><th>Ended</th></tr></thead>
+        <thead><tr><th>Input</th><th>First event</th><th>Events</th><th>Seed</th><th>Passes</th><th>Crashes (job, slot, seconds into the request, how the record shows it)</th></tr></thead>
+        <tbody>
+        {% for u in sig.es_units %}
+        <tr>
+            <td>{{ u.lfn }}</td>
+            <td>{{ u.first_event|default_if_none:'' }}</td>
+            <td>{{ u.events|default_if_none:'' }}</td>
+            <td>{{ u.seed|default_if_none:'' }}</td>
+            <td>{{ u.passes }}</td>
+            <td>{% for c in u.crashes %}<a href="{% url 'monitor_app:panda_job_detail' pandaid=c.pandaid %}">{{ c.pandaid }}</a> slot {{ c.slot|default_if_none:'' }}, {{ c.seconds|default_if_none:'' }} s, {{ c.form }}{% if c.signal %}, signal {{ c.signal }}{% endif %} ({{ c.ended_at|fmt_dt }}){% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <h4>{% if sig.class == 'memory' %}Representative jobs{% else %}Crashed jobs{% endif %}{% if sig.jobs_total > sig.jobs|length %} <span class="text-muted">(latest {{ sig.jobs|length }} of {{ sig.jobs_total }})</span>{% endif %}</h4>
+    {% if sig.class == 'memory' %}<p class="text-muted small mb-1">The shortest, median and longest time to kill among the kills whose manifest row resolves; the catalog keeps no row for the other kills.</p>{% endif %}
+    <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
+        <thead><tr><th>Job</th><th>Task</th><th>Seq</th><th>Row</th><th>Site</th><th>Host</th><th>Minutes</th><th>Max RSS (MB)</th>{% if sig.class == 'memory' %}<th>Request (MB)</th>{% endif %}<th>Stage</th><th>Ended</th></tr></thead>
         <tbody>
         {% for j in sig.jobs %}
         <tr>
@@ -194,12 +273,14 @@
             <td>{{ j.host }}</td>
             <td>{{ j.minutes|default_if_none:'' }}</td>
             <td>{{ j.maxrss_mb|default_if_none:'' }}</td>
+            {% if sig.class == 'memory' %}<td>{{ j.request_mb|default_if_none:'' }}</td>{% endif %}
             <td>{{ j.stage }}</td>
             <td>{{ j.endtime|fmt_dt }}</td>
         </tr>
         {% endfor %}
         </tbody>
     </table>
+    {% endif %}
 </div>
 {{ sig.trace.dug_at|default:''|json_script:"dig-before" }}
 
@@ -370,7 +451,9 @@
     const elseQueue = document.getElementById('repro-elsewhere-queue');
     const elseName = document.getElementById('repro-elsewhere-name');
     const memInput = document.getElementById('repro-mem');
+    const refQueue = document.getElementById('repro-ref-queue');
     let plan = null;
+    let shaped = false;
     function loadPlan() {
         const pandaid = (jobInput.value || '').trim();
         const url = form.dataset.planUrl + (pandaid ? '?pandaid=' + encodeURIComponent(pandaid) : '');
@@ -382,7 +465,16 @@
               planBox.className = 'small mt-1 text-muted';
               planBox.textContent = 'Job ' + plan.pandaid + ' of ' + plan.task + ', row ' + plan.row_text +
                   (plan.maxrss_mb ? '; the production queue allows ' + plan.maxrss_mb + ' MB' : '') +
-                  (plan.job_maxrss_mb ? '; the job peaked at ' + plan.job_maxrss_mb + ' MB' : '') + '.';
+                  (plan.request_mb ? '; the job requested ' + plan.request_mb + ' MB' : '') +
+                  (plan.job_maxrss_mb ? '; the job peaked at ' + plan.job_maxrss_mb + ' MB' : '') +
+                  (plan.memory ? '. A memory kill is measured: the production queue at the task\'s own request and the reference queue with no limit' : '') + '.';
+              if (plan.memory && !shaped) {
+                  // The memory pair: production and the reference queue, unlimited.
+                  shaped = true;
+                  elseQueue.checked = false;
+                  if (refQueue) refQueue.checked = true;
+                  memInput.value = '';
+              }
               prodQueue.value = plan.production_queue || '';
               prodName.textContent = plan.production_queue || '(unknown)';
               prodQueue.disabled = !plan.production_queue;
@@ -391,7 +483,7 @@
               elseName.textContent = plan.elsewhere_queue || '(none)';
               elseQueue.disabled = !plan.elsewhere_queue;
               if (!plan.elsewhere_queue) elseQueue.checked = false;
-              if (!memInput.value && plan.maxrss_mb) memInput.value = plan.maxrss_mb;
+              if (!plan.memory && !memInput.value && plan.maxrss_mb) memInput.value = plan.maxrss_mb;
               button.disabled = false;
           }).catch(function() { planBox.textContent = 'Plan unavailable.'; });
     }

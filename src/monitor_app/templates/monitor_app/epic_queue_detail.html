@@ -257,6 +257,10 @@
         </div>
         <div class="card-body p-0">
             <table class="table table-sm table-striped mb-0">
+                {% if harvester.fetch_error %}
+                <tr><td class="fw-bold" style="width:24%">Job fetches</td>
+                    <td>not read: {{ harvester.fetch_error }}</td></tr>
+                {% else %}
                 <tr><td class="fw-bold" style="width:24%">Last fetch</td>
                     <td>{% if harvester.fetch.last %}
                         {{ harvester.fetch.last.at }} (UTC): asked for {{ harvester.fetch.last.asked|default:"?" }},
@@ -269,8 +273,9 @@
                         {{ harvester.fetch.jobs_got|default:"0" }} jobs got,
                         <span class="{% if harvester.fetch.failed %}text-danger fw-bold{% endif %}">{{ harvester.fetch.failed|default:"0" }} failed</span>
                         {% for cls, n in harvester.fetch.errors.items %}{% if forloop.first %}({% endif %}{{ cls }} {{ n }}{% if forloop.last %}){% else %}, {% endif %}{% endfor %}</td></tr>
+                {% endif %}
                 <tr><td class="fw-bold">Workers</td>
-                    <td>{{ harvester.submit.workers_submitted|default:"0" }} submitted in the interval;
+                    <td>{% if harvester.submit_error %}not read: {{ harvester.submit_error }}{% else %}{{ harvester.submit.workers_submitted|default:"0" }} submitted in the interval;{% endif %}
                         {% if harvester.submit.workers_status %}
                         last read {{ harvester.submit.workers_status.nRunning }} running,
                         {{ harvester.submit.workers_status.nQueue }} queued,
@@ -291,13 +296,18 @@
                     <td>{% for status, n in harvester.ended.by_status.items %}{{ n }} {{ status }}{% if not forloop.last %}, {% endif %}{% endfor %}{% if harvester.ended.median_finished_run_s is not None %};
                         the finished ran {{ harvester.ended.median_finished_run_s|fmt_duration }} (median){% endif %}</td></tr>
                 {% endif %}
+                {% if harvester.admission_declines.declined %}
+                <tr><td class="fw-bold">Admission declines</td><td>{{ harvester.admission_declines.declined }} pre-job refusals in the last hour;
+                    <a href="{% url 'monitor_app:worker_admission' %}?site={{ queue_name|urlencode }}">starts, reasons and repeated wasted starts</a>.
+                    Expected refusals are separate from worker errors.</td></tr>
+                {% endif %}
                 {% if harvester.limits or harvester.not_finished %}
                 <tr><td class="fw-bold{% if harvester.not_finished %} text-danger{% endif %}">Workers that did not finish, last {{ harvester.not_finished_hours|default:"24" }} h</td>
                     <td style="word-break: break-word">{% if harvester.not_finished %}{{ harvester.not_finished.workers }}, by the batch system's reason:
                         <ul class="mb-0 ps-3">
                         {% for r in harvester.not_finished.reasons %}
                         <li><strong>{{ r.count }}</strong> {{ r.status }}: {{ r.reason }}
-                            <span class="text-muted">({{ r.source }}; last {{ r.last_ended }} UTC{% for ex in r.examples %}{% if ex.batch_log %}; <a href="{{ ex.batch_log }}">worker {{ ex.workerid }} log</a>{% endif %}{% endfor %})</span></li>
+                            <span class="text-muted">({{ r.source }}; last {{ r.last_ended }}{% for ex in r.examples %}{% if ex.batch_log %}; <a href="{{ ex.batch_log }}">worker {{ ex.workerid }} log</a>{% endif %}{% endfor %})</span></li>
                         {% endfor %}
                         </ul>{% if harvester.not_finished.reasons_dropped %}<span class="text-muted">and {{ harvester.not_finished.reasons_dropped }} rarer reasons</span>{% endif %}
                         {% else %}none{% endif %}</td></tr>
@@ -305,6 +315,11 @@
                 {% if harvester.db_error %}
                 <tr><td class="fw-bold text-danger">Harvester database</td>
                     <td>not read: {{ harvester.db_error }}</td></tr>
+                {% endif %}
+                {% if harvester.dialogs.messages %}
+                <tr><td class="fw-bold text-danger">Harvester's errors reported to PanDA, last {{ harvester.dialogs.hours }} h</td>
+                    <td style="word-break: break-word">{% for d in harvester.dialogs.messages %}{% if not forloop.first %}<br>{% endif %}{{ d.module }}: {{ d.count }}, {% if d.first_at and d.count > 1 %}{{ d.first_at }} to {% endif %}{{ d.last.at }}: {{ d.last.message }}{% endfor %}
+                        {% if harvester.dialogs.messages_dropped %}<br><span class="text-muted">and {{ harvester.dialogs.messages_dropped }} rarer kinds</span>{% endif %}</td></tr>
                 {% endif %}
                 {% for daemon, calls in harvester.failed_calls.items %}
                 <tr><td class="fw-bold text-danger">Failed calls to PanDA ({{ daemon }})</td>
@@ -377,7 +392,7 @@
 
     <div class="mb-3">
         <div class="d-flex align-items-baseline">
-            <h5 class="mb-1">Job outcomes · {{ queue_name }} · last 2 weeks</h5>
+            <h5 class="mb-1">Job outcomes · {{ queue_name }} · {{ outcomes_window_label }}</h5>
             <a class="ms-3" href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='site' %}?site={{ queue_name|urlencode }}">State history in Snapper</a>
         </div>
         {% if site_outcomes_pie.pie %}

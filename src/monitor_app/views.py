@@ -811,6 +811,19 @@ def log_summary_datatable_ajax(request):
     return dt.create_response(data, records_total, records_filtered)
 
 
+def _log_window(request, queryset):
+    """The logs page's ``hours`` filter: records of the last N hours, the
+    window the dashboard's epicprod-live counts link with."""
+    from datetime import timedelta
+    try:
+        hours = float(request.GET.get('hours') or 0)
+    except ValueError:
+        return queryset
+    if hours > 0:
+        queryset = queryset.filter(timestamp__gte=timezone.now() - timedelta(hours=hours))
+    return queryset
+
+
 def log_list(request):
     """
     Professional log list view using server-side DataTables.
@@ -860,6 +873,7 @@ def log_list(request):
         'selected_instance': request.GET.get('instance_name'),
         'selected_sublevel': request.GET.get('sublevel'),
         'selected_module': request.GET.get('module'),
+        'selected_hours': request.GET.get('hours'),
         'live_mode': live_mode,
     }
     return render(request, 'monitor_app/log_list_dynamic.html', context)
@@ -907,19 +921,43 @@ def live_policy(request):
                   {'rows': live_policy_rows()})
 
 
+def epicprod_live(request):
+    """The curated epicprod-live page: the live stream's last day in six
+    groups (ACTION_STREAM.md, Curated view)."""
+    from .live_curated import WINDOW_H, curated_live
+    try:
+        hours = int(request.GET.get('hours') or WINDOW_H)
+    except ValueError:
+        hours = WINDOW_H
+    record = curated_live(hours)
+    prefix = request.META.get('SCRIPT_NAME', '')
+    for group in record['groups']:
+        for line in group['lines']:
+            if line.get('path'):
+                line['href'] = prefix + line['path']
+    return render(request, 'monitor_app/epicprod_live.html', {'live': record})
+
+
 def log_detail(request, log_id):
     """Display details for a specific log entry."""
     from .epicprod_logging import EPICPROD_APP_NAME, action_description
+    from .log_presentation import present_log
     log = get_object_or_404(AppLog, id=log_id)
     action_desc = ''
     if log.app_name == EPICPROD_APP_NAME and isinstance(log.extra_data, dict):
         action_desc = action_description(log.extra_data.get('action', ''))
+        if log.extra_data.get('action') == 'node_guard_decision':
+            from .live_notices import node_guard_text, site_node_guard_fields
+            from .panda.node_guard import exclusion_ranks
+            log.extra_data = site_node_guard_fields(log.extra_data, exclusion_ranks())
+            log.message = node_guard_text(log.extra_data)
     # Action-stream instance names ('web', 'ops-agent', 'mcp') are component
     # labels, not registry names — only link to a real registered agent.
     agent_exists = SystemAgent.objects.filter(
         instance_name=log.instance_name).exists()
     return render(request, 'monitor_app/log_detail.html',
                   {'log': log, 'action_description': action_desc,
+                   'detail': present_log(log),
                    'agent_exists': agent_exists})
 
 
@@ -966,6 +1004,7 @@ def logs_datatable_ajax(request):
     if request.GET.get('live') == '1':
         from .epicprod_logging import live_stream_q
         queryset = queryset.filter(live_stream_q())
+    queryset = _log_window(request, queryset)
 
     # Handle time range filters
     start_time = request.GET.get('start_time')
@@ -990,6 +1029,7 @@ def logs_datatable_ajax(request):
 
     # Format data for DataTables
     data = []
+    guard_ranks = None
     for log in logs:
         timestamp_str = format_datetime(log.timestamp)
         # Link timestamp to detail page
@@ -1007,8 +1047,14 @@ def logs_datatable_ajax(request):
         # Use plain text level (consistent with other views)
         level_text = log.levelname
 
-        # Truncate message if too long
-        message = log.message[:200] + '...' if len(log.message) > 200 else log.message
+        full_message = log.message
+        if isinstance(log.extra_data, dict) and log.extra_data.get('action') == 'node_guard_decision':
+            from .live_notices import node_guard_text, site_node_guard_fields
+            from .panda.node_guard import exclusion_ranks
+            if guard_ranks is None:
+                guard_ranks = exclusion_ranks()
+            full_message = node_guard_text(site_node_guard_fields(log.extra_data, guard_ranks))
+        message = full_message[:200] + '...' if len(full_message) > 200 else full_message
         func_display = f"{log.funcname}:{log.lineno}"
         extra = log.extra_data if isinstance(log.extra_data, dict) else {}
         sublevel_display = extra.get('sublevel', '')
@@ -1047,7 +1093,16 @@ def get_log_filter_counts(request):
     at_or_above = ([v for v in SUBLEVEL_VALUES
                     if SUBLEVEL_ORDER[v] >= SUBLEVEL_ORDER[sublevel]]
                    if sublevel in SUBLEVEL_ORDER else None)
-    base_queryset = AppLog.objects.all()
+    # The live stream's filters count what its list shows, the live rows,
+    # not every record of the app (Torre Wenaus, 2026-10-28: "list is right,
+    # filters is a mess").
+    def rows():
+        if request.GET.get('live') == '1':
+            from .epicprod_logging import live_stream_q
+            return AppLog.objects.filter(live_stream_q())
+        return AppLog.objects.all()
+
+    base_queryset = _log_window(request, rows())
     if username:
         base_queryset = base_queryset.filter(
             Q(instance_name__regex=rf'-{username}-\d+$')
@@ -1068,7 +1123,7 @@ def get_log_filter_counts(request):
     # extra_data): apply the other filters, never the threshold itself.
     # Cumulative — each option counts events at or above it, matching the
     # ≥ filter semantics (normal shows normal and high).
-    qs_for_sublevel = AppLog.objects.all()
+    qs_for_sublevel = rows()
     if username:
         qs_for_sublevel = qs_for_sublevel.filter(
             instance_name__regex=rf'-{username}-\d+$')
@@ -1094,7 +1149,7 @@ def get_log_filter_counts(request):
     # two sources are disjoint (action instances are 'ops-agent'/'web'/'mcp',
     # which never match the agent pattern).
     username_pattern = re.compile(r'-([^-]+)-\d+$')
-    qs_for_username = apply_filters(AppLog.objects.all(), current_filters)
+    qs_for_username = apply_filters(rows(), current_filters)
     if at_or_above:
         qs_for_username = qs_for_username.filter(
             extra_data__sublevel__in=at_or_above)
@@ -1115,6 +1170,10 @@ def get_log_filter_counts(request):
 
     # Convert to sorted list of tuples (matching expected format)
     filter_counts['username'] = sorted(username_counts.items(), key=lambda x: (-x[1], x[0]))
+    if request.GET.get('live') == '1':
+        # The live stream offers its busiest sources, not every one.
+        filter_counts['username'] = filter_counts['username'][:15]
+        filter_counts['instance_name'] = filter_counts['instance_name'][:15]
 
     # Add username/sublevel to current_filters for UI state (after utility call)
     current_filters['username'] = username
@@ -3142,10 +3201,10 @@ def panda_queues_datatable_ajax(request):
     dt = DataTablesProcessor(request, columns, default_order_column=0, default_order_direction='asc')
     
     # Build base queryset
-    queryset = PandaQueue.objects.all()
+    queryset = PandaQueue.objects.exclude(queue_name__in=django_settings.CANARY_CLOSED_QUEUES)
     
     # Get counts and apply search/pagination
-    records_total = PandaQueue.objects.count()
+    records_total = queryset.count()
     search_fields = ['queue_name', 'site', 'status', 'queue_type']
     queryset = dt.apply_search(queryset, search_fields)
     records_filtered = queryset.count()
@@ -3340,7 +3399,7 @@ def rucio_endpoint_json(request, endpoint_name):
 def panda_queues_all_json(request):
     """Display JSON view of all PanDA queue configurations."""
     queues_data = {}
-    for queue in PandaQueue.objects.all().order_by('queue_name'):
+    for queue in PandaQueue.objects.exclude(queue_name__in=django_settings.CANARY_CLOSED_QUEUES).order_by('queue_name'):
         queues_data[queue.queue_name] = queue.config_data
     
     import json
@@ -3512,7 +3571,11 @@ def _corun_narrative_count():
 
 
 def prod_hub(request):
-    """ePIC Production home — Nav (workflow hub) and Ops (dashboard) tabs."""
+    """ePIC Production home: Nav, Dash and Ops, with Nav as default."""
+    tab = request.GET.get('tab', 'nav')
+    if tab == 'dash' and request.GET.get('user_view') != '1':
+        from .viewdir.prod_dashboard import dashboard_home
+        return dashboard_home(request)
     from pcs.views import pcs_hub_counts
     from ai.models import Proposal
     from pcs.dashboard import (build_dashboard, get_dashboard_prefs,
@@ -3530,7 +3593,7 @@ def prod_hub(request):
                 logger.exception('home_tab preference save failed for %s',
                                  username)
     else:
-        tab = prefs.get('home_tab') if prefs.get('home_tab') in ('nav', 'ops') else 'nav'
+        tab = 'nav'
     from .cached_product import get_product
     # The summary strip (swf-epicprod docs/EPICPROD_DASHBOARD.md), on
     # both tabs: one campaign completion line per current or producing

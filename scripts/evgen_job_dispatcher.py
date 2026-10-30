@@ -388,10 +388,9 @@ def es_slot_count():
     return len(os.sched_getaffinity(0)), "cores available"
 
 
-def run_event_service(csv_base, stamp, workdir, channel):
-    """Event Service canary: the node harness over this job's ranges,
-    outputs to epic:/TEST/canary/<stamp>; exits 0 when the harness does,
-    with the job report carrying every range it did or failed."""
+def run_event_service(csv_base, stamp, workdir, channel, production=False):
+    """Run the same ES harness with ordinary production or expiring canary
+    outputs. Range outcomes and closes remain in the job report."""
     name = channel or os.environ.get("PILOT_EVENTRANGECHANNEL")
     if not name:
         print("ERROR: no range channel (argument or PILOT_EVENTRANGECHANNEL): "
@@ -401,7 +400,22 @@ def run_event_service(csv_base, stamp, workdir, channel):
     if not image:
         print("ERROR: ES_PAYLOAD_IMAGE names no container image", file=sys.stderr)
         return 2
-    dataset = f"{CANARY_DATASET_ROOT}/{stamp}"
+    if production or os.environ.get('ES_WORKER_PROXY') == '1':
+        # Materialize the native pilot's credential only on the worker, at
+        # the path named by the sandbox environment. It never enters the cache.
+        import shutil
+        proxy = os.environ.get('PILOT_X509_USER_PROXY', '')
+        if not proxy or not os.path.isfile(proxy):
+            print('ERROR: native worker proxy is unavailable', file=sys.stderr)
+            return 2
+        target = os.path.join(workdir, 'worker-proxy')
+        shutil.copyfile(proxy, target)
+        os.chmod(target, 0o600)
+    dataset = (os.environ.get('ES_OUTPUT_DATASET', '').lstrip('/') if production
+               else f"{CANARY_DATASET_ROOT}/{stamp}")
+    if production and not dataset.startswith('RECO/'):
+        print('ERROR: production ES requires its declared RECO output dataset', file=sys.stderr)
+        return 2
     work = os.path.join(os.path.dirname(workdir), ES_WORK_DIR)
     summary_path = os.path.join(work, "es_summary.json")
     os.makedirs(work, exist_ok=True)
@@ -411,9 +425,10 @@ def run_event_service(csv_base, stamp, workdir, channel):
            "--slots", str(slots), "--work", work,
            "--sandbox", workdir, "--image", image, "--csv-base", csv_base,
            "--stamp", stamp, "--channel", name, "--summary", summary_path,
-           "--env", f"CANARY_OUTPUT_DATASET={dataset}",
-           "--env", f"CANARY_LIFETIME_S={CANARY_LIFETIME_S}",
            "--env", f"PANDAID={os.environ.get('PANDAID', '')}"]
+    if not production:
+        cmd += ["--env", f"CANARY_OUTPUT_DATASET={dataset}",
+                "--env", f"CANARY_LIFETIME_S={CANARY_LIFETIME_S}"]
     for key in ("ES_DEADLINE_S", "ES_MARGIN_S"):
         if os.environ.get(key):
             cmd += [f"--{key[3:].lower().replace('_', '-')}", os.environ[key]]
@@ -426,6 +441,7 @@ def run_event_service(csv_base, stamp, workdir, channel):
     for line in proc.stderr:
         sys.stderr.write(line)
         stderr_tail.append(line.rstrip("\n"))
+    proc.stderr.close()
     rc = proc.wait()
     summary = {}
     try:
@@ -443,6 +459,12 @@ def run_event_service(csv_base, stamp, workdir, channel):
                "untaken_at_deadline": summary.get("untaken_at_deadline"),
                "ranges_done": summary.get("done", []),
                "ranges_failed": summary.get("failed", []),
+               # With EPICPROD_SWITCH_ES_RECORD_PER_CLOSE the units of shipped
+               # closes are in the report store, not here; the counts stand
+               # for every unit (swf-epicprod swf_epicprod/es_records.py).
+               "done_count": summary.get("done_count"),
+               "failed_count": summary.get("failed_count"),
+               "shipped_closes": summary.get("shipped_closes", []),
                "closes": summary.get("closes", []),
                # TEST AND DEMO ONLY (ES_PREEMPT_AT_S): the sudden end and what it cost.
                "preempted": summary.get("preempted"),
@@ -452,13 +474,14 @@ def run_event_service(csv_base, stamp, workdir, channel):
 
 
 def main():
-    if len(sys.argv) >= 2 and sys.argv[1] == "es":
+    if len(sys.argv) >= 2 and sys.argv[1] in ("es", "es-production"):
         if len(sys.argv) < 4:
             print(f"Usage: {sys.argv[0]} es <csv_base> <stamp> [channel]",
                   file=sys.stderr)
             return 2
         return run_event_service(sys.argv[2], sys.argv[3],
-                                 os.getcwd(), sys.argv[4] if len(sys.argv) > 4 else "")
+                                 os.getcwd(), sys.argv[4] if len(sys.argv) > 4 else "",
+                                 production=sys.argv[1] == 'es-production')
     if len(sys.argv) >= 2 and sys.argv[1] == "canary":
         # Canary probe job: same runner, landing-kit payload.
         payload_seconds = int(sys.argv[2]) if len(sys.argv) > 2 else 60

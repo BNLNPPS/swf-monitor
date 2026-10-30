@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+{% load swf_fmt %}
+{% block title %}Worker admission — {{ queue_label }}{% endblock %}
+{% block content %}
+<div class="container-fluid mt-3">
+  <h2>Worker starts and admission — {{ queue_label }}</h2>
+  <p class="text-muted">The dashboard’s slots/1h counts Harvester worker starts. A start can be declined before taking a job. It does not imply an additional running payload.</p>
+  <form method="get" class="d-flex align-items-center gap-2 mb-3">
+    <label for="admission-queue">Queue</label>
+    <select id="admission-queue" name="site" class="form-select form-select-sm w-auto">
+      {% for queue in queue_choices %}<option value="{{ queue }}" {% if queue == selected_queue %}selected{% endif %}>{{ queue }}</option>{% endfor %}
+    </select>
+    <label for="admission-hours">Window</label>
+    <select id="admission-hours" name="hours" class="form-select form-select-sm w-auto">
+      {% for option in hour_options %}<option value="{{ option }}" {% if option == hours %}selected{% endif %}>{{ option }} h</option>{% endfor %}
+    </select>
+    <button class="btn btn-sm btn-secondary">Show</button>
+    <a href="?site={{ selected_queue|urlencode }}&amp;hours={{ hours }}&amp;refresh=1" class="btn btn-sm btn-secondary swf-update-btn">Update</a>
+  </form>
+  {% if failure %}<div class="alert alert-danger">{{ failure }}</div>{% endif %}
+  {% if data %}
+  <p>Starts between {{ data.since|fmt_dt }} and {{ data.until|fmt_dt }}. Worker outcomes are measured now; workers that started earlier are outside this cohort.</p>
+  <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable mb-3">
+    <thead><tr><th>Started in window</th><th>Declined before job</th><th>Still running</th><th>Finished</th><th>Failed</th><th>Cancelled</th><th>Other</th></tr></thead>
+    <tbody><tr><td>{{ data.starts }}</td><td class="text-secondary">{{ data.declined }} ({{ data.declined_pct }}%)</td><td>{{ data.still_running }}</td><td>{{ data.finished }}</td><td>{{ data.failed }}</td><td>{{ data.cancelled }}</td><td>{{ data.other }}</td></tr></tbody>
+  </table>
+  {% if data.declined %}
+  <div class="alert alert-warning">
+    <strong>Admission churn: {{ data.declined }} of {{ data.starts }} starts were declined.</strong>
+    Their recorded worker lifetimes total {{ data.declined_worker_hours }} hours, including startup and reporting delay; this is not payload CPU time.
+    Each refusal protects a payload from a short-lived slot. Repeated replacement starts on those slots still waste matches, transfers and startup work.
+  </div>
+  {% endif %}
+  <p>Current queue: <strong>{{ data.jobs_now }} payload jobs running</strong>;
+    {% for status, count in data.workers_now.items %}{{ count }} workers {{ status }}{% if not forloop.last %}, {% endif %}{% endfor %}.
+    These current totals include workers started before the selected window.</p>
+  {% else %}<p class="text-muted">Building the worker-start summary…</p>{% endif %}
+
+  <h4 class="mt-4">Why starts were declined</h4>
+  {% if evidence.error %}<div class="alert alert-warning">Startup evidence unavailable: {{ evidence.error }}</div>
+  {% elif evidence %}
+  <p>One-hour startup-log window ending {{ evidence.until|fmt_dt }}; {{ evidence.classified }} of {{ evidence.declined }} declines have parsed startup evidence.
+    {{ evidence.repeated_slot_starts }} repeat declines on identified slots.
+    Batch logs measured {{ evidence.busy_s|fmt_duration }} of slot-busy time and {{ evidence.execute_s|fmt_duration }} of execution time across {{ evidence.busy_measured_workers }} declined starts.</p>
+  <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable" data-swf-order="3,desc">
+    <thead><tr><th>Execution queue</th><th>Host</th><th>Slot</th><th>Declined starts</th><th>Remaining lifetime</th><th>Minimum to start a job</th><th>Evidence</th></tr></thead>
+    <tbody>{% for row in evidence.placements %}<tr><td>{{ row.execution_queue|short }}</td><td>{{ row.node }}</td><td style="max-width:26rem;overflow-wrap:anywhere;">{{ row.slot }}</td><td>{{ row.count }}</td><td>{{ row.remaining_min_s|fmt_duration }} – {{ row.remaining_max_s|fmt_duration }}</td><td>{{ row.required_s|fmt_duration }}</td><td>{% if row.batch_log %}<a href="{{ row.batch_log }}" target="_blank" rel="noopener">Batch log</a>{% endif %}</td></tr>{% endfor %}</tbody>
+  </table>
+  <p class="small text-muted">Individual pre-job declines are expected and stay below the dashboard error threshold. Their aggregate churn is reported here. Unread startup logs remain unknown. Showing {{ evidence.placements|length }} of {{ evidence.placements_total }} host/slot groups; source {{ evidence.host }}, reported {{ evidence.reported_at|fmt_dt }}.</p>
+  {% else %}<p class="text-muted">This host has not reported parsed admission evidence yet. The worker-start counts above remain available.</p>{% endif %}
+
+  {% if data.recent %}
+  <h4 class="mt-4">Recent worker starts</h4>
+  <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
+    <thead><tr><th>Worker</th><th>Batch ID</th><th>Started</th><th>Outcome</th><th>Exit</th><th>Reason</th><th>Evidence</th></tr></thead>
+    <tbody>{% for row in data.recent %}<tr><td>{{ row.workerid }}</td><td>{{ row.batchid }}</td><td>{{ row.started|fmt_dt }}</td><td class="{% if row.outcome == 'declined' or row.outcome == 'cancelled' %}text-secondary{% else %}{{ row.outcome|state_class }}{% endif %}">{{ row.outcome }}</td><td>{{ row.exit_code|default_if_none:'—' }}</td><td style="max-width:42rem;overflow-wrap:anywhere;">{{ row.reason }}</td><td>{% if row.batch_log %}<a href="{{ row.batch_log }}" target="_blank" rel="noopener">Batch log</a>{% endif %}</td></tr>{% endfor %}</tbody>
+  </table>
+  {% endif %}
+</div>
+<script>
+setTimeout(function refreshAdmission() {
+  if (window.swfPollGate && !window.swfPollGate.attended()) { setTimeout(refreshAdmission, 10000); return; }
+  window.location.reload();
+}, {% if data %}60000{% else %}3000{% endif %});
+</script>
+{% endblock %}

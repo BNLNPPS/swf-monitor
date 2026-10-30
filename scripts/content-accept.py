@@ -140,12 +140,9 @@ def main():
         return 0
 
     if plan['detach']:
-        try:
-            proxy, summary['proxy'] = _evgen.resolve_proxy()
-        except _evgen.DoerError as e:
-            summary['error'] = e.msg if hasattr(e, 'msg') else str(e)
-            print(json.dumps(summary))
-            return EXIT_PROXY
+        # The detach is catalog work a token does alone; the proxy is only
+        # the fallback.
+        proxy, summary['proxy'] = _evgen.resolve_proxy_or_none()
         try:
             client = _evgen.rucio_client(proxy)
         except _evgen.DoerError as e:

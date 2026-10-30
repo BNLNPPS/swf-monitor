@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}epicprod-live{% endblock %}
+
+{% block content %}
+<style>
+/* The curated epicprod-live page (ACTION_STREAM.md, Curated view): window
+   scrolling only, no table scrolls sideways (Torre Wenaus, 2026-10-28). */
+.live-curated{font-size:1.05rem}
+.live-curated h2{font-size:1.6rem;margin-bottom:.4rem}
+.live-curated h3{font-size:1.3rem;margin:1.2rem 0 .2rem}
+.live-curated h3 .count{color:#555;font-weight:normal}
+.live-curated .desc,.live-curated .none{color:#444;margin-bottom:.4rem}
+.live-curated table.curated{table-layout:fixed;width:100% !important;font-size:1rem}
+.live-curated table.curated td,.live-curated table.curated th{overflow-wrap:anywhere}
+.live-curated table.curated th:nth-child(1){width:8% !important}
+.live-curated table.curated th:nth-child(2){width:19% !important}
+.live-curated table.curated th:nth-child(3){width:59% !important}
+.live-curated table.curated th:nth-child(4){width:14% !important}
+.live-curated .lvl-ERROR,.live-curated .lvl-CRITICAL{color:#b02a37;font-weight:600}
+.live-curated .lvl-WARNING{color:#995c00;font-weight:600}
+.live-curated .lvl-CLEARED{color:#5c636a}
+.live-curated .note{color:#444}
+</style>
+<div class="container-fluid live-curated">
+    <h2>epicprod-live, last {{ live.hours }} hours</h2>
+    <p class="desc">The live stream's {{ live.records }} records since
+       {{ live.since|date:"m-d H:i" }} ET, curated into six groups, newest first in each.
+       {{ live.left_out }} are left out: routine passes, pilot cycles, bookkeeping, the
+       steps behind a move or a pause, and OSG's fair-share hold, which Production now
+       carries. Every live record is in the
+       <a href="{% url 'monitor_app:log_list' %}?app_name=epicprod&amp;live=1">live stream view</a>.</p>
+    {% for group in live.groups %}
+    <h3 id="{{ group.key }}">{{ group.title }} <span class="count">{{ group.lines|length }}</span></h3>
+    <p class="desc">{{ group.description }}</p>
+    {% if group.lines %}
+    <table class="table table-striped table-bordered table-sm align-middle swf-sortable curated">
+        <thead><tr><th>Time ET</th><th>What</th><th>Detail</th><th>Who</th></tr></thead>
+        <tbody>
+        {% for line in group.lines %}
+            <tr>
+                <td data-order="{{ line.at|date:'U' }}">{{ line.at|date:"m-d H:i" }}</td>
+                <td><a class="lvl-{{ line.level }}" href="{% if line.href %}{{ line.href }}{% else %}{% url 'monitor_app:log_detail' line.id %}{% endif %}">{{ line.title }}</a></td>
+                <td>{{ line.detail }}{% if line.note %} <span class="note">({{ line.note }})</span>{% endif %}</td>
+                <td>{{ line.who }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="none">None in the window.</p>
+    {% endif %}
+    {% endfor %}
+</div>
+{% endblock %}

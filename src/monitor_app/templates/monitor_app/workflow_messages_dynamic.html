@@ -2,12 +2,12 @@
 
 {% block initial_filters %}
 {
-    namespace: '{{ selected_namespace|default:"" }}',
-    execution_id: '{{ selected_execution_id|default:"" }}',
-    message_type: '{{ selected_message_type|default:"" }}',
-    sender_agent: '{{ selected_sender_agent|default:"" }}',
-    workflow: '{{ selected_workflow|default:"" }}',
-    is_successful: '{{ selected_is_successful|default:"" }}'
+    namespace: '{{ selected_namespace|default:""|force_escape|escapejs }}',
+    execution_id: '{{ selected_execution_id|default:""|force_escape|escapejs }}',
+    message_type: '{{ selected_message_type|default:""|force_escape|escapejs }}',
+    sender_agent: '{{ selected_sender_agent|default:""|force_escape|escapejs }}',
+    workflow: '{{ selected_workflow|default:""|force_escape|escapejs }}',
+    is_successful: '{{ selected_is_successful|default:""|force_escape|escapejs }}'
 }
 {% endblock %}
 

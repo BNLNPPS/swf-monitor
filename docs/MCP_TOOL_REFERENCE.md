@@ -24,6 +24,7 @@ and `monitor_urls` when web UI links are available.
 | Tool | Parameters | Description |
 |------|------------|-------------|
 | `swf_get_system_state` | `username` | Comprehensive system state for a user: context from testbed.toml, agent manager status, workflow runner readiness, agent counts, execution stats. |
+| `swf_comp_snapshot` | `refresh` | The computing centre room's live record: pressure front, sites with their queues, OSG execute sites, storage health, report (docs/COMP_SNAPSHOT.md). |
 
 **Parameters:**
 - `username`: Optional. Username to get context for (reads their testbed.toml). If not provided, infers from SWF_HOME environment variable.
@@ -415,6 +416,7 @@ This tool aggregates information from workflow messages and logs, providing a si
 | `epic_register_ai_assessment` | `subject_type`, `subject_key`, `assessment`, `username`, `ai`, `subject_label`, `subject_url`, `data` | Register append-only AI assessment content as a corun-ai Page and link it from the target object JSON when the subject is known locally. |
 | `epic_get_ai_content` | `ids`, `corun_page_group_ids` | Retrieve append-only AI assessment content by corun-ai Page group ids and/or legacy AIContent ids. Use the arguments supplied in a detail payload's `ai_content.retrieval.arguments`. |
 | `epicprod_list_actions` | `action`, `instance`, `subject_type`, `subject_key`, `username`, `outcome`, `start_time`, `end_time`, `min_sublevel`, `summarize`, `limit`, `offset` | Query the epicprod action stream (structured production-action records with outcome and duration). Prefer `summarize=True` for reporting: counts by action with ok/error split and duration statistics. Raw listings default to an importance floor of `normal` (excluded records counted in `excluded_below_floor`; floor lifts for action/subject/outcome drill-downs and summaries); `min_sublevel` sets it explicitly. See [ACTION_STREAM.md](ACTION_STREAM.md). |
+| `epicprod_live_clear` | `ids`, `reason`, `username` | Take records off the computing centre's epicprod-live screen once Torre's question about them is answered as taken care of: one `live_cleared` action naming the record ids and why; the records are unchanged. See [COMP_SNAPSHOT.md](COMP_SNAPSHOT.md) § Live. |
 | `epicprod_storage` | `listing`, `rse`, `campaign`, `state`, `limit`, `offset` | Exception listings from the production storage record's store: `ghosts` (registered files with no available replica on any RSE, each with its holding replicas by state; the envelope carries `by_rse`, the account of the filtered population by holding RSE with files, bytes, states, campaigns and the oldest entry), `stuck_rules`, `stalled_datasets`. Filter by `rse` (`none` for ghosts with no replica row), `campaign` family and `state`; paged oldest first; `as_of` names the last completed pass and any pass in progress. REST counterpart `pcs/api/storage/<listing>/`. See swf-epicprod STORAGE.md. |
 
 **Known subject types:**
@@ -673,15 +675,15 @@ them and a person reading the page see one history.
 | AI Content | `epic_register_ai_assessment`, `epic_get_ai_content` | 2 |
 | AI Proposals | `ai_list_proposals`, `ai_decide_proposal` | 2 |
 | Campaign Status | `epicprod_campaign_status` | 1 |
-| Action Stream | `epicprod_list_actions` | 1 |
+| Action Stream | `epicprod_list_actions`, `epicprod_live_clear` | 2 |
 | Storage Record | `epicprod_storage` | 1 |
 | Snapper State History | `snapper_latest`, `snapper_state_at`, `snapper_component_history`, `snapper_changes_between`, `snapper_context_around`, `snapper_series`, `snapper_cut_summary` | 7 |
 | PCS Tags | `pcs_list_tags`, `pcs_get_tag`, `pcs_search_tags` | 3 |
-| PCS Datasets and Prod Tasks | `pcs_dataset_list`, `pcs_dataset_get`, `pcs_data_provenance`, `pcs_dataset_intake`, `pcs_prodtask_list`, `pcs_prodtask_get`, `pcs_prodtask_artifact`, `pcs_prodtask_intake`, `pcs_prodtask_link_input`, `pcs_prodtask_set_status` | 10 |
+| PCS Datasets and Prod Tasks | `pcs_dataset_list`, `pcs_dataset_get`, `pcs_data_provenance`, `pcs_dataset_intake`, `pcs_prodtask_list`, `pcs_prodtask_get`, `pcs_prodtask_artifact`, `pcs_prodtask_intake`, `pcs_prodtask_link_input`, `pcs_prodtask_set_status`, `pcs_prodtask_unplace` | 11 |
 | PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers`, `panda_segfault_catalog`, `panda_segfault_signature`, `panda_segfault_findings`, `panda_segfault_finding_set`, `panda_segfault_reproduce` | 12 |
 | JLab Rucio | `jlab_rucio_*` | 14 |
 | BNL Rucio | `bnl_rucio_*` | 14 |
-| **Total** | | **97** |
+| **Total** | | **99** |
 
 ---
 

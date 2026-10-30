@@ -9,7 +9,7 @@ import logging
 
 from .constants import PANDA_SCHEMA, ERROR_COMPONENTS, JOB_STATUS_CATEGORIES
 from ..declared import job_declared
-from ..error_corrections import correction, match
+from ..error_corrections import reading
 
 logger = logging.getLogger(__name__)
 
@@ -134,10 +134,10 @@ def extract_errors(job_dict):
     exit_profile = {str(transexitcode).strip(): 1} if has_exit else {}
     for err in errors:
         try:
-            rule = match(err['component'], err['code'], err['diag'],
-                         sites=[job_dict.get('computingsite')])
-            if rule is not None:
-                err['correction'] = correction(rule, exit_profile)
+            interpreted = reading(err['component'], err['code'], err['diag'],
+                                  exit_profile, sites=[job_dict.get('computingsite')])
+            if interpreted is not None:
+                err['correction'] = interpreted
         except Exception as e:
             logger.error('error-correction decoration failed for job %s '
                          '%s:%s: %s', job_dict.get('pandaid'),
@@ -163,6 +163,17 @@ def like_or_eq(field, value):
     if '%' in value:
         return f'"{field}" LIKE %s', value
     return f'"{field}" = %s', value
+
+
+def site_clause(value):
+    """Return (where_clause, params) for the job list's queue filter:
+    several queues comma-separated (a floor site's live queues), else one
+    queue as like_or_eq takes it."""
+    queues = [q.strip() for q in value.split(',') if q.strip()]
+    if len(queues) > 1:
+        return '"computingsite" = ANY(%s)', [queues]
+    clause, val = like_or_eq('computingsite', queues[0] if queues else value)
+    return clause, [val]
 
 
 # ── DataTables SQL builders ──────────────────────────────────────────────────

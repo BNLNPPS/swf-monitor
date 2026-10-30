@@ -11,7 +11,8 @@
         Payload crashes in ePIC production jobs, one row per crash signature: a job whose payload died on a signal
         (exit code 128 plus the signal: 139 SIGSEGV, 134 SIGABRT, 135 SIGBUS, 136 SIGFPE), found from the PanDA record
         and grouped by exit code and PanDA task at record level; signatures sharing a crashing frame merge into one
-        trace-level entry once dug. Rebuilt nightly by the catalog sync; the crashed jobs behind each row carry their
+        trace-level entry once dug. Jobs the site killed for their memory are signatures of their own, one per task
+        and stage (Kind Himem). Rebuilt nightly by the catalog sync; the crashed jobs behind each row carry their
         manifest row where the attempt's manifest is on record.
     </p>
     <details class="mb-3">
@@ -24,6 +25,7 @@
                     <li><strong>Sparse</strong>: a few crashes at varying times, about one per host; where event-dependent crashes live (under 5% of the task's jobs).</li>
                     <li><strong>Abort</strong>: exit 134, the program aborted itself (an exception or assertion), whatever the rate.</li>
                     <li><strong>Mixed</strong>: none of the above; a class to look at, not a verdict.</li>
+                    <li><strong>Memory</strong>: jobs the site removed for their memory, not crashes: killed by the kernel's memory cgroup, or evicted by the batch system with SIGTERM with a peak resident memory at or above the configured share of their request (segfault_memory_rss_fraction on the System page). One entry per task and stage; the crashes column counts the kills, the jobs listed are three representatives, and a reproduction measures the row's peak memory and its growth on the reference queue.</li>
                 </ul>
             </li>
             <li><strong>Status</strong>, where the signature stands from first sighting to a verdict:
@@ -57,7 +59,7 @@
     </details>
     <p class="mb-2">
         <strong class="swf-nf-shown">{{ shown }}</strong> of <strong>{{ total }}</strong> signatures,
-        <strong>{{ crashes_total }}</strong> crashed jobs in the inventory{% if repro_counts.total %};
+        <strong>{{ crashes_total }}</strong> crashed jobs in the inventory{% if memory_kills_total %} and <strong>{{ memory_kills_total }}</strong> jobs killed for memory{% endif %}{% if repro_counts.total %};
         <strong>{{ repro_counts.active }}</strong> reproduction runs active, <strong>{{ repro_counts.ended }}</strong> ended{% endif %};
         <strong>{{ run_needed }}</strong> signature{{ run_needed|pluralize }} still need{{ run_needed|pluralize:"s," }} a run
         (the Reproduction bar's <a href="{% url 'monitor_app:panda_segfaults' %}?reproduction=run_needed">run needed</a> selection).
@@ -99,7 +101,7 @@
                 <td data-order="{{ r.last_seen|default:'' }}">{% with t=r.last_seen|fmt_dt %}{{ t|slice:":8" }}<br>{{ t|slice:"9:" }}{% endwith %}</td>
                 <td class="class-col">{{ r.class_label }}</td>
                 <td class="sig-col"><a href="{% url 'monitor_app:panda_segfault_detail' key=r.key %}">{{ r.key }}</a>{% if r.finding_anchor %} <a href="{% url 'monitor_app:panda_segfault_findings' %}#{{ r.finding_anchor }}" title="The curated finding for this crashing frame">finding</a>{% endif %}<br>
-                    exit {{ r.exit_code }}, {{ r.signal_name }}{% if r.frame %}; {{ r.frame }}{% endif %}</td>
+                    {% if r.class == 'memory' %}{{ r.signal_name }}{% if r.memory.rss_max_mb %}; peak RSS {{ r.memory.rss_max_mb }} MB, request {{ r.memory.request_mb|last }} MB{% endif %}{% else %}exit {{ r.exit_code }}, {{ r.signal_name }}{% if r.frame %}; {{ r.frame }}{% endif %}{% endif %}</td>
                 <td class="cfg-col">{% if r.configuration.prod_task %}{{ r.configuration.prod_task }}{% else %}{{ r.task_names.0|default:'' }}{% endif %}
                     {% if r.image %}<br>{{ r.image }}{% endif %}</td>
                 <td class="tasks-col" data-order="{{ r.tasks }}">{% if r.task_ids %}<a href="{% url 'monitor_app:panda_task_detail' jeditaskid=r.task_ids.0 %}">{{ r.task_ids.0 }}</a>{% if r.tasks > 1 %}<br>&amp; {{ r.tasks|add:"-1" }} other{{ r.tasks|add:"-1"|pluralize }}{% endif %}{% endif %}</td>

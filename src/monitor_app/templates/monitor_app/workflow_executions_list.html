@@ -49,10 +49,10 @@
 
 {% block initial_filters %}
 {
-    workflow: '{{ selected_workflow|default:"" }}',
-    status: '{{ selected_status|default:"" }}',
-    executed_by: '{{ selected_executed_by|default:"" }}',
-    namespace: '{{ selected_namespace|default:"" }}'
+    workflow: '{{ selected_workflow|default:""|force_escape|escapejs }}',
+    status: '{{ selected_status|default:""|force_escape|escapejs }}',
+    executed_by: '{{ selected_executed_by|default:""|force_escape|escapejs }}',
+    namespace: '{{ selected_namespace|default:""|force_escape|escapejs }}'
 }
 {% endblock %}
 

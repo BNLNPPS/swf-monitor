@@ -117,10 +117,7 @@
       .prod-home-tabs a.active { border-bottom-color: #3d85c6; color: #111; }
     </style>
 
-    <div class="prod-home-tabs">
-        <a class="{% if active_tab != 'ops' %}active{% endif %}" href="{% url 'monitor_app:prod_hub' %}?tab=nav">Nav</a>
-        <a class="{% if active_tab == 'ops' %}active{% endif %}" href="{% url 'monitor_app:prod_hub' %}?tab=ops">Ops</a>
-    </div>
+    {% include 'monitor_app/_prod_home_tabs.html' %}
 
     {% if is_tunnel %}
     <script>

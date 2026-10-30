@@ -5,7 +5,8 @@ Runs on a harvester host (pandaharvester01, osgsub01) and posts one record
 per run to swf-monitor (docs/HARVESTER_REPORTER.md): per queue, the
 harvester's job fetches since the last run (asked, got, the outcome, the
 last attempt), the workers it submitted and for which jobs, the worker
-counts the submitter last read; every failed call to the PanDA server by
+counts the submitter last read, the waiting-worker limit the worker
+adjuster last applied; every failed call to the PanDA server by
 daemon, call and error class; the age of every harvester log; the
 harvester's process count; and, from the harvester's own database and its
 condor logs, its launch limits per queue, its workers now, the workers
@@ -31,6 +32,7 @@ import argparse
 import ast
 import configparser
 import glob
+import hashlib
 import json
 import os
 import re
@@ -59,6 +61,7 @@ REASON_HOURS = 24
 DB_TIMEOUT_S = 60
 FETCHER_LOG = os.path.join(LOG_DIR, 'panda-job_fetcher.log')
 SUBMITTER_LOG = os.path.join(LOG_DIR, 'panda-submitter.log')
+ADJUSTER_LOG = os.path.join(LOG_DIR, 'panda-worker_adjuster.log')
 CALL_LOGS = (('communicator', os.path.join(LOG_DIR, 'panda-communicator.log')),
              ('propagator', os.path.join(LOG_DIR, 'panda-propagator.log')))
 DEFAULT_STATE = os.path.expanduser('~/.swf-harvester-reporter')
@@ -80,6 +83,8 @@ STATUS_RE = re.compile(STAMP + r'panda\.log\.submitter: \w+\s+run <[^>]*queue=([
                        r'workers status: (\{.*\})')
 CHUNKS_RE = re.compile(STAMP + r'panda\.log\.submitter: \w+\s+run <[^>]*queue=([^ >]+)[^>]*> '
                        r'got (\d+) job chunks')
+LIMIT_RE = re.compile(STAMP + r'panda\.log\.worker_adjuster: \w+\s+define_num_workers <site=([^>]+)> '
+                      r'limiting max_queued_workers to min\(n_activated=(\d+), queue_limit=(\d+)\)')
 FAILED_RE = re.compile(STAMP + r'panda\.log\.(\w+): \w+\s+(\w+).*?failed to POST with '
                        r"<class '([\w.]+)'>")
 CLASS_RE = re.compile(r"<class '([\w.]+)'>:?(.*)")
@@ -212,6 +217,24 @@ def submission(lines, info):
             'pushes_in_interval': len(pushes)}
 
 
+def adjustment(lines, info, last):
+    """Per queue, the waiting-worker limit the worker adjuster last
+    applied, with when it logged it. Harvester computes it from its running
+    workers (nQueueLimitWorkerRatio, Min, Max), so pq_table's
+    nQueueLimitWorker is only its cap. The adjuster logs it only in some
+    cycles (on osgsub01 on 2026-10-22, in bursts half an hour apart), so
+    the last value seen is kept in ``last``, the state map, and delivered
+    with its time."""
+    queues = last
+    for line in lines:
+        hit = LIMIT_RE.match(line)
+        if hit:
+            stamp, queue, activated, limit = hit.groups()
+            queues[queue] = {'queue_limit': int(limit), 'n_activated': int(activated),
+                             'at': utc(stamp)}
+    return {'read': info, 'queues': queues}
+
+
 def failed_calls(positions, first_run):
     out = {}
     for daemon, path in CALL_LOGS:
@@ -289,6 +312,91 @@ def query(conf, sql):
     return rows
 
 
+def pilot_dispatch(template):
+    """Dispatch capability from the actual submit template, never queue history."""
+    result = {'mode': 'unknown', 'images': [], 'source': template or ''}
+    try:
+        with open(template) as handle:
+            text = handle.read()
+    except (OSError, TypeError) as exc:
+        result['error'] = 'pilot template unreadable: {}'.format(exc)
+        return result
+    result['sha256'] = hashlib.sha256(text.encode()).hexdigest()
+    images = re.findall(r'(?m)^\+EpicprodNativeImage\s*=\s*"([^"\n]+)"', text)
+    images += re.findall(r'(?:^|[\s"])EPICPROD_NATIVE_IMAGE=([^\s"]+)', text)
+    if images:
+        images += re.findall(r'(?m)^\+SingularityImage\s*=\s*"([^"\n]+)"', text)
+    images = sorted(set(images))
+    mode = re.search(r'(?m)^\+EpicprodNativeMode\s*=\s*"([^"\n]+)"', text)
+    if mode and mode.group(1) == 'per-job':
+        try:
+            if ('EPICPROD_NATIVE_DISPATCH=per-job' not in text
+                    or 'EPICPROD_NATIVE_NESTING=on' not in text):
+                raise ValueError('per-job mode lacks dispatch or payload-launch configuration')
+            inputs = re.search(r'(?m)^transfer_input_files\s*=\s*(.*)$', text)
+            launchers = [p.strip() for p in inputs.group(1).split(',')
+                         if os.path.basename(p.strip()) == 'epic-native-pilot.sh'] if inputs else []
+            if len(launchers) != 1:
+                raise ValueError('per-job launcher is not uniquely established')
+            with open(launchers[0]) as handle:
+                launcher = handle.read()
+            if 'EPICPROD_NATIVE_DISPATCH' not in launcher or 'unset PILOT_CONTAINER_NAME' not in launcher:
+                raise ValueError('launcher does not implement per-job dispatch')
+            result.update(mode='any', images=[], bootstrap_images=images,
+                          launcher_sha256=hashlib.sha256(launcher.encode()).hexdigest())
+        except (OSError, ValueError) as exc:
+            result['error'] = 'per-job dispatch unavailable: {}'.format(exc)
+        return result
+    if images:
+        if len(images) != 1 or any(c in images[0] for c in '{}$'):
+            result['error'] = 'pilot image binding is conflicting or unresolved'
+        else:
+            result.update(mode='bound', images=images)
+            allocation = re.search(r'(?m)^\+EpicprodImagePolicyFile\s*=\s*"([^"\n]+)"', text)
+            if allocation:
+                try:
+                    with open(allocation.group(1)) as handle:
+                        policy = json.load(handle)
+                    state_path = os.path.join(os.path.dirname(allocation.group(1)), 'allocation-state.json')
+                    with open(state_path) as handle:
+                        state = json.load(handle)
+                    until = datetime.strptime(state['valid_until'], '%Y-%m-%dT%H:%M:%SZ')
+                    if (state.get('mode') != 'active' or until <= datetime.utcnow()
+                            or state.get('images') != policy['images']
+                            or state.get('queue') != policy['queue']):
+                        raise ValueError('image allocator state is stale or disagrees with policy')
+                    result.update(images=policy['images'], allocation_policy=allocation.group(1),
+                                  allocation_observed_at=state['observed_at'])
+                except (OSError, ValueError, KeyError, TypeError) as exc:
+                    result.update(mode='unknown', error='image allocator unavailable: {}'.format(exc))
+        return result
+    executable = re.search(r'(?m)^executable\s*=\s*(\S+)\s*$', text)
+    wrapper = re.search(r'EPICPROD_STANDARD_WRAPPER=([^\s"]+)', text)
+    legacy = ('bnlpanda.runpilot2-wrapper.sh', 'epicprod-multipilot.sh')
+    if (executable and os.path.basename(executable.group(1)) in legacy
+            and (not wrapper or os.path.basename(wrapper.group(1)) == legacy[0])
+            and 'EpicprodNative' not in text and 'EPICPROD_NATIVE_' not in text):
+        result['mode'] = 'any'
+    else:
+        result['error'] = 'pilot launcher image capability is not established'
+    return result
+
+
+def queue_status():
+    """Each queue's ``queueStatus`` in the harvester queue configuration, a
+    copy the queue registry checks (swf-epicprod docs/QUEUE_REGISTRY.md);
+    None where an entry sets none."""
+    try:
+        with open(QUEUE_CONFIG) as handle:
+            config = json.load(handle)
+    except (OSError, ValueError) as exc:
+        return {'error': 'cannot read {}: {}'.format(QUEUE_CONFIG, exc)}
+    blocks = {q: b for q, b in config.items() if isinstance(b, dict)}
+    return {'status': {q: b.get('queueStatus') for q, b in blocks.items()},
+            'pilot_dispatch': {q: pilot_dispatch((b.get('submitter') or {}).get('templateFile'))
+                               for q, b in blocks.items()}}
+
+
 def log_roots():
     """(logBaseURL, logDir) pairs from the queue configuration: a worker's
     log URL under a base URL is the file under that directory here."""
@@ -364,7 +472,7 @@ def median(values):
     return values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2.0
 
 
-def harvester_db(since, until, cache):
+def harvester_db(since, until, cache, admission_cache=None):
     """The harvester's launch limits per queue, its workers now, the workers
     that ended in (since, until], the workers that did not finish over the
     last REASON_HOURS with the batch system's reason for each, and its
@@ -378,9 +486,11 @@ def harvester_db(since, until, cache):
 
     try:
         cols = ('queue', 'site', 'job_type', 'resource_type', 'n_queue_limit_worker',
-                'max_workers', 'n_new_workers', 'n_queue_limit_job', 'job_fetch_time', 'submit_time')
+                'max_workers', 'n_new_workers', 'n_queue_limit_job', 'job_fetch_time', 'submit_time',
+                'n_queue_limit_worker_ratio', 'n_queue_limit_worker_min', 'n_queue_limit_worker_max')
         rows = query(conf, 'SELECT queueName, siteName, jobType, resourceType, nQueueLimitWorker, '
-                           'maxWorkers, nNewWorkers, nQueueLimitJob, jobFetchTime, submitTime FROM pq_table')
+                           'maxWorkers, nNewWorkers, nQueueLimitJob, jobFetchTime, submitTime, '
+                           'nQueueLimitWorkerRatio, nQueueLimitWorkerMin, nQueueLimitWorkerMax FROM pq_table')
         out['launch_limits'] = [dict(zip(cols, r)) for r in rows]
     except Exception as exc:                                  # noqa: BLE001
         out['launch_limits'] = {'error': '{}: {}'.format(exc.__class__.__name__, exc)}
@@ -396,9 +506,30 @@ def harvester_db(since, until, cache):
         out['workers_now'] = {'error': '{}: {}'.format(exc.__class__.__name__, exc)}
 
     try:
+        rows = query(conf, "SELECT computingSite, COUNT(*) FROM work_table "
+                           "WHERE startTime > '{}' AND startTime <= '{}' GROUP BY 1".format(since, until))
+        out['workers_started'] = {site: int(n) for site, n in rows}
+        for site in out.get('workers_now', {}):
+            out['workers_started'].setdefault(site, 0)
+    except Exception as exc:
+        out['workers_started'] = {'error': '{}: {}'.format(exc.__class__.__name__, exc)}
+
+    try:
+        rows = query(conf, "SELECT mainKey, lastUpdate FROM cache_table WHERE mainKey IN "
+                           "('job_statistics.json','job_statistics_new.json','panda_queues.json')")
+        out['cache_updates'] = dict(rows)
+    except Exception as exc:
+        out['cache_updates'] = {'error': '{}: {}'.format(exc.__class__.__name__, exc)}
+
+    try:
         out['workers_ended'] = workers_ended(conf, since, until)
     except Exception as exc:                                  # noqa: BLE001
         out['workers_ended'] = {'error': '{}: {}'.format(exc.__class__.__name__, exc)}
+
+    try:
+        out['admission_declines'] = admission_declines(conf, until, admission_cache if admission_cache is not None else {})
+    except Exception as exc:
+        out['admission_declines'] = {'error': '{}: {}'.format(exc.__class__.__name__, exc)}
 
     try:
         out['not_finished'] = not_finished(conf, until, cache)
@@ -421,6 +552,89 @@ def harvester_db(since, until, cache):
     except Exception as exc:                                  # noqa: BLE001
         out['service_metrics'] = {'error': '{}: {}'.format(exc.__class__.__name__, exc)}
     return out
+
+
+def admission_evidence(batch_log, roots):
+    """Bounded local startup evidence. No remote fetch and no secrets copied."""
+    path = local_log(batch_log, roots)
+    if not path:
+        return {}
+    stem = os.path.splitext(path)[0]
+    texts = {}
+    for suffix in ('.err', '.out', '.log'):
+        try:
+            with open(stem + suffix, 'rb') as handle:
+                handle.seek(max(0, os.path.getsize(stem + suffix) - 16384))
+                texts[suffix] = handle.read().decode('utf-8', 'replace')
+        except OSError:
+            texts[suffix] = ''
+    err, out, event = texts['.err'], texts['.out'], texts['.log']
+    budget = re.search(r'glidein life (-?\d+) s is under the (\d+) s a job needs; no job taken', err)
+    if not budget:
+        return {}
+    site = re.search(r'execution queue=(.*?); minimum=', err)
+    host = re.search(r'ePIC native pilot: image .*?, host ([^, ]+)', out)
+    slot = re.search(r'Message from starter on (\S+):', event)
+    if not slot:
+        slot = re.search(r'SlotName:\s*(\S+)', event)
+    busy = re.search(r'TimeSlotBusy \(s\)\s*:\s*(\d+)', event)
+    execute = re.search(r'TimeExecute \(s\)\s*:\s*(\d+)', event)
+    return {'reason': 'Insufficient remaining glidein lifetime; no job taken',
+            'remaining_s': int(budget.group(1)), 'required_s': int(budget.group(2)),
+            'execution_queue': site.group(1) if site else None,
+            'node': host.group(1) if host else None,
+            'slot': slot.group(1) if slot else None,
+            'busy_s': int(busy.group(1)) if busy else None,
+            'execute_s': int(execute.group(1)) if execute else None}
+
+
+def admission_declines(conf, until, cache):
+    """Native OSG pre-job exit-73 refusals over one hour, including repeat slots."""
+    floor = (datetime.strptime(until, '%Y-%m-%d %H:%M:%S')
+             - timedelta(hours=1)).strftime('%Y-%m-%d %H:%M:%S')
+    rows = query(conf, ("SELECT workerID, batchID, computingSite, startTime, endTime, "
+        "JSON_UNQUOTE(JSON_EXTRACT(workAttributes, '$.batchLog')) FROM work_table "
+        "WHERE computingSite='BNL_OSG_PanDA_1' AND nativeExitCode=73 "
+        "AND startTime>'{}' AND startTime<='{}' ORDER BY endTime DESC").format(floor, until))
+    roots = log_roots()
+    groups, samples, seen, reads = {}, [], set(), 0
+    busy_total, execute_total, measured = 0, 0, 0
+    for worker, batch, queue, started, ended, batch_log in rows:
+        seen.add(worker)
+        evidence = cache.get(worker)
+        if evidence is None and reads < 4000:
+            reads += 1
+            evidence = admission_evidence(batch_log, roots)
+            if evidence:
+                cache[worker] = evidence
+        evidence = evidence or {}
+        key = (evidence.get('execution_queue') or 'unknown', evidence.get('node') or 'unknown',
+               evidence.get('slot') or 'unknown', evidence.get('required_s'))
+        group = groups.setdefault(key, {'execution_queue': key[0], 'node': key[1], 'slot': key[2],
+            'count': 0, 'remaining_min_s': None, 'remaining_max_s': None,
+            'required_s': evidence.get('required_s'), 'batch_log': batch_log})
+        group['count'] += 1
+        remaining = evidence.get('remaining_s')
+        if remaining is not None:
+            group['remaining_min_s'] = remaining if group['remaining_min_s'] is None else min(remaining, group['remaining_min_s'])
+            group['remaining_max_s'] = remaining if group['remaining_max_s'] is None else max(remaining, group['remaining_max_s'])
+        if evidence.get('busy_s') is not None:
+            measured += 1
+            busy_total += evidence['busy_s']
+            execute_total += evidence.get('execute_s') or 0
+        if len(samples) < 20:
+            samples.append(dict(evidence, workerid=int(worker), batchid=batch,
+                                queue=queue, started=started, ended=ended, batch_log=batch_log))
+    for worker in list(cache):
+        if worker not in seen:
+            del cache[worker]
+    ranked = sorted((row for row in groups.values() if row['required_s'] is not None),
+                    key=lambda row: -row['count'])
+    return {'hours': 1, 'since': floor, 'until': until, 'declined': len(rows),
+            'classified': sum(row['count'] for row in ranked if row['required_s'] is not None),
+            'repeated_slot_starts': sum(max(0, row['count']-1) for row in ranked if row['slot'] != 'unknown'),
+            'busy_s': busy_total, 'execute_s': execute_total, 'busy_measured_workers': measured,
+            'placements': ranked[:60], 'placements_total': len(ranked), 'samples': samples}
 
 
 def workers_ended(conf, since, until):
@@ -454,13 +668,18 @@ def not_finished(conf, until, cache):
     rows = query(conf, (
         "SELECT workerID, batchID, computingSite, status, nativeStatus, endTime, "
         "LEFT(diagMessage, 300), JSON_UNQUOTE(JSON_EXTRACT(workAttributes, '$.batchLog')), "
-        "nodeID, computingElement FROM work_table "
+        "nodeID, computingElement, nativeExitCode FROM work_table "
         "WHERE endTime > '{}' AND endTime <= '{}' AND (status <> 'finished' "
         "OR (nativeExitCode IS NOT NULL AND nativeExitCode <> 0)) ORDER BY endTime DESC"
     ).format(floor, until))
     roots = log_roots()
     sites, logs_read, log_errors, seen = {}, 0, 0, set()
-    for worker, batch, site, status, native, ended, diag, batch_log, node, ce in rows:
+    for worker, batch, site, status, native, ended, diag, batch_log, node, ce, exit_code in rows:
+        # Native OSG exit 73 is the launcher's deliberate pre-job refusal.
+        # It belongs in admission telemetry, below the operational error feed.
+        if (site == 'BNL_OSG_PanDA_1' and str(exit_code) == '73') or (
+                status == 'cancelled' and str(exit_code) in ('143', '-15')):
+            continue
         seen.add(worker)
         reason = cache.get(worker)
         if reason is None:
@@ -494,14 +713,37 @@ def not_finished(conf, until, cache):
         reasons = sorted(s['reasons'].values(), key=lambda e: -e['count'])
         s['reasons'] = reasons[:REASONS_KEEP]
         s['reasons_dropped'] = max(0, len(reasons) - REASONS_KEEP)
-    return {'hours': REASON_HOURS, 'sites': sites, 'workers': len(rows),
+    return {'hours': REASON_HOURS, 'sites': sites, 'workers': sum(v['workers'] for v in sites.values()),
             'condor_logs_read': logs_read, 'condor_log_errors': log_errors}
+
+
+def disk_health():
+    """Local service volumes, before log or scheduler writes run out of room."""
+    volumes = {}
+    for mount in ('/', '/var', '/data', '/tmp'):
+        try:
+            st = os.statvfs(mount)
+            total = st.f_blocks * st.f_frsize
+            free = st.f_bavail * st.f_frsize
+            volumes[mount] = {
+                'device': os.stat(mount).st_dev,
+                'total_bytes': total, 'free_bytes': free,
+                'used_percent': round(100.0 * (total - free) / total, 1)
+                if total else None}
+        except FileNotFoundError as exc:
+            # /data is a separate service volume only on hosts that have it.
+            if mount != '/data':
+                volumes[mount] = {'error': str(exc)}
+        except OSError as exc:
+            volumes[mount] = {'error': str(exc)}
+    return {'volumes': volumes}
 
 
 def collect(state):
     """The record this run delivers; ``state`` is advanced in place."""
     started = time.time()
-    record = {'host': HOST, 'collected_at': now_iso(), 'reporter_version': '1.1'}
+    record = {'host': HOST, 'collected_at': now_iso(), 'reporter_version': '1.8',
+              'health': disk_health()}
     positions = state.setdefault('positions', {})
     last_run = state.get('last_run_at')
     first_run = not last_run
@@ -517,9 +759,12 @@ def collect(state):
     record['fetching'] = fetching(lines, info)
     lines, info = read_since(SUBMITTER_LOG, positions, first_run)
     record['submission'] = submission(lines, info)
+    lines, info = read_since(ADJUSTER_LOG, positions, first_run)
+    record['adjustment'] = adjustment(lines, info, state.setdefault('adjustment', {}))
     record['failed_calls'] = failed_calls(positions, first_run)
     record['daemons'] = daemons()
     record['processes'] = processes()
+    record['queue_status'] = queue_status()
     # The database window: since the previous run, or the last five
     # minutes on a first run. Harvester times are UTC.
     until = datetime.utcnow()
@@ -533,7 +778,7 @@ def collect(state):
     # worker IDs the mysql client returns.
     cache = state.setdefault('reasons', {})
     record['harvester_db'] = harvester_db(since.strftime('%Y-%m-%d %H:%M:%S'),
-                                          until.strftime('%Y-%m-%d %H:%M:%S'), cache)
+                                          until.strftime('%Y-%m-%d %H:%M:%S'), cache, state.setdefault('admission', {}))
     record['collect_seconds'] = round(time.time() - started, 2)
     state['last_run_at'] = record['collected_at']
     return record

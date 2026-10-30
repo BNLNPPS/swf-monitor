@@ -14,12 +14,14 @@ registration contract is the production team's reference
 and ``scripts/register_from_checksum_listing.py``). Re-running is safe:
 existing datasets, replicas, and attachments are kept and counted.
 
-Credential: the JLab ``eicprod`` x509 proxy. ``EVGEN_X509_PROXY`` names the
-agent's private copy (mode 0600; the same file the submission doer ships in
-the sandbox). ``EVGEN_X509_PROXY_SOURCE``, when set, names the renewal
-source — the production team's proxy drop — and a source proxy that outlives
-the private copy is copied over it before use, so a renewed proxy is picked
-up at the next registration with no operator step.
+Credential: tokens from the PanDA server (swf_epicprod.jlab_auth): a storage
+token scoped to the directory being registered for the door, and a rucio
+token for the catalog. The JLab ``eicprod`` x509 proxy is the fallback for
+both while it lasts (it cannot be renewed past 2026-10-28).
+``EVGEN_X509_PROXY`` names the agent's private copy (mode 0600; the same
+file the submission doer ships in the sandbox). ``EVGEN_X509_PROXY_SOURCE``,
+when set, names the renewal source — the production team's proxy drop — and
+a source proxy that outlives the private copy is copied over it before use.
 
 No silent failures: a file whose checksum the door does not return makes the
 run incomplete and nothing is registered (exit 4); a dataset whose Rucio file
@@ -142,9 +144,17 @@ def resolve_proxy():
 
 # -- door ---------------------------------------------------------------------
 
-def _xrdfs(args, proxy, timeout):
-    env = dict(os.environ, X509_USER_PROXY=proxy)
-    return subprocess.run(['xrdfs', XRD_DOOR] + args, capture_output=True,
+def door_credential(scope, proxy):
+    """(door URL, environment, how) for xrootd work under the door path
+    ``scope``: a storage token for that path, else the proxy
+    (swf_epicprod.jlab_auth.door_access). The token is cached for the run."""
+    from swf_epicprod.jlab_auth import door_access
+    return door_access(XRD_DOOR, scope, proxy=proxy)
+
+
+def _xrdfs(args, scope, proxy, timeout):
+    door, env, _how = door_credential(scope, proxy)
+    return subprocess.run(['xrdfs', door] + args, capture_output=True,
                           text=True, timeout=timeout, env=env)
 
 
@@ -164,7 +174,7 @@ def list_files(evgen_path, proxy):
     ``obsolete``, each counted."""
     door_path = XRD_BASE + evgen_path
     try:
-        p = _xrdfs(['ls', '-l', '-R', door_path], proxy, LISTING_TIMEOUT)
+        p = _xrdfs(['ls', '-l', '-R', door_path], door_path, proxy, LISTING_TIMEOUT)
     except subprocess.TimeoutExpired:
         raise DoerError(EXIT_LISTING, f'listing timed out after {LISTING_TIMEOUT}s')
     if p.returncode != 0:
@@ -199,11 +209,12 @@ def list_files(evgen_path, proxy):
     return files, skipped, other, obsolete
 
 
-def checksums(files, proxy):
-    """adler32 per file from the door; returns ({path: adler32}, [(path, why)])."""
+def checksums(files, proxy, scope):
+    """adler32 per file from the door, under the door path ``scope``;
+    returns ({path: adler32}, [(path, why)])."""
     def one(path):
         try:
-            p = _xrdfs(['query', 'checksum', path], proxy, CHECKSUM_TIMEOUT)
+            p = _xrdfs(['query', 'checksum', path], scope, proxy, CHECKSUM_TIMEOUT)
         except subprocess.TimeoutExpired:
             return path, None, f'timed out after {CHECKSUM_TIMEOUT}s'
         parts = (p.stdout or '').split()
@@ -243,35 +254,62 @@ def plan_datasets(files, adlers):
 
 
 def rucio_client(proxy):
-    """The Rucio client as the production account, authenticated by the
-    proxy; refuses a proxy that maps to any other account."""
-    from rucio.client import Client
+    """The Rucio client as the production account: by a token from the
+    PanDA server, else by the proxy (swf_epicprod.jlab_auth); refuses a
+    credential that maps to any other account. ``proxy`` may be None once
+    the proxy is gone; the token is then the only credential."""
     from rucio.common.exception import RucioException
+    from swf_epicprod.jlab_auth import rucio_client as jlab_rucio_client
     try:
-        client = Client(rucio_host=RUCIO_HOST, auth_host=RUCIO_HOST,
-                        account=RUCIO_ACCOUNT, auth_type='x509_proxy',
-                        creds={'client_proxy': proxy})
+        client = jlab_rucio_client(account=RUCIO_ACCOUNT, host=RUCIO_HOST, proxy=proxy)
         who = client.whoami()
-    except RucioException as e:
+    except (RucioException, RuntimeError) as e:
         raise DoerError(EXIT_RUCIO, f'Rucio auth failed: {e}')
     if who.get('account') != RUCIO_ACCOUNT:
-        raise DoerError(EXIT_RUCIO, f'proxy maps to account {who.get("account")!r}, '
-                        f'not {RUCIO_ACCOUNT!r}')
+        raise DoerError(EXIT_RUCIO, f'{client.jlab_auth} maps to account '
+                        f'{who.get("account")!r}, not {RUCIO_ACCOUNT!r}')
+    _log(f'JLab Rucio as {RUCIO_ACCOUNT} by {client.jlab_auth}')
     return client
 
 
-def count_events(datasets, proxy, write=True):
+def resolve_proxy_or_none():
+    """resolve_proxy's (path, summary), or (None, {'error': reason}) when
+    there is no usable proxy: for passes whose catalog work a token does
+    alone, the proxy is only the fallback."""
+    try:
+        return resolve_proxy()
+    except DoerError as e:
+        return None, {'error': str(e)}
+
+
+def count_events(datasets, proxy, scope, write=True):
     """Event count per file, read through the door as the entry count of
     the HepMC3 tree (the tree header carries it; no event bytes move), then
     recorded as Rucio's ``events`` attribute on each file DID and, once
     every file of a dataset is counted, on the dataset. Returns one record
     per dataset; a file that cannot be counted is reported by name and
     leaves its dataset's total unset — never a partial total presented as
-    the whole. ``write=False`` counts and reports without touching Rucio."""
+    the whole. ``write=False`` counts and reports without touching Rucio.
+    uproot's xrootd client reads the door's credential for ``scope`` from
+    this process's environment, which takes exactly the door's: the token
+    over the root:// PFN as it is (uproot knows no roots://; the client
+    turns on TLS for the token), else the proxy. A proxy left beside the
+    token breaks the client's TLS (the robot's copy is group-readable), so
+    the robot proxy stays the PanDA sign-in under its own name."""
     import uproot
     from concurrent.futures import TimeoutError as FutureTimeout
     from rucio.common.exception import RucioException
-    os.environ['X509_USER_PROXY'] = proxy
+
+    client = rucio_client(proxy) if write else None
+    _door, env, how = door_credential(scope, proxy)
+    if os.environ.get('X509_USER_PROXY'):
+        os.environ.setdefault('EPICPROD_PANDA_LOGIN_PROXY', os.environ['X509_USER_PROXY'])
+    for key in ('XrdSecPROTOCOL', 'BEARER_TOKEN', 'X509_USER_PROXY', 'X509_CERT_DIR'):
+        if env.get(key):
+            os.environ[key] = env[key]
+        else:
+            os.environ.pop(key, None)
+    _log(f'door credential: {how}')
 
     class _NoWrite:
         def set_metadata(self, *_args, **_kwargs):
@@ -288,7 +326,7 @@ def count_events(datasets, proxy, write=True):
         except Exception as e:                              # noqa: BLE001
             return entry['name'], None, f'{type(e).__name__}: {e}'
 
-    client = rucio_client(proxy) if write else _NoWrite()
+    client = client or _NoWrite()
     result = []
     for ds_name, entries in datasets.items():
         rec = {'did': f'{RUCIO_SCOPE}:{ds_name}', 'files': len(entries),
@@ -432,8 +470,12 @@ def main(argv):
         if not PATH_OK.match(evgen_path) or '..' in evgen_path or '//' in evgen_path \
                 or len([s for s in evgen_path.split('/') if s]) < 3:
             raise DoerError(EXIT_BAD_PATH, f'not an EVGEN path: {evgen_path!r}')
-        proxy, summary['proxy'] = resolve_proxy()
-        _log(f'proxy {proxy}: {summary["proxy"]["days_left"]} days left')
+        proxy, summary['proxy'] = resolve_proxy_or_none()
+        _log(f'proxy {proxy}: {summary["proxy"]["days_left"]} days left' if proxy
+             else f'no proxy ({summary["proxy"]["error"]}): tokens only')
+        scope = XRD_BASE + evgen_path
+        summary['door_credential'] = door_credential(scope, proxy)[2]
+        _log(f'door credential: {summary["door_credential"]}')
 
         files, skipped, other, obsolete = list_files(evgen_path, proxy)
         summary.update(files=len(files), bytes=sum(s for _, s in files),
@@ -447,7 +489,7 @@ def main(argv):
             # The registration's second step: counts recorded on the DIDs
             # the first step registered. Checksums are not needed here.
             datasets = plan_datasets(files, defaultdict(str))
-            summary['datasets'] = count_events(datasets, proxy,
+            summary['datasets'] = count_events(datasets, proxy, scope,
                                                write=not args.dry_run)
             failed_files = sum(len(d['failed']) for d in summary['datasets'])
             summary['events'] = (sum(d['events'] for d in summary['datasets'])
@@ -461,7 +503,7 @@ def main(argv):
             print(json.dumps(summary), flush=True)
             return 0
 
-        adlers, failed = checksums(files, proxy)
+        adlers, failed = checksums(files, proxy, scope)
         if failed:
             summary['checksum_failed'] = [{'file': f, 'reason': why} for f, why in failed[:20]]
             for f, why in failed[:20]:

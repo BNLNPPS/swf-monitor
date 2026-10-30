@@ -271,11 +271,15 @@ def segfault_findings_api(request):
         return JsonResponse({'error': 'name is required'}, status=400)
     fields = {k: body[k] for k in ('title', 'what', 'date', 'frame', 'stage', 'class', 'action',
                                    'standing', 'fix', 'notes', 'sources', 'signatures',
-                                   'model_reading') if k in body}
+                                   'model_reading', 'detector_components', 'detector_point',
+                                   'detector_geometry') if k in body}
     if not fields:
         return JsonResponse({'error': 'nothing to set'}, status=400)
     who = (str(body.get('changed_by') or request.user.username) if token_ok
            else request.user.username)
-    entry, created = set_finding(name, fields, who)
+    try:
+        entry, created = set_finding(name, fields, who)
+    except ValueError as exc:
+        return JsonResponse({'error': str(exc)}, status=400)
     return JsonResponse({'name': name, 'created': created, 'versions': entry.versions.count(),
                          'title': entry.title, 'standing': entry.status})

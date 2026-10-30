@@ -141,3 +141,7 @@ reporter.
 - [SNAPPER.md](SNAPPER.md) — Snapper operations in SWF.
 - [ERROR_ATTRIBUTION.md](ERROR_ATTRIBUTION.md) — the error-label
   correction service that consumes the same observations.
+
+Version 1.2 adds `queue_overrides` (each queue's status in the installed schedconfig overrides) and `jedi_regulation.pools` (each pool the JEDI throttler last read, with its member queues), the copies the queue registry's drift check compares (swf-epicprod QUEUE_REGISTRY.md).
+
+Version 1.3 reads the throttler's `REGULATION_OK` decision line as key=value fields in any order, so added or moved fields do not stop the reading, and delivers `jedi_regulation.unread` (the count of decision lines lacking a field the front checks, with the latest), which the front's verdict names when regulation is unverified (swf-epicprod CONTINUOUS_PRODUCTION.md, Regulation evidence).

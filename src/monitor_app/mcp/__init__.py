@@ -43,20 +43,25 @@ mcp = FastMCP(
 EXTERNAL_INSTRUCTIONS = """swf-monitor MCP, external face (epic-devcloud.org).
 
 You are connected through swf-remote as a named collaborator; the tools
-run as that person. This face serves the read-only tools of the ePIC
-production monitor: PanDA tasks, jobs, queues, errors, and resource usage
-(panda_*), the production catalog and physics configurations (pcs_*
-reads), the production action stream (epicprod_*), Snapper state history
-(snapper_*), both Rucio catalogs (bnl_rucio_*, jlab_rucio_*), AI
-assessments and proposals (epic_get_ai_content, ai_list_proposals), and
-one write: ai_propose_ping, which proposes a dated obligation in natural
-language; it takes effect only when a person accepts it on the alarm
-dashboard.
+run as that person. This face serves the ePIC production monitor's tools:
+PanDA tasks, jobs, queues, errors and resource usage, and the segfault and
+memory-kill catalog with its findings and reproductions (panda_*); the
+production catalog and physics configurations (pcs_*); the production
+action stream and storage record (epicprod_*); Snapper state history
+(snapper_*); both Rucio catalogs (bnl_rucio_*, jlab_rucio_*); the
+streaming testbed's agents, workflows, runs, logs and messages, and the
+caller's own testbed (swf_*); and AI content and proposals
+(epic_get_ai_content, ai_list_proposals, ai_propose_ping).
+
+Reading needs only the sign-in. A tool that changes the system needs
+authority, membership of the eic GitHub organization or rights granted on
+the monitor; without it the tool refuses and names the joining procedure.
+ai_propose_ping proposes a dated obligation in natural language; it takes
+effect only when a person accepts it on the alarm dashboard, where
+decisions on proposals are made.
 
 The tool catalog is tools/list; call it rather than looking for a listing
-tool. Decisions on proposals, task operations, and every other mutation
-happen on the web pages by signed-in people, not through this face.
-The human-facing outline is
+tool. The human-facing outline is
 https://epic-wfms-docs.readthedocs.io/en/latest/apis/#mcp
 """
 

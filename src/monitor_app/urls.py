@@ -13,6 +13,7 @@ from .views import (
     log_summary,
     log_summary_datatable_ajax,
     live_policy,
+    epicprod_live,
     log_list,
     log_detail,
     logs_datatable_ajax,
@@ -77,6 +78,8 @@ from .viewdir.panda_database import (
     panda_database_table_row_detail,
 )
 
+from .viewdir.compute_efficiency import compute_efficiency, compute_efficiency_data
+
 # Import PanDA production monitor views
 from .viewdir.pandamon import (
     panda_activity,
@@ -125,9 +128,14 @@ from .viewdir.system_status import (
 # Import iDDS database views from new dedicated module
 from .viewdir.analysis import analysis_view
 from .viewdir.panda_census import panda_queue_census_json
+from .viewdir.comp_snapshot import comp_snapshot_json
+from .viewdir.worker_admission import worker_admission, osg_image_demand
+from .viewdir.prod_dashboard import prod_dashboard, task_resources_json
+from .viewdir.snapper_api import snapper_series as dashboard_history
 from .viewdir.panda_node_guard import (panda_node_guard, panda_node_guard_json,
                                        panda_node_guard_set)
 from .viewdir.panda_storage_doors import panda_storage_doors
+from .viewdir.panda_rse_deletion import panda_rse_deletion
 from pcs.views import front_page as panda_front
 from .viewdir.idds_database import (
     idds_database_tables_list,
@@ -174,6 +182,7 @@ urlpatterns = [
     path('logs/summary/datatable/', log_summary_datatable_ajax, name='log_summary_datatable_ajax'),
     path('logs/', log_list, name='log_list'),
     path('logs/live-policy/', live_policy, name='live_policy'),
+    path('logs/epicprod-live/', epicprod_live, name='epicprod_live'),
     path('logs/<int:log_id>/', log_detail, name='log_detail'),
     path('logs/datatable/', logs_datatable_ajax, name='logs_datatable_ajax'),
     path('logs/filter-counts/', get_log_filter_counts, name='log_filter_counts'),
@@ -256,6 +265,11 @@ urlpatterns = [
     # (monitor_app/panda/census.py); under panda/ so the external face
     # serves it.
     path('panda/queues/census/json/', panda_queue_census_json, name='panda_queue_census_json'),
+    path('panda/comp/snapshot.json', comp_snapshot_json, name='comp_snapshot_json'),
+    path('panda/dashboard/', prod_dashboard, name='prod_dashboard'),
+    path('panda/dashboard/resources.json', task_resources_json, name='prod_dashboard_resources'),
+    path('panda/dashboard/history.json', dashboard_history, {'scope': 'epicprod'},
+         name='prod_dashboard_history'),
     path('panda-queues/update-from-github/', update_panda_queues_from_github, name='update_panda_queues_from_github'),
     path('panda-queues/<str:queue_name>/', panda_queue_detail, name='panda_queue_detail'),
     path('panda-queues/<str:queue_name>/json/', panda_queue_json, name='panda_queue_json'),
@@ -271,6 +285,8 @@ urlpatterns = [
     # PanDA Hub
     path('panda/', panda_hub, name='panda_hub'),
     path('prod/', prod_hub, name='prod_hub'),
+    path('panda/compute-efficiency/', compute_efficiency, name='compute_efficiency'),
+    path('panda/compute-efficiency/data/', compute_efficiency_data, name='compute_efficiency_data'),
     path('compute-usage/', compute_usage, name='compute_usage'),
     path('compute-usage/data/', compute_usage_data,
          name='compute_usage_data'),
@@ -299,6 +315,9 @@ urlpatterns = [
     path('panda/node-guard/', panda_node_guard, name='panda_node_guard'),
     # The storage doors production writes through, used hourly
     path('panda/storage-doors/', panda_storage_doors, name='panda_storage_doors'),
+    # Remove datasets from a disk RSE where tape holds a complete copy
+    path('panda/storage-doors/<str:rse>/remove/', panda_rse_deletion,
+         name='panda_rse_deletion'),
     path('panda/node-guard/json/', panda_node_guard_json, name='panda_node_guard_json'),
     path('panda/node-guard/set/', panda_node_guard_set, name='panda_node_guard_set'),
     path('panda/jobs/', panda_jobs_list, name='panda_jobs_list'),
@@ -330,6 +349,8 @@ urlpatterns = [
     path('panda/diagnostics/', panda_diagnostics_list, name='panda_diagnostics_list'),
     path('panda/diagnostics/datatable/', panda_diagnostics_datatable_ajax, name='panda_diagnostics_datatable_ajax'),
     path('panda/node-declines/', panda_node_declines, name='panda_node_declines'),
+    path('panda/worker-starts/', worker_admission, name='worker_admission'),
+    path('api/osg-image-demand/', osg_image_demand, name='osg_image_demand'),
     path('panda/epic-queues/', epic_queues_list, name='epic_queues_list'),
     path('panda/epic-queues/<str:queue_name>/', epic_queue_detail, name='epic_queue_detail'),
     path('panda/epic-queues/<str:queue_name>/description/', epic_queue_description_update,

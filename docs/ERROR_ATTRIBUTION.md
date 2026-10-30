@@ -285,3 +285,21 @@ supported, not confirmed. Every summary states the processing lost.
   [pilot3 PR #212](https://github.com/PanDAWMS/pilot3/pull/212)
   (merged and deployed on the ePIC pilot 2026-08-25); optionally a
   server-side lift of the failed-job metadata discard.
+
+Generic payload-exit patterns can show a representative job’s cached
+payload-log diagnosis, with its job link and explicit sample scope. DDSim
+rejecting a stable particle with daughters is an input-record failure.
+The witness does not assert that every job with the same exit code has
+the same cause. Reading the summary never fetches remote logs. Each row
+of the error summary page also names what its jobs ran on: the input
+sample of its leading tasks (at most three, most failures first), from
+PCS, each task linked, so a failure reads as its generator and sample
+rather than a task number alone.
+
+The shared error reader also explains explicit catalog byte-size mismatches,
+runtime limits, kernel memory kills, unavailable allowed input replicas,
+heartbeat loss and remote-scheduler worker disappearance. Documented payload
+exit codes identify signals; generic exit 1 retains an undetermined cause.
+It does not turn a lost heartbeat into a node diagnosis or infer why a remote
+scheduler lost a worker. The error summary, per-job error entries and Snapper
+patterns all use this reader. Raw diagnostics remain in the records.

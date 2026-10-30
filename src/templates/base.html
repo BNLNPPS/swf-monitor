@@ -678,6 +678,7 @@
                 <a href="{% url 'pcs:pc_ingest' %}" class="{% if active_nav.pcs_ingest %}nav-active{% endif %}">PC ingest</a>
                 <a href="{% url 'pcs:prod_configs_compose' %}" class="{% if active_nav.pcs_configs %}nav-active{% endif %}">Prod Configs</a>
                 <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks" class="{% if active_nav.pcs_tasks %}nav-active{% endif %}">Prod Tasks</a>
+                <a href="{% url 'pcs:prod_tasks_in_flight' %}" class="{% if active_nav.pcs_in_flight %}nav-active{% endif %}">Prod tasks in flight</a>
                 <a href="{% url 'pcs:trials_list' %}" class="{% if active_nav.pcs_trials %}nav-active{% endif %}">Prod trials</a>
             </div>
         </div>
@@ -696,6 +697,7 @@
             <button class="dropbtn{% if active_nav.data %} nav-active{% endif %}">Data</button>
             <div class="dropdown-content">
                 <a href="{% url 'pcs:find_data' %}" class="{% if active_nav.find_data %}nav-active{% endif %}">Find data</a>
+                <a href="{% url 'pcs:status_grids' %}" class="{% if active_nav.pcs_status_grids %}nav-active{% endif %}">Production status grids</a>
                 <a href="{% url 'pcs:evgen_inputs' %}" class="{% if active_nav.pcs_evgen_inputs %}nav-active{% endif %}">EVGEN Inputs</a>
                 <a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='storage' %}" class="{% if active_nav.snapper_storage %}nav-active{% endif %}">Snapper storage view</a>
                 <a href="{% url 'pcs:storage_listings' listing='ghosts' %}" class="{% if active_nav.pcs_storage %}nav-active{% endif %}">Storage exceptions</a>
@@ -739,6 +741,7 @@
             <div class="dropdown-content">
                 <a href="{% url 'monitor_app:epic_queues_list' %}" class="{% if active_nav.panda_queues %}nav-active{% endif %}">PanDA queues</a>
                 <a href="{% url 'monitor_app:compute_usage' %}" class="{% if active_nav.compute_usage %}nav-active{% endif %}">Site compute usage</a>
+                <a href="{% url 'monitor_app:compute_efficiency' %}" class="{% if active_nav.compute_efficiency %}nav-active{% endif %}">Compute efficiency</a>
                 <a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='site' %}">Snapper site view</a>
                 <a href="{% url 'canary:probes_page' %}" class="{% if active_nav.canary %}nav-active{% endif %}">Canary probes</a>
                 <a href="{% url 'monitor_app:panda_node_guard' %}" class="{% if active_nav.panda_node_guard %}nav-active{% endif %}">Node guard</a>

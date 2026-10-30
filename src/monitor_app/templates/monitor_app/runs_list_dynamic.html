@@ -2,7 +2,7 @@
 
 {% block initial_filters %}
 {
-    status: '{{ selected_status|default:"" }}'
+    status: '{{ selected_status|default:""|force_escape|escapejs }}'
 }
 {% endblock %}
 

@@ -92,7 +92,7 @@ if _xrootd_server:
         'name': 'xrootd',
         'source': 'github.com/eic/xrootd-mcp-server',
         'command': [
-            os.environ.get('NODE_PATH', '/eic/u/wenauseic/.nvm/versions/node/v22.17.0/bin/node'),
+            os.environ.get('NODE_PATH', '/eic/u/wenauseic/.nvm/versions/node/v22.23.4/bin/node'),
             '/data/wenauseic/github/xrootd-mcp-server/build/src/index.js',
         ],
         'env': {
@@ -101,7 +101,7 @@ if _xrootd_server:
         },
         'repo_dir': '/data/wenauseic/github/xrootd-mcp-server',
         'update_commands': [
-            'export PATH=/eic/u/wenauseic/.nvm/versions/node/v22.17.0/bin:$PATH && cd /data/wenauseic/github/xrootd-mcp-server && git pull && npm install && npm run build',
+            'export PATH=/eic/u/wenauseic/.nvm/versions/node/v22.23.4/bin:$PATH && cd /data/wenauseic/github/xrootd-mcp-server && git pull && npm install && npm run build',
         ],
     })
 
@@ -129,7 +129,7 @@ if _zenodo_key:
         'name': 'zenodo',
         'source': 'github.com/eic/zenodo-mcp-server',
         'command': [
-            os.environ.get('NODE_PATH', '/eic/u/wenauseic/.nvm/versions/node/v22.17.0/bin/node'),
+            os.environ.get('NODE_PATH', '/eic/u/wenauseic/.nvm/versions/node/v22.23.4/bin/node'),
             '/data/wenauseic/github/zenodo-mcp-server/build/src/index.js',
         ],
         'env': {
@@ -137,7 +137,7 @@ if _zenodo_key:
         },
         'repo_dir': '/data/wenauseic/github/zenodo-mcp-server',
         'update_commands': [
-            'export PATH=/eic/u/wenauseic/.nvm/versions/node/v22.17.0/bin:$PATH && cd /data/wenauseic/github/zenodo-mcp-server && git pull && npm install && npm run build',
+            'export PATH=/eic/u/wenauseic/.nvm/versions/node/v22.23.4/bin:$PATH && cd /data/wenauseic/github/zenodo-mcp-server && git pull && npm install && npm run build',
         ],
     })
 
@@ -284,7 +284,9 @@ EPIC_DOC_SEARCH_TOOL = {
     "name": "epic_doc_search",
     "description": (
         "Search ePIC documentation by natural-language query (semantic vector search). "
-        "Covers SWF testbed, SWF monitor, Bamboo/PanDA, EICrecon, containers, ePIC production, "
+        "Covers the ePIC WFMS documentation (epic-wfms-docs.readthedocs.io: PCS, production, "
+        "platform, operations, TeamComms), SWF testbed, SWF monitor, Bamboo/PanDA, EICrecon, "
+        "containers, ePIC production, "
         "EIC master docs, afterburner, eic-shell, and more. "
         "Use for conceptual 'how does X work?' questions about the software and experiment."
     ),

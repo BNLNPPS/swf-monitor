@@ -1,0 +1,20 @@
+{% if value.kind == 'mapping' %}
+<dl class="log-fields">
+  {% for item in value.items %}
+  <dt>{{ item.label }}</dt>
+  <dd>{% include 'monitor_app/_log_value.html' with value=item.value only %}</dd>
+  {% empty %}<dd>None</dd>{% endfor %}
+</dl>
+{% elif value.kind == 'list' %}
+<ul class="log-value-list">
+  {% for item in value.items %}
+  <li>{% include 'monitor_app/_log_value.html' with value=item only %}</li>
+  {% empty %}<li>None</li>{% endfor %}
+</ul>
+{% elif value.link == 'execution_id' %}
+<a href="{% url 'monitor_app:workflow_execution_detail' value.text %}">{{ value.text }}</a>
+{% elif value.link == 'run_id' %}
+<a href="{% url 'monitor_app:run_detail' value.text %}">{{ value.text }}</a>
+{% else %}
+<span class="log-value-text">{{ value.text|urlize }}</span>
+{% endif %}

@@ -29,6 +29,8 @@ import tarfile
 import tempfile
 import uuid
 
+from evgen_dataset_names import output_dataset_name
+
 from pandaclient import panda_api
 from pandaclient import Client
 
@@ -156,7 +158,7 @@ def build_task_params(spec, archive_name):
             # earlier got its task id substituted from this same template. The
             # log dataset is per-task, so the serial alone names the file.
             'value': f"{spec['outDS']}.${{SN}}.log.tgz",
-            'dataset': spec['outDS'] + '_log/',
+            'dataset': output_dataset_name(spec, 'log'),
             'hidden': True,
             # A log the pilot could not stage out but held in the stage-out
             # bucket (swf-epicprod docs/LOG_STAGEOUT_FALLBACK.md) is absent
@@ -189,6 +191,12 @@ def build_task_params(spec, archive_name):
     if spec.get('fineGrainedProc'):
         params.pop('nEventsPerWorker', None)
         params['fineGrainedProc'] = True
+        # Events per range, one unless set: JEDI's nEventsPerFineGrainedRange
+        # (split rule FR), a local patch on the ePIC server until upstream
+        # (distcomp-services panda-server/UPGRADE.md, Local changes on the
+        # host). A row per event bounds a task by JEDI's 600 s job insertion.
+        if int(spec.get('fineGrainedRangeEvents') or 1) > 1:
+            params['nEventsPerFineGrainedRange'] = int(spec['fineGrainedRangeEvents'])
     # An Event Service job runs its payload in one step outside the
     # pilot's container (the harness starts the image itself), so the
     # container's pre- and post-process steps have nothing to do: the
@@ -206,17 +214,33 @@ def build_task_params(spec, archive_name):
     # when the catalog carries no event count.
     if spec.get('inputDataset'):
         params.pop('noInput', None)
-        params['jobParameters'].append({
+        item = {
             'type': 'template', 'param_type': 'input',
             'value': '-i "${IN/T}"', 'dataset': spec['inputDataset'],
             'expand': True, 'exclude': r'\.log\.tgz(\.\d+)*$',
-        })
+        }
+        # An input read where it resides (swf-epicprod evgen_es.catalog_input):
+        # the catalog's dataset, of which JEDI takes these files only.
+        if spec.get('inputFiles'):
+            item['files'] = list(spec['inputFiles'])
+        params['jobParameters'].append(item)
         params['nFilesPerJob'] = int(spec.get('nFilesPerJob', 1))
         if spec.get('nEventsPerInputFile'):
             params['nEventsPerInputFile'] = int(spec['nEventsPerInputFile'])
+        # Each file at its own events (swf-epicprod production_es, EVGEN
+        # input): JEDI reads them from the listing, which the ePIC DDM
+        # interface gives the task's counts (epicFileEvents), so the last
+        # file is taken only as far as the manifest and none is dropped.
+        if spec.get('epicFileEvents'):
+            params['useRealNumEvents'] = True
+            params['epicFileEvents'] = {str(k): int(v) for k, v in spec['epicFileEvents'].items()}
+            params.pop('nEventsPerInputFile', None)
         # Over real input nEvents is the events to process, not the job
-        # count the noInput shape encodes in it.
-        params['nEvents'] = params['nEventsPerJob'] * int(spec.get('nJobs', 1))
+        # count the noInput shape encodes in it. An EVGEN Event Service task
+        # gives its own: its manifest's total, which takes its last file
+        # only part way (swf-epicprod production_es.py, EVGEN input).
+        params['nEvents'] = (int(spec['nEvents']) if spec.get('nEvents')
+                             else params['nEventsPerJob'] * int(spec.get('nJobs', 1)))
         # Input handed to the payload as a TURL, not staged: runGen's
         # --givenPFN takes the input names as given and skips its check
         # for a local copy, which otherwise ends the job before the
@@ -252,7 +276,7 @@ def build_task_params(spec, archive_name):
             params['jobParameters'].append({
                 'type': 'template', 'param_type': 'output',
                 'value': f"{spec['outDS']}.{name}",
-                'dataset': f"{spec['outDS']}_{name.split('.')[0]}/",
+                'dataset': output_dataset_name(spec, name.split('.')[0]),
                 'hidden': True,
             })
 

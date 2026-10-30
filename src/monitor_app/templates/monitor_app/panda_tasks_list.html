@@ -64,10 +64,10 @@
 
 {% block initial_filters %}
 {
-    status: '{{ selected_status|default:"" }}',
-    username: '{{ selected_username|default:"" }}',
-    processingtype: '{{ selected_processingtype|default:"" }}',
-    queue: '{{ selected_queue|default:"" }}',
+    status: '{{ selected_status|default:""|force_escape|escapejs }}',
+    username: '{{ selected_username|default:""|force_escape|escapejs }}',
+    processingtype: '{{ selected_processingtype|default:""|force_escape|escapejs }}',
+    queue: '{{ selected_queue|default:""|force_escape|escapejs }}',
     days: '{{ days }}'
 }
 {% endblock %}
@@ -256,6 +256,13 @@ bulkForm.addEventListener('submit', async function (event) {
         && !window.confirm(`Stop and finish ${taskIds.length} task${taskIds.length === 1 ? '' : 's'}? Running jobs stop; completed output is kept and the task can be retried later.`)) {
         return;
     }
+    // No task is paused without a recorded reason (Torre, 2026-10-28).
+    let reason = '';
+    if (operation === 'pause') {
+        reason = window.prompt(`Pause ${taskIds.length} task${taskIds.length === 1 ? '' : 's'}?\n\nReason (recorded with each task and shown on the production dashboard):`);
+        if (reason === null) return;
+        if (!reason.trim()) { window.alert('A pause needs a reason.'); return; }
+    }
     const moveQueue = bulkMoveQueue.value;
     if (operation === 'reassign'
         && !window.confirm(`Move the remaining work of ${taskIds.length} task${taskIds.length === 1 ? '' : 's'} to ${moveQueue}? Jobs not yet running are stopped and regenerated there, with the attempt each costs given back; running jobs finish where they are.`)) {
@@ -264,6 +271,7 @@ bulkForm.addEventListener('submit', async function (event) {
     // Changed resource requirements ride the retry request; read them
     // before the controls reset.
     const requestBody = {operation: operation, jedi_task_ids: taskIds};
+    if (reason) requestBody.reason = reason.trim();
     if (operation === 'reassign') requestBody.site = moveQueue;
     if (operation === 'retry_failures') {
         const newParameters = {};

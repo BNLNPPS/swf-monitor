@@ -18,12 +18,12 @@ from monitor_app.models import PandaQueue
 DESCRIPTIONS = {
     # BNL grid and production
     'BNL_OSG_EPIC_PROD_1': (
-        'Main ePIC production queue at BNL, reached through OSG. Carries the '
-        'bulk of campaign simulation and reconstruction.'
+        'Closed to new production tasks; existing tasks drain here. '
+        'New OSG work belongs on BNL_OSG_PanDA_1.'
     ),
     'BNL_EPIC_PROD_1': (
         'Earlier BNL production queue, direct rather than through OSG. '
-        'Superseded by BNL_OSG_EPIC_PROD_1 for campaign work.'
+        'New campaign work uses BNL_OSG_PanDA_1.'
     ),
     'BNL_PanDA_1': (
         'General-purpose BNL queue for user analysis and ad-hoc work, with a '
@@ -34,8 +34,8 @@ DESCRIPTIONS = {
         'they reach the production queues.'
     ),
     'BNL_OSG_PanDA_1': (
-        'Short-job OSG queue at BNL, 3-hour limit. Suited to quick work that '
-        'should not wait behind long production jobs.'
+        'Active ePIC production queue through OSG, carrying campaign '
+        'simulation and reconstruction.'
     ),
     'BNL_OSG_PanDA_CI': (
         'Continuous-integration queue: automated software validation jobs, '

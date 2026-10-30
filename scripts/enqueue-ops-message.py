@@ -11,6 +11,9 @@ Usage:
     enqueue-ops-message.py association_sweep --created-by backfill --extra days=30
     enqueue-ops-message.py assess_refresh --queue /queue/canary.ops \
         --namespace canary --created-by hourly_cron
+    enqueue-ops-message.py payload_canary --queue /queue/canary.ops \
+        --namespace canary --extra task=<PCS task> --extra queue=<queue> \
+        --extra payload_ref=<branch> --json switches='["EPICPROD_SWITCH_X=1"]'
 """
 
 import argparse
@@ -18,7 +21,9 @@ import json
 import os
 import ssl
 import sys
+import threading
 import time
+import uuid
 
 import stomp
 
@@ -33,6 +38,28 @@ OPS_QUEUE = os.environ.get("EPICPROD_OPS_QUEUE", "/queue/epicprod.ops")
 # miss its slot (the 2026-07-24 catalog_sync miss).
 RETRY_DELAYS = (15, 30, 60)
 
+# A send counts only once the broker's receipt for it has arrived. With
+# stomp.py 9.0 a send returns before its frame is written, and a disconnect
+# right after it could close the connection first: from 2026-10-21 12:23 ET
+# every front_cycle trigger was printed as enqueued and never reached the
+# queue, while the agent ran each cycle sent by hand with a receipt.
+RECEIPT_TIMEOUT_S = 10
+
+
+class _ReceiptListener(stomp.ConnectionListener):
+    def __init__(self, receipt_id):
+        self.receipt_id = receipt_id
+        self.received = threading.Event()
+        self.error = None
+
+    def on_receipt(self, frame):
+        if frame.headers.get('receipt-id') == self.receipt_id:
+            self.received.set()
+
+    def on_error(self, frame):
+        self.error = frame.headers.get('message') or frame.body or 'ERROR frame'
+        self.received.set()
+
 
 def _connect_and_send(queue, body):
     host = os.getenv('ACTIVEMQ_HOST', 'localhost')
@@ -45,10 +72,17 @@ def _connect_and_send(queue, body):
             ca_certs=os.getenv('ACTIVEMQ_SSL_CA_CERTS') or None,
             ssl_version=ssl.PROTOCOL_TLS_CLIENT,
         )
+    receipt_id = f"enqueue-{uuid.uuid4()}"
+    listener = _ReceiptListener(receipt_id)
+    conn.set_listener('receipt', listener)
     conn.connect(os.getenv('ACTIVEMQ_USER', 'admin'),
                  os.getenv('ACTIVEMQ_PASSWORD', 'admin'), wait=True)
     try:
-        conn.send(destination=queue, body=body)
+        conn.send(destination=queue, body=body, receipt=receipt_id)
+        if not listener.received.wait(RECEIPT_TIMEOUT_S):
+            raise TimeoutError(f"no broker receipt within {RECEIPT_TIMEOUT_S} s")
+        if listener.error:
+            raise RuntimeError(f"broker refused the send: {listener.error}")
     finally:
         conn.disconnect()
 
@@ -60,6 +94,9 @@ def main():
                         help="requester recorded in the action stream")
     parser.add_argument('--extra', action='append', default=[],
                         help="extra key=value message fields (int if numeric)")
+    parser.add_argument('--json', action='append', default=[], dest='json_fields',
+                        help="extra key=<JSON> message fields, for a list or an "
+                             "object, e.g. switches='[\"EPICPROD_SWITCH_X=1\"]'")
     parser.add_argument('--queue', default=OPS_QUEUE,
                         help="destination queue (default: the epicprod ops queue)")
     parser.add_argument('--namespace', default='prodops',
@@ -73,6 +110,14 @@ def main():
         if not key or not value:
             sys.exit(f"bad --extra {item!r}, need key=value")
         msg[key] = int(value) if value.isdigit() else value
+    for item in args.json_fields:
+        key, _, value = item.partition('=')
+        try:
+            msg[key] = json.loads(value)
+        except ValueError as e:
+            sys.exit(f"bad --json {item!r}: {e}")
+        if not key:
+            sys.exit(f"bad --json {item!r}, need key=<JSON>")
 
     body = json.dumps(msg)
     for attempt, delay in enumerate(RETRY_DELAYS + (None,), start=1):

@@ -1,0 +1,261 @@
+{% extends 'base.html' %}
+{% load swf_fmt %}
+{% block title %}Remove from {{ rse }}{% endblock %}
+{% block content %}
+<style>
+  .rmv-note { max-width: 74rem; font-size: 1.1rem; line-height: 1.55; }
+  .rmv-name { font-family: var(--bs-font-monospace, monospace); font-size: 0.92em; word-break: break-all; }
+  .rmv-warning { max-width: 74rem; border: 2px solid #c0392b; background: #fdecea;
+                 padding: 0.8rem 1rem; border-radius: 0.3rem; }
+</style>
+<div class="container-fluid">
+    <h1>Remove datasets from {{ rse }}</h1>
+    <p class="rmv-note">
+        Removes every dataset matching a name pattern from {{ rse }}, and only
+        where {{ tape_rse }} holds a complete copy: a tape rule in state OK with
+        every file locked and none replicating or stuck. A dataset without one
+        is kept and listed with the reason, and so is one whose production task
+        is still active. The tape check is Rucio's lock state at {{ tape_rse }}.
+        The preview reads the live catalog
+        and changes nothing; the removal expires the dataset's rule on
+        {{ rse }}, and Rucio's deletion daemon then removes the replicas.
+        <a href="{% url 'monitor_app:panda_storage_doors' %}">Storage doors</a>
+    </p>
+
+    {% if can_act %}
+    <form id="rmv-form" class="row g-2 align-items-end mb-3" onsubmit="return false;">
+        {% csrf_token %}
+        <div class="col-auto" style="min-width: 36rem;">
+            <label for="rmv-pattern" class="form-label">Dataset pattern</label>
+            <input id="rmv-pattern" class="form-control form-control-sm rmv-name"
+                   placeholder="/RECO/26.03.0/*" autocomplete="off">
+        </div>
+        <div class="col-auto">
+            <button id="rmv-preview" type="submit" class="btn btn-primary btn-sm">Preview</button>
+        </div>
+        <div class="col-12"><span id="rmv-status" class="d-none"></span></div>
+    </form>
+
+    <div id="rmv-plan" class="d-none">
+        <h4 id="rmv-plan-title"></h4>
+        <div id="rmv-confirm" class="rmv-warning mb-3 d-none">
+            <p class="mb-2"><strong>Removal is immediate and cannot be undone.</strong>
+               <span id="rmv-confirm-summary"></span>
+               Datasets listed as kept are not touched.</p>
+            <div class="row g-2 align-items-center">
+                <div class="col-auto"><label for="rmv-confirm-rse">Type {{ rse }} to confirm</label></div>
+                <div class="col-auto"><input id="rmv-confirm-rse" class="form-control form-control-sm" autocomplete="off"></div>
+                <div class="col-auto"><button id="rmv-execute" type="button" class="btn btn-danger btn-sm" disabled>Remove from {{ rse }}</button></div>
+            </div>
+        </div>
+        <div id="rmv-plan-table"></div>
+    </div>
+    {% elif is_ops %}
+    <p class="rmv-note text-muted">Removals are available on the internal monitor.</p>
+    {% elif request.user.is_authenticated %}
+    <p class="rmv-note text-muted">Removals are made by the operations role; an
+       administrator can grant it on the User admin page.</p>
+    {% else %}
+    <p class="rmv-note text-muted">Sign in to remove datasets.</p>
+    {% endif %}
+
+    <h4 class="mt-4">Previews and removals</h4>
+    {% if recent %}
+    <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
+        <thead><tr>
+            <th>When</th><th>What</th><th>Pattern</th><th>By</th><th>Status</th>
+            <th class="text-end">Matched</th><th class="text-end">Eligible</th>
+            <th class="text-end">Removed</th><th class="text-end">TB removed</th><th>Note</th>
+        </tr></thead>
+        <tbody>
+        {% for r in recent %}
+            <tr>
+                <td data-order="{{ r.at|date:'c' }}"><span data-relative-time="{{ r.at|date:'c' }}">{{ r.at }}</span></td>
+                <td>{{ r.kind }}</td>
+                <td class="rmv-name">{{ r.pattern }}</td>
+                <td>{{ r.by }}</td>
+                <td class="{{ r.outcome|state_class }}">{{ r.outcome }}</td>
+                <td class="text-end">{{ r.matched|default_if_none:"" }}</td>
+                <td class="text-end">{{ r.eligible|default_if_none:"" }}</td>
+                <td class="text-end">{{ r.removed|default_if_none:"" }}</td>
+                <td class="text-end">{% if r.removed_tb is not None %}{{ r.removed_tb|floatformat:2 }}{% endif %}</td>
+                <td>{{ r.note|truncatechars:160 }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-muted">No preview or removal has been recorded for {{ rse }}.</p>
+    {% endif %}
+</div>
+
+{% if can_act %}
+<script>
+(function () {
+    const rse = "{{ rse|escapejs }}";
+    const form = document.getElementById('rmv-form');
+    const csrfToken = form.querySelector('[name=csrfmiddlewaretoken]').value;
+    const requestUrl = "{% url 'monitor_app:panda-rse-deletion-request' %}";
+    const base = requestUrl;
+    const streamUrl = "{% url 'monitor_app:sse-message-stream' %}?msg_types=rse_deletion_done";
+    const patternInput = document.getElementById('rmv-pattern');
+    const previewButton = document.getElementById('rmv-preview');
+    const statusNode = document.getElementById('rmv-status');
+    const planBox = document.getElementById('rmv-plan');
+    const confirmBox = document.getElementById('rmv-confirm');
+    const confirmInput = document.getElementById('rmv-confirm-rse');
+    const executeButton = document.getElementById('rmv-execute');
+    let current = null;
+    let eventSource = null;
+    let pollTimer = null;
+
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+    }
+    function tb(n) { return ((n || 0) / 1e12).toFixed(2) + ' TB'; }
+    function showStatus(message, state) {
+        statusNode.textContent = message;
+        statusNode.className = `text-${state}`;
+    }
+    function closeWatch() {
+        if (eventSource) eventSource.close();
+        if (pollTimer) window.clearInterval(pollTimer);
+        eventSource = null; pollTimer = null;
+    }
+    async function check() {
+        if (!current) return;
+        try {
+            const resp = await fetch(`${base}${current}/`, {headers: {'Accept': 'application/json'}, credentials: 'same-origin'});
+            if (resp.ok) render(await resp.json());
+        } catch (_e) { /* the next poll retries */ }
+    }
+    function watch(id) {
+        closeWatch();
+        current = id;
+        eventSource = new EventSource(streamUrl);
+        eventSource.addEventListener('rse_deletion_done', function (event) {
+            const payload = JSON.parse(event.data);
+            if (String(payload.deletion_id || '') === String(current)) check();
+        });
+        pollTimer = window.setInterval(function () {
+            if (!window.swfPollGate || window.swfPollGate.attended()) check();
+        }, 5000);
+    }
+
+    function planTable(rows, removing) {
+        let html = '<table class="table table-striped table-bordered table-sm align-middle w-auto swf-latch-head"><thead><tr>' +
+            '<th>' + (removing ? 'Outcome' : 'Action') + '</th><th>Dataset</th><th class="text-end">Files</th>' +
+            '<th class="text-end">TB</th><th>Tape copy / reason</th></tr></thead><tbody>';
+        for (const r of rows) {
+            const label = removing ? r.outcome : (r.eligible ? 'remove' : 'keep');
+            const cls = (label === 'remove' || label === 'removed') ? 'finished_fill'
+                : (label === 'failed' ? 'failed_fill' : '');
+            const why = removing ? (r.reason || r.tape || '') : (r.eligible ? r.tape : r.reason);
+            html += `<tr><td class="${cls}">${esc(label)}</td><td class="rmv-name">${esc(r.name)}</td>` +
+                `<td class="text-end">${esc(r.files == null ? '' : r.files)}</td><td class="text-end">${r.bytes == null ? '' : tb(r.bytes)}</td>` +
+                `<td>${esc(why)}</td></tr>`;
+        }
+        return html + '</tbody></table>';
+    }
+
+    function render(rec) {
+        planBox.classList.remove('d-none');
+        const title = document.getElementById('rmv-plan-title');
+        const table = document.getElementById('rmv-plan-table');
+        if (rec.status === 'previewing') {
+            showStatus(`Previewing ${rec.pattern} against the live catalog…`, 'primary');
+            return;
+        }
+        if (rec.status === 'queued' || rec.status === 'running') {
+            confirmBox.classList.add('d-none');
+            const done = rec.result && rec.result.datasets;
+            if (done) {
+                const t = rec.result.totals || {};
+                showStatus(`Removing from ${rse}… ${done.length} of ${t.requested || '?'} decided, ${t.removed || 0} removed.`, 'primary');
+                table.innerHTML = planTable(done, true);
+            } else {
+                showStatus(`Removing from ${rse}…`, 'primary');
+            }
+            return;
+        }
+        closeWatch();
+        previewButton.disabled = false;
+        if (rec.status === 'failed') {
+            confirmBox.classList.add('d-none');
+            showStatus(rec.diagnostic || 'Failed.', 'danger');
+            if (rec.result && rec.result.datasets) table.innerHTML = planTable(rec.result.datasets, true);
+            return;
+        }
+        if (rec.status === 'previewed') {
+            const t = rec.plan.totals || {};
+            title.textContent = `${t.datasets || 0} datasets match ${rec.pattern}: ${t.eligible || 0} to remove, ${t.refused || 0} kept`;
+            table.innerHTML = planTable(rec.plan.datasets || [], false);
+            showStatus('Preview ready; nothing has been removed.', 'success');
+            if (t.eligible) {
+                document.getElementById('rmv-confirm-summary').textContent =
+                    `This removes ${t.eligible} datasets (${t.eligible_files} files, ${tb(t.eligible_bytes)}) from ${rse}.`;
+                confirmInput.value = '';
+                executeButton.disabled = true;
+                confirmBox.classList.remove('d-none');
+            } else {
+                confirmBox.classList.add('d-none');
+            }
+            return;
+        }
+        // done / partial
+        confirmBox.classList.add('d-none');
+        const t = rec.result.totals || {};
+        title.textContent = `Removed ${t.removed || 0} of ${t.requested || 0} datasets (${tb(t.removed_bytes)}) from ${rse}; ${t.skipped || 0} skipped, ${t.failed || 0} failed`;
+        table.innerHTML = planTable(rec.result.datasets || [], true);
+        showStatus(rec.status === 'done' ? 'Removal done.' : 'Removal done with failures.', rec.status === 'done' ? 'success' : 'danger');
+    }
+
+    async function post(url, body) {
+        const resp = await fetch(url, {
+            method: 'POST', credentials: 'same-origin',
+            headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRFToken': csrfToken},
+            body: JSON.stringify(body),
+        });
+        let data = null;
+        try { data = await resp.json(); } catch (_e) { /* non-JSON error */ }
+        if (!resp.ok) throw new Error((data && (data.error || data.detail)) || `HTTP ${resp.status}`);
+        return data;
+    }
+
+    previewButton.addEventListener('click', async function () {
+        const pattern = patternInput.value.trim();
+        if (!pattern) return;
+        previewButton.disabled = true;
+        confirmBox.classList.add('d-none');
+        document.getElementById('rmv-plan-table').innerHTML = '';
+        document.getElementById('rmv-plan-title').textContent = '';
+        try {
+            const rec = await post(requestUrl, {rse: rse, pattern: pattern});
+            watch(rec.id);
+            render(rec);
+        } catch (e) {
+            previewButton.disabled = false;
+            showStatus('Refused: ' + e.message, 'danger');
+        }
+    });
+    confirmInput.addEventListener('input', function () {
+        executeButton.disabled = confirmInput.value.trim() !== rse;
+    });
+    executeButton.addEventListener('click', async function () {
+        if (!current || confirmInput.value.trim() !== rse) return;
+        executeButton.disabled = true;
+        previewButton.disabled = true;
+        try {
+            const rec = await post(`${base}${current}/execute/`, {confirm_rse: confirmInput.value.trim()});
+            watch(rec.id);
+            render(rec);
+        } catch (e) {
+            executeButton.disabled = false;
+            previewButton.disabled = false;
+            showStatus('Refused: ' + e.message, 'danger');
+        }
+    });
+})();
+</script>
+{% endif %}
+{% endblock %}

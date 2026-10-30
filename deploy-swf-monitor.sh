@@ -270,6 +270,25 @@ python "$RELEASE_DIR/scripts/migrate-swfdb.py" --settings=swf_monitor_project.se
 log "Setting ownership..."
 chown -R "$CURRENT_USER:eic" "$DEPLOY_ROOT"
 
+# The ES close-out's PanDA-client step runs es_closeout.py as a bare script
+# under the PanDA client, a path no package import exercises. On 2026-10-28 a
+# package-relative import broke it and no dead ES job could be closed for
+# hours. Run the step once, with no jobs, from the new release before it
+# takes over; a failure keeps the old release serving.
+# Paths are absolute: the deploy's working directory has moved by here.
+if "$RELEASE_DIR/.venv/bin/python" -m pip show swf-epicprod >/dev/null 2>&1; then
+    log "Checking the ES close-out's PanDA-client step in the new release..."
+    AS_USER=(sudo -u "$CURRENT_USER" -H)
+    [ "$(id -un)" = "$CURRENT_USER" ] && AS_USER=()
+    if ! "${AS_USER[@]}" "$RELEASE_DIR/.venv/bin/python" -c 'from swf_epicprod.es_closeout import finish_in_pclient; print(finish_in_pclient([]))'; then
+        log "❌ ERROR: the ES close-out's PanDA-client step fails in the new release; current release left in place"
+        exit 1
+    fi
+    log "✅ ES close-out PanDA-client step runs"
+else
+    log "ℹ️ swf-epicprod not installed in the release; ES close-out check skipped"
+fi
+
 # Atomic cutover: the fully built release takes over in one symlink flip
 log "Updating current symlink..."
 ln -sfn "$RELEASE_DIR" "$DEPLOY_ROOT/current"

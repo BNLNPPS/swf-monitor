@@ -12,7 +12,7 @@ from django.utils import timezone
 from asgiref.sync import sync_to_async
 
 from monitor_app.mcp import mcp
-from monitor_app.mcp.common import requires_authority
+from monitor_app.mcp.common import _get_username, requires_authority
 
 from ..models import AIMemory
 
@@ -36,7 +36,8 @@ async def swf_record_ai_memory(
     Each exchange is stored as a separate record for retrieval across sessions.
 
     Args:
-        username: Developer username (required)
+        username: Developer username (required; through the external face
+            the signed-in caller, whatever is supplied)
         session_id: Claude Code session ID (required)
         role: Either 'user' or 'assistant' (required)
         content: The message content (required)
@@ -51,6 +52,7 @@ async def swf_record_ai_memory(
 
     if not username or not session_id or not content:
         return {"success": False, "error": "username, session_id, and content are required"}
+    username = _get_username(username)
 
     @sync_to_async
     def do_record():
@@ -83,7 +85,7 @@ async def swf_record_ai_memory(
 
 @mcp.tool()
 async def swf_get_ai_memory(
-    username: str,
+    username: str = None,
     turns: int = 20,
     namespace: str = None,
 ) -> list:
@@ -95,7 +97,8 @@ async def swf_get_ai_memory(
     conversation flow.
 
     Args:
-        username: Developer username (required)
+        username: Developer username (required; through the external face
+            the signed-in caller, whatever is supplied)
         turns: Number of conversation turns to retrieve (default: 20).
                Each turn = 1 user + 1 assistant message, so 20 turns = up to 40 messages.
         namespace: Filter to messages from this namespace (optional)
@@ -103,7 +106,9 @@ async def swf_get_ai_memory(
     Returns:
         List of dialogue entries with: role, content, created_at, session_id
     """
-    if not username:
+    try:
+        username = _get_username(username)
+    except RuntimeError:
         return {"error": "username is required"}
 
     max_messages = turns * 2  # Each turn is user + assistant

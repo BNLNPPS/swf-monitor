@@ -38,7 +38,11 @@ Django-bootstrap standalone script — also usable by hand::
         [--hours 48] [--limit N] [--dry-run]
 
 The last stdout line is a JSON summary; progress and errors go to stderr.
-Exit codes: 0 ok · 5 proxy unusable · 6 Rucio unreachable.
+Credentials: the catalog by a token from the PanDA server, the eicprod
+proxy as fallback; the storage check by a storage token where the door
+takes one, else the proxy, else none (swf_epicprod.jlab_auth).
+
+Exit codes: 0 ok · 5 no token and no usable proxy · 6 Rucio unreachable.
 """
 import argparse
 import importlib.util
@@ -229,9 +233,11 @@ def stored_file(pfn, proxy):
     The storage is asked, never the catalog: the question is whether the
     upload stood, and the catalog is the thing that could not answer.
     """
+    from swf_epicprod.jlab_auth import door_access
     door, _, path = pfn.partition('//')[2].partition('/')
-    door_url = f"{pfn.split('//')[0]}//{door}"
-    env = dict(os.environ, X509_USER_PROXY=proxy)
+    # A storage token where the door takes one, else the proxy, else none
+    # (BNL-XRD's read door reads without a credential).
+    door_url, env, _how = door_access(f"{pfn.split('//')[0]}//{door}", f'/{path}', proxy=proxy)
     try:
         stat = subprocess.run(['xrdfs', door_url, 'stat', f'/{path}'],
                               capture_output=True, text=True, timeout=120, env=env)
@@ -381,18 +387,16 @@ def main():
         print(json.dumps(summary))
         return 0
 
-    try:
-        proxy, summary['proxy'] = _evgen.resolve_proxy()
-    except _evgen.DoerError as e:
-        summary['error'] = str(e)
-        print(json.dumps(summary))
-        return EXIT_PROXY
+    # The proxy is the fallback: the catalog takes a token from the PanDA
+    # server, and the storage check a storage token or no credential.
+    proxy, summary['proxy'] = _evgen.resolve_proxy_or_none()
     try:
         client = _evgen.rucio_client(proxy)
     except _evgen.DoerError as e:
         summary['error'] = str(e)
         print(json.dumps(summary))
-        return EXIT_RUCIO
+        return EXIT_PROXY if proxy is None else EXIT_RUCIO
+    summary['catalog_auth'] = client.jlab_auth
 
     # One pass is bounded in time (the agent's timeout is the ceiling) and
     # in consecutive catalog failures: a catalog that answers nothing is

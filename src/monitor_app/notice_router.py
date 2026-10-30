@@ -73,12 +73,18 @@ def _compose(row, extra):
     record link and outcome-derived severity."""
     from monitor_app.models import external_face_base_url
 
+    from monitor_app.live_notices import board_text
+
     action = str(extra.get('action') or row.funcname or 'event')
-    title_action = str(extra.get('operation') or action)
-    subject = str(extra.get('subject_label') or extra.get('subject_key') or '')
-    title = title_action.replace('_', ' ')
-    if subject:
-        title = f'{title}: {subject}'
+    if extra.get('operation') in ('pause', 'resume'):
+        # A task pause or resume keeps "pause: <task>": Capcom files those
+        # notices by that form (tjai capcom.is_task_pause_resume_notice).
+        subject = str(extra.get('subject_label') or extra.get('subject_key') or '')
+        title = str(extra['operation']).replace('_', ' ') + (f': {subject}' if subject else '')
+    else:
+        # The live screen's title rule: what happened and to what, never the
+        # action's name alone (Torre Wenaus, 2026-10-29: "ditto for capcom").
+        title, _detail = board_text(getattr(row, 'message', '') or '', dict(extra, action=action))
     outcome = str(extra.get('outcome') or '')
     detail = str(extra.get('narration') or extra.get('reason')
                  or extra.get('summary') or '')

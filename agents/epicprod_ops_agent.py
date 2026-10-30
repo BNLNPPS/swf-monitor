@@ -46,6 +46,9 @@ Capabilities:
   panda_task_operation — run a PanDA-native operation on an existing JEDI task:
                        pause/resume, increase attempts, or retry failed work.
   panda_task_operations — run one paced bulk pause/resume request.
+  rse_deletion       — preview, or remove, the datasets matching a pattern on
+                       a disk RSE where tape holds a complete copy
+                       (swf-epicprod docs/STORAGE.md, Removing datasets).
   panda_sandbox_keepalive — touch the sandbox tarballs of retryable tasks in
                        the PanDA server cache so the 7-day purge passes them
                        by (nightly catalog_sync chain step).
@@ -172,6 +175,19 @@ SUBMIT_EVGEN_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "subm
 SUBMIT_EVGEN_TIMEOUT = int(os.environ.get("EPICPROD_SUBMIT_EVGEN_TIMEOUT", "300"))
 PANDA_TASK_OPERATION_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "panda-task-operation.py"
 PANDA_TASK_OPERATION_TIMEOUT = int(os.environ.get("EPICPROD_PANDA_TASK_OPERATION_TIMEOUT", "120"))
+# A Move PanDA accepted but the doer could not verify in its first wait is
+# settled in the background: JEDI holds a large task in toreassign for an
+# hour or more while it kills the waiting jobs (40856, 40857 on 2026-10-20),
+# and the attempts those kills cost are repaid only once it has moved the
+# task. The settles in progress are kept on disk and resumed after a restart.
+REASSIGN_SETTLE_TIMEOUT = int(os.environ.get("EPICPROD_REASSIGN_SETTLE_TIMEOUT", str(8 * 3600)))
+REASSIGN_SETTLE_POLL = 120
+REASSIGN_SETTLES = Path(os.environ.get("EPICPROD_REASSIGN_SETTLES",
+                                       "/opt/swf-monitor/shared/run/reassign-settles.json"))
+_REASSIGN_SETTLES_LOCK = threading.Lock()
+REASSIGN_SETTLING_REASON = (
+    'PanDA accepted the Move and JEDI is still moving the task; the attempts '
+    'its kills cost are repaid when it is done')
 
 SANDBOX_KEEPALIVE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "panda-sandbox-keepalive.py"
 SANDBOX_KEEPALIVE_TIMEOUT = int(os.environ.get("EPICPROD_SANDBOX_KEEPALIVE_TIMEOUT", "600"))
@@ -296,6 +312,19 @@ GKE_PILOT_CYCLE_TIMEOUT = int(os.environ.get("EPICPROD_GKE_PILOT_CYCLE_TIMEOUT",
 # tier (about an hour at the pass's pacing, STORAGE.md); the nightly full
 # pass lists the target campaigns' files. Three hours holds either.
 STORAGE_SWEEP_TIMEOUT = int(os.environ.get("EPICPROD_STORAGE_SWEEP_TIMEOUT", "10800"))
+# Removing datasets from a disk RSE (swf-epicprod docs/STORAGE.md): a
+# preview reads two catalog records per matching dataset, a removal three
+# plus the rule update; an hour holds a full campaign of either.
+RSE_DELETION_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "rse-deletion.py"
+RSE_DELETION_TIMEOUT = int(os.environ.get("EPICPROD_RSE_DELETION_TIMEOUT", "3600"))
+# How often a running removal writes its outcomes so far to the request.
+RSE_DELETION_PROGRESS_S = 5
+
+
+def _utc_now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
 # The campaign configuration proposer (swf-monitor docs/PINGS.md, Pings
 # with a remedy): pings and remedies for editions without a Standard
 # Production configuration.
@@ -372,6 +401,10 @@ SNAPPER_OPPORTUNITY_SECONDS = int(
     or os.environ.get("EPICPROD_SNAPPER_POLL_SECONDS")
     or "30")
 SNAPPER_SCHEDULER_INITIAL_DELAY = int(os.environ.get("EPICPROD_SNAPPER_INITIAL_DELAY", "5"))
+# The capture's own background pool, apart from the default one that slow
+# production operations fill.
+SNAPPER_QUEUE = 'snapper'
+OPS_BACKGROUND_WORKERS = 16     # threads per background pool (SWF_AGENT_MAX_WORKERS overrides)
 
 # Dedicated namespace config shipped beside the agent. A fixed 'prodops' namespace
 # makes the singleton identifiable in the monitor and lets callers address it
@@ -389,6 +422,7 @@ class EpicProdOpsAgent(BaseAgent):
 
     KNOWN_TYPES = {"fetch_payload_log", "submit_task", "submit_evgen_task",
                    "panda_task_operation", "panda_task_operations",
+                   "rse_deletion",
                    "panda_sandbox_keepalive",
                    "rucio_snapshot_update", "evgen_rucio_update", "evgen_register",
                    "catalog_import",
@@ -422,10 +456,21 @@ class EpicProdOpsAgent(BaseAgent):
         # System-level singleton (not a per-user testbed agent): its namespace is
         # the fixed 'prodops' from PRODOPS_CONFIG, so it is identifiable in the
         # monitor and callers address it explicitly. See docs/EPICPROD_OPS.md.
+        # Each background pool's threads: BaseAgent's default of four held
+        # the day's submissions, Moves, drains and sweeps (2026-10-26: 112
+        # submissions and 77 task operations in 24 h) and queued the rest
+        # behind them for minutes. The doers are subprocesses that mostly
+        # wait on PanDA, Rucio and JLab; sixteen fit the host (8 cores, 15 GB)
+        # and both databases with room to spare.
+        os.environ.setdefault('SWF_AGENT_MAX_WORKERS', str(OPS_BACKGROUND_WORKERS))
         super().__init__(agent_type="PRODOPS", subscription_queue=OPS_QUEUE,
                          config_path=str(PRODOPS_CONFIG))
         self._deliberate = False
         self._campaign_progress_last_start = 0
+        # Removals from a disk RSE: the request running on each RSE, and
+        # the lock its request files are written under.
+        self._rse_deletion_lock = threading.RLock()
+        self._rse_deletion_running = {}
         self._action_log_session = requests.Session()
         self._system_status_thread = threading.Thread(
             target=self._system_status_periodic_loop,
@@ -749,6 +794,9 @@ class EpicProdOpsAgent(BaseAgent):
         operation = m["operation"]
         task_name = str(m["task_name"])
         jedi_task_id = str(m["jedi_task_id"])
+        move_sites = ({'previous_site': str(m.get('previous_site') or ''),
+                       'site': str(m.get('site') or '')}
+                      if operation == 'reassign' else {})
         cmd = [
             sys.executable, str(PANDA_TASK_OPERATION_SCRIPT),
             "--operation", operation,
@@ -793,6 +841,7 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True, level=logging.ERROR,
                              operation=operation, task_name=task_name,
+                             **move_sites,
                              url=f'/panda/tasks/{jedi_task_id}/')
             return
 
@@ -806,11 +855,16 @@ class EpicProdOpsAgent(BaseAgent):
                 result = json.loads((p.stdout or '').strip().splitlines()[-1])
             except (IndexError, json.JSONDecodeError):
                 result = {}
+        if operation == 'reassign':
+            move_sites['previous_site'] = str(result.get('previous_site')
+                                              or move_sites['previous_site'])
         if p.returncode == 0:
             summary = (p.stdout or "").strip()
             if is_state_change and not result.get('verified'):
                 reason = ('PanDA accepted the request but the task state was '
                           'not verified before the deadline')
+                if operation == 'reassign':
+                    reason = REASSIGN_SETTLING_REASON
                 observed_status = str(result.get('observed_status') or '')
                 self.logger.warning(
                     f"PRODOPS panda_task_operation UNVERIFIED: {operation} "
@@ -818,7 +872,7 @@ class EpicProdOpsAgent(BaseAgent):
                 self._record_panda_operation_state(
                     operation_id, 'unverified', diagnostic=reason,
                     observed_status=observed_status,
-                    evidence={'panda_diagnostic': result.get('diagnostic', '')})
+                    evidence={'panda_diagnostic': result.get('diagnostic', ''), **move_sites})
                 self.send_message('/topic/epictopic', {
                     'msg_type': 'panda_task_operation_done',
                     'operation_id': operation_id,
@@ -826,15 +880,29 @@ class EpicProdOpsAgent(BaseAgent):
                     'operation': operation, 'status': 'unverified',
                     'observed_status': observed_status,
                     'accepted': True, 'ok': False, 'error': reason})
+                # A Move JEDI is still carrying out is its normal course
+                # (Torre Wenaus, 2026-10-29: "a move is normal ops, should
+                # be info level"); a Move that never lands is an ERROR below.
                 self._log_action(
                     'panda_task_operation', t0, outcome='unverified',
                     reason=reason, subject_type='panda_task',
                     subject_key=jedi_task_id,
                     username=str(m.get('created_by') or ''),
-                    sublevel='high', live_default=True, level=logging.WARNING,
+                    sublevel='high', live_default=True,
+                    level=logging.INFO if operation == 'reassign' else logging.WARNING,
                     operation=operation, task_name=task_name,
+                    **move_sites,
                     observed_status=observed_status,
                     url=f'/panda/tasks/{jedi_task_id}/')
+                if operation == 'reassign':
+                    self._settle_reassign_later({
+                        'operation_id': operation_id,
+                        'jedi_task_id': jedi_task_id, 'task_name': task_name,
+                        'site': str(m.get('site') or ''),
+                        'previous_site': move_sites['previous_site'],
+                        'mode': str(m.get('mode') or 'soft'),
+                        'created_by': str(m.get('created_by') or ''),
+                        'since': time.time()})
                 return
             observed_status = str(result.get('observed_status') or '')
             self.logger.info(
@@ -875,6 +943,7 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True,
                              operation=operation, task_name=task_name,
+                             **move_sites,
                              **ok_bits)
         else:
             reason = self._derive_reason(p)
@@ -898,7 +967,7 @@ class EpicProdOpsAgent(BaseAgent):
                              subject_type='panda_task', subject_key=jedi_task_id,
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True, level=logging.ERROR,
-                             operation=operation, task_name=task_name)
+                             operation=operation, task_name=task_name, **move_sites)
 
     def _handle_panda_task_operations(self, m):
         """Run one paced batch of scalar PanDA pause/resume commands."""
@@ -927,6 +996,11 @@ class EpicProdOpsAgent(BaseAgent):
     def _do_panda_task_operations(self, m):
         operation = str(m['operation'])
         items = list(m['items'])
+        move_sites = ({
+            'previous_site': ', '.join(sorted({str(item.get('previous_site') or 'source unavailable')
+                                               for item in items})),
+            'site': str(m.get('site') or ''),
+        } if operation == 'reassign' else {})
         batch_id = str(m['batch_id'])
         username = str(m.get('created_by') or '')
         task_ids = [str(item['jedi_task_id']) for item in items]
@@ -978,6 +1052,7 @@ class EpicProdOpsAgent(BaseAgent):
                 'panda_task_operation', t0, outcome='timeout', reason=reason,
                 username=username, sublevel='high', live_default=False,
                 level=logging.ERROR, operation=operation, tasks=len(items),
+                **move_sites,
                 summary=f'0/{len(items)} verified · {len(items)} timed out',
                 url='/panda/tasks/', **notice_subject)
             return
@@ -1011,6 +1086,8 @@ class EpicProdOpsAgent(BaseAgent):
                 status = 'unverified'
                 diagnostic = ('PanDA accepted the request but the task state '
                               'was not verified before the deadline')
+                if operation == 'reassign':
+                    diagnostic = REASSIGN_SETTLING_REASON
             counts[status] = counts.get(status, 0) + 1
             self._settle_panda_bulk_item(
                 m, item, status,
@@ -1023,6 +1100,16 @@ class EpicProdOpsAgent(BaseAgent):
                         (result or {}).get('status_diagnostic') or ''),
                 },
             )
+            if operation == 'reassign' and status == 'unverified':
+                self._settle_reassign_later({
+                    'operation_id': str(item['operation_id']),
+                    'jedi_task_id': str(item['jedi_task_id']),
+                    'task_name': str(item.get('task_name') or ''),
+                    'site': str(m.get('site') or ''),
+                    'previous_site': str((result or {}).get('previous_site')
+                                         or item.get('previous_site') or ''),
+                    'mode': str(m.get('mode') or 'soft'),
+                    'created_by': username, 'since': time.time()})
         problems = counts.get('failed', 0) + counts.get('unverified', 0)
         outcome = 'ok' if not problems else 'error'
         # The human count line the batch notice shows (notice routing).
@@ -1037,8 +1124,147 @@ class EpicProdOpsAgent(BaseAgent):
             username=username, sublevel='high', live_default=False,
             level=logging.WARNING if problems else logging.INFO,
             operation=operation, tasks=len(items),
+            **move_sites,
             summary=' · '.join(parts), url='/panda/tasks/',
             **notice_subject, **counts)
+
+    def register_subscriber(self):
+        """Register on the bus, then resume the Move settles a restart cut."""
+        super().register_subscriber()
+        self._resume_reassign_settles()
+
+    def _reassign_settles(self):
+        try:
+            with open(REASSIGN_SETTLES) as f:
+                settles = json.load(f)
+            return settles if isinstance(settles, dict) else {}
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError) as e:
+            self.logger.error(f"PRODOPS could not read {REASSIGN_SETTLES}: {e}")
+            return {}
+
+    def _store_reassign_settle(self, operation_id, settle):
+        """Add (settle) or remove (None) one pending settle on disk."""
+        with _REASSIGN_SETTLES_LOCK:
+            settles = self._reassign_settles()
+            if settle is None:
+                settles.pop(operation_id, None)
+            else:
+                settles[operation_id] = settle
+            try:
+                REASSIGN_SETTLES.parent.mkdir(parents=True, exist_ok=True)
+                tmp = REASSIGN_SETTLES.with_suffix('.tmp')
+                with open(tmp, 'w') as f:
+                    json.dump(settles, f)
+                os.replace(tmp, REASSIGN_SETTLES)
+            except OSError as e:
+                self.logger.error(f"PRODOPS could not write {REASSIGN_SETTLES}: {e}")
+
+    def _settle_reassign_later(self, settle):
+        """Watch a Move the doer could not verify in its first wait, and
+        repay the attempts its kills cost once JEDI has moved the task."""
+        self._store_reassign_settle(settle['operation_id'], settle)
+        self._start_reassign_settle(settle)
+
+    def _start_reassign_settle(self, settle):
+        self.run_in_background(
+            self._do_settle_reassign, settle,
+            dedup_key=f"panda-settle:{settle['jedi_task_id']}",
+            label=f"reassign settle {settle['jedi_task_id']}",
+            queue='reassign_settle')
+
+    def _resume_reassign_settles(self):
+        with _REASSIGN_SETTLES_LOCK:
+            settles = self._reassign_settles()
+        for settle in settles.values():
+            self.logger.info(
+                f"PRODOPS resuming the Move settle of {settle.get('jedi_task_id')} "
+                f"to {settle.get('site')}")
+            self._start_reassign_settle(settle)
+
+    def _do_settle_reassign(self, settle):
+        operation_id = str(settle['operation_id'])
+        jedi_task_id = str(settle['jedi_task_id'])
+        task_name = str(settle.get('task_name') or '')
+        site = str(settle.get('site') or '')
+        move_sites = {'previous_site': str(settle.get('previous_site') or ''), 'site': site}
+        left = int(REASSIGN_SETTLE_TIMEOUT - (time.time() - float(settle.get('since') or 0)))
+        t0 = time.monotonic()
+        result = {}
+        if left > 0:
+            cmd = [
+                sys.executable, str(PANDA_TASK_OPERATION_SCRIPT),
+                '--operation', 'reassign_settle',
+                '--jedi-task-id', jedi_task_id,
+                '--site', site, '--mode', str(settle.get('mode') or 'soft'),
+                '--verify-timeout', str(left),
+                '--poll-interval', str(REASSIGN_SETTLE_POLL),
+                '--timeout', str(left + PANDA_TASK_OPERATION_TIMEOUT),
+            ]
+            try:
+                p = subprocess.run(cmd, capture_output=True, text=True,
+                                   timeout=left + PANDA_TASK_OPERATION_TIMEOUT + 60)
+                for line in (p.stderr or '').splitlines():
+                    self.logger.info(f'  reassign settle: {line}')
+                result = json.loads((p.stdout or '').strip().splitlines()[-1])
+            except subprocess.TimeoutExpired:
+                result = {}
+            except (IndexError, json.JSONDecodeError):
+                # No result: the doer was ended (an agent stop) or failed
+                # before its watch finished. The settle stays on disk and
+                # resumes at the next start while it has time left.
+                self.logger.warning(
+                    f"PRODOPS Move settle of {jedi_task_id} returned no result; kept")
+                return
+        self._store_reassign_settle(operation_id, None)
+        hours = round(REASSIGN_SETTLE_TIMEOUT / 3600, 1)
+        if result.get('verified'):
+            repaid = bool(result.get('attempts_repaid'))
+            diagnostic = '' if repaid else (
+                'the task moved but the attempt repayment failed: '
+                f"{result.get('repay_diagnostic') or 'no detail'}")
+            self._record_panda_operation_state(
+                operation_id, 'verified',
+                observed_status=str(result.get('observed_status') or ''),
+                diagnostic=diagnostic,
+                evidence={'observed_site': str(result.get('observed_site') or ''),
+                          'attempts_repaid': repaid,
+                          'repay_diagnostic': str(result.get('repay_diagnostic') or '')})
+            summary = (f'remaining work moved to {site}; '
+                       + ('attempts repaid' if repaid else 'attempts NOT repaid'))
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'panda_task_operation_done',
+                'operation_id': operation_id,
+                'task_name': task_name, 'jedi_task_id': jedi_task_id,
+                'operation': 'reassign', 'status': 'verified',
+                'observed_status': str(result.get('observed_status') or ''),
+                'ok': repaid, 'summary': summary})
+            self._log_action(
+                'panda_task_operation', t0, outcome='ok' if repaid else 'error',
+                reason=diagnostic, subject_type='panda_task',
+                subject_key=jedi_task_id,
+                username=str(settle.get('created_by') or ''),
+                sublevel='high', live_default=True,
+                level=logging.INFO if repaid else logging.ERROR,
+                operation='reassign', task_name=task_name, summary=summary,
+                **move_sites,
+                url=f'/panda/tasks/{jedi_task_id}/')
+            return
+        reason = (f'JEDI had not moved the task to {site} within {hours} h of the '
+                  'Move; the attempts its kills cost were not repaid')
+        self._record_panda_operation_state(
+            operation_id, 'unverified', diagnostic=reason,
+            observed_status=str(result.get('observed_status') or ''),
+            evidence={'observed_site': str(result.get('observed_site') or '')})
+        self._log_action(
+            'panda_task_operation', t0, outcome='unverified', reason=reason,
+            subject_type='panda_task', subject_key=jedi_task_id,
+            username=str(settle.get('created_by') or ''),
+            sublevel='high', live_default=True, level=logging.ERROR,
+            operation='reassign', task_name=task_name,
+            **move_sites,
+            url=f'/panda/tasks/{jedi_task_id}/')
 
     def _settle_panda_bulk_item(self, message, item, status, *,
                                 diagnostic='', observed_status='',
@@ -1158,6 +1384,12 @@ class EpicProdOpsAgent(BaseAgent):
             selected = [selected]
         for name in selected:
             cmd += ["--only", str(name)]
+        # The self-scheduled refresh records as a cron run, so the channel
+        # treats it as the automated maintenance pass it is
+        # (live_notices.MAINTENANCE) and its failures stay off epicprod-live;
+        # a refresh someone asked for records no user and still reaches it.
+        source = str(m.get('source') or 'ops_agent')
+        username = 'five_minutely_cron' if source == 'ops_agent_periodic' else ''
         t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
@@ -1168,9 +1400,8 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'system_status_ready', 'ok': False, 'error': reason})
             self._log_action('system_status_refresh', t0, outcome='timeout',
-                             reason=reason,
-                             level=logging.ERROR,
-                             source=str(m.get('source') or 'ops_agent'))
+                             reason=reason, username=username,
+                             level=logging.ERROR, source=source)
             return
         ok = p.returncode == 0
         reason = ''
@@ -1188,9 +1419,9 @@ class EpicProdOpsAgent(BaseAgent):
             'msg_type': 'system_status_ready', 'ok': ok, 'error': reason})
         self._log_action('system_status_refresh', t0,
                          outcome='ok' if ok else 'error',
-                         reason=reason,
+                         reason=reason, username=username,
                          level=logging.INFO if ok else logging.ERROR,
-                         source=str(m.get('source') or 'ops_agent'))
+                         source=source)
 
     def _system_status_periodic_loop(self):
         """Keep cached system knowledge fresh without page-load probes."""
@@ -1221,7 +1452,7 @@ class EpicProdOpsAgent(BaseAgent):
         self.run_in_background(
             self._do_snapper_capture, request,
             dedup_key=f"snapper_capture_manual_{scope}",
-            label=f"capture_system_snap {scope}")
+            label=f"capture_system_snap {scope}", queue=SNAPPER_QUEUE)
 
     def _do_snapper_capture(self, m):
         scope = str(m.get('scope') or 'all')
@@ -1348,13 +1579,19 @@ class EpicProdOpsAgent(BaseAgent):
             executor = self._bg_executor
             if executor is not None and getattr(executor, '_shutdown', False):
                 return
+            # Its own pool: on the default one the capture waited behind
+            # submissions and Moves that hold all four workers for minutes,
+            # and each opportunity it missed is a coverage gap in the record
+            # (2026-10-26 16:57:34 to 17:00:05 ET: two submissions, four
+            # Moves and a node-measure ingest; the floor's trends then broke
+            # for half an hour at every quarter-hour edge such a gap held).
             self.run_in_background(
                 self._do_snapper_capture,
                 {'scope': 'all', 'manual': False,
                  'source': 'ops_agent_periodic',
                  'requested_at': datetime.now(timezone.utc).isoformat()},
                 dedup_key="snapper_capture_periodic",
-                label="capture_system_snap periodic")
+                label="capture_system_snap periodic", queue=SNAPPER_QUEUE)
 
     def _handle_association_sweep(self, m):
         """Batch-associate recent PanDA tasks with PCS campaign tasks."""
@@ -1724,7 +1961,12 @@ class EpicProdOpsAgent(BaseAgent):
         except Exception:
             pass
         creds = summary.get('credentials', [])
-        days = {c['credential']: c.get('days_left') for c in creds}
+        # The days map is what the front's credential gate reads: the
+        # credentials that expire and count, without the token and a
+        # superseded proxy, whose days stay on the record apart.
+        from swf_epicprod.credential_check import gate_days, superseded_days
+        days = gate_days(creds)
+        superseded = superseded_days(creds)
         reason = '; '.join(
             f"{c['credential']}: {c['status']}"
             + (f" ({c['days_left']}d left)" if 'days_left' in c else '')
@@ -1732,24 +1974,25 @@ class EpicProdOpsAgent(BaseAgent):
         if p.returncode == 0:
             self._log_action('credential_expiry_check', t0,
                              username=str(m.get('created_by') or ''),
-                             days_left=days)
+                             days_left=days, superseded=superseded)
         elif p.returncode == 3:
             # An expiry inside the window is the ping's to carry; only a
             # credential the check cannot vouch for at all stays live.
             unvouched = [c for c in creds
-                         if c.get('status') not in ('ok', 'expiring')]
+                         if c.get('status') not in ('ok', 'expiring', 'superseded',
+                                                    'unavailable')]
             self._log_action('credential_expiry_check', t0, outcome='warning',
                              reason=reason or 'credential inside warning window',
                              username=str(m.get('created_by') or ''),
                              sublevel='high' if unvouched else 'low',
                              live_default=bool(unvouched),
-                             level=logging.WARNING, days_left=days)
+                             level=logging.WARNING, days_left=days, superseded=superseded)
         else:
             self._log_action('credential_expiry_check', t0, outcome='error',
                              reason=reason or self._derive_reason(p),
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True,
-                             level=logging.ERROR, days_left=days)
+                             level=logging.ERROR, days_left=days, superseded=superseded)
 
     def _handle_dataset_definitions_sweep(self, m):
         """The definitions sweep on demand, off the receiver thread: the PC
@@ -3069,17 +3312,21 @@ class EpicProdOpsAgent(BaseAgent):
     def _do_storage_door_cycle(self, m):
         """One cycle of the storage door canary. The canary reports and
         production operations act: nothing here excludes anything."""
+        from monitor_app.panda.storage_doors import failure_context
+
         cmd = [sys.executable, str(STORAGE_DOOR_SCRIPT),
                "--created-by", str(m.get('created_by') or 'prodops_agent')]
         t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
                                timeout=STORAGE_DOOR_TIMEOUT)
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
+            reason = f'timed out after {STORAGE_DOOR_TIMEOUT}s'
+            context = failure_context(exc.stdout, reason)
             self.logger.error(
                 f"PRODOPS storage_door_cycle TIMEOUT after {STORAGE_DOOR_TIMEOUT}s")
             self._log_action('storage_door_cycle', t0, outcome='timeout',
-                             reason=f'timed out after {STORAGE_DOOR_TIMEOUT}s',
+                             reason=reason, message=context['summary'], **context,
                              username=str(m.get('created_by') or ''),
                              sublevel='low', live_default=False,
                              level=logging.ERROR)
@@ -3089,9 +3336,13 @@ class EpicProdOpsAgent(BaseAgent):
         for line in (p.stderr or "").splitlines():
             self.logger.info(f"  storage-door-cycle: {line}")
         if p.returncode != 0:
+            reason = self._derive_reason(p)
+            if p.returncode == -signal.SIGTERM and self._stopping:
+                reason = 'SIGTERM while the ops agent was shutting down'
+            context = failure_context(p.stdout, reason)
             self.logger.error(f"PRODOPS storage_door_cycle FAILED rc={p.returncode}")
             self._log_action('storage_door_cycle', t0, outcome='error',
-                             reason=self._derive_reason(p),
+                             reason=reason, message=context['summary'], **context,
                              username=str(m.get('created_by') or ''),
                              sublevel='normal', live_default=True,
                              level=logging.ERROR)
@@ -3793,6 +4044,235 @@ class EpicProdOpsAgent(BaseAgent):
                          proposed=proposed,
                          withdrawn=summary.get('withdrawn', 0))
 
+    def _handle_rse_deletion(self, m):
+        """Preview or remove datasets on a disk RSE for the monitor's
+        removal page. One removal per RSE runs at a time: a confirmation
+        that arrives while another request's removal runs on the same RSE
+        is refused on its own request; a repeat of the running one is
+        dropped."""
+        phase = m.get("phase")
+        deletion_id = str(m.get("deletion_id") or "")
+        rse = str(m.get("rse") or "")
+        if phase not in ("preview", "execute") or not deletion_id or not rse:
+            self.logger.error(f"PRODOPS rse_deletion: bad message {m!r}")
+            return
+        if phase == "preview":
+            self._record_rse_deletion_state(
+                deletion_id, 'previewing', start={
+                    'id': deletion_id, 'rse': rse,
+                    'pattern': str(m.get("pattern") or ""),
+                    'requested_by': str(m.get("created_by") or ""),
+                    'confirmed_by': '',
+                    'requested_at': m.get("requested_at") or _utc_now_iso()})
+            self.run_in_background(
+                self._do_rse_deletion, m,
+                dedup_key=f"rse_deletion:preview:{deletion_id}",
+                label=f"rse_deletion preview {rse}")
+            return
+        with self._rse_deletion_lock:
+            running = self._rse_deletion_running.get(rse)
+            if running == deletion_id:
+                self.logger.info(f"PRODOPS rse_deletion: {deletion_id} already removing")
+                return
+            if running or not self.run_in_background(
+                    self._do_rse_deletion, m,
+                    dedup_key=f"rse_deletion:execute:{rse}",
+                    label=f"rse_deletion execute {rse}"):
+                self._record_rse_deletion_state(
+                    deletion_id, 'failed',
+                    diagnostic=f'A removal from {rse} was already in progress; '
+                               'nothing was removed by this request.')
+                self.send_message('/topic/epictopic', {
+                    'msg_type': 'rse_deletion_done', 'deletion_id': deletion_id,
+                    'phase': phase, 'rse': rse, 'status': 'failed', 'ok': False})
+                return
+            self._rse_deletion_running[rse] = deletion_id
+
+    def _do_rse_deletion(self, m):
+        """Run the rse-deletion doer and record its plan or outcomes on the
+        request. A removal's outcomes stream from the doer one line per
+        dataset and are written to the request every
+        RSE_DELETION_PROGRESS_S while it runs, so a timeout or crash keeps
+        what was removed. Completion is pushed on
+        success and failure alike."""
+        phase = m["phase"]
+        rse = str(m.get("rse") or "")
+        try:
+            self._run_rse_deletion(m)
+        finally:
+            if phase == "execute":
+                with self._rse_deletion_lock:
+                    self._rse_deletion_running.pop(rse, None)
+
+    def _run_rse_deletion(self, m):
+        import tempfile
+        phase = m["phase"]
+        deletion_id = str(m["deletion_id"])
+        rse = str(m.get("rse") or "")
+        pattern = str(m.get("pattern") or "")
+        names = list(m.get("names") or [])
+        username = str(m.get("created_by") or "")
+        cmd = [sys.executable, str(RSE_DELETION_SCRIPT), "--phase", phase,
+               "--rse", rse, "--pattern", pattern]
+        names_file = None
+        if phase == "execute":
+            self._record_rse_deletion_state(
+                deletion_id, 'running', confirmed_by=username,
+                confirmed_at=m.get("confirmed_at") or _utc_now_iso())
+            names_file = tempfile.NamedTemporaryFile(
+                'w', suffix='.json', prefix='rse-deletion-', delete=False)
+            json.dump(names, names_file)
+            names_file.close()
+            cmd += ["--names-file", names_file.name]
+        self.logger.info(f"PRODOPS rse_deletion: {phase} {pattern} on {rse}")
+        t0 = time.monotonic()
+        outcomes, final, diagnostic = [], None, ''
+        timed_out = threading.Event()
+
+        def progress():
+            from swf_epicprod.rse_deletion import totals
+            return {'rse': rse, 'pattern': pattern, 'datasets': list(outcomes),
+                    'totals': totals(outcomes, len(names)), 'partial': True}
+
+        # stderr to a file: a pipe read only at the end would block a
+        # chatty doer once its buffer filled.
+        errlog = tempfile.TemporaryFile('w+')
+        try:
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                 stderr=errlog, text=True)
+            killer = threading.Timer(RSE_DELETION_TIMEOUT,
+                                     lambda: (timed_out.set(), p.kill()))
+            killer.start()
+            last_write = time.monotonic()
+            try:
+                for line in p.stdout:
+                    try:
+                        event = json.loads(line)
+                    except ValueError:
+                        continue
+                    kind = event.pop('event', '')
+                    if kind == 'outcome':
+                        outcomes.append(event)
+                        if time.monotonic() - last_write > RSE_DELETION_PROGRESS_S:
+                            self._record_rse_deletion_state(
+                                deletion_id, 'running', result=progress())
+                            last_write = time.monotonic()
+                    elif kind == 'result':
+                        final = event
+                    elif kind == 'error':
+                        diagnostic = str(event.get('error') or 'doer error')
+                p.wait()
+            finally:
+                killer.cancel()
+            errlog.seek(0)
+            for line in (errlog.read() or "").splitlines()[-20:]:
+                self.logger.info(f"  rse-deletion: {line}")
+            if timed_out.is_set():
+                diagnostic = f'timed out after {RSE_DELETION_TIMEOUT}s'
+            elif final is None and not diagnostic:
+                diagnostic = f'doer rc={p.returncode} gave no result'
+        except Exception as exc:                              # noqa: BLE001
+            diagnostic = f'doer could not run: {exc}'
+        finally:
+            errlog.close()
+            if names_file:
+                try:
+                    os.unlink(names_file.name)
+                except OSError:
+                    pass
+        if phase == "preview":
+            status = 'failed' if (diagnostic or final is None) else 'previewed'
+            self._record_rse_deletion_state(
+                deletion_id, status, diagnostic=diagnostic,
+                plan=final if status == 'previewed' else None)
+            totals = (final or {}).get('totals') or {}
+            self._log_action('rse_deletion_preview', t0,
+                             outcome='ok' if status == 'previewed' else 'error',
+                             reason=diagnostic, subject_type='rse',
+                             subject_key=rse, username=username,
+                             sublevel='low', message=pattern,
+                             request_id=deletion_id, pattern=pattern,
+                             status=status,
+                             matched=totals.get('datasets', 0),
+                             eligible=totals.get('eligible', 0),
+                             eligible_bytes=totals.get('eligible_bytes', 0))
+        else:
+            result = final if final is not None and not diagnostic else (
+                progress() if outcomes else None)
+            totals = (result or {}).get('totals') or {}
+            if diagnostic:
+                status = 'failed'
+            else:
+                status = 'partial' if totals.get('failed') else 'done'
+            self._record_rse_deletion_state(
+                deletion_id, status, diagnostic=diagnostic, result=result)
+            removed = [o.get('name') for o in (result or {}).get('datasets') or []
+                       if o.get('outcome') == 'removed']
+            # The action record is the record that stands: who, what and
+            # how much, with the removed datasets named.
+            self._log_action('rse_deletion', t0,
+                             outcome='ok' if status == 'done' else 'error',
+                             reason=diagnostic, subject_type='rse',
+                             subject_key=rse, username=username,
+                             sublevel='high', live_default=True,
+                             level=logging.INFO if status == 'done' else logging.ERROR,
+                             message=f'{pattern}: removed {totals.get("removed", 0)} '
+                                     f'datasets ({totals.get("removed_bytes", 0) / 1e12:.2f} TB) '
+                                     f'from {rse}',
+                             request_id=deletion_id, pattern=pattern,
+                             status=status,
+                             removed=totals.get('removed', 0),
+                             removed_files=totals.get('removed_files', 0),
+                             removed_bytes=totals.get('removed_bytes', 0),
+                             skipped=totals.get('skipped', 0),
+                             failed=totals.get('failed', 0),
+                             datasets=removed)
+        self.send_message('/topic/epictopic', {
+            'msg_type': 'rse_deletion_done', 'deletion_id': deletion_id,
+            'phase': phase, 'rse': rse, 'status': status,
+            'ok': status in ('previewed', 'done')})
+
+    def _record_rse_deletion_state(self, deletion_id, status, *, diagnostic='',
+                                   plan=None, result=None, start=None, **fields):
+        """Write a removal request's working state, the file the monitor's
+        removal page reads ($SWF_TMP_DIR/rse-deletions/<id>.json; no table
+        holds the requests). Replaced whole through a rename, so the page
+        never reads a half-written file. Never raises."""
+        try:
+            directory = Path(SWF_TMP_DIR) / "rse-deletions"
+            directory.mkdir(parents=True, exist_ok=True)
+            path = directory / f"{deletion_id}.json"
+            with self._rse_deletion_lock:
+                record = dict(start or {})
+                if not start:
+                    try:
+                        with open(path) as f:
+                            record = json.load(f)
+                    except (OSError, ValueError):
+                        record = {'id': deletion_id}
+                now = _utc_now_iso()
+                record.update(fields, status=status, updated_at=now)
+                if diagnostic or status != 'running':
+                    record['diagnostic'] = str(diagnostic or '')
+                if plan is not None:
+                    record['plan'] = plan
+                if result is not None:
+                    record['result'] = result
+                if status == 'previewed':
+                    record['previewed_at'] = now
+                if status in ('done', 'partial', 'failed'):
+                    record['completed_at'] = now
+                tmp = path.with_suffix('.tmp')
+                with open(tmp, 'w') as f:
+                    json.dump(record, f)
+                os.chmod(tmp, 0o644)
+                os.replace(tmp, path)
+            return True
+        except Exception as exc:                              # noqa: BLE001
+            self.logger.error(
+                f"PRODOPS rse_deletion state write failed ({deletion_id} {status}): {exc}")
+            return False
+
     def _record_panda_operation_state(self, operation_id, status, *,
                                       diagnostic='', observed_status='',
                                       evidence=None):
@@ -4374,8 +4854,17 @@ class EpicProdOpsAgent(BaseAgent):
                            'reason'):
                 extra[key] = value
         if not message:
-            subject = f"{subject_type}:{subject_key}" if subject_key else ''
-            message = ' '.join(x for x in (str(action), subject, str(outcome)) if x)
+            if action == 'panda_task_operation' and counts.get('operation') == 'reassign':
+                previous = counts.get('previous_site') or 'source unavailable'
+                target = counts.get('site') or 'destination unavailable'
+                state = {'unverified': 'pending', 'ok': 'completed',
+                         'error': 'failed', 'timeout': 'timed out'}.get(outcome, outcome)
+                message = f'Move {subject_key}: {previous} → {target}; {state}'
+                if counts.get('summary'):
+                    message += '; ' + str(counts['summary'])
+            else:
+                subject = f"{subject_type}:{subject_key}" if subject_key else ''
+                message = ' '.join(x for x in (str(action), subject, str(outcome)) if x)
         if reason:
             message = f"{message} — {str(reason)[:300]}"
         try:

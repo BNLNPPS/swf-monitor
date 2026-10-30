@@ -1,0 +1,25 @@
+{% load swf_fmt %}
+{% if tl.measured_units %}
+<p class="mb-1"><strong>Measured saved event processing:</strong>
+  {{ tl.saved_processing_s|fmt_duration }} core-time{% if tl.saved_processing_fraction is not None %},
+  {% widthratio tl.saved_processing_fraction 1 100 %}% of observed core-time{% endif %}.
+  Initialization {{ tl.initialization_s|fmt_duration }};
+  setup and output handling {{ tl.overhead_s|fmt_duration }}.
+  {% if tl.unseparated_s %}A further {{ tl.unseparated_s|fmt_duration }} has no separate processing measurement.{% endif %}
+</p>
+{% if tl.members %}
+<p class="mb-1"><strong>Reconstruction on {{ tl.members }} shared member{{ tl.members|pluralize }}</strong>
+  (their own lanes, on hardware threads apart from the job's cores, so outside the figures above):
+  {{ tl.member_processing_s|fmt_duration }} of reconstruction, {{ tl.member_saved_processing_s|fmt_duration }} of it saved;
+  member startup {{ tl.member_initialization_s|fmt_duration }}.</p>
+{% endif %}
+{% if tl.turnaround_n %}
+<p class="mb-1"><strong>Turnaround between units:</strong>
+  median {{ tl.turnaround_median_s|floatformat:1 }} s, 90th percentile {{ tl.turnaround_p90_s|floatformat:1 }} s,
+  longest {{ tl.turnaround_max_s|floatformat:1 }} s over {{ tl.turnaround_n }} transitions: on each core, from the
+  last measured event of one unit to the first of the next.</p>
+{% endif %}
+{% else %}
+<p class="mb-1 text-muted">Initialization and event processing were not separately measured in this record.
+  Unit occupancy includes initialization, processing and output handling.</p>
+{% endif %}

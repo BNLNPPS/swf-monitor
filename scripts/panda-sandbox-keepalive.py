@@ -9,8 +9,9 @@ The server API provides ``touch_cache_file`` for exactly this: it resets
 the file's modification time so the cleanup passes it by.
 
 This doer touches the sandbox tarball of every task worth keeping
-retryable: epic-VO tasks in a non-final state, plus tasks finished, failed,
-or exhausted within the retention window (SysConfig
+retryable: EIC tasks (epic VO, or working group EIC under any VO —
+production runs as vo=wlcg, workinggroup=EIC) in a non-final state, plus
+tasks finished, failed, or exhausted within the retention window (SysConfig
 ``panda_sandbox_keepalive_final_days``). Each task's tarball name and
 source server come from its stored parameters (``jedi_taskparams``). A
 tarball already purged is retained in the run inventory per task — that
@@ -79,7 +80,9 @@ def _candidate_tasks(final_days):
     cur = connections["panda"].cursor()
     cur.execute(
         "SELECT jeditaskid, status FROM jedi_tasks"
-        " WHERE vo = 'epic'"
+        # Production tasks are vo='wlcg', workinggroup='EIC'; selecting
+        # vo='epic' alone omitted them from sandbox keepalive.
+        " WHERE (vo = 'epic' OR workinggroup = 'EIC')"
         " AND (NOT (status = ANY(%s))"
         "      OR (status = ANY(%s)"
         "          AND modificationtime > now() - make_interval(days => %s)))"
