@@ -27,7 +27,9 @@ running, queued, pilot and hourly outcome figures, cylinders and
 Perlmutter, Google, Compute Canada and JLab follow in two columns.
 Tasks in flight, epicprod-live, Production now and Science data occupy
 the remaining columns. Site panes open by default; Open and Close act
-on every site pane.
+on every site pane. Beside them a note reads "Numeric codes reference
+*Production now* items": the numbers at a site pane's upper right are
+its Production now lines.
 
 Site labels, reasons and phase colours come from the feed's `status_label`,
 `status_reason` and `status_level`. A site's bullet is the feed's
