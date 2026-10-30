@@ -5,11 +5,13 @@
   const trendModel = createEpicTrendModel();
   const compact = value => value >= 1000 ? (value / 1000).toFixed(1) + 'k' : Math.round(value).toLocaleString('en-US');
   const metrics = [
-    // Axis labels in whole percent, period cells in whole numbers without % so they do not overlap (Torre, 2026-10-30).
+    // Period cells short enough not to overlap: efficiency in whole numbers without %, its axis in whole
+    // percent; productive cores in k (Torre, 2026-10-30).
     {key: 'efficiency', label: 'Efficiency', unit: '%', format: value => value.toFixed(1) + '%', ceiling: 100,
       axis: value => Math.round(value) + '%', cell: value => String(Math.round(value))},
     {key: 'core_hours_per_day', label: 'Cores / day', unit: 'cores/day', divisor: 24, format: compact},
-    {key: 'productive_cores', label: 'Productive avg cores', unit: 'cores', format: value => Math.round(value).toLocaleString('en-US')},
+    {key: 'productive_cores', label: 'Productive avg cores', unit: 'cores', format: value => Math.round(value).toLocaleString('en-US'),
+      cell: compact},
   ];
   const metricValue = (metric, row) => row?.[metric.key] == null ? null : row[metric.key] / (metric.divisor || 1);
   const reading = (metric, row, format = metric.format) => {

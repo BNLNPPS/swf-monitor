@@ -40,7 +40,7 @@ def dashboard_document(request):
     return render_to_string('monitor_app/prod_dashboard.html', {
         'dashboard_record': record,
         'dashboard_config': config,
-        'dashboard_version': '20261030-efficiency-axes',
+        'dashboard_version': '20261030-compute-cells',
     }, request=request)
 
 

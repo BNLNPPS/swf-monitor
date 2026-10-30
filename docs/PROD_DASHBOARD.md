@@ -244,8 +244,9 @@ productive average cores, with OSG, Perlmutter and GREX curves in each. Each plo
 overall last-24-hour figure and one overall monthly average since May.
 The current month is marked with an asterisk. The efficiency plot labels
 its axis in whole percent and its monthly figures in whole numbers
-without the percent sign, so they fit side by side; the last-24-hour
-figure and the hover text keep one decimal. All three use ended-job
+without the percent sign, and productive average cores shows its monthly
+figures in thousands (1.1k), so they fit side by side; the last-24-hour
+figures and the hover text keep full precision. All three use ended-job
 walltime times cores, without processor-performance weighting. Efficiency
 is the successful fraction; an Event Service job's successful part is its
 saved-processing share, not its PanDA status (COMPUTE_EFFICIENCY.md, Event
