@@ -4,6 +4,7 @@ from django.shortcuts import render
 
 from ai.assessments import render_assessment_markdown
 from ai.models import Proposal
+from monitor_app.authority import may_act
 from monitor_app.inclusive_filter import Facet, InclusiveFilter
 
 from . import whats_new as wn
@@ -64,6 +65,7 @@ def whats_new(request):
         'open_all': request.GET.get('open') == 'all',
         'proposals': _proposals(),
         'username': username,
+        'may_add': bool(username) and may_act(username),
         'importance_levels': wn.IMPORTANCE,
         'tags_in_use': wn.tags_in_use(),
     })

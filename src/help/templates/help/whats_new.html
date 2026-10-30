@@ -11,7 +11,7 @@ opens the full item with its comments and history.{% if username %} Anyone with 
 can add, edit, comment and vote.{% endif %}</p>
 
 <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
-  {% if username %}<a class="btn btn-primary btn-sm" href="{% url 'help:whats_new_new' %}{% if request.GET.user_view %}?user_view={{ request.GET.user_view }}{% endif %}">New item</a>{% endif %}
+  {% if may_add %}<a class="btn btn-primary btn-sm" href="{% url 'help:whats_new_new' %}{% if request.GET.user_view %}?user_view={{ request.GET.user_view }}{% endif %}">Add</a>{% endif %}
   <button type="button" class="btn btn-secondary btn-sm" id="wn-open-all">Open all</button>
   <button type="button" class="btn btn-secondary btn-sm" id="wn-close-all">Close all</button>
   <span class="ms-2">Order:

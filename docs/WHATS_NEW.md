@@ -99,6 +99,9 @@ the URL: `f` and `match` for the filter, `q` for the search,
 `sort=score` for ordering by score instead of date, and `open=all` for
 the expanded list.
 
+An Add button at the top of the list, shown to people with authority to
+act, opens the New item form.
+
 Proposed items wait in a section at the top of the list, in the AI
 treatment, each with its approve, edit and deny controls.
 
