@@ -185,6 +185,19 @@ distinguishes identified cause, implemented fix, deployment and verified
 recovery, and states any remaining scope limitation. Report new evidence and
 state changes, not every investigative step or routine successful check.
 
+Every post is brief (Torre Wenaus, 2026-10-30: "use BREVITY AND CONCISENESS in
+the postings"). The dashboard and the floor are read at a glance. The title
+says what happened and to what in under ten words. The detail is one or two
+short sentences: the finding, its scope and any open decision with its owner.
+Evidence goes in links and record ids, never in prose; leave out mechanism,
+chronology and arithmetic. A reason recorded for a pause, a feed switch or a
+core limit is shown verbatim as a Production now line (COMP_SNAPSHOT.md,
+Report), so it is one short clause:
+
+    Title:  GREX node n388 out of disk, not the site volume
+    Detail: All 167 disk failures of 41604 were on n388; the node guard
+            excluded it at 02:19 ET. 41604 stays paused (record 7368588).
+
 Daily and weekly assessments must read the channel findings in full for their
 reporting interval and reconcile resolution notices with the same incident.
 Historical losses remain in the accounting after resolution, but must not be

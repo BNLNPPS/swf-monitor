@@ -452,6 +452,10 @@ OSG. Queue identifiers and links retain their canonical names.
     2026-10-28), with the pool and the negotiation cycle's time
     (`site.fair_share.notice`).
 
+  A recorded reason is shown as written, so whoever records one writes a
+  short clause (NOTICE_ROUTING.md, Findings and resolutions; Torre Wenaus,
+  2026-10-30).
+
   Then why the front feeds nothing (the global front is off, each live
   queue's front decision in the words of CONTINUOUS_PRODUCTION.md's
   states and reasons, a feed switch apart), every amber or red health
