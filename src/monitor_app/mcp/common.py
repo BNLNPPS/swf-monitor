@@ -49,9 +49,11 @@ CALLER: contextvars.ContextVar = contextvars.ContextVar('mcp_caller', default=''
 #: declared name cannot go stale.
 AUTHORITY_GUARDED_TOOLS = frozenset({
     'ai_decide_proposal', 'ai_propose_ping', 'epic_register_ai_assessment',
+    'whats_new_propose', 'whats_new_edit',
     'epicprod_live_clear',
     'pcs_dataset_intake', 'pcs_prodtask_intake', 'pcs_prodtask_link_input',
     'panda_segfault_finding_set', 'panda_segfault_reproduce', 'pcs_prodtask_set_status',
+    'pcs_prodtask_unplace',
     'swf_end_execution', 'swf_kill_agent',
     'swf_record_ai_memory',
     'swf_send_message', 'swf_start_user_testbed', 'swf_start_workflow',
@@ -350,6 +352,26 @@ def get_available_tools_list() -> list:
             "name": "ai_decide_proposal",
             "description": "Relay one human's approve/deny on one AI proposal by ref. Only after an explicit human instruction naming the ref; username is the deciding human, who must be on the SysConfig approver list.",
             "parameters": ["ref", "decision", "username", "quality"],
+        },
+        {
+            "name": "whats_new_list",
+            "description": "What's new: the curated list of recent developments in ePIC production, the monitor, PCS, PanDA operations and the testbed, newest first, filterable by tags, importance, shipped date and text; returns the tags in use.",
+            "parameters": ["tags", "importance", "since", "search", "limit", "include_details"],
+        },
+        {
+            "name": "whats_new_get",
+            "description": "One What's new item in full: details, references, links, comments.",
+            "parameters": ["slug"],
+        },
+        {
+            "name": "whats_new_propose",
+            "description": "Propose a What's new item for a development in production; a person approves it on the What's new page.",
+            "parameters": ["title", "summary", "tags", "importance", "shipped", "contact", "comment", "proposer", "details", "refs", "builds_on"],
+        },
+        {
+            "name": "whats_new_edit",
+            "description": "Edit an existing What's new item's fields as the calling person; the previous state is kept as a version.",
+            "parameters": ["slug", "title", "summary", "details", "refs", "tags", "importance", "shipped", "contact", "builds_on", "username"],
         },
         {
             "name": "epicprod_list_actions",

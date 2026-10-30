@@ -113,6 +113,7 @@ The full tool catalog is in [MCP tool reference](MCP_TOOL_REFERENCE.md).
 | AI Memory | `swf_record_ai_memory`, `swf_get_ai_memory` | 2 |
 | AI Content | `epic_register_ai_assessment`, `epic_get_ai_content` | 2 |
 | AI Proposals | `ai_list_proposals`, `ai_decide_proposal` | 2 |
+| What's New | `whats_new_list`, `whats_new_get`, `whats_new_propose`, `whats_new_edit` | 4 |
 | Campaign Status | `epicprod_campaign_status` | 1 |
 | Action Stream | `epicprod_list_actions` | 1 |
 | Storage Record | `epicprod_storage` | 1 |
@@ -122,7 +123,7 @@ The full tool catalog is in [MCP tool reference](MCP_TOOL_REFERENCE.md).
 | PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers`, `panda_segfault_catalog`, `panda_segfault_signature`, `panda_segfault_findings`, `panda_segfault_finding_set`, `panda_segfault_reproduce` | 12 |
 | JLab Rucio | `jlab_rucio_*` — scopes, DIDs, dataset summaries, metadata, content/files, rules/locks, replicas, RSEs, account usage | 14 |
 | BNL Rucio | `bnl_rucio_*` — scopes, DIDs, dataset summaries, metadata, content/files, rules/locks, replicas, RSEs, account usage | 14 |
-| **Total** | | **91** |
+| **Total** | | **95** |
 
 ## Implementation Files
 
@@ -136,6 +137,7 @@ The full tool catalog is in [MCP tool reference](MCP_TOOL_REFERENCE.md).
 | `src/monitor_app/mcp/ai_memory.py` | AI memory tools. |
 | `src/monitor_app/mcp/ai_content.py` | epicprod AI-assessment tools. |
 | `src/monitor_app/mcp/ai_proposals.py` | AI proposal listing and human-decision relay (the bot review flow). |
+| `src/monitor_app/mcp/whats_new.py` | What's new: the list of developments, one item, propose, edit ([WHATS_NEW.md](WHATS_NEW.md)). |
 | `src/monitor_app/mcp/pandamon.py` | PanDA production monitoring tools. |
 | `src/monitor_app/mcp/rucio.py` | Complete JLab and BNL Rucio service bridge; credentials stay local. |
 | `src/monitor_app/auth0.py` | JWT validation with Auth0 JWKS. |

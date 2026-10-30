@@ -21,6 +21,7 @@ ACTION_REF_PREFIXES = {
     'registered_sample': 'rs',  # a registered EVGEN sample nobody asked for
                               # to create; the remedy of a campaign
                               # configuration ping (PINGS.md)
+    'whats_new': 'wn',      # a What's new item (WHATS_NEW.md)
 }
 
 

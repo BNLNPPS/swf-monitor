@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}{{ version.title }} (version {{ version.num }}) - What's new{% endblock %}
+
+{% block content %}
+{% include 'help/_wn_styles.html' %}
+<div class="wn-section">
+<p><a href="{% url 'help:whats_new' %}">What's new</a> /
+   <a href="{% url 'help:whats_new_item' version.slug %}">{{ current_title }}</a></p>
+<h2>{{ version.title }}</h2>
+<p>Version {{ version.num }}: the item as it stood before the edit by {{ version.by }},
+<span data-relative-time="{{ version.at }}" data-relative-time-interval="60"></span>.</p>
+<div class="d-flex flex-wrap align-items-center gap-3 mb-2">
+  <span class="wn-imp wn-imp-{{ version.importance }}">{{ version.importance_label }}</span>
+  <span>Shipped {{ version.shipped }}</span>
+  <span>Contact {{ version.contact }}</span>
+</div>
+<div class="mb-2">{% for t in version.tags %}<span class="wn-tag">{{ t }}</span>{% endfor %}</div>
+<div class="wn-summary mb-3">{{ version.summary }}</div>
+{% if version.details %}<div class="mb-3">{{ version.details_html }}</div>{% endif %}
+{% if version.refs %}<h5>References</h5><div class="mb-3">{{ version.refs_html }}</div>{% endif %}
+{% if version.builds_on %}<h5>Builds on</h5><ul>{% for s in version.builds_on %}<li><a href="{% url 'help:whats_new_item' s %}">{{ s }}</a></li>{% endfor %}</ul>{% endif %}
+{% if username %}<button type="button" class="btn btn-primary btn-sm" id="wn-restore">Restore this version</button>{% endif %}
+</div>
+{% include 'help/_wn_js.html' %}
+<script>
+(function () {
+  const b = document.getElementById('wn-restore');
+  if (!b) return;
+  b.addEventListener('click', async function () {
+    if (!confirm('Restore version {{ version.num }}? The current state is kept as a version.')) return;
+    try {
+      await wn.post('{{ version.slug|escapejs }}/restore/', { version: {{ version.num }} });
+      window.location = wn.itemUrl('{{ version.slug|escapejs }}');
+    } catch (err) { alert(err.message); }
+  });
+})();
+</script>
+{% endblock %}

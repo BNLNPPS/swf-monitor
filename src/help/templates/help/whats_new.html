@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+
+{% block title %}What's new - epicprod{% endblock %}
+
+{% block content %}
+{% include 'help/_wn_styles.html' %}
+<h2>What's new</h2>
+<p class="wn-intro">Developments in the ePIC workflow and production system that users, operators and
+developers should know about, newest first. Each item can be expanded with the arrow; its title
+opens the full item with its comments and history.{% if username %} Anyone with authority to act
+can add, edit, comment and vote.{% endif %}</p>
+
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+  {% if username %}<a class="btn btn-primary btn-sm" href="{% url 'help:whats_new_new' %}{% if request.GET.user_view %}?user_view={{ request.GET.user_view }}{% endif %}">New item</a>{% endif %}
+  <button type="button" class="btn btn-secondary btn-sm" id="wn-open-all">Open all</button>
+  <button type="button" class="btn btn-secondary btn-sm" id="wn-close-all">Close all</button>
+  <span class="ms-2">Order:
+    {% if sort == 'score' %}<a href="#" id="wn-sort-date">newest first</a> | <strong>score</strong>
+    {% else %}<strong>newest first</strong> | <a href="#" id="wn-sort-score">score</a>{% endif %}
+  </span>
+</div>
+
+{% if proposals %}
+<h4 class="mt-3"><span class="ai-attr-text">Proposed items</span> ({{ proposals|length }})</h4>
+<p class="wn-intro">LLM sessions propose items here. Approving adds the item, after any changes made with Edit;
+denying keeps it from being proposed again.</p>
+{% for p in proposals %}
+<div class="wn-proposal ai-fill" data-proposal="{{ p.id }}">
+  <div class="d-flex flex-wrap align-items-baseline gap-2">
+    <span class="wn-imp wn-imp-{{ p.item.importance }}">{{ p.item.importance_label }}</span>
+    <span class="wn-title">{{ p.item.title }}</span>
+    <span>shipped {{ p.item.shipped }}, contact {{ p.item.contact }}</span>
+  </div>
+  <div class="wn-summary">{{ p.item.summary }}</div>
+  <div class="mt-1">{% for t in p.item.tags %}<span class="wn-tag">{{ t }}</span>{% endfor %}</div>
+  {% if p.item.details %}<div class="mt-2">{{ p.item.details_html }}</div>{% endif %}
+  {% if p.item.refs %}<h6 class="mt-2 fw-bold">References</h6><div>{{ p.item.refs_html }}</div>{% endif %}
+  <div class="mt-2"><span class="ai-attr-text">{{ p.ref }}</span> proposed by {{ p.proposer|default:'an AI' }}
+    <span data-relative-time="{{ p.created_at|date:'c' }}"></span>: {{ p.comment }}</div>
+  {% if username %}
+  <div class="wn-edit-box mt-2" style="display:none">{% include 'help/_wn_form.html' with f=p.item %}</div>
+  <div class="mt-2 d-flex gap-2">
+    <button type="button" class="btn btn-success btn-sm wn-p-approve">Approve</button>
+    <button type="button" class="btn btn-dark-green btn-sm wn-p-edit">Edit</button>
+    <button type="button" class="btn btn-secondary btn-sm wn-p-deny">Deny</button>
+  </div>
+  {% endif %}
+</div>
+{% endfor %}
+{% endif %}
+
+{% include 'monitor_app/_inclusive_filter.html' %}
+
+<p><span class="swf-if-shown">{{ rows|length }}</span> of {{ rows|length }} items.</p>
+
+<table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable" id="wn-table">
+  <thead>
+    <tr>
+      <th></th>
+      <th>Shipped</th>
+      <th>Importance</th>
+      <th>Item</th>
+      <th>Tags</th>
+      <th>Contact</th>
+      <th>Score</th>
+      <th>Comments</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for r in rows %}
+    <tr data-if="{{ r.if_attr }}" class="wn-row{% if open_all %} wn-open{% endif %}{% if r.if_hidden %} swf-if-hidden{% endif %}">
+      <td><button type="button" class="wn-toggle" title="Show or hide the details">&#9656;</button></td>
+      <td data-order="{{ r.shipped }}" style="white-space:nowrap">{{ r.shipped }}</td>
+      <td data-order="{{ r.importance_rank }}"><span class="wn-imp wn-imp-{{ r.importance }}">{{ r.importance_label }}</span></td>
+      <td style="min-width: 28em; max-width: 60em;">
+        <a class="wn-title" href="{% url 'help:whats_new_item' r.slug %}{% if request.GET.user_view %}?user_view={{ request.GET.user_view }}{% endif %}">{{ r.title }}</a>
+        <div class="wn-summary">{{ r.summary }}</div>
+        <div class="wn-more">
+          {% if r.details %}{{ r.details_html }}{% endif %}
+          {% if r.refs %}<h6>References</h6>{{ r.refs_html }}{% endif %}
+          {% if r.builds_on_items %}<h6>Builds on</h6><ul>{% for b in r.builds_on_items %}<li><a href="{% url 'help:whats_new_item' b.slug %}">{{ b.title }}</a></li>{% endfor %}</ul>{% endif %}
+          {% if r.developed_in %}<h6>Developed further in</h6><ul>{% for b in r.developed_in %}<li><a href="{% url 'help:whats_new_item' b.slug %}">{{ b.title }}</a></li>{% endfor %}</ul>{% endif %}
+          {% if not r.details and not r.refs and not r.builds_on_items and not r.developed_in %}<div>No further details.</div>{% endif %}
+        </div>
+      </td>
+      <td>{% for t in r.tags %}<span class="wn-tag">{{ t }}</span>{% endfor %}</td>
+      <td>{{ r.contact }}</td>
+      <td data-order="{{ r.score }}">{% include 'help/_wn_vote.html' %}</td>
+      <td data-order="{{ r.comment_count }}"><a href="{% url 'help:whats_new_item' r.slug %}#comments">{{ r.comment_count }}</a>{% if r.awaiting_reply %} <span class="wn-awaiting" title="The newest comment is not from the contact">awaiting reply</span>{% endif %}</td>
+    </tr>
+  {% empty %}
+    <tr><td colspan="8">No items yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+{% include 'help/_wn_js.html' %}
+<script>
+(function () {
+  function setUrl(key, value) {
+    const url = new URL(window.location.href);
+    if (value) url.searchParams.set(key, value); else url.searchParams.delete(key);
+    return url;
+  }
+  document.querySelectorAll('.wn-toggle').forEach(function (b) {
+    b.addEventListener('click', function () { b.closest('tr').classList.toggle('wn-open'); });
+  });
+  function openAll(open) {
+    document.querySelectorAll('tr.wn-row').forEach(function (tr) { tr.classList.toggle('wn-open', open); });
+    window.history.replaceState(null, '', setUrl('open', open ? 'all' : ''));
+  }
+  document.getElementById('wn-open-all').addEventListener('click', function () { openAll(true); });
+  document.getElementById('wn-close-all').addEventListener('click', function () { openAll(false); });
+  const byScore = document.getElementById('wn-sort-score');
+  const byDate = document.getElementById('wn-sort-date');
+  if (byScore) byScore.addEventListener('click', function (e) { e.preventDefault(); window.location = setUrl('sort', 'score'); });
+  if (byDate) byDate.addEventListener('click', function (e) { e.preventDefault(); window.location = setUrl('sort', ''); });
+
+  // Proposals: approve (with any edits as amendments), edit, deny.
+  document.querySelectorAll('.wn-proposal').forEach(function (box) {
+    const id = parseInt(box.dataset.proposal, 10);
+    const editBox = box.querySelector('.wn-edit-box');
+    if (!editBox) return;
+    const original = wn.readForm(editBox);
+    async function decide(decision) {
+      const body = { ids: [id], decision: decision };
+      if (decision === 'approve' && editBox.style.display !== 'none') {
+        const now = wn.readForm(editBox), changed = {};
+        Object.keys(now).forEach(function (k) {
+          if (JSON.stringify(now[k]) !== JSON.stringify(original[k])) changed[k] = now[k];
+        });
+        if (Object.keys(changed).length) body.amendments = { [id]: changed };
+      }
+      try {
+        const tokenEl = document.querySelector('[name=csrfmiddlewaretoken]');
+        const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/proposals/decide/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': tokenEl ? tokenEl.value : '' },
+          body: JSON.stringify(body),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.detail || j.error || ('request failed (' + r.status + ')'));
+        if (j.stale && j.stale.length) alert('An item with this title was added since the proposal; it is withdrawn.');
+        window.location.reload();
+      } catch (err) {
+        editBox.style.display = '';
+        wn.showError(editBox, err);
+      }
+    }
+    box.querySelector('.wn-p-approve').addEventListener('click', function () { decide('approve'); });
+    box.querySelector('.wn-p-deny').addEventListener('click', function () {
+      if (confirm('Deny this proposal? It will not be proposed again.')) decide('deny');
+    });
+    box.querySelector('.wn-p-edit').addEventListener('click', function () {
+      editBox.style.display = editBox.style.display === 'none' ? '' : 'none';
+    });
+  });
+})();
+</script>
+{% endblock %}

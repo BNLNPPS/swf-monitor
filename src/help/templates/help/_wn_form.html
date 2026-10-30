@@ -1,0 +1,38 @@
+<div class="wn-form">
+  <label>Title</label>
+  <div class="wn-hint">One line: what changed, in the reader's terms.</div>
+  <input type="text" class="form-control" data-field="title" value="{{ f.title|default:'' }}">
+  <label>Summary</label>
+  <div class="wn-hint">One to three lines: what it does and who it is for.</div>
+  <textarea class="form-control" rows="3" data-field="summary">{{ f.summary|default:'' }}</textarea>
+  <label>Details</label>
+  <div class="wn-hint">Optional, Markdown: how to use it, what it replaces, limits.</div>
+  <textarea class="form-control" rows="8" data-field="details">{{ f.details|default:'' }}</textarea>
+  <label>References</label>
+  <div class="wn-hint">Optional, Markdown: pages, documents, pull requests.</div>
+  <textarea class="form-control" rows="3" data-field="refs">{{ f.refs|default:'' }}</textarea>
+  <label>Tags</label>
+  <div class="wn-hint">Separated by spaces, e.g. users ops pcs. Tags in use (click to add):
+    {% for t, n in tags_in_use.items %}<a class="wn-tag wn-add-tag" data-tag="{{ t }}">{{ t }}</a>{% empty %}none yet{% endfor %}</div>
+  <input type="text" class="form-control" data-field="tags" value="{{ f.tags_text|default:'' }}">
+  <div class="d-flex flex-wrap gap-4">
+    <div>
+      <label>Importance</label>
+      <select class="form-select" data-field="importance">
+        {% for level in importance_levels %}<option value="{{ level }}"{% if f.importance == level or not f.importance and level == 'routine' %} selected{% endif %}>{{ level|capfirst }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label>Shipped</label>
+      <input type="date" class="form-control" data-field="shipped" value="{% if f.shipped %}{{ f.shipped }}{% else %}{{ today }}{% endif %}">
+    </div>
+    <div>
+      <label>Contact</label>
+      <input type="text" class="form-control" data-field="contact" value="{{ f.contact|default:username }}" placeholder="account of the principal developer">
+    </div>
+  </div>
+  <label>Builds on</label>
+  <div class="wn-hint">Optional: earlier items this one develops further, by their address (the last part of the item's URL), separated by spaces.</div>
+  <input type="text" class="form-control" data-field="builds_on" value="{{ f.builds_on_text|default:'' }}">
+  <div class="wn-error mt-2"></div>
+</div>

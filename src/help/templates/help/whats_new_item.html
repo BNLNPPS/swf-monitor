@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+
+{% block title %}{{ item.title }} - What's new{% endblock %}
+
+{% block content %}
+{% include 'help/_wn_styles.html' %}
+<div class="wn-section">
+<p><a href="{% url 'help:whats_new' %}{% if request.GET.user_view %}?user_view={{ request.GET.user_view }}{% endif %}">What's new</a></p>
+<h2>{{ item.title }}</h2>
+{% if item.archived %}<p class="wn-error">This item is archived: it is not on the What's new list.</p>{% endif %}
+<div class="d-flex flex-wrap align-items-center gap-3 mb-2">
+  <span class="wn-imp wn-imp-{{ item.importance }}">{{ item.importance_label }}</span>
+  <span>Shipped {{ item.shipped }}</span>
+  <span>Contact {{ item.contact }}</span>
+  {% with r=item %}<span>Score {% include 'help/_wn_vote.html' %}</span>{% endwith %}
+</div>
+<div class="mb-2">{% for t in item.tags %}<a class="wn-tag" href="{% url 'help:whats_new' %}?f=tag:{{ t }}">{{ t }}</a>{% endfor %}</div>
+<div class="wn-summary mb-3">{{ item.summary }}</div>
+
+{% if item.details %}<div class="mb-3">{{ item.details_html }}</div>{% endif %}
+{% if item.refs %}<h5>References</h5><div class="mb-3">{{ item.refs_html }}</div>{% endif %}
+{% if item.builds_on_items %}<h5>Builds on</h5><ul>{% for b in item.builds_on_items %}<li><a href="{% url 'help:whats_new_item' b.slug %}">{{ b.title }}</a></li>{% endfor %}</ul>{% endif %}
+{% if item.developed_in %}<h5>Developed further in</h5><ul>{% for b in item.developed_in %}<li><a href="{% url 'help:whats_new_item' b.slug %}">{{ b.title }}</a></li>{% endfor %}</ul>{% endif %}
+
+<p>Added <span data-relative-time="{{ item.created }}" data-relative-time-interval="60"></span>{% if item.created_by %} by {{ item.created_by }}{% endif %}{% if item.origin != 'manual' %} from AI proposal {{ item.origin }}{% endif %}{% if item.versions %}; last edited <span data-relative-time="{{ item.modified }}" data-relative-time-interval="60"></span>{% endif %}.</p>
+
+{% if username %}
+<div class="d-flex gap-2 mb-3">
+  <button type="button" class="btn btn-dark-green btn-sm" id="wn-edit">Edit</button>
+  <button type="button" class="btn btn-danger btn-sm" id="wn-archive">{% if item.archived %}Return to the list{% else %}Archive{% endif %}</button>
+</div>
+<div id="wn-edit-box" style="display:none" class="mb-4">
+  {% include 'help/_wn_form.html' with f=item %}
+  <div class="d-flex gap-2 mt-2">
+    <button type="button" class="btn btn-primary btn-sm" id="wn-save">Save</button>
+    <button type="button" class="btn btn-secondary btn-sm" id="wn-cancel">Cancel</button>
+  </div>
+</div>
+{% endif %}
+
+<h4 id="comments" class="mt-4">Comments and questions ({{ item.comments|length }})</h4>
+{% for c in item.comments %}
+<div class="wn-comment" data-comment="{{ c.id }}">
+  <div class="wn-meta">{{ c.author }}, <span data-relative-time="{{ c.created }}" data-relative-time-interval="60"></span>{% if c.edited %} (edited){% endif %}
+    {% if c.author == username %}<a href="#" class="ms-2 wn-c-edit">edit</a>{% endif %}</div>
+  <div class="wn-c-body">{{ c.html }}</div>
+  {% if c.author == username %}<div class="wn-c-form" style="display:none"><textarea class="form-control" rows="4">{{ c.text }}</textarea>
+    <div class="d-flex gap-2 mt-1"><button type="button" class="btn btn-primary btn-sm wn-c-save">Save</button>
+    <button type="button" class="btn btn-secondary btn-sm wn-c-cancel">Cancel</button></div><div class="wn-error"></div></div>{% endif %}
+</div>
+{% empty %}
+<p>No comments yet.</p>
+{% endfor %}
+{% if username %}
+<div class="wn-form" id="wn-comment-box">
+  <label>Add a comment or question</label>
+  <div class="wn-hint">Markdown. The contact, {{ item.contact }}, is the person to answer.</div>
+  <textarea class="form-control" rows="4" id="wn-comment-text"></textarea>
+  <button type="button" class="btn btn-primary btn-sm mt-2" id="wn-comment-add">Comment</button>
+  <div class="wn-error"></div>
+</div>
+{% endif %}
+
+<h4 class="mt-4">History</h4>
+{% if item.versions %}
+<table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable" data-swf-order="0,desc">
+  <thead><tr><th>Version</th><th>Replaced</th><th>Edit by</th><th>Title then</th><th></th></tr></thead>
+  <tbody>
+  {% for v in item.versions %}
+    <tr>
+      <td>{{ v.num }}</td>
+      <td data-order="{{ v.at }}"><span data-relative-time="{{ v.at }}" data-relative-time-interval="60"></span></td>
+      <td>{{ v.by }}</td>
+      <td><a href="{% url 'help:whats_new_version' item.slug v.num %}">{{ v.title }}</a></td>
+      <td>{% if username %}<button type="button" class="btn btn-primary btn-sm wn-restore" data-version="{{ v.num }}">Restore</button>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p>Each version is the item as it stood before the edit named beside it.</p>
+{% else %}
+<p>Not edited since it was added.</p>
+{% endif %}
+</div>
+
+{% include 'help/_wn_js.html' %}
+<script>
+(function () {
+  const SLUG = '{{ item.slug|escapejs }}';
+  const editBtn = document.getElementById('wn-edit');
+  if (!editBtn) return;
+  const box = document.getElementById('wn-edit-box');
+  editBtn.addEventListener('click', function () { box.style.display = ''; editBtn.style.display = 'none'; });
+  document.getElementById('wn-cancel').addEventListener('click', function () { box.style.display = 'none'; editBtn.style.display = ''; });
+  document.getElementById('wn-save').addEventListener('click', async function () {
+    try { await wn.post(SLUG + '/edit/', wn.readForm(box)); window.location.reload(); }
+    catch (err) { wn.showError(box, err); }
+  });
+  document.getElementById('wn-archive').addEventListener('click', async function () {
+    const archived = {{ item.archived|yesno:'false,true' }};
+    if (archived && !confirm('Archive this item? It leaves the What\'s new list; its page and history remain.')) return;
+    try { await wn.post(SLUG + '/archive/', { archived: archived }); window.location.reload(); }
+    catch (err) { alert(err.message); }
+  });
+  document.querySelectorAll('.wn-restore').forEach(function (b) {
+    b.addEventListener('click', async function () {
+      if (!confirm('Restore version ' + b.dataset.version + '? The current state is kept as a version.')) return;
+      try { await wn.post(SLUG + '/restore/', { version: parseInt(b.dataset.version, 10) }); window.location.reload(); }
+      catch (err) { alert(err.message); }
+    });
+  });
+  const cbox = document.getElementById('wn-comment-box');
+  document.getElementById('wn-comment-add').addEventListener('click', async function () {
+    try { await wn.post(SLUG + '/comment/', { text: document.getElementById('wn-comment-text').value }); window.location.reload(); }
+    catch (err) { wn.showError(cbox, err); }
+  });
+  document.querySelectorAll('.wn-comment').forEach(function (c) {
+    const form = c.querySelector('.wn-c-form');
+    if (!form) return;
+    c.querySelector('.wn-c-edit').addEventListener('click', function (e) {
+      e.preventDefault(); form.style.display = ''; c.querySelector('.wn-c-body').style.display = 'none';
+    });
+    form.querySelector('.wn-c-cancel').addEventListener('click', function () {
+      form.style.display = 'none'; c.querySelector('.wn-c-body').style.display = '';
+    });
+    form.querySelector('.wn-c-save').addEventListener('click', async function () {
+      try { await wn.post('comments/' + c.dataset.comment + '/edit/', { text: form.querySelector('textarea').value }); window.location.reload(); }
+      catch (err) { form.querySelector('.wn-error').textContent = err.message; }
+    });
+  });
+})();
+</script>
+{% endblock %}

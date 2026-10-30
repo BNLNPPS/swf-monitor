@@ -468,6 +468,19 @@ verbatim and re-list.
 
 ---
 
+### What's New
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `whats_new_list` | `tags`, `importance`, `since`, `search`, `limit`, `include_details` | The curated list of recent developments, newest shipped first: each item's slug, title, summary, tags, importance, shipped date, contact, score, comment count, awaiting-reply mark and URL; `tags` keeps items carrying every tag given, `importance` the levels given, `since` items shipped on or after a date. Returns `tags_in_use`, the vocabulary to reuse. |
+| `whats_new_get` | `slug` | One item in full: details and references (Markdown), the items it builds on and those that develop it further, the comment thread, the number of earlier versions. |
+| `whats_new_propose` | `title`, `summary`, `tags`, `importance`, `shipped`, `contact`, `comment`, `proposer`, `details`, `refs`, `builds_on` | Propose an item (AI proposal category `whats_new`, ref prefix `wn`); a person approves it on the What's new page, where any field can be changed first. Requires authority. |
+| `whats_new_edit` | `slug`, `title`, `summary`, `details`, `refs`, `tags`, `importance`, `shipped`, `contact`, `builds_on`, `username` | Edit an item's fields as the calling person; fields left out are unchanged and the previous state is kept as a version. Requires authority. |
+
+See [WHATS_NEW.md](WHATS_NEW.md).
+
+---
+
 ### PanDA Production Monitoring
 
 Tools for querying the ePIC PanDA production database (`doma_panda` schema). Read-only access to jobs and JEDI tasks.
@@ -674,6 +687,7 @@ them and a person reading the page see one history.
 | AI Memory | `swf_record_ai_memory`, `swf_get_ai_memory` | 2 |
 | AI Content | `epic_register_ai_assessment`, `epic_get_ai_content` | 2 |
 | AI Proposals | `ai_list_proposals`, `ai_decide_proposal` | 2 |
+| What's New | `whats_new_list`, `whats_new_get`, `whats_new_propose`, `whats_new_edit` | 4 |
 | Campaign Status | `epicprod_campaign_status` | 1 |
 | Action Stream | `epicprod_list_actions`, `epicprod_live_clear` | 2 |
 | Storage Record | `epicprod_storage` | 1 |
@@ -683,7 +697,7 @@ them and a person reading the page see one history.
 | PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers`, `panda_segfault_catalog`, `panda_segfault_signature`, `panda_segfault_findings`, `panda_segfault_finding_set`, `panda_segfault_reproduce` | 12 |
 | JLab Rucio | `jlab_rucio_*` | 14 |
 | BNL Rucio | `bnl_rucio_*` | 14 |
-| **Total** | | **99** |
+| **Total** | | **103** |
 
 ---
 

@@ -1,0 +1,63 @@
+{% csrf_token %}
+<script>
+(function () {
+  const BASE = '{{ request.META.SCRIPT_NAME }}/help/';
+  window.wn = {
+    base: BASE,
+    itemUrl: function (slug) { return BASE + 'whats-new/' + slug + '/'; },
+    post: async function (path, body) {
+      const tokenEl = document.querySelector('[name=csrfmiddlewaretoken]');
+      const r = await fetch(BASE + 'api/whats-new/' + path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json',
+                   'X-CSRFToken': tokenEl ? tokenEl.value : '' },
+        body: JSON.stringify(body || {}),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || j.error || ('request failed (' + r.status + ')'));
+      return j;
+    },
+    words: function (s) { return (s || '').split(/[\s,]+/).filter(Boolean); },
+    readForm: function (el) {
+      const out = {};
+      el.querySelectorAll('[data-field]').forEach(function (f) {
+        const k = f.dataset.field;
+        out[k] = (k === 'tags' || k === 'builds_on') ? wn.words(f.value) : f.value;
+      });
+      return out;
+    },
+    showError: function (el, err) {
+      const box = el.querySelector('.wn-error');
+      if (box) box.textContent = err.message || String(err);
+      else alert(err.message || String(err));
+    },
+  };
+  // Tags in use, clicked, join the tag field of their form.
+  document.addEventListener('click', function (ev) {
+    const a = ev.target.closest('.wn-add-tag');
+    if (!a) return;
+    ev.preventDefault();
+    const input = a.closest('.wn-form').querySelector('[data-field=tags]');
+    const tags = wn.words(input.value);
+    if (tags.indexOf(a.dataset.tag) < 0) tags.push(a.dataset.tag);
+    input.value = tags.join(' ');
+  });
+  // Votes: the same arrow again withdraws the vote.
+  document.addEventListener('click', async function (ev) {
+    const b = ev.target.closest('.wn-vote button');
+    if (!b) return;
+    const box = b.closest('.wn-vote');
+    const value = parseInt(b.dataset.value, 10);
+    const mine = parseInt(box.dataset.mine || '0', 10);
+    try {
+      const j = await wn.post(box.dataset.slug + '/vote/',
+                              { value: mine === value ? 0 : value });
+      box.dataset.mine = j.my_vote;
+      box.querySelector('.wn-score').textContent = j.score;
+      box.querySelectorAll('button').forEach(function (x) {
+        x.classList.toggle('wn-mine', parseInt(x.dataset.value, 10) === j.my_vote);
+      });
+    } catch (err) { alert('Vote not recorded: ' + err.message); }
+  });
+})();
+</script>

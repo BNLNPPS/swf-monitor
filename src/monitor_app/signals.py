@@ -33,8 +33,11 @@ def get_changed_by() -> str:
 
 
 # Data keys that change every save (e.g. engine heartbeats) and don't
-# warrant a new version — match tjai's noise-filter list.
-_OPERATIONAL_KEYS = {'last_seen', 'last_run', 'retry_count', 'cooldown_until'}
+# warrant a new version — match tjai's noise-filter list. `votes` is the
+# What's new per-person vote record (docs/WHATS_NEW.md): a vote is not an
+# edit.
+_OPERATIONAL_KEYS = {'last_seen', 'last_run', 'retry_count', 'cooldown_until',
+                     'votes'}
 
 
 def _data_substantive(old: dict | None, new: dict | None) -> bool:

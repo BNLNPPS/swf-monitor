@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}New item - What's new{% endblock %}
+
+{% block content %}
+{% include 'help/_wn_styles.html' %}
+<div class="wn-section">
+<p><a href="{% url 'help:whats_new' %}">What's new</a></p>
+<h2>New What's new item</h2>
+{% if username %}
+<div id="wn-new">
+  {% include 'help/_wn_form.html' with f=None %}
+  <div class="d-flex gap-2 mt-3">
+    <button type="button" class="btn btn-primary btn-sm" id="wn-create">Add item</button>
+    <a class="btn btn-secondary btn-sm" href="{% url 'help:whats_new' %}">Cancel</a>
+  </div>
+</div>
+{% else %}
+<p>Sign in to add an item.</p>
+{% endif %}
+</div>
+{% include 'help/_wn_js.html' %}
+<script>
+(function () {
+  const b = document.getElementById('wn-create');
+  if (!b) return;
+  const box = document.getElementById('wn-new');
+  b.addEventListener('click', async function () {
+    try {
+      const j = await wn.post('create/', wn.readForm(box));
+      window.location = wn.itemUrl(j.slug);
+    } catch (err) { wn.showError(box, err); }
+  });
+})();
+</script>
+{% endblock %}

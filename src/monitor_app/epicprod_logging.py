@@ -160,6 +160,16 @@ ACTION_DEFAULTS = {
                        "raises ahead of its due date, on the alarm "
                        "dashboard.",
     },
+    # Help menu: What's new (docs/WHATS_NEW.md)
+    'whats_new_create': {
+        'sublevel': 'normal', 'live': False,
+        'description': "Add an item to What's new, the list of developments "
+                       "users, operators and developers should know about.",
+    },
+    'whats_new_archive': {
+        'sublevel': 'normal', 'live': False,
+        'description': "Take a What's new item off the list, or return it.",
+    },
     'ping_fulfil': {
         'sublevel': 'normal', 'live': True,
         'description': "Record a ping's obligation as fulfilled; its alarm "

@@ -72,6 +72,8 @@ DECISION_FIELDS = {
                         'jug_xl_tag', 'rucio_rse', 'ping_title'),
     'registered_sample': ('did', 'campaign', 'physics', 'evgen', 'background',
                           'sample', 'physics_tag', 'pc'),
+    'whats_new': ('title', 'summary', 'details', 'refs', 'tags', 'importance',
+                  'shipped', 'contact', 'builds_on'),
 }
 
 
@@ -794,6 +796,109 @@ def _decide_registered_samples(rows, decision, decided_by, quality,
     return approved, denied, stale
 
 
+def propose_whats_new(items, *, proposer='', batch_id='', created_by=''):
+    """Propose What's new items (WHATS_NEW.md): creation subjects keyed on
+    the slug the title gives. ``items``: [{title, summary, details, refs,
+    tags, importance, shipped, contact, builds_on, comment}]. Validation is
+    the executor's own (``help.whats_new.validate_new``); the precondition
+    is that no item holds the slug. Denial memory and identical-pending
+    checks follow the subsystem conventions; one ``proposal_created``
+    event per call."""
+    from help import whats_new
+    from monitor_app.epicprod_logging import log_epicprod_action
+
+    if not items:
+        raise ServiceError('no items supplied')
+    now = _timezone.now()
+    proposed, noop, denied_skips, invalid = [], [], [], []
+    with transaction.atomic():
+        for item in items:
+            comment = (item.get('comment') or '').strip()
+            label = (item.get('title') or '').strip() or '(missing title)'
+            if not comment:
+                invalid.append(f'{label}: a comment (why, with the evidence) '
+                               f'is required')
+                continue
+            try:
+                clean = whats_new.validate_new(
+                    {k: item.get(k) for k in whats_new.FIELDS})
+            except whats_new.WhatsNewError as e:
+                invalid.append(f'{label}: {e.detail}')
+                continue
+            slug = clean.pop('slug')
+            if whats_new.get_entry(slug) is not None:
+                invalid.append(f'{label}: an item with this title exists '
+                               f'({slug}); edit it instead')
+                continue
+            payload = clean
+            outcome = _upsert_proposal(
+                'whats_new',
+                Proposal.objects.filter(action='whats_new', subject_key=slug),
+                payload, comment, now,
+                lambda h: Proposal.objects.create(
+                    action='whats_new', subject_type='whats_new',
+                    subject_key=slug, counterpart_key=payload['shipped'],
+                    payload=payload, comment=comment, proposer=proposer or '',
+                    scan_version=1, batch_id=batch_id or '',
+                    executor='service', precondition={'existing': None},
+                    input_hash=h, created_by=created_by or ''))
+            {'denied': denied_skips, 'refreshed': noop,
+             'proposed': proposed}[outcome].append(slug)
+    log_epicprod_action(
+        'web', 'proposal_created', username=created_by,
+        sublevel='low', live_default=False,
+        message=(f"AI proposal: {len(proposed)} What's new item(s) "
+                 f'[{batch_id or "no batch"}]'),
+        proposed=len(proposed), noop=len(noop), denied=len(denied_skips),
+        invalid=len(invalid), proposer=proposer or '',
+        batch_id=batch_id or '', category='whats_new',
+        url='/help/whats-new/')
+    return {'proposed': proposed, 'noop': noop, 'denied': denied_skips,
+            'invalid': invalid}
+
+
+def _decide_whats_new(rows, decision, decided_by, quality, amendments, now):
+    """Decide pending What's new proposals: a slug taken since the
+    proposal makes it stale; a reviewer's changes to any field are
+    recorded on the payload under ``amended`` and the executor creates
+    the amended item, one origin-stamped event each."""
+    from help import whats_new
+
+    amendments = {str(k): v for k, v in (amendments or {}).items()}
+    stale, denied, approved = [], [], []
+    for row in rows:
+        with transaction.atomic():
+            if whats_new.get_entry(row.subject_key) is not None:
+                _mark_decided(row, 'stale', decided_by, now)
+                stale.append(row.ref)
+                continue
+            if decision == 'deny':
+                _mark_decided(row, 'denied', decided_by, now, quality)
+                denied.append(row.ref)
+                continue
+            payload = dict(row.payload or {})
+            amended = amendments.get(str(row.pk)) or {}
+            changes = {k: v for k, v in amended.items()
+                       if k in whats_new.FIELDS and v != payload.get(k)}
+            fields = {**{k: payload.get(k) for k in whats_new.FIELDS},
+                      **changes}
+            if changes:
+                payload['amended'] = changes
+                row.payload = payload
+                row.save(update_fields=['payload'])
+            origin = {'kind': 'ai_proposal', 'ref': row.ref,
+                      'proposer': row.proposer, 'batch_id': row.batch_id,
+                      'proposed_at': row.created_at.isoformat()}
+            try:
+                _entry, log_id = whats_new.item_create(
+                    fields, changed_by=decided_by, origin=origin)
+            except whats_new.WhatsNewError as e:
+                raise ServiceError(f'{row.ref}: {e.detail}', status=e.status)
+            _mark_decided(row, 'executed', decided_by, now, quality, log_id)
+            approved.append(row.ref)
+    return approved, denied, stale
+
+
 def _mark_decided(row, status, decided_by, now, quality=None, log_id=None):
     row.status = status
     row.decided_by = decided_by
@@ -1002,7 +1107,7 @@ def proposal_decide(composed_names, decision, *, decided_by='',
 
     pending = Proposal.objects.filter(
         action__in=('propagation', 'campaign_plan', 'ping', 'ping_fulfil',
-                    'standard_config', 'registered_sample'),
+                    'standard_config', 'registered_sample', 'whats_new'),
         status='proposed')
     selector = Q()
     if names:
@@ -1017,6 +1122,7 @@ def proposal_decide(composed_names, decision, *, decided_by='',
     ping_rows = [r for r in all_rows if r.action in ('ping', 'ping_fulfil')]
     config_rows = [r for r in all_rows if r.action == 'standard_config']
     sample_rows = [r for r in all_rows if r.action == 'registered_sample']
+    news_rows = [r for r in all_rows if r.action == 'whats_new']
     found_names = {r.subject_key for r in all_rows}
     no_proposal = [n for n in names if n not in found_names]
 
@@ -1111,6 +1217,13 @@ def proposal_decide(composed_names, decision, *, decided_by='',
         approved += rs_approved
         denied += rs_denied
         stale += rs_stale
+
+    if news_rows:
+        wn_approved, wn_denied, wn_stale = _decide_whats_new(
+            news_rows, decision, decided_by, quality, amendments, now)
+        approved += wn_approved
+        denied += wn_denied
+        stale += wn_stale
 
     if decision == 'deny':
         log_epicprod_action(

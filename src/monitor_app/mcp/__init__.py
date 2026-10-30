@@ -50,8 +50,9 @@ production catalog and physics configurations (pcs_*); the production
 action stream and storage record (epicprod_*); Snapper state history
 (snapper_*); both Rucio catalogs (bnl_rucio_*, jlab_rucio_*); the
 streaming testbed's agents, workflows, runs, logs and messages, and the
-caller's own testbed (swf_*); and AI content and proposals
-(epic_get_ai_content, ai_list_proposals, ai_propose_ping).
+caller's own testbed (swf_*); AI content and proposals
+(epic_get_ai_content, ai_list_proposals, ai_propose_ping); and What's
+new, the curated list of recent developments (whats_new_*).
 
 Reading needs only the sign-in. A tool that changes the system needs
 authority, membership of the eic GitHub organization or rights granted on
@@ -59,6 +60,12 @@ the monitor; without it the tool refuses and names the joining procedure.
 ai_propose_ping proposes a dated obligation in natural language; it takes
 effect only when a person accepts it on the alarm dashboard, where
 decisions on proposals are made.
+
+What's new: whats_new_list answers "what is new" and "recent
+developments". When a change that users, operators or developers should
+know about is in production and not on the list, propose it with
+whats_new_propose (its shipped date, tags, importance and contact); a
+person approves it on the What's new page.
 
 The tool catalog is tools/list; call it rather than looking for a listing
 tool. The human-facing outline is
@@ -138,6 +145,14 @@ from .ai_content import (
 )
 
 # AI proposal tools
+
+# What's new: the curated list of developments (docs/WHATS_NEW.md)
+from .whats_new import (
+    whats_new_list,
+    whats_new_get,
+    whats_new_propose,
+    whats_new_edit,
+)
 
 # Domain tools and assessment subject types, hosted in swf-epicprod.
 # The import is the registration shim: loading the package registers its
@@ -232,6 +247,11 @@ __all__ = [
     # AI Proposals
     'ai_list_proposals',
     'ai_decide_proposal',
+    # What's new
+    'whats_new_list',
+    'whats_new_get',
+    'whats_new_propose',
+    'whats_new_edit',
     # PanDA Monitor
     'panda_list_jobs',
     'panda_diagnose_jobs',
