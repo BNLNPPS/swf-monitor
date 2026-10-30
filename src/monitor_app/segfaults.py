@@ -1627,8 +1627,9 @@ def _refresh_frame(merged, members, sig=None):
     for m in members:
         tasks.extend(m.tasks or [])
         for s in (m.sites or []):
-            sites[s['site']]['crashes'] += s.get('crashes', 0)
-            sites[s['site']]['hosts'] += s.get('hosts', 0)
+            sites[s['site']]['crashes'] += s.get('crashes') or 0
+            # An Event Service member names no hosts (its units' records do not).
+            sites[s['site']]['hosts'] += s.get('hosts') or 0
     merged.tasks = tasks
     merged.sites = sorted(({'site': k, **v} for k, v in sites.items()),
                           key=lambda s: -s['crashes'])
