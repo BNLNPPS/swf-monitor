@@ -231,8 +231,9 @@ if [[ "$DO_UI" == true ]]; then
     rsync "${RSYNC_ARGS[@]}" "$CANARY_ROOT/canary/store/templates/" "$TARGET_CANARY/store/templates/"
 fi
 
-log "Syncing ai lightweight paths..."
+log "Syncing ai and help lightweight paths..."
 rsync "${RSYNC_ARGS[@]}" "${AI_EXCLUDES[@]}" "$SRC_DIR/ai/" "$TARGET_SRC/ai/"
+rsync "${RSYNC_ARGS[@]}" "${AI_EXCLUDES[@]}" "$SRC_DIR/help/" "$TARGET_SRC/help/"
 
 if [[ "$DO_UI" == true ]]; then
     log "Syncing project-level templates and URL routing..."
