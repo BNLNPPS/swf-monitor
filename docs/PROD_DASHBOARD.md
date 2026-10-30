@@ -57,10 +57,9 @@ The Computing now, Work available and Campaign blocks consume
 `report.header`: display-ready values, labels, colours, details and links.
 The room places the same three blocks beneath the Production now title.
 
-The right column is bounded by the visible viewport using the existing
-screen-height measurement. Production now wraps its notices without growing
-to fill unused space. When the notices would push Storage off screen, their
-body scrolls within the available height. Storage follows directly below.
+Production now wraps its notices and grows downward with them, never
+scrolling (Torre Wenaus, 2026-10-30); the right column is not bounded by
+the viewport, and Storage follows directly below.
 Notices use 10-pixel text, and every notice is accessible. A notice has
 no hover text, which would repeat the line (Torre Wenaus, 2026-10-28:
 "they are noise"). There is no separate inactive-site footer.
