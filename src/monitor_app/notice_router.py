@@ -84,7 +84,7 @@ def _compose(row, extra):
     else:
         # The live screen's title rule: what happened and to what, never the
         # action's name alone (Torre Wenaus, 2026-10-29: "ditto for capcom").
-        title, _detail = board_text(row.message, dict(extra, action=action))
+        title, _detail = board_text(getattr(row, 'message', '') or '', dict(extra, action=action))
     outcome = str(extra.get('outcome') or '')
     detail = str(extra.get('narration') or extra.get('reason')
                  or extra.get('summary') or '')
