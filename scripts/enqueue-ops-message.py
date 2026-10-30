@@ -24,11 +24,13 @@ import stomp
 
 OPS_QUEUE = os.environ.get("EPICPROD_OPS_QUEUE", "/queue/epicprod.ops")
 
-# The broker's ssl-stomp acceptor drops any TLS handshake slower than its
-# 10-second limit (Artemis AMQ224088), which happens transiently every day;
-# persistent clients ride through on their reconnect logic, so a one-shot
-# enqueue must retry through them or a scheduled trigger silently misses
-# its slot (the 2026-07-24 catalog_sync miss).
+# The broker's ssl-stomp acceptor closes a connection that sends no STOMP
+# frame within 10 seconds (Artemis AMQ224088). stomp.py before 9.0 read and
+# wrote one TLS 1.3 socket from two threads, and the CONNECT written while
+# the broker's session tickets were being read was sometimes lost (about 4%
+# of connects here); 9.0 does all TLS I/O on one thread. The retries remain
+# for any transient broker fault, so a scheduled trigger does not silently
+# miss its slot (the 2026-07-24 catalog_sync miss).
 RETRY_DELAYS = (15, 30, 60)
 
 
