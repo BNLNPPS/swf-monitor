@@ -757,8 +757,11 @@
             <div class="dropdown-content">
                 <a href="https://epic-wfms-docs.readthedocs.io/en/latest/" target="_blank" rel="noopener"
                    title="ePIC workflow and production system documentation (readthedocs)">Documentation</a>
+                {# Internal face only until swf-remote proxies help/ (EXTERNAL_ACCESS.md); without that route it is a 404 on epic-devcloud.org. #}
+                {% if not is_tunnel %}
                 <a href="{% url 'help:whats_new' %}{% if user_view %}?user_view=1{% endif %}"
                    title="Developments users, operators and developers should know about, newest first">What's new</a>
+                {% endif %}
             </div>
         </div>
         <div class="dropdown" id="nav-system">
