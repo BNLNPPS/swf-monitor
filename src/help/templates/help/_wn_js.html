@@ -53,7 +53,8 @@
       const j = await wn.post(box.dataset.slug + '/vote/',
                               { value: mine === value ? 0 : value });
       box.dataset.mine = j.my_vote;
-      box.querySelector('.wn-score').textContent = j.score;
+      box.querySelector('.wn-up').textContent = j.up;
+      box.querySelector('.wn-down').textContent = j.down;
       box.querySelectorAll('button').forEach(function (x) {
         x.classList.toggle('wn-mine', parseInt(x.dataset.value, 10) === j.my_vote);
       });

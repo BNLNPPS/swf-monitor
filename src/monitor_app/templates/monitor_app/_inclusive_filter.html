@@ -16,12 +16,12 @@ server URLs, so a middle click or a page without script still works.
   .swf-if .swf-if-box.swf-if-active { padding: .35em .8em; border-radius: .5em; border: 2px solid #d39e00; background-color: rgba(255, 193, 7, .12); }
   .swf-if-restriped > tbody > tr.swf-if-odd > * { --bs-table-accent-bg: var(--bs-table-striped-bg); color: var(--bs-table-striped-color); }
 </style>
-<div class="card mb-3 swf-if" data-if-param="{{ inclusive_filter.param }}" data-if-narrow-param="{{ inclusive_filter.narrow_param }}" data-if-search-param="{{ inclusive_filter.search_param }}" data-if-match-param="{{ inclusive_filter.match_param }}" data-if-match="{{ inclusive_filter.match }}" data-if-noun="{{ inclusive_filter.noun }}" data-if-legacy="{{ inclusive_filter.legacy_json }}" data-if-selections="{{ inclusive_filter.selections_json }}" data-if-narrow="{{ inclusive_filter.narrow_json }}">
+<div class="card mb-3 swf-if" data-if-param="{{ inclusive_filter.param }}" data-if-narrow-param="{{ inclusive_filter.narrow_param }}" data-if-search-param="{{ inclusive_filter.search_param }}" data-if-match-param="{{ inclusive_filter.match_param }}" data-if-match="{{ inclusive_filter.match }}"{% if inclusive_filter.match_fixed %} data-if-match-fixed="1"{% endif %} data-if-noun="{{ inclusive_filter.noun }}" data-if-legacy="{{ inclusive_filter.legacy_json }}" data-if-selections="{{ inclusive_filter.selections_json }}" data-if-narrow="{{ inclusive_filter.narrow_json }}">
     <div class="card-body">
-        <div class="mb-2"><strong>Match:</strong>
+        {% if not inclusive_filter.match_fixed %}<div class="mb-2"><strong>Match:</strong>
             <a href="{{ inclusive_filter.match_any_url }}" data-if-match-mode="any" class="ms-1 me-1{% if inclusive_filter.match == 'any' %} swf-if-on{% endif %}">any</a>|<a href="{{ inclusive_filter.match_all_url }}" data-if-match-mode="all" class="ms-1 me-3{% if inclusive_filter.match == 'all' %} swf-if-on{% endif %}">all</a>
             <span><strong>Match any:</strong> each selection adds the {{ inclusive_filter.noun }} that carry it. <strong>Match all:</strong> only {{ inclusive_filter.noun }} carrying every selection are shown.</span>
-        </div>
+        </div>{% endif %}
         <div class="mb-2 d-flex align-items-center gap-2">
             <strong>Search:</strong>
             <input type="search" class="form-control form-control-sm swf-if-search" style="max-width: 24em;" value="{{ inclusive_filter.search }}" placeholder="text in any column" title="Rows whose text contains this, in any column; applies together with the selections below">
@@ -67,6 +67,8 @@ server URLs, so a middle click or a page without script still works.
   const NOUN = root.dataset.ifNoun || 'rows';
   // any: a row shows when it carries any selection; all: every selection.
   let match = root.dataset.ifMatch === 'all' ? 'all' : 'any';
+  // A page with one mode fixes it: no Match control, no match parameter.
+  const MATCH_FIXED = root.dataset.ifMatchFixed === '1';
   const LEGACY = JSON.parse(root.dataset.ifLegacy || '[]');
   let selections = JSON.parse(root.dataset.ifSelections || '[]');
   // The frame a link opened the page with: pairs every row must carry.
@@ -108,7 +110,7 @@ server URLs, so a middle click or a page without script still works.
     url.searchParams.delete(MATCH_PARAM);
     if (narrow.length) url.searchParams.set(NARROW_PARAM, encode(narrow));
     if (sel.length) url.searchParams.set(PARAM, encode(sel));
-    if (mode === 'all') url.searchParams.set(MATCH_PARAM, 'all');
+    if (mode === 'all' && !MATCH_FIXED) url.searchParams.set(MATCH_PARAM, 'all');
     if (search) url.searchParams.set(SEARCH_PARAM, search);
     return url;
   }
@@ -214,7 +216,7 @@ server URLs, so a middle click or a page without script still works.
       selections: selections.map(function (p) { return p.slice(); }),
       query: [narrow.length ? NARROW_PARAM + '=' + encodeURIComponent(encode(narrow)) : '',
               selections.length ? PARAM + '=' + encodeURIComponent(encode(selections)) : '',
-              selections.length && match === 'all' ? MATCH_PARAM + '=all' : '']
+              selections.length && match === 'all' && !MATCH_FIXED ? MATCH_PARAM + '=all' : '']
              .filter(Boolean).join('&'),
       shown: shown,
     }}));

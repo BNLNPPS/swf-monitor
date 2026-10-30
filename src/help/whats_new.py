@@ -96,6 +96,14 @@ def normalize_tags(raw):
     return sorted(tags)
 
 
+def contacts():
+    """The accounts an item's contact may name: people known here who hold
+    the operations role (docs/AUTHORITY.md), sorted."""
+    from monitor_app.authority import all_authority, is_ops, may_act
+    return sorted(u for u, record in all_authority().items()
+                  if is_ops(record) and may_act(record))
+
+
 def _validate(fields, *, current=None, changed_by=''):
     """The item's data after applying ``fields`` to ``current`` (None for
     a new item). Every rule an item obeys is checked here."""
@@ -139,6 +147,10 @@ def _validate(fields, *, current=None, changed_by=''):
     contact = str(out['contact'] or changed_by or '').strip()
     if not contact:
         raise WhatsNewError('a contact (the principal developer) is required')
+    if contact not in contacts():
+        raise WhatsNewError(
+            f'contact {contact!r}: the contact is an account with the operations '
+            f'role, one of {", ".join(contacts())}')
     builds_on = out['builds_on'] or []
     if isinstance(builds_on, str):
         builds_on = re.split(r'[,\s]+', builds_on)
@@ -270,7 +282,7 @@ def item_archive(slug, *, changed_by, archived=True):
 
 def vote(slug, *, username, value):
     """Set the person's vote on an item: +1, -1, or 0 to withdraw.
-    Returns (score, the person's vote)."""
+    Returns (up votes, down votes, the person's vote)."""
     if not username:
         raise WhatsNewError('an authenticated person is required', status=403)
     try:
@@ -290,7 +302,14 @@ def vote(slug, *, username, value):
         data['votes'] = votes
         entry.data = data
         entry.save(update_fields=['data'])
-    return sum(votes.values()), votes.get(username, 0)
+    up, down = _tally(votes)
+    return up, down, votes.get(username, 0)
+
+
+def _tally(votes):
+    """(up votes, down votes); there is no combined score."""
+    values = list(votes.values())
+    return values.count(1), values.count(-1)
 
 
 def comment_add(slug, text, *, author):
@@ -364,8 +383,8 @@ def _row(entry, comments, developed_in, username=''):
         'contact': contact,
         'builds_on': list(data.get('builds_on') or []),
         'developed_in': developed_in,
-        'score': sum(votes.values()),
-        'votes': len(votes),
+        'up': _tally(votes)[0],
+        'down': _tally(votes)[1],
         'my_vote': votes.get(username, 0) if username else 0,
         'comment_count': len(comments),
         'awaiting_reply': bool(last and last_author and last_author != contact),
@@ -379,7 +398,7 @@ def _row(entry, comments, developed_in, username=''):
 
 def list_items(*, username='', include_archived=False):
     """Every item as a dict, newest shipped first, with comment counts,
-    scores, and the links in both directions."""
+    up and down votes, and the links in both directions."""
     qs = _items()
     if not include_archived:
         qs = qs.filter(archived=False)

@@ -34,9 +34,9 @@ earlier `pcs/user/` redirects there). It has no pulldown, and the mode
 flipper is not shown. The menu is Requests (Request form, Request
 list), Campaign (Current campaign, Campaign Catalog),
 Find data, then a wider gap and Full epicprod view, which leaves the
-user view. At the right, the Help menu (Documentation, the WFMS
-documentation on readthedocs) stands before the account name and
-Logout, as it stands before System in the full view. The System menu
+user view. At the right, the Help menu (What's new, then Workflow management
+doc, the WFMS documentation on readthedocs) stands before the account
+name and Logout, as it stands before System in the full view. The System menu
 and the built-at line are not shown.
 
 The conventions: white is for the title or a major section label,

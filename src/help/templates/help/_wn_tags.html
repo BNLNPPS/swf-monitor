@@ -1,0 +1,1 @@
+{% for t in tags %}{% if not forloop.first %}<span class="wn-tag-sep"> &bull; </span>{% endif %}<a class="wn-tag" data-tag="{{ t }}" href="{% url 'help:whats_new' %}?f=tag:{{ t|urlencode }}{% if request.GET.user_view %}&amp;user_view={{ request.GET.user_view }}{% endif %}" title="Show the items tagged {{ t }}">{{ t }}</a>{% endfor %}

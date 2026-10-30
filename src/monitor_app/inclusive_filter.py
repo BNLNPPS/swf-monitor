@@ -92,14 +92,20 @@ class InclusiveFilter:
     ``match=all``; or none is made), and contains the search text. A
     page's former one-per-facet parameters meant an intersection, so they
     are read into the frame. ``noun`` names what a row is on the page
-    ("configurations"), for the text the include shows."""
+    ("configurations"), for the text the include shows. ``match`` fixes
+    the mode for a page that has only one: the include then shows no
+    Match control and the URLs carry no ``match`` parameter."""
 
-    def __init__(self, query, param=PARAM, legacy=None, noun='rows'):
+    def __init__(self, query, param=PARAM, legacy=None, noun='rows', match=None):
         self.param = param
         self.legacy = dict(legacy or {})
         self.noun = noun
-        self.match = (MATCH_ALL if query and (query.get(MATCH_PARAM) or '').strip() == MATCH_ALL
-                      else MATCH_ANY)
+        if match not in (None, MATCH_ANY, MATCH_ALL):
+            raise ValueError(f'match is {MATCH_ANY!r} or {MATCH_ALL!r}, not {match!r}')
+        self.match_fixed = match is not None
+        self.match = match or (
+            MATCH_ALL if query and (query.get(MATCH_PARAM) or '').strip() == MATCH_ALL
+            else MATCH_ANY)
         self.search = ((query.get(SEARCH_PARAM) or '').strip()
                        if query else '')
         self.selections = []
@@ -150,7 +156,7 @@ class InclusiveFilter:
             out[NARROW_PARAM] = self.encode(self.narrow)
         if self.selections:
             out[self.param] = self.encode()
-            if self.match == MATCH_ALL:
+            if self.match == MATCH_ALL and not self.match_fixed:
                 out[MATCH_PARAM] = MATCH_ALL
         return out
 
@@ -223,7 +229,7 @@ class InclusiveFilter:
             params[NARROW_PARAM] = self.encode(narrow)
         if selections:
             params[self.param] = self.encode(selections)
-        if match == MATCH_ALL:
+        if match == MATCH_ALL and not self.match_fixed:
             params[MATCH_PARAM] = MATCH_ALL
         encoded = params.urlencode()
         return f'{request.path}?{encoded}' if encoded else request.path
@@ -314,6 +320,7 @@ class InclusiveFilter:
             'param': self.param,
             'narrow_param': NARROW_PARAM,
             'match': self.match,
+            'match_fixed': self.match_fixed,
             'match_param': MATCH_PARAM,
             'match_any_url': self.match_url(request, MATCH_ANY),
             'match_all_url': self.match_url(request, MATCH_ALL),

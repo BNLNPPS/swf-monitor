@@ -13,7 +13,7 @@
   <textarea class="form-control" rows="3" data-field="refs">{{ f.refs|default:'' }}</textarea>
   <label>Tags</label>
   <div class="wn-hint">Separated by spaces, e.g. users ops pcs. Tags in use (click to add):
-    {% for t, n in tags_in_use.items %}<a class="wn-tag wn-add-tag" data-tag="{{ t }}">{{ t }}</a>{% empty %}none yet{% endfor %}</div>
+    {% for t, n in tags_in_use.items %}{% if not forloop.first %}<span class="wn-tag-sep"> &bull; </span>{% endif %}<a class="wn-tag wn-add-tag" data-tag="{{ t }}">{{ t }}</a>{% empty %}none yet{% endfor %}</div>
   <input type="text" class="form-control" data-field="tags" value="{{ f.tags_text|default:'' }}">
   <div class="d-flex flex-wrap gap-4">
     <div>
@@ -28,7 +28,12 @@
     </div>
     <div>
       <label>Contact</label>
-      <input type="text" class="form-control" data-field="contact" value="{{ f.contact|default:username }}" placeholder="account of the principal developer">
+      {% with chosen=f.contact|default:username %}
+      <select class="form-select" data-field="contact" title="The principal developer, the person to ask: an account with the operations role">
+        {% if chosen not in contacts %}<option value="" selected>Choose the contact</option>{% endif %}
+        {% for c in contacts %}<option value="{{ c }}"{% if c == chosen %} selected{% endif %}>{{ c }}</option>{% endfor %}
+      </select>
+      {% endwith %}
     </div>
   </div>
   <label>Builds on</label>

@@ -15,7 +15,7 @@
   <span>Shipped {{ version.shipped }}</span>
   <span>Contact {{ version.contact }}</span>
 </div>
-<div class="mb-2">{% for t in version.tags %}<span class="wn-tag">{{ t }}</span>{% endfor %}</div>
+<div class="mb-2">{% include 'help/_wn_tags.html' with tags=version.tags %}</div>
 <div class="wn-summary mb-3">{{ version.summary }}</div>
 {% if version.details %}<div class="mb-3">{{ version.details_html }}</div>{% endif %}
 {% if version.refs %}<h5>References</h5><div class="mb-3">{{ version.refs_html }}</div>{% endif %}

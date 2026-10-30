@@ -13,7 +13,8 @@ def _brief(row):
         'slug': row['slug'], 'title': row['title'], 'summary': row['summary'],
         'tags': row['tags'], 'importance': row['importance'],
         'shipped': row['shipped'], 'contact': row['contact'],
-        'score': row['score'], 'comment_count': row['comment_count'],
+        'up': row['up'], 'down': row['down'],
+        'comment_count': row['comment_count'],
         'awaiting_reply': row['awaiting_reply'],
         'url': _monitor_url(f"/help/whats-new/{row['slug']}/"),
     }
@@ -136,7 +137,8 @@ async def whats_new_propose(title: str, summary: str, tags: list[str],
             use (whats_new_list returns them).
         importance: urgent (readers must act), high, routine, or minor.
         shipped: The date the change reached production, YYYY-MM-DD.
-        contact: The account of the principal developer.
+        contact: The account of the principal developer, an account with
+            the operations role.
         comment: Why this is proposed, with the evidence: the commit,
             release notes or document it rests on.
         proposer: The proposing AI's own name, e.g. "claude-swf-testbed".

@@ -12,9 +12,9 @@
   <span class="wn-imp wn-imp-{{ item.importance }}">{{ item.importance_label }}</span>
   <span>Shipped {{ item.shipped }}</span>
   <span>Contact {{ item.contact }}</span>
-  {% with r=item %}<span>Score {% include 'help/_wn_vote.html' %}</span>{% endwith %}
+  {% with r=item %}<span>Importance to me {% include 'help/_wn_vote.html' %}</span>{% endwith %}
 </div>
-<div class="mb-2">{% for t in item.tags %}<a class="wn-tag" href="{% url 'help:whats_new' %}?f=tag:{{ t }}">{{ t }}</a>{% endfor %}</div>
+<div class="mb-2">{% include 'help/_wn_tags.html' with tags=item.tags %}</div>
 <div class="wn-summary mb-3">{{ item.summary }}</div>
 
 {% if item.details %}<div class="mb-3">{{ item.details_html }}</div>{% endif %}
@@ -27,7 +27,6 @@
 {% if username %}
 <div class="d-flex gap-2 mb-3">
   <button type="button" class="btn btn-dark-green btn-sm" id="wn-edit">Edit</button>
-  <button type="button" class="btn btn-danger btn-sm" id="wn-archive">{% if item.archived %}Return to the list{% else %}Archive{% endif %}</button>
 </div>
 <div id="wn-edit-box" style="display:none" class="mb-4">
   {% include 'help/_wn_form.html' with f=item %}
@@ -54,7 +53,7 @@
 {% if username %}
 <div class="wn-form" id="wn-comment-box">
   <label>Add a comment or question</label>
-  <div class="wn-hint">Markdown. The contact, {{ item.contact }}, is the person to answer.</div>
+  <div class="wn-hint">Markdown.</div>
   <textarea class="form-control" rows="4" id="wn-comment-text"></textarea>
   <button type="button" class="btn btn-primary btn-sm mt-2" id="wn-comment-add">Comment</button>
   <div class="wn-error"></div>
@@ -81,6 +80,11 @@
 {% else %}
 <p>Not edited since it was added.</p>
 {% endif %}
+{% if username %}
+<div class="mt-5 mb-3">
+  <button type="button" class="btn btn-danger btn-sm" id="wn-archive">{% if item.archived %}Return to the list{% else %}Archive{% endif %}</button>
+</div>
+{% endif %}
 </div>
 
 {% include 'help/_wn_js.html' %}
@@ -98,7 +102,8 @@
   });
   document.getElementById('wn-archive').addEventListener('click', async function () {
     const archived = {{ item.archived|yesno:'false,true' }};
-    if (archived && !confirm('Archive this item? It leaves the What\'s new list; its page and history remain.')) return;
+    if (!confirm(archived ? 'Archive this item? It leaves the What\'s new list; its page and history remain.'
+                          : 'Return this item to the What\'s new list?')) return;
     try { await wn.post(SLUG + '/archive/', { archived: archived }); window.location.reload(); }
     catch (err) { alert(err.message); }
   });

@@ -75,9 +75,9 @@ CORUN_SUBSCRIPTION_NAME = os.environ.get(
 # HTTP MCP tools ingested into the bot's registry: production scope only
 # (the testbed bot carries the swf_ testbed surface). swf_get_log_entry
 # rides along because the #epicprod-live flow drills into action records
-# by log id.
+# by log id; the two What's new reads answer "what's new" (docs/WHATS_NEW.md).
 BOT_TOOL_PREFIXES = ('panda_', 'pcs_', 'epic_', 'epicprod_', 'ai_',
-                     'swf_get_log_entry')
+                     'swf_get_log_entry', 'whats_new_list', 'whats_new_get')
 NO_QUERY_WARN = ":warning: *This response was not based on a live data query.*"
 NO_CITE_WARN = ":warning: *Tool was called live but the Data Provenance ID was not cited in the reply.*"
 THREAD_REPLY_MARKER = "[Thread reply]"

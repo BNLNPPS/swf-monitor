@@ -1,16 +1,18 @@
 <style>
 .wn-intro { max-width: 60em; }
-.wn-tag { display: inline-block; padding: .05em .5em; margin: 0 .25em .2em 0;
-          border: 1px solid #4a6a8a; border-radius: 4px; background: #eef3f8;
-          color: #1f3550; white-space: nowrap; }
-a.wn-tag { text-decoration: none; cursor: pointer; }
-a.wn-tag:hover { background: #1f3550; color: #fff; }
+/* Tags are text everywhere: links separated by bullets; a tag selected in
+   the filter is bold and underlined, as the filter marks it. */
+.wn-tag { text-decoration: none; cursor: pointer; white-space: nowrap; }
+.wn-tag:hover { text-decoration: underline; }
+.wn-tag.wn-tag-on { font-weight: bold; text-decoration: underline; }
+.wn-tag-sep { color: #3d4b5a; }
 .wn-imp { display: inline-block; padding: .05em .5em; border-radius: 4px;
           font-weight: 600; white-space: nowrap; border: 1px solid transparent; }
-.wn-imp-urgent { background: #b42318; color: #fff; }
-.wn-imp-high { background: #f5a524; color: #1f1300; }
-.wn-imp-routine { background: #e3e8ee; color: #1f2933; border-color: #8a9bad; }
-.wn-imp-minor { background: #fff; color: #1f2933; border-color: #8a9bad; }
+/* Importance in shades of green: the lighter, the less important. */
+.wn-imp-urgent { background: #14532d; color: #fff; }
+.wn-imp-high { background: #3f9a47; color: #fff; }
+.wn-imp-routine { background: #c6e5c8; color: #10361a; border-color: #7db382; }
+.wn-imp-minor { background: #eef7ee; color: #14361a; border-color: #8fbf93; }
 .wn-title { font-weight: 600; font-size: 1.05em; }
 .wn-summary { margin-top: .15em; white-space: pre-line; }
 .wn-toggle { background: none; border: none; padding: 0 .3em; font-size: 1.1em;
@@ -24,7 +26,6 @@ a.wn-tag:hover { background: #1f3550; color: #fff; }
 .wn-vote button { border: 1px solid #8a9bad; background: #fff; color: #1f2933;
                   border-radius: 4px; padding: 0 .4em; line-height: 1.4; }
 .wn-vote button.wn-mine { background: #1f6feb; color: #fff; border-color: #1f6feb; }
-.wn-score { display: inline-block; min-width: 1.6em; text-align: center; font-weight: 600; }
 .wn-awaiting { color: #8a4b00; font-weight: 600; }
 .wn-form label { font-weight: 600; margin-top: .5em; margin-bottom: .1em; display: block; }
 .wn-form .wn-hint { color: #3d4b5a; }

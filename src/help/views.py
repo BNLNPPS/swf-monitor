@@ -49,25 +49,23 @@ def _proposals():
 
 
 def whats_new(request):
-    """The What's new list: newest shipped first, or by score."""
+    """The What's new list, newest shipped first; the filter shows the
+    items carrying every selection."""
     username = _username(request)
     rows = [_render_fields(r) for r in wn.list_items(username=username)]
-    sort = 'score' if request.GET.get('sort') == 'score' else 'date'
-    if sort == 'score':
-        rows.sort(key=lambda r: (r['score'], r['shipped']), reverse=True)
     facets = _facets(rows)
-    flt = InclusiveFilter(request.GET, noun='items')
+    flt = InclusiveFilter(request.GET, noun='items', match='all')
     flt.annotate(rows, facets)
     return render(request, 'help/whats_new.html', {
         'rows': rows,
         'inclusive_filter': flt.context(rows, facets, request),
-        'sort': sort,
         'open_all': request.GET.get('open') == 'all',
         'proposals': _proposals(),
         'username': username,
         'may_add': bool(username) and may_act(username),
         'importance_levels': wn.IMPORTANCE,
         'tags_in_use': wn.tags_in_use(),
+        'contacts': wn.contacts(),
     })
 
 
@@ -86,6 +84,7 @@ def whats_new_item(request, slug):
         'item': item, 'username': username,
         'importance_levels': wn.IMPORTANCE,
         'tags_in_use': wn.tags_in_use(),
+        'contacts': wn.contacts(),
     })
 
 
@@ -107,5 +106,6 @@ def whats_new_new(request):
         'username': _username(request),
         'importance_levels': wn.IMPORTANCE,
         'tags_in_use': wn.tags_in_use(),
+        'contacts': wn.contacts(),
         'today': wn._today().isoformat(),
     })

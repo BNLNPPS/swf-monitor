@@ -2,7 +2,7 @@
 
 The What's new page lists the developments in SWF that its users,
 operators and developers should know about, newest first. It is the
-second entry of the Help menu, after Documentation. Each item is an
+first entry of the Help menu, before Workflow management doc. Each item is an
 entry in the monitor's entry store, so every edit is kept as a version.
 Items are edited, commented on and voted on by anyone with authority to
 act ([AUTHORITY.md](AUTHORITY.md)). LLM sessions propose items, and a
@@ -19,7 +19,7 @@ person approves them.
 | Tags | Topical tags, at least one. |
 | Importance | Exactly one of urgent, high, routine, minor. |
 | Shipped | The date the development reached production. |
-| Contact | The account of the principal developer, the person to ask. |
+| Contact | The account of the principal developer, the person to ask: an account with the operations role, chosen from a pulldown. |
 | Builds on | Earlier items this one develops further. |
 
 An item is an `Entry` of kind `development` in the context `whats-new`.
@@ -44,7 +44,13 @@ rather than duplicated under other spellings.
 
 Importance is required and single-valued: `urgent` (action needed by
 readers), `high`, `routine`, `minor`. It is shown as a badge on each
-item and filters like a tag.
+item, in shades of green from the lightest (minor) to the darkest
+(urgent), and filters like a tag.
+
+Tags are shown as text everywhere, links separated by bullets. A tag
+opens the list filtered to the items carrying it; on the list, a tag
+in the table selects it in the filter in place, and the selected tags
+are bold in every row.
 
 ## Links between items
 
@@ -60,9 +66,11 @@ item, and its author may edit it. On the list, each item shows its
 comment count; when the newest comment is by someone other than the
 contact, the item is marked as awaiting a reply from the contact.
 
-Each person has at most one vote per item, up or down, held in
-`data.votes` as username to +1 or -1. Voting again replaces the vote,
-and the same click withdraws it. The score is the sum. A vote does not
+A vote says how important an item is to the person: up or down, shown
+as "Importance to me" with the number of up votes and of down votes.
+There is no combined score. Each person has at most one vote per item,
+held in `data.votes` as username to +1 or -1. Voting again replaces the
+vote, and the same click withdraws it. A vote does not
 create a version: `votes` is excluded from versioning beside the other
 operational keys in `signals.py`.
 
@@ -86,21 +94,25 @@ version.
 
 The list shows one row per item: an expand arrow, the shipped date, the
 importance badge, the title with the summary beneath it, the tags, the
-contact, the score with up and down vote controls, and the comment
-count. The arrow expands the details, references and links in place;
-Open all and Close all at the top expand or collapse every row. The
+contact, Importance to me with the up and down vote controls, and the
+comment count. The arrow expands the details, references and links in
+place; Open all and Close all, just above the table beside the count of
+items shown, expand or collapse every row. The
 title opens the item page, which carries the whole item, the comment
 thread, the edit form and the version list.
 
-Above the list, the inclusive filter ([INCLUSIVE_FILTER.md](INCLUSIVE_FILTER.md))
-offers every tag and importance level with its count, and the search
-box narrows the rows by text. Every element of the page state is in
-the URL: `f` and `match` for the filter, `q` for the search,
-`sort=score` for ordering by score instead of date, and `open=all` for
-the expanded list.
+Above the list, the inclusive filter ([INCLUSIVE_FILTER.md](INCLUSIVE_FILTER.md)),
+fixed to match all, so it has no Match control: the search box at its
+top narrows the rows by text, and below it every tag and importance
+level is offered with its count; the list shows the items carrying
+every selection. Every element of the page state is in the URL: `f`
+for the filter, `q` for the search, and `open=all` for the expanded
+list.
 
 An Add button at the top of the list, shown to people with authority to
-act, opens the New item form.
+act, opens the New item form. On the item page, Archive (or Return to
+the list, for an archived item) stands at the very bottom and asks for
+confirmation.
 
 Proposed items wait in a section at the top of the list, in the AI
 treatment, each with its approve, edit and deny controls.
@@ -151,12 +163,14 @@ missing.
 
 | Tool | Purpose |
 |---|---|
-| `whats_new_list` | Recent items, newest first: filter by tags, importance, shipped date and text; each item's title, summary, tags, importance, shipped date, contact, score, comment count and URL; the tags in use with counts. |
+| `whats_new_list` | Recent items, newest first: filter by tags, importance, shipped date and text; each item's title, summary, tags, importance, shipped date, contact, up and down votes, comment count and URL; the tags in use with counts. |
 | `whats_new_get` | One item in full, with its links, comments and version count. |
 | `whats_new_propose` | Propose an item (the AI proposal path above). |
 | `whats_new_edit` | Edit an existing item's fields, as the calling person. |
 
 `whats_new_edit` changes the system and carries `@requires_authority`.
-The list tool's description names the questions it answers, "what is
-new", "recent developments", so that DISpatcher selects it for them
-([PANDA_BOT.md](PANDA_BOT.md)).
+DISpatcher carries the two reads, `whats_new_list` and `whats_new_get`
+(`BOT_TOOL_PREFIXES`, [PANDA_BOT.md](PANDA_BOT.md)), so "what's new"
+can be asked in natural language in the bot; the list tool's
+description names the questions it answers, "what is new", "recent
+developments", so that DISpatcher selects it for them.

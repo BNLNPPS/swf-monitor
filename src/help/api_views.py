@@ -84,9 +84,9 @@ class ItemVoteView(_HelpApiView):
     def post(self, request, slug):
         """Vote on an item: ``value`` 1, -1, or 0 to withdraw."""
         def go():
-            score, mine = wn.vote(slug, username=request.user.username,
-                                  value=request.data.get('value'))
-            return {'slug': slug, 'score': score, 'my_vote': mine}
+            up, down, mine = wn.vote(slug, username=request.user.username,
+                                     value=request.data.get('value'))
+            return {'slug': slug, 'up': up, 'down': down, 'my_vote': mine}
         return self._run(go)
 
 
