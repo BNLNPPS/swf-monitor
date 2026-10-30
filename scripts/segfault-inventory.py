@@ -54,6 +54,13 @@ representative jobs, ``phase = 'payload_memory'``: the shortest, median
 and longest time to kill among the kills whose manifest row resolves.
 ``--memory-only --since 2026-07-01`` is its back-fill.
 
+After the bad-input pass, the Event Service pass (SEGFAULT_DIAGNOSIS.md,
+Event Service units) reads from swfdb the filed harness records of the
+Event Service jobs updated in the window and rebuilds, over every filed
+record of each task with a crashed unit, its ``esunit`` signatures
+(``monitor_app.segfaults.build_es_signatures``). ``--es-only --since
+2026-09-01`` is its back-fill.
+
 Django-bootstrap standalone script — usable by hand and as the nightly
 chain step::
 
@@ -685,6 +692,22 @@ def input_pass(since, manifests, chains, counts):
             'input_rows_unresolved': counts['memory_rows_unresolved'] - before}
 
 
+def es_pass(since):
+    """The Event Service unit signatures of the tasks with a crashed unit
+    among the records filed since ``since``, rebuilt over all of each
+    task's filed records (SEGFAULT_DIAGNOSIS.md, Event Service units).
+    Reads swfdb alone."""
+    from monitor_app.segfaults import build_es_signatures, es_tasks
+    tids = es_tasks(since)
+    log.info('Event Service pass: %d tasks with a crashed unit since %s', len(tids),
+             since.isoformat(timespec='seconds'))
+    result = build_es_signatures(tids)
+    log.info('  %d Event Service unit signatures (%d new), %d unit crashes',
+             result['signatures'], result['created'], result['units'])
+    return {'es_tasks': len(tids), 'es_signatures': result['signatures'],
+            'es_signatures_new': result['created'], 'es_unit_crashes': result['units']}
+
+
 def run(args):
     since = _window(args)
     t0 = time.monotonic()
@@ -703,6 +726,11 @@ def run(args):
         manifests = ManifestRows(establish=not args.no_manifest_establish)
         summary = {'since': since.isoformat(timespec='seconds'), 'input_only': True}
         summary.update(input_pass(since, manifests, RetryChains(), counts))
+        summary['seconds'] = round(time.monotonic() - t0, 1)
+        return summary, t0
+    if args.es_only:
+        summary = {'since': since.isoformat(timespec='seconds'), 'es_only': True}
+        summary.update(es_pass(since))
         summary['seconds'] = round(time.monotonic() - t0, 1)
         return summary, t0
     jobs = crashed_jobs(since, args.limit)
@@ -734,6 +762,8 @@ def run(args):
         summary.update(memory_pass(since, manifests, chains, counts))
     if not args.dry_run and not args.no_input:
         summary.update(input_pass(since, manifests, chains, counts))
+    if not args.dry_run and not args.no_es:
+        summary.update(es_pass(since))
     summary['seconds'] = round(time.monotonic() - t0, 1)
     return summary, t0
 
@@ -796,6 +826,10 @@ def main():
                     help='skip the bad-input pass')
     ap.add_argument('--input-only', action='store_true',
                     help='the bad-input pass alone over the window (its back-fill)')
+    ap.add_argument('--no-es', action='store_true',
+                    help='skip the Event Service unit pass')
+    ap.add_argument('--es-only', action='store_true',
+                    help='the Event Service unit pass alone over the window (its back-fill)')
     ap.add_argument('--no-rows-lost', action='store_true',
                     help='skip the delivery lookup behind rows_lost')
     ap.add_argument('--no-manifest-establish', action='store_true',
@@ -843,6 +877,11 @@ def main():
                      f"{summary.get('input_tasks', 0)} tasks, "
                      f"{summary.get('input_representatives', 0)} representatives written"
                      if 'input_signatures' in summary else '')
+        es_units = (f"{summary.get('es_signatures', 0)} Event Service unit signatures "
+                    f"({summary.get('es_signatures_new', 0)} new) over "
+                    f"{summary.get('es_tasks', 0)} tasks, "
+                    f"{summary.get('es_unit_crashes', 0)} unit crashes"
+                    if 'es_signatures' in summary else '')
         log_epicprod_action(
             args.instance, 'segfault_inventory', outcome='ok',
             duration_ms=int((time.monotonic() - t0) * 1000),
@@ -854,6 +893,8 @@ def main():
                      if args.memory_only else
                      f"segfault inventory since {summary['since'][:10]}: {bad_input}"
                      if args.input_only else
+                     f"segfault inventory since {summary['since'][:10]}: {es_units}"
+                     if args.es_only else
                      f"segfault inventory since {summary['since'][:10]}: "
                      f"{summary['jobs_seen']} crashed jobs, {summary['rows_added']} rows added, "
                      f"{summary['rows_updated']} updated, {summary['rows_unresolved']} rows "
@@ -863,7 +904,8 @@ def main():
                      f"{summary.get('signatures', 0)} signatures "
                      f"({summary.get('signatures_new', 0)} new)"
                      + (f"; {memory}" if memory else '')
-                     + (f"; {bad_input}" if bad_input else '')),
+                     + (f"; {bad_input}" if bad_input else '')
+                     + (f"; {es_units}" if es_units else '')),
             **{k: v for k, v in summary.items() if isinstance(v, int) and not isinstance(v, bool)})
     print(json.dumps(summary))
     return 0

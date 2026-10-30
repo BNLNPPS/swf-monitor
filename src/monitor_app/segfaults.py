@@ -24,6 +24,7 @@ Memory kills): one signature per task and stage, built by
 with no row per job, and a few representative jobs written by the
 inventory as EpicProdJob rows of phase ``payload_memory``.
 """
+import json
 import logging
 import re
 from collections import defaultdict
@@ -42,11 +43,14 @@ MEMORY_PHASE = 'payload_memory'
 MEMORY_CLASS = 'memory'
 INPUT_PHASE = 'payload_input'
 INPUT_CLASS = 'input'
+# An Event Service unit that crashed inside a finished job
+# (SEGFAULT_DIAGNOSIS.md, Event Service units).
+ES_CLASS = 'es_unit'
 SIGNAL_NAMES = {6: 'SIGABRT', 7: 'SIGBUS', 8: 'SIGFPE', 11: 'SIGSEGV'}
 CLASS_LABELS = {
     'storm': 'Storm', 'configuration_dead': 'Config dead',
     'sparse': 'Sparse', 'abort': 'Abort', 'mixed': 'Mixed',
-    MEMORY_CLASS: 'Memory', INPUT_CLASS: 'Bad input',
+    MEMORY_CLASS: 'Memory', INPUT_CLASS: 'Bad input', ES_CLASS: 'ES unit',
 }
 STAGE_LABELS = {'simulation': 'simu', 'reconstruction': 'reco'}
 # What a signature records, the Kind facet of the catalog and the runs
@@ -121,6 +125,11 @@ def job_filter(sig):
             q |= job_filter(m)
         return q
     task_ids = [t.get('jeditaskid') for t in (sig.tasks or []) if t.get('jeditaskid')]
+    if is_es_unit(sig):
+        # An Event Service unit signature's jobs are the jobs whose filed
+        # records carry its crashed units.
+        return Q(pandaid__in=sorted({c.get('pandaid') for u in ((sig.data or {}).get('units') or [])
+                                     for c in u.get('crashes') or [] if c.get('pandaid')}))
     if is_memory(sig) or is_input(sig):
         # A memory or bad-input signature's jobs are its representatives,
         # whatever status the failure left.
@@ -134,7 +143,7 @@ def job_filter(sig):
         else:
             q &= (Q(data__crash__stage='') | Q(data__crash__stage__isnull=True))
     return q
-CLASS_ORDER = ['storm', 'configuration_dead', 'mixed', 'sparse', 'abort', MEMORY_CLASS,
+CLASS_ORDER = ['storm', 'configuration_dead', 'mixed', 'sparse', 'abort', ES_CLASS, MEMORY_CLASS,
                INPUT_CLASS]
 STATUS_LABELS = dict(CrashSignature.STATUSES)
 
@@ -927,6 +936,250 @@ def read_input_fatal(sig, fetch=None):
     return False
 
 
+# ------------------------------------------------- Event Service units
+
+# A unit of an Event Service job that crashed fails alone inside a job
+# that ends finished; its crash is read from the job's filed harness
+# record (EpicProdJob.data['es_record'], JOB_REPORTING.md) by the forms
+# its message takes (SEGFAULT_DIAGNOSIS.md, Event Service units).
+ES_RESIDENT_DEATH = 'Resident simulation exited without a reply'
+ES_RESIDENT_SIGNAL_RE = re.compile(r'Resident simulation died on signal (\d+)')
+ES_PAYLOAD_EXIT_RE = re.compile(r'^payload exit (\d+)')
+ES_STAGE_RE = re.compile(r'\bstage: \S+ (\w+) fail')
+ES_SLOT_RE = re.compile(r'^slot exited -(\d+) with the unit in flight')
+# A run.sh unit whose payload stopped in its resident simulation request.
+ES_RESIDENT_REQUEST = 'resident_sim.py" request'
+CRASH_SIGNALS = (6, 7, 8, 11)
+
+
+def is_es_unit(sig):
+    return getattr(sig, 'class_hint', '') == ES_CLASS
+
+
+def es_unit_key(jeditaskid, stage=''):
+    """An Event Service unit signature's key: the task and the stage."""
+    key = f'esunit:task{int(jeditaskid)}'
+    return f'{key}:{stage}' if stage else key
+
+
+def es_request(unit):
+    """The request a unit sent its simulation: input LFN and path, the
+    zero-based first event, the event count and the request seed. The
+    four fields that identify it are None where the record lacks them."""
+    sim = unit.get('simulation') or {}
+    rng = unit.get('range') or {}
+    lfn = ''
+    try:
+        lfn = (json.loads(sim.get('source_id') or '{}') or {}).get('LFN') or ''
+    except (TypeError, ValueError):
+        lfn = ''
+    first = sim.get('first_event')
+    if first is None and rng.get('startEvent') is not None:
+        first = int(rng['startEvent']) - 1
+    events = sim.get('events') or unit.get('events')
+    seed = sim.get('seed')
+    return {'lfn': lfn or (sim.get('input_file') or '').rpartition('/')[2],
+            'input_file': sim.get('input_file') or '',
+            'first_event': int(first) if first is not None else None,
+            'events': int(events) if events else None,
+            'seed': int(seed) if seed not in (None, '') else None}
+
+
+def _request_id(req):
+    return (req['lfn'], req['first_event'], req['events'], req['seed'])
+
+
+def es_crash(unit):
+    """(stage, signal, form) when the unit's message is a crash form
+    itself, else None. The signal is 0 where the record does not name it;
+    a run.sh unit stopped in its resident request is a crash only as the
+    repeat of a recorded crash request (``es_crash_units``)."""
+    message = unit.get('message') or ''
+    m = ES_RESIDENT_SIGNAL_RE.search(message)
+    if m:
+        return 'simulation', int(m.group(1)), 'resident_signal'
+    if ES_RESIDENT_DEATH in message:
+        return 'simulation', 0, 'resident_death'
+    m = ES_PAYLOAD_EXIT_RE.match(message)
+    if m and int(m.group(1)) in CRASH_EXITS:
+        stage = ES_STAGE_RE.search(message)
+        return (stage.group(1) if stage else ''), int(m.group(1)) - 128, 'payload_exit'
+    m = ES_SLOT_RE.match(message)
+    if m and int(m.group(1)) in CRASH_SIGNALS:
+        return '', int(m.group(1)), 'slot_signal'
+    return None
+
+
+def es_crash_units(record):
+    """The crashed units of one filed record (``record['failed']``) as
+    (unit, stage, signal, form), and the request ids of its crash forms;
+    the repeats are added by the caller against the task's crash ids."""
+    out = []
+    for unit in record.get('failed') or []:
+        crash = es_crash(unit)
+        if crash:
+            out.append((unit, *crash))
+    return out
+
+
+def _es_records(where, params):
+    """(pandaid, jeditaskid, record) for the filed Event Service records
+    matching ``where``, each record cut in SQL to its failed units and
+    its unit counts: a record carries every done unit (tens of thousands
+    on a whole node), which the intake never reads."""
+    from django.db import connection
+    sql = f"""SELECT pandaid, jeditaskid,
+                     data->'es_record'->'record'->'failed',
+                     data->'es_record'->'record'->>'done_count',
+                     data->'es_record'->'record'->>'failed_count',
+                     jsonb_array_length(COALESCE(data->'es_record'->'record'->'done', '[]'::jsonb))
+              FROM swf_epicprod_jobs
+              WHERE data ? 'es_record' AND jeditaskid IS NOT NULL AND {where}
+              ORDER BY pandaid"""
+    with connection.cursor() as cur:
+        cur.execute(sql, params)
+        for pandaid, tid, failed, done_count, failed_count, done_len in cur.fetchall():
+            if isinstance(failed, str):
+                failed = json.loads(failed)
+            failed = failed if isinstance(failed, list) else []
+            yield int(pandaid), int(tid), {
+                'failed': failed,
+                'done_count': int(done_count) if done_count not in (None, '') else int(done_len or 0),
+                'failed_count': int(failed_count) if failed_count not in (None, '') else len(failed)}
+
+
+def es_tasks(since):
+    """The tasks with a crashed unit among the Event Service jobs whose
+    record was filed or updated since ``since`` (swfdb only)."""
+    return sorted({tid for _p, tid, record in _es_records('updated_at >= %s', [since])
+                   if es_crash_units(record)})
+
+
+def _from_epoch(value):
+    try:
+        return datetime.fromtimestamp(float(value), tz=dt_timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def build_es_signatures(jeditaskids):
+    """The Event Service unit signatures of the tasks, rebuilt from every
+    filed record of each task and upserted, one per task and stage; what
+    a later stage wrote (status, trace, reproductions, verdict) survives.
+    Returns a summary with the keys built."""
+    from pcs.models import PandaTasks
+    tids = sorted({int(t) for t in jeditaskids if t})
+    summary = {'signatures': 0, 'created': 0, 'units': 0, 'keys': []}
+    if not tids:
+        return summary
+    prod_tasks, payload_versions, task_names, task_sites = {}, {}, {}, {}
+    for pt in PandaTasks.objects.filter(jedi_task_id__in=tids).select_related(
+            'prod_task', 'prod_task__dataset', 'prod_task__prod_config',
+            'prod_task__dataset__physics_tag', 'prod_task__campaign',
+            'prod_task__dataset__campaign'):
+        prod_tasks[pt.jedi_task_id] = pt.prod_task
+        payload_versions[pt.jedi_task_id] = (pt.metadata or {}).get('payload_version', '')
+        task_names[pt.jedi_task_id] = pt.task_name
+        task_sites[pt.jedi_task_id] = pt.site
+    now = timezone.now()
+    for tid in tids:
+        units_run, jobs_filed = 0, 0
+        crashes, deferred = [], []      # (pandaid, unit, stage, signal, form)
+        for pandaid, _tid, record in _es_records('jeditaskid = %s', [tid]):
+            jobs_filed += 1
+            units_run += record['done_count'] + record['failed_count']
+            found = es_crash_units(record)
+            crashed = {id(c[0]) for c in found}
+            for unit, stage, signal, form in found:
+                crashes.append((pandaid, unit, stage, signal, form))
+            for unit in record['failed']:
+                if id(unit) not in crashed and ES_RESIDENT_REQUEST in (unit.get('message') or ''):
+                    deferred.append((pandaid, unit))
+        # A run.sh unit stopped in its resident request on a request the
+        # task's records already show crashing is the same crash again.
+        known = {_request_id(es_request(u)): (stage, signal) for _p, u, stage, signal, _f in crashes}
+        for pandaid, unit in deferred:
+            hit = known.get(_request_id(es_request(unit)))
+            if hit and None not in _request_id(es_request(unit)):
+                crashes.append((pandaid, unit, 'simulation', hit[1], 'resident_repeat'))
+        groups = defaultdict(list)
+        for c in crashes:
+            groups[stage_label(c[2])].append(c)
+        for stage, members in groups.items():
+            key = es_unit_key(tid, stage)
+            sig = CrashSignature.objects.filter(key=key).first()
+            created = sig is None
+            if created:
+                sig = CrashSignature(key=key, status='new')
+            requests = {}
+            signals = defaultdict(int)
+            seconds, ended = [], []
+            for pandaid, unit, _stage, signal, form in members:
+                req = es_request(unit)
+                rid = _request_id(req)
+                entry = requests.setdefault(rid, dict(req, crashes=[]))
+                at = _from_epoch(unit.get('ended_at'))
+                entry['crashes'].append({
+                    'pandaid': pandaid, 'unit_id': unit.get('unit_id') or '',
+                    'slot': unit.get('slot'), 'form': form, 'signal': signal,
+                    'seconds': unit.get('wall_s'), 'ended_at': _iso(at),
+                    'message': (unit.get('message') or '')[:300]})
+                if signal:
+                    signals[signal] += 1
+                if unit.get('wall_s') is not None:
+                    seconds.append(float(unit['wall_s']))
+                if at:
+                    ended.append(at)
+            units = sorted(requests.values(), key=lambda r: (-len(r['crashes']), r['lfn'],
+                                                               r['first_event'] or 0))
+            for r in units:
+                r['passes'] = len({c['pandaid'] for c in r['crashes']})
+            signal = max(signals, key=signals.get) if signals else (sig.signal or 0)
+            sig.level = 'record'
+            sig.class_hint = ES_CLASS
+            sig.signal = signal
+            sig.exit_code = 128 + signal if signal else 0
+            first, last = (min(ended), max(ended)) if ended else (None, None)
+            sig.tasks = [{'jeditaskid': tid, 'taskname': task_names.get(tid, ''),
+                          'crashes': len(members), 'units': units_run, 'jobs': jobs_filed,
+                          'first_seen': _iso(first), 'last_seen': _iso(last)}]
+            sig.configuration = _configuration(prod_tasks.get(tid), payload_versions.get(tid, ''))
+            site = task_sites.get(tid) or ''
+            sig.sites = ([{'site': site, 'crashes': len(members),
+                           'hosts': None}] if site else [])
+            sig.crashes = len(members)
+            sig.rate = round(len(members) / units_run, 6) if units_run else None
+            sig.minutes_p10 = _min(_percentile(seconds, 0.1) / 60.0) if seconds else None
+            sig.minutes_p50 = _min(_percentile(seconds, 0.5) / 60.0) if seconds else None
+            sig.first_seen, sig.last_seen = first, last
+            sig.rows_lost, sig.events_lost = None, None
+            data = dict(sig.data or {})
+            data.update({
+                'kind': ES_CLASS,
+                'units': units,
+                'requests': len(units),
+                'stages': {_stage_name(stage): len(members)} if stage else {},
+                'rows_lost_note': ("an Event Service unit's events go back to the file; the loss is "
+                                   "what no pass delivered, read from the task's delivery"),
+                'record_built_at': _iso(now),
+                'stage': stage,
+                'split': False,
+            })
+            sig.data = data
+            sig.updated_at = now
+            sig.save()
+            summary['signatures'] += 1
+            summary['created'] += int(created)
+            summary['units'] += len(members)
+            summary['keys'].append(key)
+    return summary
+
+
+def _stage_name(label):
+    """The stage a short label stands for (simu -> simulation)."""
+    return next((k for k, v in STAGE_LABELS.items() if v == label), label)
+
+
 # ---------------------------------------------------------- the reading
 
 # The campaign images all live at one cvmfs path; the version is the
@@ -949,6 +1202,8 @@ def signature_summary(sig):
     elif is_input(sig):
         fatal = ((sig.data or {}).get('input') or {}).get('fatal') or ''
         signal_name = f'stopped on its error (exit 1){": " + fatal if fatal else ""}'
+    elif is_es_unit(sig) and not sig.signal:
+        signal_name = 'died during its request, signal not recorded'
     else:
         signal_name = SIGNAL_NAMES.get(sig.signal, f'signal {sig.signal}')
     return {
@@ -971,7 +1226,8 @@ def signature_summary(sig):
                               or (sig.configuration or {}).get('container_image') or ''),
         'crashes': sig.crashes,
         'rate': sig.rate,
-        'rate_pct': (f'{100 * sig.rate:.1f}%' if sig.rate is not None else ''),
+        'rate_pct': ((f'{100 * sig.rate:.2g}%' if is_es_unit(sig) else f'{100 * sig.rate:.1f}%')
+                     if sig.rate is not None else ''),
         'minutes_p10': sig.minutes_p10,
         'minutes_p50': sig.minutes_p50,
         'sites': sig.sites or [],
@@ -997,6 +1253,10 @@ def signature_summary(sig):
         # from the next build.
         'runnable': bool((sig.configuration or {}).get('prod_task')
                          and ((sig.data or {}).get('rows_resolved') or 0) > 0),
+        # An Event Service unit replays on npps0 by its request, not as a
+        # payload canary of a row (SEGFAULT_DIAGNOSIS.md, Event Service units).
+        'es_unit': is_es_unit(sig),
+        'es_requests': (sig.data or {}).get('requests') if is_es_unit(sig) else None,
         'reproduction_outcome': (sig.data or {}).get('reproduction_outcome', ''),
         'finding_anchor': '',
         'first_seen': _iso(sig.first_seen),
@@ -1045,6 +1305,7 @@ def signature_detail(key, jobs_limit=200):
         'package': sig.package or {},
         'data': sig.data or {},
         'local_repro': local_repro(sig),
+        'es_units': ((sig.data or {}).get('units') or []) if is_es_unit(sig) else [],
     })
     # The reproduction attempts, execution and result apart, from the
     # shared read-only summary (monitor_app/reproductions.py); a
@@ -1091,7 +1352,21 @@ def signature_for_job(pandaid):
     signature."""
     job = EpicProdJob.objects.filter(pandaid=pandaid, phase__in=(PHASE, MEMORY_PHASE, INPUT_PHASE)).only(
         'jeditaskid', 'phase', 'data').first()
-    if job is None or not job.jeditaskid:
+    if job is None:
+        # An Event Service job whose filed record carries a crashed unit.
+        job = EpicProdJob.objects.filter(pandaid=pandaid, data__has_key='es_record').only(
+            'jeditaskid').first()
+        if job is None or not job.jeditaskid:
+            return None
+        from django.db.models import Q
+        base = es_unit_key(job.jeditaskid)
+        for sig in CrashSignature.objects.filter(Q(key=base) | Q(key__startswith=base + ':'),
+                                                 class_hint=ES_CLASS):
+            if any(c.get('pandaid') == int(pandaid) for u in ((sig.data or {}).get('units') or [])
+                   for c in u.get('crashes') or []):
+                return signature_summary(sig)
+        return None
+    if not job.jeditaskid:
         return None
     crash = (job.data or {}).get('crash') or {}
     if job.phase == MEMORY_PHASE:
@@ -1418,7 +1693,7 @@ def dig_candidates(limit):
     """Record-level signatures never dug, largest first, for the automatic
     dig: at most ``limit`` a night so a storm is not a thousand fetches."""
     qs = (CrashSignature.objects.filter(level='record')
-          .exclude(class_hint=MEMORY_CLASS)
+          .exclude(class_hint__in=(MEMORY_CLASS, ES_CLASS))
           .exclude(trace__has_key='trace_status').order_by('-crashes'))
     return list(qs[:limit])
 
@@ -1459,6 +1734,10 @@ def crashed_run(sig, pandaid=None):
     """The crashed job a reproduction runs (the representative unless
     named) with its crash record, its manifest row and the row as manifest
     text. Raises ValueError with the reason when the run cannot be formed."""
+    if is_es_unit(sig):
+        raise ValueError('an Event Service unit is replayed on npps0 by its request: '
+                         f'scripts/segfault-es-reproduce.py --key {sig.key} '
+                         '(SEGFAULT_DIAGNOSIS.md, Event Service units)')
     if pandaid is None:
         rep = representative(sig, runnable=True) or representative(sig)
         if rep is None:
