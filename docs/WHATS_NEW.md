@@ -107,9 +107,8 @@ treatment, each with its approve, edit and deny controls.
 
 The pages live in the `help` application (`src/help/`), mounted at
 `help/`, which also holds later Help pages. The external face proxies
-the `help/` tree through one catch-all route in swf-remote. Until that
-route exists, the Help menu offers What's new on the internal face
-only (`is_tunnel`, [EXTERNAL_ACCESS.md](EXTERNAL_ACCESS.md)).
+the `help/` tree through one catch-all route in swf-remote
+([EXTERNAL_ACCESS.md](EXTERNAL_ACCESS.md)).
 
 ## Writes
 
