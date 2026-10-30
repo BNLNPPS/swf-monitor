@@ -2293,6 +2293,22 @@ def _stable_numbers(keys, now=None):
     return {key: (held[key]['n'], held[key]['since']) for key in keys}
 
 
+# A measured quantity on a line: a percent or a byte size.
+LINE_QUANTITY = re.compile(r'(?<![\w.])(\d+\.\d+)(?=\s*(?:%|[kMGTP]B\b))')
+
+
+def _rounded(text):
+    """A line's quantities rounded for the space the floor has (Torre Wenaus,
+    2026-10-30: "round off and '.0' on 100.0 is utterly superfluous"):
+    whole numbers, one decimal below 10, never a trailing .0."""
+    def whole(match):
+        value = float(match.group(1))
+        if value >= 10:
+            return str(int(value + 0.5))
+        return f'{value:.1f}'.rstrip('0').rstrip('.')
+    return LINE_QUANTITY.sub(whole, text)
+
+
 def _numbered(items, sites):
     """The report's lines newest first, the biggest number at the top
     (Torre Wenaus, 2026-10-28: "reverse time order, which means I should
@@ -2302,6 +2318,7 @@ def _numbered(items, sites):
     worst of its health, status and lines."""
     for item in items:
         item.setdefault('key', item.get('text') or '')
+        item['text'] = _rounded(item.get('text') or '')
     try:
         numbers = _stable_numbers(list(dict.fromkeys(i['key'] for i in items)))
     except Exception:
@@ -2423,7 +2440,11 @@ def _report_items(front, sites, storage, alarms, assessment):
             text = f"{'Due' if ping else 'Overdue, due'} {date}: {what}"
             key = f'due:{date}:{what}'
         else:
-            text = f"{'Due' if ping else 'Alarm'}: {title.replace(' — ', ': ')}"
+            # An alarm's title says what is wrong; only a ping is labelled
+            # (Torre Wenaus, 2026-10-30: "'Alarm:' is not needed in prod now").
+            text = title.replace(' — ', ': ')
+            if ping:
+                text = f'Due: {text}'
             key = f'alarm:{title}'
         items.append({'level': 'amber' if ping else 'red', 'text': text, 'key': key,
                       'link': f"{PUBLIC}/alarms/events/{a['id']}/"})

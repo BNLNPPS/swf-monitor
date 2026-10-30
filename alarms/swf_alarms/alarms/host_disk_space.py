@@ -73,8 +73,8 @@ def detect(client, params):
                             {'host': host, 'reason': reason})
         elif bad:
             bad.sort(key=lambda item: -item['used_percent'])
-            detail = '; '.join('{} {:.1f}% full, {:.1f} GiB free'.format(
-                v['path'], v['used_percent'], v['free_bytes'] / 2**30) for v in bad)
+            detail = '; '.join('{} {:.1f}% full, {:.1f} GB free'.format(
+                v['path'], v['used_percent'], v['free_bytes'] / 1e9) for v in bad)
             yield Detection('host-disk:' + host, host + ': ' + detail,
                             'Disk-space warning at {:.0f}% used: {}. Free space before '
                             'logs, HTCondor or Harvester can no longer write.'.format(limit, detail),

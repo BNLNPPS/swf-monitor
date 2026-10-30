@@ -176,8 +176,8 @@
   resourceHead.append(resourceStamp); resourcePanel.append(resourceHead);
   const resourceCharts = element('div', 'resource-charts');
   const resourceMetrics = [
-    {key: 'memory', label: 'Peak memory', unit: 'GiB'},
-    {key: 'disk', label: 'Peak scratch disk', unit: 'GiB'},
+    {key: 'memory', label: 'Peak memory', unit: 'GB'},
+    {key: 'disk', label: 'Peak scratch disk', unit: 'GB'},
     {key: 'files', label: 'Peak scratch files', unit: 'files'},
   ];
   resourceMetrics.forEach(metric => {

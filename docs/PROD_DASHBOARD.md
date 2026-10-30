@@ -210,7 +210,7 @@ test and canary jobs. It plots reported peak memory, scratch disk and
 scratch file counts over the preceding twelve hours, with one colour per task across all three
 plots. Hovering a curve gives the task name and window peak; hovering a
 point gives its time bin, peak and reporting coverage. Each curve links
-to the task. Memory and disk use GiB; file counts are integers.
+to the task. Memory and disk are in GB (10^9 bytes); file counts are integers.
 
 Each fifteen-minute bin contains the maximum reported job peak. Completed
 jobs are placed at their end time; active jobs use their latest update.

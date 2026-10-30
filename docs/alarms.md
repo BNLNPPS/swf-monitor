@@ -93,7 +93,7 @@ Do not delete them as part of routine monitor-side alarm work.
 The `host_disk_space` detector reads the existing host reports for
 `osgsub01`, `pandaharvester01`, `pandaharvester02`, and `pandaserver01`.
 It raises one incident per host at `warn_used_percent` (default 90), with
-the affected filesystem, percent used and GiB available to the service
+the affected filesystem, percent used and GB available to the service
 account. This complements the platform alarm's existing monitor-host
 volume check. The reporter cadence is two minutes on the OSG submit host
 and five minutes on the other hosts; the alarm engine runs every five
