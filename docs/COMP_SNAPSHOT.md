@@ -522,7 +522,13 @@ reason and the evidence:
 
 For a task operation it is the task and the operation's reading;
 otherwise the record's reason led by its subject. Both come from
-`live_notices.board_text`. A Move's title names where from and where to
+`live_notices.board_text`. No title is generic (Torre Wenaus,
+2026-10-29): a record that carries its own `title` is shown under it; a
+failure says how it failed (`System status refresh timed out`,
+`Log rescue failed · BNL-XRD`); a task, RSE or queue subject is named
+(`task 41470`); a finding (`watch_finding`, `production_finding`) with no
+title of its own is titled by its first sentence, which states what was
+found, and its detail is the rest of its text. A Move's title names where from and where to
 (`Move GREX to OSG · task 41474`); its detail is the task, its route, who
 asked and why, from its operation record as the curated view reads it
 (`live_curated.task_operation_who_why`):

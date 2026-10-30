@@ -49,7 +49,7 @@ BOARD_LABELS = {
     'storage_door_cycle': 'Storage doors', 'storage_door_verdict': 'Storage door',
     'storage_sweep': 'Storage sweep', 'stash_drain': 'Stash drain',
     'rse_deletion': 'Disk removal',
-    'system_status_refresh': 'System status', 'report_sweep': 'Report sweep',
+    'system_status_refresh': 'System status refresh', 'report_sweep': 'Report sweep',
     'log_rescue': 'Log rescue', 'catalog_sync': 'Catalog sync',
     'payload_log_fetch': 'Payload log fetch', 'declared_state_sync': 'Declared state',
     'es_closeout_cycle': 'ES close-out', 'snapper_capture': 'Snapper capture',
@@ -64,6 +64,13 @@ BOARD_LABELS = {
 # Subjects named by a composed task name, too long for a title: the title
 # carries its physics and evgen tags instead (p1108.e37).
 TASK_SUBJECTS = frozenset({'prod_task', 'campaign_task'})
+# Other subjects a title names by their key.
+SUBJECT_NAMES = {'panda_task': lambda key: f'task {key}', 'rse': short_name,
+                 'panda_queue': short_name, 'site': short_name}
+# A failure's title says how it failed.
+OUTCOME_WORDS = {'timeout': 'timed out', 'error': 'failed', 'partial': 'partly failed'}
+# Records whose text is a reading: titled by what was found.
+FINDING_ACTIONS = frozenset({'watch_finding', 'production_finding'})
 OPERATION_LABELS = {'reassign': 'Move', 'pause': 'Pause', 'resume': 'Resume',
                     'retry': 'Retry', 'finish': 'Finish', 'kill': 'Kill',
                     'abort': 'Abort'}
@@ -89,12 +96,29 @@ def task_short(name):
     return tags.group(1) + (f' {tail.group(1)}' if tail else '')
 
 
+def _first_sentence(text):
+    """(first sentence, the rest) of a finding's text: the sentence states
+    what was found."""
+    text = re.sub(r'^\s*(?:Watch finding|Finding)\s*:\s*', '', str(text or '')).strip()
+    m = re.match(r'(.+?[.;])(?:\s+|$)', text)
+    if not m:
+        return text, ''
+    return m.group(1).rstrip('.;'), text[m.end():].strip()
+
+
 def board_text(message, extra):
     """(title, detail) for one record on the room's epicprod-live screen:
     the title names what happened and where (the execute site, storage
-    element or queue), the detail is the informative message."""
+    element, queue or task), the detail is the informative message. No
+    title is generic (Torre Wenaus, 2026-10-29: "NO GENERIC TITLES"): a
+    record that carries its own ``title`` is shown under it; a failure
+    says how it failed; a finding with no title of its own is titled by
+    the sentence that states what was found."""
     action = str(extra.get('action') or '')
     label = BOARD_LABELS.get(action) or action.replace('_', ' ').capitalize()
+    if extra.get('title'):
+        detail = str(extra.get('reason') or extra.get('summary') or message)
+        return str(extra['title']), detail
     if action == 'node_guard_decision':
         return _node_guard_name(extra), node_guard_text(extra)
     if action == 'panda_task_operation':
@@ -112,11 +136,20 @@ def board_text(message, extra):
                        or (None if subject_type in TASK_SUBJECTS else extra.get('subject_label')))
     if not where:
         where = task_short(extra.get('subject_key'))
+    if not where and extra.get('subject_key') and subject_type in SUBJECT_NAMES:
+        where = SUBJECT_NAMES[subject_type](extra['subject_key'])
     detail = str(extra.get('reason') or extra.get('summary') or message)
     subject = str(extra.get('subject_label') or extra.get('subject_key') or '')
     if subject and subject not in detail:
         detail = f'{subject}: {detail}'
-    return (f'{label} · {where}' if where else label), detail
+    if action in FINDING_ACTIONS:
+        found, rest = _first_sentence(extra.get('reason') or extra.get('summary') or message)
+        key = str(extra.get('subject_key') or '')
+        title = f'{where}: {found}' if where and key and key not in found else found
+        return title, rest or detail
+    how = OUTCOME_WORDS.get(str(extra.get('outcome') or ''))
+    what = f'{label} {how}' if how else label
+    return (f'{what} · {where}' if where else what), detail
 
 
 def _node_guard_name(f):
