@@ -170,7 +170,11 @@ site panel's title row cites its lines' numbers at the upper right, each
 in its colour, with the line's text on hover and its link: a grid of small
 numbers that wraps into columns and shrinks its type until every number
 fits, followed by the weekly average cores in grey. The core limit, the
-fair-share notice and the feed switch no longer write words there.
+fair-share notice and the feed switch no longer write words there. A 1px
+grey outline draws each Production now number in its own box and a
+site's cited numbers in one box together, so a site's codes read as
+references to the list; an outline takes no space, so the text does not
+move.
 
 While a pool's negotiator holds our OSG submitter at its fair-share
 limit, OSG has a grey, informational line naming the pool and the time of
