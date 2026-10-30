@@ -608,6 +608,10 @@ _TRACE_JANA_START_RE = re.compile(r'\[fatal\].*Backtrace:')
 _TRACE_JANA_FRAME_RE = re.compile(r'\[fatal\]\s+(\d+):\s+(.+?)\s*$')
 _TRACE_JANA_LIB_RE = re.compile(r'\[fatal\]\s+(\S+?):([0-9a-fA-F]+)\s*$')
 _TRACE_BREAK_RE = re.compile(r'\*\*\* Break \*\*\* (.+)')
+# gdb on the crashed process itself (an Event Service request replayed on
+# npps0, SEGFAULT_DIAGNOSIS.md, Event Service units): "Program received
+# signal SIGSEGV, Segmentation fault." then the frames of its "bt".
+_TRACE_GDB_SIGNAL_RE = re.compile(r'Program received signal (SIG\w+)')
 _TRACE_GDB_FRAME_RE = re.compile(r'^#(\d+)\s+(?:0x[0-9a-fA-F]+ in )?(.+?)(?: \(.*\))?(?: (?:from|at) (\S+))?\s*$')
 _TRACE_GLIBC_RE = re.compile(r'Segmentation fault|Bus error|Floating point exception|Aborted \(core dumped\)')
 # DD4hep's handler (npsim) reports the signal with no backtrace; the
@@ -663,20 +667,20 @@ def trace_extract(texts):
                 i += 1
             _finish_trace(result, lines, start, frames, 'jana2')
             return result
+        # gdb: the stop on the signal, then the backtrace.
+        start = next((i for i, l in enumerate(lines) if _TRACE_GDB_SIGNAL_RE.search(l)), None)
+        if start is not None:
+            frames = _gdb_frames(lines[start + 1:start + 400])
+            if frames:
+                _finish_trace(result, lines, start, frames, 'gdb')
+                return result
         # Geant4 / ROOT: the Break banner then gdb-style frames. A banner
         # with no frames (ROOT's "*** Break *** abort" after glibc aborts
         # npsim on heap corruption) decides nothing; the DD4hep form below
         # reads the G4Exception block that precedes the signal.
         start = next((i for i, l in enumerate(lines) if _TRACE_BREAK_RE.search(l)), None)
         if start is not None:
-            frames = []
-            for l in lines[start + 1:start + 400]:
-                m = _TRACE_GDB_FRAME_RE.match(l.strip())
-                if m:
-                    frames.append({'n': int(m.group(1)), 'function': m.group(2).strip(),
-                                   'library': m.group(3) or ''})
-                    if len(frames) >= TRACE_MAX_FRAMES:
-                        break
+            frames = _gdb_frames(lines[start + 1:start + 400])
             # ROOT's handler prints its own frames first (the stack-trace
             # helper, wait4, DispatchSignals, then "<signal handler
             # called>"); the crashing frame is the first named one after
@@ -731,6 +735,20 @@ def trace_extract(texts):
         if text:
             _stage_from_text(result, text)
     return result
+
+
+def _gdb_frames(lines):
+    """The gdb-style frames ("#N 0x... in function () from library") among
+    ``lines``, bounded to TRACE_MAX_FRAMES."""
+    frames = []
+    for l in lines:
+        m = _TRACE_GDB_FRAME_RE.match(l.strip())
+        if m:
+            frames.append({'n': int(m.group(1)), 'function': m.group(2).strip(),
+                           'library': m.group(3) or ''})
+            if len(frames) >= TRACE_MAX_FRAMES:
+                break
+    return frames
 
 
 def _stage_from_text(result, text):

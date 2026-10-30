@@ -72,6 +72,7 @@ the old paths here. This repo's docs cover the platform services:
 - `EVENT_SERVICE_PLOTS.md` — task and job core timelines from finished reports and timestamped harness snapshots.
 - `INCLUSIVE_FILTER.md` — the two house facet filters: the inclusive filter (every value stays listed, selections widen, one URL key `f`) for views that assemble a set, and the narrowing filter (one parameter per facet, the intersection, every bar counted within the selection) for the operations views; pages switch to them one at a time.
 - `PRODUCTION_DEPLOYMENT.md` — deploying swf-monitor.
+- `SCRIPTS.md` — the standalone scripts in `scripts/`: the Django header, arguments, stderr progress and the JSON summary line, the action record, and how to run one by hand.
 - `API_REFERENCE.md` — REST API surface.
 - `MCP.md`, `MCP_TOOL_REFERENCE.md`, `MCP_CLIENTS.md`, `PANDA_BOT.md` — MCP server overview, tool catalog, client setup, and the DISpatcher Mattermost bot (MCP client).
 - `alarms.md`, `ALARM_QUEUE.md` — the alarm engine; the alarm queue design: lifecycle transitions, per-subscriber feeds with read state, automated response (design).

@@ -107,6 +107,11 @@ def _is_memory(sig):
     return is_memory(sig)
 
 
+def _is_es_unit(sig):
+    from .segfaults import is_es_unit
+    return is_es_unit(sig)
+
+
 def _memory_fraction():
     from .segfaults import thresholds
     return thresholds()['segfault_memory_rss_fraction']
@@ -342,15 +347,33 @@ def withdrawn_phase(entry):
     return 'cancelled', 'cancelled', entry.get('reason') or 'request withdrawn'
 
 
+def is_host_entry(entry):
+    """A run made on a host directly, with no PanDA job behind it (an Event
+    Service request replayed on npps0, SEGFAULT_DIAGNOSIS.md, Event Service
+    units): the entry itself carries the execution and the outcome."""
+    return (entry or {}).get('mode') == 'host'
+
+
 def _attempt(sig, entry, run, now, memory_fraction=None):
     """One attempt row from a request entry, its run, or both;
     ``memory_fraction`` for a memory signature's attempt."""
     d = (run.data or {}) if run is not None else {}
+    host = run is None and is_host_entry(entry)
+    if host:
+        d = {k: entry.get(k) for k in ('started_at', 'ended_at', 'host', 'container',
+                                        'events_processed')}
     phase, job_status = phase_of(run)
     result, reason, rc = result_of(run, phase, memory_fraction)
     withdrawn = withdrawn_phase(entry) if run is None else None
     if withdrawn:
         phase, result, reason = withdrawn
+    elif host:
+        outcome = entry.get('outcome') or ''
+        if outcome in ENDED_OUTCOMES:
+            phase = 'cancelled' if outcome == 'cancelled' else 'finished'
+            result, reason, rc = outcome, entry.get('reason') or '', entry.get('exit_code')
+        else:
+            phase, result, reason, rc = 'running', 'pending', '', None
     queue = (run.queue.name if run is not None else entry.get('queue')) or ''
     started = _parse_dt(d.get('started_at'))
     ended = _parse_dt(d.get('ended_at'))
@@ -759,6 +782,11 @@ def reconcile(sig_key, queue_diagnosis=None):
         # cancelled request is not in it.
         prod = [e for e in settled if entry_role(e) == 'production']
         ref = [e for e in settled if entry_role(e) != 'production']
+        if not prod and _is_es_unit(sig):
+            # An Event Service request is not run again at its production
+            # queue: the record's own passes, every one of which crashed on
+            # it, are the production side of the pair.
+            prod = [{'outcome': 'crashed'}]
         outcome = None
         measured = None
         if memory:
@@ -848,6 +876,28 @@ def reconcile(sig_key, queue_diagnosis=None):
     if to_queue and queue_diagnosis is not None:
         queue_diagnosis(to_queue, 'auto:reproduced')
     return changed
+
+
+def update_host_entry(sig_key, request_id, fields):
+    """Write a host run's progress or outcome (``fields``) onto its request
+    entry, under a row lock so a request recorded meanwhile is kept.
+    Returns the updated entry, or None when the request is not on record."""
+    with transaction.atomic():
+        sig = CrashSignature.objects.select_for_update().filter(key=sig_key).first()
+        if sig is None:
+            return None
+        entries = list(sig.reproduction or [])
+        idx = next((i for i, e in enumerate(entries)
+                    if e.get('request_id') == request_id and is_host_entry(e)), None)
+        if idx is None:
+            return None
+        entry = dict(entries[idx], **fields)
+        if entry.get('outcome') in ENDED_OUTCOMES:
+            entry['verdict_time'] = entry.get('verdict_time') or _iso(timezone.now())
+        entries[idx] = entry
+        sig.reproduction = entries
+        sig.save(update_fields=['reproduction', 'updated_at'])
+        return entry
 
 
 def withdraw_request(sig_key, request_id, reason, failed=False):

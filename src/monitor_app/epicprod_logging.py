@@ -361,6 +361,16 @@ ACTION_DEFAULTS = {
                        "not_reproduced, inconclusive) settles on the "
                        "signature from the runs' payload reports.",
     },
+    'segfault_es_reproduction': {
+        'sublevel': 'normal', 'live': False,
+        'description': "An Event Service unit signature's crash request "
+                       "replayed on npps0 (scripts/segfault-es-reproduce.py): "
+                       "the request run again through run.sh with the "
+                       "resident simulation and, on a resident death, as a "
+                       "cold npsim under gdb; carries the outcome (crashed, "
+                       "completed, inconclusive), the signal and the frame "
+                       "(swf-epicprod SEGFAULT_DIAGNOSIS.md, Event Service units).",
+    },
     'segfault_reproduction_reconcile': {
         'sublevel': 'low', 'live': False,
         'description': "Reproduction requests reconciled with their canary "

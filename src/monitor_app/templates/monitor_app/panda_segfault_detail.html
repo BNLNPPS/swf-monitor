@@ -116,9 +116,13 @@
             {% else %}
             <h4>Trace</h4>
             {% if sig.trace.frames %}
-            <p>{{ sig.trace.program }}{% if sig.trace.stage %}, stage {{ sig.trace.stage }}{% endif %}{% if sig.trace.events_processed is not None %}, {{ sig.trace.events_processed }} events processed{% endif %}; from job
+            <p>{{ sig.trace.program }}{% if sig.trace.stage %}, stage {{ sig.trace.stage }}{% endif %}{% if sig.trace.events_processed is not None %}, {{ sig.trace.events_processed }} events processed{% endif %};
+               {% if sig.trace.form == 'gdb' %}from gdb on the request's replay on npps0 (the request of job
+               <a href="{% url 'monitor_app:panda_job_detail' pandaid=sig.trace.source_pandaid %}">{{ sig.trace.source_pandaid }}</a>),
+               {% else %}from job
                <a href="{% url 'monitor_app:panda_job_detail' pandaid=sig.trace.source_pandaid %}">{{ sig.trace.source_pandaid }}</a>
-               (<a href="{% url 'monitor_app:panda_payload_log' sig.trace.source_pandaid %}" target="_blank" rel="noopener">payload log</a>), read {{ sig.trace.dug_at|fmt_dt }}.
+               (<a href="{% url 'monitor_app:panda_payload_log' sig.trace.source_pandaid %}" target="_blank" rel="noopener">payload log</a>),
+               {% endif %}read {{ sig.trace.dug_at|fmt_dt }}.
                Crashing frame: <strong>{{ sig.trace.frame }}</strong>{% if sig.trace.library %} in {{ sig.trace.library }}{% endif %}.</p>
             <pre class="small">{% for line in sig.trace.frames %}{{ line }}
 {% endfor %}</pre>
