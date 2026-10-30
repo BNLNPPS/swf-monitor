@@ -5,14 +5,16 @@
   const trendModel = createEpicTrendModel();
   const compact = value => value >= 1000 ? (value / 1000).toFixed(1) + 'k' : Math.round(value).toLocaleString('en-US');
   const metrics = [
-    {key: 'efficiency', label: 'Efficiency', unit: '%', format: value => value.toFixed(1) + '%', ceiling: 100},
+    // Axis labels in whole percent, period cells in whole numbers without % so they do not overlap (Torre, 2026-10-30).
+    {key: 'efficiency', label: 'Efficiency', unit: '%', format: value => value.toFixed(1) + '%', ceiling: 100,
+      axis: value => Math.round(value) + '%', cell: value => String(Math.round(value))},
     {key: 'core_hours_per_day', label: 'Cores / day', unit: 'cores/day', divisor: 24, format: compact},
     {key: 'productive_cores', label: 'Productive avg cores', unit: 'cores', format: value => Math.round(value).toLocaleString('en-US')},
   ];
   const metricValue = (metric, row) => row?.[metric.key] == null ? null : row[metric.key] / (metric.divisor || 1);
-  const reading = (metric, row) => {
+  const reading = (metric, row, format = metric.format) => {
     const value = metricValue(metric, row);
-    return value == null ? '—' : metric.format(value);
+    return value == null ? '—' : format(value);
   };
   const panel = document.createElement('section');
   panel.id = 'compute-efficiency'; panel.className = 'panel';
@@ -78,7 +80,7 @@
           stroke: '#445864', 'stroke-width': 1}));
         const label = svg('text', {x: 27, y: position + 3.5, fill: '#c4d0d8',
           'font-size': 11, 'text-anchor': 'end'});
-        label.textContent = metric.format(ceiling * (1 - index / 2)); chart.append(label);
+        label.textContent = (metric.axis || metric.format)(ceiling * (1 - index / 2)); chart.append(label);
       });
       const step = 210 / Math.max(1, months.length);
       const x = position => 30 + step / 2 + position * (210 - step);
@@ -112,7 +114,7 @@
         cell.title = 'All sites · ' + (row.current ? 'last 24 hours' : row.period.slice(0, 7)) + (row.partial ? ' · month to date' : '') +
           '\n' + detail(row) + '\nAveraged over ' + row.days.toFixed(2) + ' calendar days';
         const label = document.createElement('span'); label.textContent = row.label + (row.partial ? '*' : '');
-        const amount = document.createElement('b'); amount.textContent = reading(metric, row);
+        const amount = document.createElement('b'); amount.textContent = reading(metric, row, metric.cell);
         cell.append(label, amount); cells.append(cell);
       });
       chart.setAttribute('aria-label', metric.label + ' monthly since May: ' + shown.map(site =>
