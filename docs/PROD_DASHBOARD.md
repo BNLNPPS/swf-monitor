@@ -292,7 +292,9 @@ summaries apply execution-queue filters in SQL, including their status
 totals. Site plot legends follow the metric order: running, finish, fail,
 queued. Queued links use the queue's not-started
 status set. In-flight task IDs open all of that task's job history,
-with server-side task filtering and pagination. The jobs title and
+with server-side task filtering and pagination. An in-flight row has one
+hover, its task's detail, which names the queue in its short form; the
+row's links carry no hover of their own (Torre Wenaus, 2026-10-29). The jobs title and
 completion chart follow task and execute-site filters; a whole-queue
 pie is omitted for a narrower selection. Task file totals open the task accounting rather than a
 job count. Storage capacity links select BNL-XRD and the capacity view.

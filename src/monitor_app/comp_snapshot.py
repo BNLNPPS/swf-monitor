@@ -540,7 +540,7 @@ class _Build:
             lost_pct = 100.0 * lost / (done + lost) if done + lost else 0.0
             local = at.astimezone(ZoneInfo('America/New_York')) if at else None
             detail = (' at '.join(x for x in (physics, site_name.get(queue, queue)) if x)
-                      + f". {name}, {status} on {queue}"
+                      + f". {name}, {status} on {short_name(queue)}"
                       + (f" since {local:%m-%d %H:%M} ET" if local else '')
                       + f"; {done:,} of {n:,} files done, {lost:,} lost after retries"
                       + (f" ({lost_pct:.1f}%), in alarm" if tid in alarmed else '') + '.')

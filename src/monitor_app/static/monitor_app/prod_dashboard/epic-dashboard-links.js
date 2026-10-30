@@ -59,7 +59,10 @@ function linkDashboard(record) {
     refresh();
     anchor.target = '_blank';
     anchor.rel = 'noopener';
-    anchor.title = description;
+    // No description: the link carries no hover of its own, and the
+    // enclosing element's hover is the one shown.
+    if (description) anchor.title = description;
+    else anchor.removeAttribute('title');
     anchor.dashboardDestination = destination;
     if (!anchor.dataset.dashboardBound) {
       anchor.dataset.dashboardBound = '1';
@@ -145,12 +148,15 @@ function linkDashboard(record) {
 
   link(document.querySelector('#tasks .panelhead strong'), url('panda/tasks/', {days: 90}),
     'Tasks and input files');
+  // A task row's one hover is its detail, the row's own: its links carry
+  // none, so no second, smaller hover stands beside it (Torre Wenaus,
+  // 2026-10-29: "lose the little one").
   document.querySelectorAll('#tasks tbody tr').forEach(row => {
     const taskLink = row.querySelector('td:first-child a');
     if (!taskLink) return;
     const task = taskLink.textContent.trim();
     const detail = url('panda/tasks/' + task + '/');
-    link(taskLink, url('panda/jobs/', {taskid: task, days: 'all'}), 'Jobs for task ' + task);
+    link(taskLink, url('panda/jobs/', {taskid: task, days: 'all'}), '');
     const cells = Array.from(row.cells);
     cells.slice(1).forEach((cell, index) => {
       if (!cell.textContent.trim()) return;
@@ -158,10 +164,7 @@ function linkDashboard(record) {
       const destination = column === 2 ? jobs('', 'running', 2160, {taskid: task}) :
         column === 3 ? jobs('', 'queued', 2160, {taskid: task}) :
         column === 6 ? url('panda/errors/', {taskid: task, days: 'all', status: 'failed'}) : detail;
-      const description = column === 2 ? 'Running jobs for task ' + task :
-        column === 3 ? 'Queued jobs for task ' + task :
-        column === 6 ? 'Error breakdown for task ' + task : 'Task ' + task + ': input files';
-      link(cell, destination, description);
+      link(cell, destination, '');
     });
   });
   const campaign = document.getElementById('campaign-summary');
