@@ -144,7 +144,10 @@ async def whats_new_propose(title: str, summary: str, tags: list[str],
         proposer: The proposing AI's own name, e.g. "claude-swf-testbed".
             Never a human's username.
         details: Optional Markdown: how to use it, what it replaces, limits.
-        refs: Optional Markdown: links to pages, documents, pull requests.
+        refs: Markdown: links to pages, documents, pull requests. An item
+            on the operation or use of the system links first the section of
+            the WFMS documentation (https://epic-wfms-docs.readthedocs.io)
+            where its impact is described.
         builds_on: Optional slugs of earlier items this one develops further.
 
     Returns:

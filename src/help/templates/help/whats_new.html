@@ -9,6 +9,8 @@
 developers should know about, newest first. Each item can be expanded with the arrow; its title
 opens the full item with its comments and history, and a tag shows the items carrying it.{% if username %}
 Anyone with authority to act can add, edit, comment and vote.{% endif %}</p>
+<p class="wn-intro">The <a href="{% url 'help:whats_new_feed' %}">RSS feed</a> carries the newest 50 items:
+add its address to a feed reader to follow the list. It needs the same sign-in as this page.</p>
 
 {% if may_add %}<div class="mb-3"><a class="btn btn-primary btn-sm" href="{% url 'help:whats_new_new' %}{% if request.GET.user_view %}?user_view={{ request.GET.user_view }}{% endif %}">Add</a></div>{% endif %}
 

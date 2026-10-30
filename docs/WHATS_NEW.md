@@ -15,7 +15,7 @@ person approves them.
 | Title | One line: what changed, in the reader's terms. |
 | Summary | One to three lines: what it does and who it is for. |
 | Details | Optional Markdown: how to use it, what it replaces, limits. |
-| References | Optional Markdown: pages, documents, commits, pull requests. |
+| References | Markdown: pages, documents, commits, pull requests. An item on the operation or use of the system references, first, the section of the WFMS documentation (readthedocs) where its impact is described. |
 | Tags | Topical tags, at least one. |
 | Importance | Exactly one of urgent, high, routine, minor. |
 | Shipped | The date the development reached production. |
@@ -47,7 +47,7 @@ readers), `high`, `routine`, `minor`. It is shown as a badge on each
 item, in shades of green from the lightest (minor) to the darkest
 (urgent), and filters like a tag.
 
-Tags are shown as text everywhere, links separated by bullets. A tag
+Tags are shown as text everywhere, links separated by spaces. A tag
 opens the list filtered to the items carrying it; on the list, a tag
 in the table selects it in the filter in place, and the selected tags
 are bold in every row.
@@ -88,6 +88,7 @@ version.
 | Page | URL |
 |---|---|
 | List | `/help/whats-new/` |
+| Feed | `/help/whats-new/feed/` |
 | Item | `/help/whats-new/<slug>/` |
 | Version | `/help/whats-new/<slug>/versions/<n>/` |
 | New item | `/help/whats-new/new/` |
@@ -121,6 +122,15 @@ The pages live in the `help` application (`src/help/`), mounted at
 `help/`, which also holds later Help pages. The external face proxies
 the `help/` tree through one catch-all route in swf-remote
 ([EXTERNAL_ACCESS.md](EXTERNAL_ACCESS.md)).
+
+## The feed
+
+`/help/whats-new/feed/` is an RSS 2.0 feed of the newest 50 items,
+newest shipped first: each item's title, summary, importance, tags and
+contact, its link and its shipped date (`help/feeds.py`). Links point
+at the face the reader came through, epic-devcloud.org for a request
+through the swf-remote proxy. The feed needs the same sign-in as the
+page. The list page links it and says how to follow it.
 
 ## Writes
 
