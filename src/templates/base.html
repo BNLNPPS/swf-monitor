@@ -752,6 +752,13 @@
         <a href="{% url 'monitor_app:log_list' %}?app_name=epicprod" class="{% if active_nav.logs %}nav-active{% endif %}">Logs</a>
         </span>
         <span class="nav-spacer"></span>
+        <div class="dropdown" id="nav-help">
+            <button class="dropbtn">Help</button>
+            <div class="dropdown-content">
+                <a href="https://epic-wfms-docs.readthedocs.io/en/latest/" target="_blank" rel="noopener"
+                   title="ePIC workflow and production system documentation (readthedocs)">Documentation</a>
+            </div>
+        </div>
         <div class="dropdown" id="nav-system">
             <button class="dropbtn{% if system_status_overall == 'error' %} nav-system-error{% endif %}{% if active_nav.system or active_nav.snapper or active_nav.about %} nav-active{% endif %}"
                     id="system-status-nav-link"
