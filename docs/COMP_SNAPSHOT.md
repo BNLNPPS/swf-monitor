@@ -528,7 +528,10 @@ failure says how it failed (`System status refresh timed out`,
 `Log rescue failed · BNL-XRD`); a task, RSE or queue subject is named
 (`task 41470`); a finding (`watch_finding`, `production_finding`) with no
 title of its own is titled by its first sentence, which states what was
-found, and its detail is the rest of its text. A Move's title names where from and where to
+found, and its detail is the rest of its text; any other title that would be
+its label alone is completed by the record's first sentence, led by its
+verdict where it carries one. The Capcom notices take the same titles
+(NOTICE_ROUTING.md). A Move's title names where from and where to
 (`Move GREX to OSG · task 41474`); its detail is the task, its route, who
 asked and why, from its operation record as the curated view reads it
 (`live_curated.task_operation_who_why`):

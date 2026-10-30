@@ -77,9 +77,13 @@ Two modes, chosen per subscription:
   close-out defect holding four Google Event Service jobs open, reached only
   the operator's Capcom feed and no working session saw it for hours.
 
-Notice composition from the incident is deterministic: title from the operation
-when present, otherwise the action, plus `subject_label` when present, otherwise
-`subject_key`; detail from `narration`/`reason`/`summary` where present, URL to
+Notice composition from the incident is deterministic: the title is the live
+screen's (`live_notices.board_text`, COMP_SNAPSHOT.md, Live), what happened and
+to what, never the action's name alone (Torre Wenaus, 2026-10-29): an assessment
+reads by its verdict and its narration's first sentence (`Live watch alarm:
+BNL-XRD read-handshake failures remained unresolved ...`); a task pause or
+resume keeps `pause: <subject>`, the form Capcom files those notices by;
+detail from `narration`/`reason`/`summary` where present, URL to
 the log record, severity from the outcome, dedup key from the record id.
 Composition belongs to the router, not to emitters or subscribers. Incidents
 may carry `severity` (how bad — e.g. an assessment verdict) and `url`

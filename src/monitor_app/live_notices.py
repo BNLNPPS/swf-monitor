@@ -60,6 +60,7 @@ BOARD_LABELS = {
     'worker_limit': 'Core limit', 'node_guard_set': 'Node guard set',
     'prodtask_trial': 'Trial', 'prodtask_priority_set': 'Priority',
     'proposal_created': 'AI proposal', 'attempt_manifest_repair': 'Manifest repair',
+    'assessment_register': 'Assessment',
 }
 # Subjects named by a composed task name, too long for a title: the title
 # carries its physics and evgen tags instead (p1108.e37).
@@ -68,9 +69,16 @@ TASK_SUBJECTS = frozenset({'prod_task', 'campaign_task'})
 SUBJECT_NAMES = {'panda_task': lambda key: f'task {key}', 'rse': short_name,
                  'panda_queue': short_name, 'site': short_name}
 # A failure's title says how it failed.
-OUTCOME_WORDS = {'timeout': 'timed out', 'error': 'failed', 'partial': 'partly failed'}
+OUTCOME_WORDS = {'timeout': 'timed out', 'error': 'failed', 'partial': 'partly failed',
+                 'held': 'held at fair share'}
 # Records whose text is a reading: titled by what was found.
 FINDING_ACTIONS = frozenset({'watch_finding', 'production_finding'})
+# An assessment's verdict, named in its title.
+VERDICT_WORDS = frozenset({'alarm', 'attention'})
+# The verdict an assessment's narration opens with, which its title names
+# already ("Alarm: ...", "Attention is warranted: ...", "Verdict attention: ...").
+VERDICT_LEAD = re.compile(r'^\s*(?:Verdict\s+)?(?:Alarm|Attention)'
+                          r'(?:\s+(?:is|remains)\s+warranted)?\s*[:,]?\s*', re.IGNORECASE)
 OPERATION_LABELS = {'reassign': 'Move', 'pause': 'Pause', 'resume': 'Resume',
                     'retry': 'Retry', 'finish': 'Finish', 'kill': 'Kill',
                     'abort': 'Abort'}
@@ -149,7 +157,17 @@ def board_text(message, extra):
         return title, rest or detail
     how = OUTCOME_WORDS.get(str(extra.get('outcome') or ''))
     what = f'{label} {how}' if how else label
-    return (f'{what} · {where}' if where else what), detail
+    if where:
+        return f'{what} · {where}', detail
+    if how:
+        return what, detail
+    # Nothing yet says what happened: the record's own first sentence does,
+    # led by its verdict where it carries one (a live watch's alarm).
+    said = str(extra.get('narration') or extra.get('summary') or extra.get('reason') or message)
+    found, _rest = _first_sentence(VERDICT_LEAD.sub('', said))
+    verdict = str(extra.get('verdict') or '')
+    what = f'{label} {verdict}' if verdict in VERDICT_WORDS else label
+    return (f'{what}: {found}' if found and found != action else what), detail
 
 
 def _node_guard_name(f):
