@@ -7,6 +7,7 @@ TECHNICAL_KEYS = {
     'action', 'outcome', 'verdict', 'severity', 'summary', 'narration', 'reason',
     'subject_type', 'subject_key', 'username', 'duration_ms', 'sublevel',
     'live_default', 'notify', 'registered', 'corun_page_group_id', 'title',
+    'subject_label',
 }
 LABELS = {'noise': 'Channel noise', 'real_problems': 'Recurring problems'}
 
@@ -93,8 +94,11 @@ def present_log(log):
         'title': _text(extra.get('title')) or (_label(action) if action else 'Log entry'),
         'summary': summary, 'passages': passages, 'fields': fields,
         'state': state, 'duration': duration,
-        'subject': _text(extra.get('subject_key')),
-        'subject_type': _label(extra.get('subject_type', '')),
+        # The subject's own name when it carries one ("Pressure front"), else
+        # its type and key ("Task: 41474").
+        'subject': _text(extra.get('subject_label')) or _text(extra.get('subject_key')),
+        'subject_type': ('' if _text(extra.get('subject_label'))
+                         else _label(extra.get('subject_type', ''))),
         'username': _text(extra.get('username')),
         'raw_data': json.dumps(log.extra_data, indent=2, ensure_ascii=False, default=str),
     }
