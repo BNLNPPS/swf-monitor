@@ -20,7 +20,10 @@ failures exist only in the file-level bookkeeping.
 
 Falls back to `computed_failurerate` (all-failures rate) with a stderr
 warning if the upstream swf-monitor doesn't yet expose the new field —
-covers the window while swf-monitor is redeployed.
+covers the window while swf-monitor is redeployed. A task whose field is
+present but null (no input file finished or retry-exhausted, as on an
+Event Service task whose files' events are still being processed) has no
+final failure and is skipped, never sent to the fallback.
 
 Alarm modules import and delegate to `task_failure_rate(client, params)`.
 No central registry.
@@ -100,9 +103,15 @@ def task_failure_rate(client, params: dict):
         ):
             # Prefer retry-exhausted-failures rate (true failures).
             # Fall back to all-failures rate only if upstream doesn't
-            # expose the new field (stale swf-monitor).
+            # expose the new field (stale swf-monitor). A present but null
+            # rate means no input file has finished or exhausted its
+            # retries yet: no final failure, nothing to alarm on. Event
+            # Service tasks sit there while their files' events are
+            # processed, and fell back here until 2026-10-31 (41525).
             cfr = t.get("computed_finalfailurerate")
-            using_finalrate = cfr is not None
+            using_finalrate = "computed_finalfailurerate" in t
+            if using_finalrate and cfr is None:
+                continue
             if not using_finalrate:
                 cfr = t.get("computed_failurerate")
                 if cfr is not None and not _warned_fallback:
