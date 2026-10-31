@@ -104,13 +104,19 @@ def stashed_entries(since, limit=None):
         FROM "{PANDA_SCHEMA}"."metatable" m
         JOIN "{PANDA_SCHEMA}"."jobsarchived4" j ON j."pandaid" = m."pandaid"
         WHERE j."modificationtime" >= %s AND j."processingtype" IN ('epicproduction', 'canary')
+          AND m."metadata" ~ %s
     """
     # Canaries included: their /TEST/ outputs stash and drain like
     # production's, and a canary is how the failover chain is proven
     # (swf-epicprod docs/RUCIO_FAILOVER_STASH.md, Sequencing).
+    # Only reports whose stash list is non-empty leave the database. Every
+    # report carries a "stash" key, mostly an empty list; reading them all
+    # brought 633,400 reports (6.8 GB) into this process for 1,375 that
+    # stashed anything, and the pass held 13.7 GB every half hour
+    # (2026-10-30).
     try:
         with connections['panda'].cursor() as cursor:
-            cursor.execute(sql, [since])
+            cursor.execute(sql, [since, r'"stash"\s*:\s*\[\s*\{'])
             for pandaid, raw in cursor.fetchall():
                 try:
                     metadata = json.loads(raw) if isinstance(raw, str) else raw
@@ -124,7 +130,9 @@ def stashed_entries(since, limit=None):
         _log(f'ERROR: metatable read failed: {e}')
 
     try:
-        for job in (EpicProdJob.objects.filter(updated_at__gte=since)
+        for job in (EpicProdJob.objects.filter(
+                        updated_at__gte=since,
+                        data__payload_report__report__stash__contains=[{}])
                     .only('pandaid', 'data').iterator()):
             if int(job.pandaid) in seen:
                 continue
