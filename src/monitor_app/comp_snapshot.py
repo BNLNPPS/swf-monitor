@@ -1606,6 +1606,7 @@ FRONT_REASONS = {
     'unsized_task': 'a task that cannot be sized', 'no_calibration': 'no calibration yet',
     'canary': 'the canary is failing', 'burn_through': 'jobs burning through',
     'failure_window': 'the failure rate over its threshold', 'credential': 'a credential',
+    'regulator_unverified': "JEDI's job throttler not seen deciding",
 }
 PART_NAMES = {'prod_activity': 'jobs', 'canary': 'canary',
               'snapper_errors': 'failures', 'pilot_supply': 'pilot supply'}
@@ -2441,6 +2442,9 @@ def _report_items(front, sites, storage, alarms, assessment):
             if (f.get('state') and f.get('state') not in ('supplied', 'fed')
                     and f.get('reason') not in FEED_SWITCH_REASONS):
                 reason = FRONT_REASONS.get(f.get('reason'), '')
+                # A known gate names itself in place of "a gate is red".
+                if f.get('state') == 'degraded' and reason:
+                    words = 'holds new releases'
                 items.append({'level': level, 'site': s['id'], 'key': f"front:{q['id']}",
                               'text': f"Front, {subject}: {words}{', ' + reason if reason else ''}",
                               'link': front.get('link')})

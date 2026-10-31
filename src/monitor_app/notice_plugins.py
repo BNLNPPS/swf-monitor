@@ -151,10 +151,12 @@ class MattermostLivePlugin:
         stamp = timezone.localtime(row.timestamp).strftime('%H:%M')
 
         # The line's title is the most specific thing the event states
-        # it did: its operation when it carries one, else the action.
-        title = str(extra.get('operation') or action).replace('_', ' ')
+        # it did: its own title when it carries one, else its operation,
+        # else the action.
+        title = (' '.join(str(extra.get('title') or '').split())
+                 or str(extra.get('operation') or action).replace('_', ' '))
         parts = [f"`{stamp}`", f"**{title}**"]
-        if subject:
+        if subject and not extra.get('title'):
             parts.append(subject)
         if username:
             parts.append(f"by {username}")
@@ -333,8 +335,9 @@ class NotifyLLMPlugin:
     def _format(self, row, extra):
         """The alarm, its record, and what the receiving session does."""
         stamp = timezone.localtime(row.timestamp).strftime('%H:%M %Z')
-        title = str(extra.get('operation') or extra.get('action') or 'alarm').replace('_', ' ')
-        subject = str(extra.get('subject_label') or extra.get('subject_key') or '')
+        title = ' '.join(str(extra.get('title') or '').split())
+        subject = '' if title else str(extra.get('subject_label') or extra.get('subject_key') or '')
+        title = title or str(extra.get('operation') or extra.get('action') or 'alarm').replace('_', ' ')
         detail = ' '.join(str(extra.get('narration') or extra.get('summary')
                               or extra.get('reason') or row.message or '').split())
         return (f"epicprod ALARM, {title}{' ' + subject if subject else ''}, {stamp}: "

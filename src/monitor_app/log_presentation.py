@@ -6,7 +6,7 @@ import math
 TECHNICAL_KEYS = {
     'action', 'outcome', 'verdict', 'severity', 'summary', 'narration', 'reason',
     'subject_type', 'subject_key', 'username', 'duration_ms', 'sublevel',
-    'live_default', 'notify', 'registered', 'corun_page_group_id',
+    'live_default', 'notify', 'registered', 'corun_page_group_id', 'title',
 }
 LABELS = {'noise': 'Channel noise', 'real_problems': 'Recurring problems'}
 
@@ -16,7 +16,21 @@ def _text(value):
 
 
 def _label(key):
-    return LABELS.get(key, str(key).replace('_', ' ').capitalize())
+    key = str(key)
+    if key not in LABELS and key.endswith('_s'):
+        key = key[:-2]
+    return LABELS.get(key, key.replace('_', ' ').capitalize())
+
+
+def _duration(seconds):
+    """A count of seconds in words: 59 s, 14 min, 2 h 5 min."""
+    seconds = int(round(seconds))
+    if seconds < 60:
+        return f'{seconds} s'
+    minutes = seconds // 60
+    if minutes < 60:
+        return f'{minutes} min'
+    return f'{minutes // 60} h' + (f' {minutes % 60} min' if minutes % 60 else '')
 
 
 def _value(value, key=''):
@@ -28,7 +42,10 @@ def _value(value, key=''):
     if isinstance(value, list):
         return {'kind': 'list', 'items': [_value(v) for v in value]}
     link = key if key in {'execution_id', 'run_id'} and value and not isinstance(value, bool) else ''
-    if isinstance(value, bool):
+    if (str(key).endswith('_s') and isinstance(value, (int, float))
+            and not isinstance(value, bool) and math.isfinite(value)):
+        value = _duration(value)
+    elif isinstance(value, bool):
         value = 'Yes' if value else 'No'
     elif value is None:
         value = 'Not recorded'
@@ -71,7 +88,9 @@ def present_log(log):
     state = (_text(extra.get('verdict')) or _text(extra.get('severity'))
              or _text(extra.get('outcome')))
     return {
-        'title': _label(action) if action else 'Log entry',
+        # A record that carries its own title is shown under it, as on the
+        # live screen (live_notices.board_text): what happened and to what.
+        'title': _text(extra.get('title')) or (_label(action) if action else 'Log entry'),
         'summary': summary, 'passages': passages, 'fields': fields,
         'state': state, 'duration': duration,
         'subject': _text(extra.get('subject_key')),
