@@ -160,6 +160,13 @@ ACTION_DEFAULTS = {
                        "raises ahead of its due date, on the alarm "
                        "dashboard.",
     },
+    # Production now: a person's informational line (docs/COMP_SNAPSHOT.md)
+    'prod_now_notice': {
+        'sublevel': 'normal', 'live': False,
+        'description': "Put an informational line, such as a production "
+                       "milestone, on Production now for a set number of "
+                       "hours.",
+    },
     # Help menu: What's new (docs/WHATS_NEW.md)
     'whats_new_create': {
         'sublevel': 'normal', 'live': True,

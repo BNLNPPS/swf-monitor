@@ -461,7 +461,11 @@ OSG. Queue identifiers and links retain their canonical names.
   states and reasons, a feed switch apart), every amber or red health
   part with its note,
   every active alarm event (red) and approaching deadline ping (amber),
-  storage parts not green, and late or missing scheduled campaign
+  storage parts not green, a line a person put up (grey, informational,
+  standing for the hours it was given: a `prod_now_notice` record written
+  by `scripts/prod-now-notice.py`, its text the line, linking to the page
+  it names; Torre Wenaus, 2026-10-30, for the campaign's billionth
+  delivered event, 24 hours), and late or missing scheduled campaign
   assessments (the System
   page's campaign-assessments row; the verdicts are held by corun-ai,
   which this build does not call). The text before the first ": " names

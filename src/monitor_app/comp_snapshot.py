@@ -1423,7 +1423,8 @@ def build():
         'report': {'text': _report_text(front, sites, storage),
                    'items': _drift_items(drift) + _report_items(
                        front, sites, storage, alarms,
-                       b.part('assessment', _assessment_freshness, None)),
+                       b.part('assessment', _assessment_freshness, None))
+                   + b.part('notices', _notice_items, []),
                    'assessment': b.part('daily_assessment', _latest_daily_assessment, None)},
         'live': b.part('live', _live_records, None),
         'tasks': b.part('tasks', lambda: b.floor_tasks(site_name, alarms, site_of), None),
@@ -2391,6 +2392,32 @@ def _pause_accounts(task_ids):
         out.setdefault(task_id, ('outside our tools',
                                  'paused directly in PanDA, which records no reason'))
     return out
+
+
+def _notice_items():
+    """Production now lines a person put up (``prod_now_notice`` records,
+    scripts/prod-now-notice.py): grey, informational, each shown for the
+    hours it was given (Torre Wenaus, 2026-10-30: "add a visible prod now
+    entry info level ... lifetime 24hrs")."""
+    from monitor_app.epicprod_logging import EPICPROD_APP_NAME
+    from monitor_app.models import AppLog
+    now = timezone.now()
+    items = []
+    for r in (AppLog.objects
+              .filter(app_name=EPICPROD_APP_NAME, extra_data__action='prod_now_notice')
+              .order_by('-timestamp').values('id', 'timestamp', 'extra_data')):
+        extra = r['extra_data'] or {}
+        try:
+            hours = float(extra.get('hours'))
+        except (TypeError, ValueError):
+            logger.warning('prod_now_notice %s has no number of hours', r['id'])
+            continue
+        if r['timestamp'] + timedelta(hours=hours) <= now or not extra.get('title'):
+            continue
+        items.append({'level': 'grey', 'key': f"notice:{r['id']}",
+                      'text': str(extra['title']),
+                      'link': extra.get('url') or f"{PUBLIC}/logs/{r['id']}/"})
+    return items
 
 
 def _report_items(front, sites, storage, alarms, assessment):
