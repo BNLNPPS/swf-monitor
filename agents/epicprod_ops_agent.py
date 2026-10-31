@@ -689,14 +689,20 @@ class EpicProdOpsAgent(BaseAgent):
     def _handle_submit_evgen_task(self, m):
         """Validate, then run the client-API EVGEN submission on the worker
         pool. This is the live Submit-button path (prun is sidelined). Deduped
-        per task so two near-simultaneous triggers can't fire two submissions."""
+        per task so two near-simultaneous triggers can't fire two submissions;
+        a tail (swf-epicprod prodtask_submit_tail) is deduped per attempt, so
+        one queued with its task is not skipped as a repeat (p4499's tail,
+        2026-10-28)."""
         task_name = m.get("task_name")
         if not task_name:
             self.logger.error("PRODOPS submit_evgen_task: missing task_name")
             return
+        key = f"submit:{task_name}"
+        if m.get("tail"):
+            key += f":tail:{m.get('panda_tasks_id')}"
         self.run_in_background(
             self._do_submit_evgen_task, m,
-            dedup_key=f"submit:{task_name}", label=f"submit_evgen_task {task_name}")
+            dedup_key=key, label=f"submit_evgen_task {task_name}")
 
     def _do_submit_evgen_task(self, m):
         """Submit one PCS ProdTask to PanDA via the client-API EVGEN doer.
