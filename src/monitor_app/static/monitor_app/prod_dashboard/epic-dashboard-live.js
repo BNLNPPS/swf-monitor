@@ -274,6 +274,8 @@
 
   // TASKS, centred under a site's name: Prod tasks in flight for the
   // allocation, what has been sent to it and not ended (Torre, 2026-10-27).
+  // On hover, the task board's tasks at the site by task id (Torre,
+  // 2026-10-30: "show the list of tasks on the site in task ID terms").
   function siteTasks(panel, site, queues) {
     const name = panel.querySelector('.panelhead strong');
     if (!name || !queues.length) return;
@@ -283,12 +285,15 @@
       name.replaceWith(title);
       title.append(name, element('a', 'site-tasks', 'TASKS'));
     }
-    const ids = queues.map(queue => queue.id);
     const link = title.querySelector('.site-tasks');
     link.href = new URL('pcs/in-flight/?' + new URLSearchParams({site: site.name}),
       'https://epic-devcloud.org/prod/').href;
     link.target = '_blank'; link.rel = 'noopener';
-    link.title = 'Tasks sent to ' + site.name + ' (' + ids.join(', ') + ')';
+    const taskIds = list(current && current.tasks)
+      .filter(task => (task.sites || []).includes(site.id))
+      .map(task => Number(task.id)).sort((a, b) => a - b);
+    link.title = taskIds.length ? 'Tasks at ' + site.name + ': ' + taskIds.join(' ')
+      : 'No tasks in flight at ' + site.name;
   }
 
   // A site's Production now lines by number at its title row's upper

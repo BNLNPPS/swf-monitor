@@ -29,7 +29,9 @@ Tasks in flight, epicprod-live, Production now and Science data occupy
 the remaining columns. Site panes open by default; Open and Close act
 on every site pane. Beside them a note reads "Numeric codes reference
 *Production now* items": the numbers at a site pane's upper right are
-its Production now lines.
+its Production now lines. The note is boxed as the numbers are, by a
+1-pixel muted outline that takes no space, so nothing around it moves
+(Torre Wenaus, 2026-10-30).
 
 Site labels, reasons and phase colours come from the feed's `status_label`,
 `status_reason` and `status_level`. A site's bullet is the feed's
@@ -320,7 +322,9 @@ unfinished payload registration in the same completion hour.
 Each site panel's name has **TASKS** centred beneath it, in 8-pixel text, a
 step below the pillar scale's: what has been sent to that allocation, the PCS page Prod tasks in
 flight for it (`pcs/in-flight/?site=<name>`), the production tasks sent to its
-queues that have not ended, paused ones included.
+queues that have not ended, paused ones included. Its hover text lists
+the site's tasks on the task board by JEDI task id, in ascending order
+(`tasks[].sites`, COMP_SNAPSHOT.md, Tasks; Torre Wenaus, 2026-10-30).
 
 Drilldown queue filters come from each snapshot site's queues. The site's
 primary queue page is also selected in the feed. The dashboard's panel-name
