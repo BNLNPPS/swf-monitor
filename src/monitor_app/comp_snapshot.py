@@ -105,6 +105,10 @@ LIVE_WINDOW_H = 12
 # A task Move is normal operation, shown at INFO for this long (SysConfig
 # comp.live.move_hours; Torre Wenaus, 2026-10-29: "make it 3hrs").
 LIVE_MOVE_HOURS = 3
+# An item added to What's new is shown at INFO for this long (SysConfig
+# comp.live.whats_new_hours; Torre Wenaus, 2026-10-30: "info level, visible.
+# lifetime, what, 12hr?"). The screen's window bounds it.
+LIVE_WHATS_NEW_HOURS = 12
 
 
 def _worst(levels):
@@ -1656,16 +1660,16 @@ def _latest_daily_assessment():
             'narration': x.get('narration')}
 
 
-def _live_move_hours():
-    """How long a task Move stays on the epicprod-live screen, SysConfig
-    ``comp.live.move_hours``."""
+def _live_hours(key, default):
+    """How long an INFO record of one kind stays on the epicprod-live
+    screen, SysConfig ``key``: ``comp.live.move_hours`` for a task Move,
+    ``comp.live.whats_new_hours`` for an item added to What's new."""
     from monitor_app.models import SysConfig
-    value = SysConfig.get_setting('comp.live.move_hours', LIVE_MOVE_HOURS)
+    value = SysConfig.get_setting(key, default)
     if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
         return value
-    logger.warning('comp.live.move_hours %r is not a number of hours; using %s',
-                   value, LIVE_MOVE_HOURS)
-    return LIVE_MOVE_HOURS
+    logger.warning('%s %r is not a number of hours; using %s', key, value, default)
+    return default
 
 
 def _move_detail(extra, at, task_name):
@@ -1701,7 +1705,8 @@ def _feed_text(extra):
 def _live_records():
     """The epicprod-live screen: the newest warning and error records of
     the live stream, the logs page's live view (ACTION_STREAM.md), each
-    with its own page, and a task Move at INFO for ``comp.live.move_hours``.
+    with its own page, a task Move at INFO for ``comp.live.move_hours``, and
+    an item added to What's new at INFO for ``comp.live.whats_new_hours``.
     The room reads the record anonymously and the logs page is behind the
     login wall, so the records ride here. The floor is live now: records
     from the window only, a node guard trip only for a node new to the
@@ -1719,14 +1724,19 @@ def _live_records():
                         extra_data__action='live_cleared')
                 .values_list('extra_data__cleared_ids', flat=True)):
         cleared.update(int(i) for i in ids or ())
-    moves_since = timezone.now() - timedelta(hours=_live_move_hours())
+    moves_since = timezone.now() - timedelta(
+        hours=_live_hours('comp.live.move_hours', LIVE_MOVE_HOURS))
+    whats_new_since = timezone.now() - timedelta(
+        hours=_live_hours('comp.live.whats_new_hours', LIVE_WHATS_NEW_HOURS))
     rows = (AppLog.objects.filter(live_stream_q())
             .filter(Q(levelname__in=LIVE_LEVELS)
                     | Q(levelname='INFO', timestamp__gte=moves_since,
                         extra_data__action='panda_task_operation',
                         extra_data__operation='reassign')
                     | Q(levelname='INFO', timestamp__gte=moves_since,
-                        extra_data__action='front_decision', extra_data__outcome='fed'))
+                        extra_data__action='front_decision', extra_data__outcome='fed')
+                    | Q(levelname='INFO', timestamp__gte=whats_new_since,
+                        extra_data__action='whats_new_create'))
             .exclude(id__in=cleared)
             .order_by('-timestamp')
             .values('id', 'timestamp', 'levelname', 'message', 'instance_name',

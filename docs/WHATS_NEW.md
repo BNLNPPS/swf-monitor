@@ -132,6 +132,18 @@ at the face the reader came through, epic-devcloud.org for a request
 through the swf-remote proxy. The feed needs the same sign-in as the
 page. The list page links it and says how to follow it.
 
+## On epicprod-live
+
+An item's creation is an action-stream record, `whats_new_create`,
+live at normal importance and logged at INFO, carrying the title "What's
+new: <item title>", the summary, the importance and the item page
+(Torre Wenaus, 2026-10-30). The epicprod-live channel posts it as the
+item's title linked to its page, its importance, who added it and its
+summary (`notice_plugins.py`). The room's live screen shows it at INFO
+for `comp.live.whats_new_hours` hours, 12 by default and at most the
+screen's 12-hour window ([COMP_SNAPSHOT.md](COMP_SNAPSHOT.md), Live).
+Edits, comments, votes and archiving are not posted.
+
 ## Writes
 
 Writes are JSON calls under `/help/api/whats-new/`, authenticated by

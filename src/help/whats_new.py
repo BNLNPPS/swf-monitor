@@ -191,8 +191,9 @@ def _write(entry, clean):
 
 def item_create(fields, *, changed_by, origin=None):
     """Create an item: the call the New item form, the API, and an approved
-    AI proposal make. Logs one origin-stamped ``whats_new_create`` event.
-    Returns (entry, action log id)."""
+    AI proposal make. Logs one origin-stamped ``whats_new_create`` event,
+    which epicprod-live posts and the live screen shows at INFO (Torre
+    Wenaus, 2026-10-30). Returns (entry, action log id)."""
     from monitor_app.alarms_data import _origin_attrs
     from monitor_app.epicprod_logging import log_epicprod_action
 
@@ -219,7 +220,11 @@ def item_create(fields, *, changed_by, origin=None):
     log_id = log_epicprod_action(
         'web', 'whats_new_create', subject_type='whats_new', subject_key=slug,
         subject_label=entry.title, username=changed_by,
-        sublevel='normal', live_default=False,
+        sublevel='normal', live_default=True,
+        title=(entry.title if entry.title.lower().startswith("what's new")
+               else f"What's new: {entry.title}"),
+        summary=clean['summary'],
+        importance=clean['importance'],
         url=f'/help/whats-new/{slug}/', **attrs)
     return entry, log_id
 

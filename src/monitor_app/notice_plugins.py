@@ -129,6 +129,10 @@ class MattermostLivePlugin:
             notice = self._format_assessment(row, extra)
             if notice:
                 return notice
+        if action == 'whats_new_create' and outcome in ('', 'ok'):
+            notice = self._format_whats_new(row, extra)
+            if notice:
+                return notice
         subject_type = str(extra.get('subject_type') or '').replace('_', ' ')
         subject_key = str(extra.get('subject_key') or '')
         subject_label = str(extra.get('subject_label') or '')
@@ -203,6 +207,26 @@ class MattermostLivePlugin:
         narration = ' '.join(str(extra.get('narration') or '').split())
         if narration:
             notice += f'\n{narration}'
+        return notice
+
+    def _format_whats_new(self, row, extra):
+        """An item added to What's new: its title linked to the item page,
+        its importance and who added it, and its summary."""
+        title = ' '.join(str(extra.get('subject_label') or '').split())
+        path = str(extra.get('url') or '').strip()
+        if not title or not path.startswith('/help/whats-new/'):
+            return ''
+        url = f"{_link_base()}/{path.lstrip('/')}"
+        stamp = timezone.localtime(row.timestamp).strftime('%H:%M %Z')
+        parts = [f'`{stamp}`', "**What's new**"]
+        if extra.get('importance'):
+            parts.append(str(extra['importance']))
+        if extra.get('username'):
+            parts.append(f"added by {extra['username']}")
+        notice = f'### [{title}]({url})\n' + ' · '.join(parts)
+        summary = ' '.join(str(extra.get('summary') or '').split())
+        if summary:
+            notice += f'\n{summary}'
         return notice
 
     # -- plumbing ------------------------------------------------------------

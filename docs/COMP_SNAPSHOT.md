@@ -503,7 +503,10 @@ completes, and stays on the screen at INFO for three hours (SysConfig
 failure like any other. A task the front released from the ready buffer
 to a queue (its `front_decision` record with outcome `fed`) is shown the
 same way, one line per task (`Move ready buffer to Perlmutter · p4499.e106`),
-with why the queue took it. The records ride
+with why the queue took it. An item added to What's new is shown at
+INFO for 12 hours (SysConfig `comp.live.whats_new_hours`; Torre Wenaus,
+2026-10-30; WHATS_NEW.md), titled "What's new: <item title>" with its
+summary as the detail. The records ride
 in the snapshot because the room reads it anonymously and the logs page
 is behind the login wall; they name tasks, queues, nodes and errors and
 carry no credential.

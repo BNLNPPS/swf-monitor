@@ -162,9 +162,11 @@ ACTION_DEFAULTS = {
     },
     # Help menu: What's new (docs/WHATS_NEW.md)
     'whats_new_create': {
-        'sublevel': 'normal', 'live': False,
+        'sublevel': 'normal', 'live': True,
         'description': "Add an item to What's new, the list of developments "
-                       "users, operators and developers should know about.",
+                       "users, operators and developers should know about; "
+                       "posted to epicprod-live and shown on the live "
+                       "screen at INFO.",
     },
     'whats_new_archive': {
         'sublevel': 'normal', 'live': False,
