@@ -124,8 +124,12 @@ def plan(sig, unit_index):
     if not version:
         raise ValueError(f'task {tid} records no payload version')
     files = ((md.get('manifest') or {}).get('files')) or []
+    # The request names the file the job read: the source file, or the
+    # staged BNL copy of a task whose input is that copy (evgen_es.lfn).
+    from swf_epicprod import evgen_es
     match = next((f for f in files
-                  if f"{os.path.basename(f['file'])}.{f['ext']}" == unit['lfn']), None)
+                  if unit['lfn'] in (f"{os.path.basename(f['file'])}.{f['ext']}",
+                                     evgen_es.lfn(f['file'], f['ext']))), None)
     if match is None:
         raise ValueError(f"{unit['lfn']} is not in task {tid}'s manifest")
     first, count, seed = int(unit['first_event']), int(unit['events']), int(unit['seed'])
