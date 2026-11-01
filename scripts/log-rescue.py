@@ -52,6 +52,7 @@ django.setup()
 from django.db import connections  # noqa: E402
 
 from monitor_app.panda.constants import PANDA_SCHEMA  # noqa: E402
+from swf_epicprod.private_proxy import private_copy  # noqa: E402
 
 # The BNL Rucio identity and connection of the retry pass, imported rather
 # than copied so the two writers into the log datasets cannot drift.
@@ -164,7 +165,7 @@ class Occupied(Exception):
     the same name (PanDA reuses a log name across a job's attempts)."""
 
 
-def fill_ghost(client, scope, lfn, rep, path):
+def fill_ghost(client, scope, lfn, rep, path, xrd_proxy):
     """Write the log to the path its ghost replica names and record its size and checksum."""
     pfns = [p for pfns in (rep.get('rses') or {}).values() for p in pfns]
     pfn = next((p for p in pfns if p.startswith('root://')), None)
@@ -172,11 +173,11 @@ def fill_ghost(client, scope, lfn, rep, path):
         pfn = 'root://' + pfns[0].split('://', 1)[1]
     if pfn is None:
         raise RuntimeError(f'ghost {scope}:{lfn} names no replica path')
-    # A JLab door takes a storage token for this one path, create only (a
-    # log is never overwritten), else the JLab production proxy, not the BNL
-    # one: its TLS refuses a proxy file readable by others, as the agent's
-    # BNL copy is (the payload-log fetch routes the same way).
-    env = dict(os.environ)
+    # A BNL door takes the private copy of the BNL proxy (xrd_proxy). A JLab
+    # door takes a storage token for this one path, create only (a log is
+    # never overwritten), else the JLab production proxy (the payload-log
+    # fetch routes the same way).
+    env = dict(os.environ, X509_USER_PROXY=xrd_proxy)
     if '.jlab.org' in pfn.split('/')[2]:
         from swf_epicprod.jlab_auth import door_access
         door, _, door_path = pfn.partition('//')[2].partition('/')
@@ -215,7 +216,7 @@ def ensure_open(client, scope, dataset):
         _log(f'reopened closed log dataset {scope}:{dataset}')
 
 
-def rescue(client, uploader, s3, entry, dry_run):
+def rescue(client, uploader, s3, entry, dry_run, xrd_proxy):
     pandaid, site, jeditaskid, lfn, guid, dataset, scope = entry
     rse = log_storage(site)
     key = f'logs/{site}/{dataset}/{lfn}'
@@ -232,13 +233,13 @@ def rescue(client, uploader, s3, entry, dry_run):
         s3.download_file(BUCKET, key, path)
         if rep:
             try:
-                return 'done', fill_ghost(client, scope, lfn, rep, path)
+                return 'done', fill_ghost(client, scope, lfn, rep, path, xrd_proxy)
             except Occupied as exc:
                 return 'occupied', str(exc)
         ensure_open(client, scope, dataset)
         if gfal_only(client, rse):
             try:
-                return 'done', upload_xrootd(client, rse, scope, lfn, guid, dataset, path)
+                return 'done', upload_xrootd(client, rse, scope, lfn, guid, dataset, path, xrd_proxy)
             except Occupied as exc:
                 return 'occupied', str(exc)
         uploader.upload([{'path': path, 'rse': rse, 'did_scope': scope, 'did_name': lfn,
@@ -262,7 +263,7 @@ def gfal_only(client, rse):
     return bool(writers) and all(p['impl'].startswith('rucio.rse.protocols.gfal') for p in writers)
 
 
-def upload_xrootd(client, rse, scope, lfn, guid, dataset, path):
+def upload_xrootd(client, rse, scope, lfn, guid, dataset, path, xrd_proxy):
     """The upload client's write and registration, by xrdcp: the log is
     written to its deterministic root path at the RSE, never over a file
     there, then registered there under the job's GUID with its size and
@@ -270,7 +271,7 @@ def upload_xrootd(client, rse, scope, lfn, guid, dataset, path):
     pfn = next(iter(client.lfns2pfns(rse, [f'{scope}:{lfn}'], scheme='root',
                                      operation='write').values()))
     proc = subprocess.run(['xrdcp', '--nopbar', path, pfn], capture_output=True, text=True,
-                          timeout=600)
+                          timeout=600, env=dict(os.environ, X509_USER_PROXY=xrd_proxy))
     if proc.returncode != 0 and 'file exists' in (proc.stderr or proc.stdout).lower():
         raise Occupied(f'{pfn} already holds a file; another attempt wrote this log name, '
                        'and it is never overwritten. The held copy stays in the bucket until it expires.')
@@ -311,27 +312,29 @@ def main():
         return 5
 
     state = load_state()
-    for entry in entries:
-        pandaid = str(entry[0])
-        record = state.get(pandaid, {})
-        if record.get('outcome') in ('done', 'bucket', 'occupied'):
-            summary[record['outcome']] += 1
-            continue
-        if record.get('attempts', 0) >= MAX_ATTEMPTS:
-            summary['skipped'] += 1
-            continue
-        try:
-            outcome, detail = rescue(client, uploader, s3, entry, args.dry_run)
-        except Exception as exc:
-            outcome, detail = 'failed', f'{type(exc).__name__}: {exc}'
-        _log(f'log-rescue: {pandaid} {outcome}: {detail}')
-        if outcome == 'failed':
-            summary['failed'].append(f'{pandaid}: {detail}'[:300])
-            state[pandaid] = {'outcome': 'failed', 'attempts': record.get('attempts', 0) + 1,
-                              'reason': detail[:500], 'at': int(time.time())}
-        elif outcome != 'dry_run':
-            summary[outcome] += 1
-            state[pandaid] = {'outcome': outcome, 'detail': detail[:500], 'at': int(time.time())}
+    # xrdcp refuses the group-readable service proxy: a private copy for the pass.
+    with private_copy(_op.X509_PROXY, prefix='log-rescue-proxy-') as xrd_proxy:
+        for entry in entries:
+            pandaid = str(entry[0])
+            record = state.get(pandaid, {})
+            if record.get('outcome') in ('done', 'bucket', 'occupied'):
+                summary[record['outcome']] += 1
+                continue
+            if record.get('attempts', 0) >= MAX_ATTEMPTS:
+                summary['skipped'] += 1
+                continue
+            try:
+                outcome, detail = rescue(client, uploader, s3, entry, args.dry_run, xrd_proxy)
+            except Exception as exc:
+                outcome, detail = 'failed', f'{type(exc).__name__}: {exc}'
+            _log(f'log-rescue: {pandaid} {outcome}: {detail}')
+            if outcome == 'failed':
+                summary['failed'].append(f'{pandaid}: {detail}'[:300])
+                state[pandaid] = {'outcome': 'failed', 'attempts': record.get('attempts', 0) + 1,
+                                  'reason': detail[:500], 'at': int(time.time())}
+            elif outcome != 'dry_run':
+                summary[outcome] += 1
+                state[pandaid] = {'outcome': outcome, 'detail': detail[:500], 'at': int(time.time())}
     if not args.dry_run:
         save_state(state)
     print(json.dumps(summary))
