@@ -66,7 +66,11 @@ feeder pass that `submitted`), and where a record's flag sets it apart,
 the flag's own (`flags`: a rule proposer's `proposal_created` carries
 `rule` and is low and not live, AI_PROPOSALS.md). A failure (an `error`, `timeout`, `partial`
 or `unrecorded` outcome, or a record at ERROR) is `high` and live, a
-maintenance pass's failure `normal`. These are set at the write, whoever
+maintenance pass's failure `normal`. A testbed action (`testbed`:
+`workflow_execution_completed`) is not production work: every outcome
+takes its declaration, low and not live, so a failed testbed run stays
+off epicprod-live; the nightly testbed heartbeat reaches its operator by
+its own subscription (NOTICE_ROUTING.md). These are set at the write, whoever
 writes the record (the web tier, the MCP tools, the cron runners, the ops
 agent's REST posts): `AppLog.save` applies `epicprod_logging.publication`,
 so a call site's own values are not consulted for a catalogued action

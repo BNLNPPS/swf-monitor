@@ -545,10 +545,11 @@ ACTION_DEFAULTS = {
                        "is taken.",
     },
     'workflow_execution_completed': {
-        'sublevel': 'low', 'live': False,
+        'sublevel': 'low', 'live': False, 'testbed': True,
         'description': "A testbed workflow execution reached a terminal "
                        "state (completed or failed); carries the run's "
-                       "notice stamp for notice routing.",
+                       "notice stamp for notice routing. Testbed, not "
+                       "production: a failed run stays low and not live.",
     },
     'notice_subscription_edit': {
         'sublevel': 'normal', 'live': False,
@@ -956,7 +957,9 @@ def publication(extra, levelname=''):
     """Set an action record's importance (``sublevel``) and live default by
     their meaning (ACTION_STREAM.md, Importance), in place, at the write:
     a failure (an error, timeout, partial or unrecorded outcome, or a record
-    at ERROR) is high and live, a maintenance pass's failure normal; any
+    at ERROR) is high and live, a maintenance pass's failure normal, a
+    testbed action's failure its declaration (``testbed``: a testbed
+    workflow execution is not production); any
     other record takes its action's catalog declaration, the outcome's own
     where the catalog declares one, and a flag's own where the record
     carries a flag the catalog declares (``flags``: a rule proposer's
@@ -967,7 +970,9 @@ def publication(extra, levelname=''):
     action = str(extra.get('action') or '')
     outcome = str(extra.get('outcome') or '')
     declared = ACTION_DEFAULTS.get(action)
-    if outcome in FAILURE_OUTCOMES or levelname in FAILURE_LEVELS:
+    if declared and declared.get('testbed'):
+        sublevel, live = declared['sublevel'], declared['live']
+    elif outcome in FAILURE_OUTCOMES or levelname in FAILURE_LEVELS:
         sublevel, live = ('normal' if action in MAINTENANCE else 'high'), True
     elif declared:
         entry = dict(declared, **(declared.get('outcomes') or {}).get(outcome, {}))
