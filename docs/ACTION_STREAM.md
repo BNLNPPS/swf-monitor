@@ -62,12 +62,15 @@ made to MEAN something"):
 The catalog (`ACTION_DEFAULTS`, below) declares each action's importance
 and live default when it succeeds, and where one outcome matters more than
 the rest, that outcome's own (`outcomes`: a front decision that `fed`, a
-feeder pass that `submitted`). A failure (an `error`, `timeout`, `partial`
+feeder pass that `submitted`), and where a record's flag sets it apart,
+the flag's own (`flags`: a rule proposer's `proposal_created` carries
+`rule` and is low and not live, AI_PROPOSALS.md). A failure (an `error`, `timeout`, `partial`
 or `unrecorded` outcome, or a record at ERROR) is `high` and live, a
 maintenance pass's failure `normal`. These are set at the write, whoever
 writes the record (the web tier, the MCP tools, the cron runners, the ops
 agent's REST posts): `AppLog.save` applies `epicprod_logging.publication`,
-so a call site's own values are not consulted for a catalogued action. An
+so a call site's own values are not consulted for a catalogued action
+beyond the flags its declaration names. An
 action missing from the catalog keeps its call site's values and is logged
 as uncatalogued. Over the seven days before the rule, 68 records would have
 been `high` (37 guard pauses, the rest failures and findings) against more

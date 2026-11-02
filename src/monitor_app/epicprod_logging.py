@@ -601,6 +601,7 @@ ACTION_DEFAULTS = {
     },
     'proposal_created': {
         'sublevel': 'normal', 'live': True,
+        'flags': {'rule': {'sublevel': 'low', 'live': False}},
         'description': "AI proposal pending human review; one event per "
                        "propose call with the proposed count and batch. A "
                        "session's proposal is normal and live; a rule "
@@ -957,7 +958,9 @@ def publication(extra, levelname=''):
     a failure (an error, timeout, partial or unrecorded outcome, or a record
     at ERROR) is high and live, a maintenance pass's failure normal; any
     other record takes its action's catalog declaration, the outcome's own
-    where the catalog declares one. A low record is never live by default.
+    where the catalog declares one, and a flag's own where the record
+    carries a flag the catalog declares (``flags``: a rule proposer's
+    ``proposal_created``). A low record is never live by default.
     An action the catalog lacks keeps its call site's values and is logged
     once, so it is catalogued."""
     from .live_notices import FAILURE_OUTCOMES, MAINTENANCE
@@ -968,6 +971,9 @@ def publication(extra, levelname=''):
         sublevel, live = ('normal' if action in MAINTENANCE else 'high'), True
     elif declared:
         entry = dict(declared, **(declared.get('outcomes') or {}).get(outcome, {}))
+        for flag, axes in (declared.get('flags') or {}).items():
+            if extra.get(flag):
+                entry.update(axes)
         sublevel, live = entry['sublevel'], entry['live']
     else:
         if action not in _uncatalogued:

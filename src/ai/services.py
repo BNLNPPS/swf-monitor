@@ -273,9 +273,10 @@ def _creation_record(rule):
     certificate-expiry, campaign-config, campaign-assembly) records low
     and not live, since its proposal waits on the AI Proposals page and
     the decision is the live event; a session's proposal is normal and
-    live."""
+    live. The record carries ``rule``, the flag the action catalog
+    declares for it, since the write sets a catalogued action's axes."""
     return {'sublevel': 'low' if rule else 'normal',
-            'live_default': not rule}
+            'live_default': not rule, 'rule': bool(rule)}
 
 
 def propose_campaign_plan(campaign_name, items, *, proposer='',
