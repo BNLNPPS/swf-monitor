@@ -383,7 +383,7 @@ ASSOCIATION_SWEEP_DAYS = int(os.environ.get("EPICPROD_ASSOCIATION_SWEEP_DAYS", "
 # System status refresh doer: cached monitor/system rows, intentionally a
 # standalone script rather than a Django management command.
 SYSTEM_STATUS_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "refresh-system-status.py"
-SYSTEM_STATUS_TIMEOUT = int(os.environ.get("EPICPROD_SYSTEM_STATUS_TIMEOUT", "60"))
+SYSTEM_STATUS_TIMEOUT = int(os.environ.get("EPICPROD_SYSTEM_STATUS_TIMEOUT", "120"))
 SYSTEM_STATUS_INTERVAL = int(os.environ.get("EPICPROD_SYSTEM_STATUS_INTERVAL", "300"))
 SYSTEM_STATUS_INITIAL_DELAY = int(os.environ.get("EPICPROD_SYSTEM_STATUS_INITIAL_DELAY", "30"))
 

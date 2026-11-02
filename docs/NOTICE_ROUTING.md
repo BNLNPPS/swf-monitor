@@ -150,7 +150,8 @@ Other subscribers and the complete action log are unchanged.
   the other drains, captures, ingests and refreshes) stay quiet, failures and
   recoveries included. Their outcomes remain in the action log and the alarm
   system; a live-policy override still publishes one.
-- Shadow node-guard suggestions stay quiet; actual exclusions remain visible.
+- Shadow node-guard suggestions and expiries into half open stay quiet;
+  actual exclusions remain visible.
 - Assessments, production arrivals, job closeouts, operator actions and
   substantive findings remain eligible for publication.
 - Any other automated failure is published on first observation or when its cause

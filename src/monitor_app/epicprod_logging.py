@@ -107,12 +107,16 @@ ACTION_DEFAULTS = {
     # the node guard (site-canary docs/NODE_GUARD.md)
     'node_guard_decision': {
         'sublevel': 'normal', 'live': True,
-        'outcomes': {'would_exclude': {'sublevel': 'low', 'live': False}},
+        # an expiry into half open excludes nothing new: quiet (Torre
+        # Wenaus, 2026-11-02)
+        'outcomes': {'would_exclude': {'sublevel': 'low', 'live': False},
+                     'half_open': {'sublevel': 'low', 'live': False}},
         'description': "One node's verdict from the node guard's cycle: a "
                        "black hole tripped (would_exclude in shadow mode, "
-                       "excluded live) or cleared after a trip, with the "
-                       "evidence; recorded on a trip, on the clear after "
-                       "one, and hourly while tripped.",
+                       "excluded live), expired into half open, or cleared "
+                       "after a trip, with the evidence; recorded on a "
+                       "trip, an expiry, the clear after one, and hourly "
+                       "while tripped.",
     },
     'node_guard_cycle': {
         'sublevel': 'low', 'live': False,
