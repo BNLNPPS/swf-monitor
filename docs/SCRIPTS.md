@@ -44,6 +44,12 @@ Then:
 - **The docstring** states what the script does, where its design is
   documented, and the invocation by hand.
 
+`scripts/post-finding.py` posts a production finding or its resolution
+to epicprod-live through the REST log endpoint (`--title`, `--detail`,
+`--subject-type`, `--subject-key`, `--resolves` the record it resolves,
+`--evidence` links, `--dry-run`); `scripts/live-clear.py` takes a taken-care-of
+record off the room's screen the same way.
+
 ## Running one by hand
 
 On swf-testbed, from the source directory, with the testbed's virtual
