@@ -335,6 +335,15 @@ EPICPROD_PAYLOAD.md):
   internal EVGEN task's own kind), `other` for a derived name.
 - `failed_1h`: jobs whose registration did not complete (`pending` or
   `unfinished`); the registrar completes a pending registration later.
+- An Event Service job registers each close, a RECO file, as it stands,
+  hours before the job ends, and its job metrics carry no registration
+  mark, so the payload reports never list its files. Its closes are read
+  from the harness records filed with the jobs (`EpicProdJob.data
+  ['es_record']`, refreshed every five minutes for running jobs,
+  EVENT_SERVICE_PLOTS.md): every close of the last two days whose outcome
+  is `registered` or `diverted`, read once per build, at the close's end,
+  under its job's queue and task. Each counts in `arrived_1h`, `events_1h`
+  and `reco`; a close record carries no byte count, so it adds no bytes.
 - `pending`: the files owed the catalog now, the sum of
   `pending_parts`: `stash`, the failover stash's entries not yet home
   (the drain's record, cached product `stash_state`,
@@ -370,7 +379,8 @@ For `jlab-rucio`, `flow` is the output flow on the trends axis
 files the finished production jobs ending in each bin registered and
 their bytes, and `registration_incomplete_jobs`, those jobs whose
 registration did not complete, all from the same payload-report reading
-as `arrived_1h`. These are registrations as the payload reports them,
+as `arrived_1h`, with the Event Service closes in the bin of each close's
+end. These are registrations as the payload reports them,
 grouped by the job's end, not measured transfer bandwidth or the files'
 availability times; volume per hour is the bin's bytes times four. A
 bin's jobs are final once archived, so the bins are kept (cached product
@@ -390,8 +400,12 @@ Health parts for `jlab-rucio`:
 
 - `registration`: the share of the last hour's finished jobs whose
   registration did not complete; `amber` over 5%, `red` over half.
-- `latest_arrival`: the age of the newest registration; `amber` over 30
-  minutes, `red` over two hours or with none in two days.
+- `latest_arrival`: the age of the newest registration, a finished job's
+  or an Event Service close's; `amber` over 30 minutes, `red` over two
+  hours or with none in two days. `grey` when no production job
+  (`epicproduction`; canaries and other trials are not production) is
+  running anywhere: nothing is due to arrive, so the age is no evidence
+  either way (Torre Wenaus, 2026-11-03).
 
 Health parts for `bnl-rucio`:
 
@@ -679,8 +693,9 @@ Quiet end).
 configuration, for the dashboard's panel under the completed tasks
 (Torre Wenaus, 2026-10-24): the RECO files the finished production jobs
 registered and their events, from each job's payload report (the record the
-JLab Rucio pillar reads), grouped by task and the task's PC (`_task_pcs`, as
-for `completed`).
+JLab Rucio pillar reads), and the Event Service closes registered (Storage,
+above), grouped by task and the task's PC (`_task_pcs`, as for
+`completed`).
 
 - `pcs`, `files`, `events`, `window_hours` (24), `link` (the campaign view)
   and `detail` (the totals in words).

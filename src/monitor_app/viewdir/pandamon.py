@@ -2213,7 +2213,7 @@ def panda_segfault_reproduce(request, key):
         return JsonResponse({'error': str(e)}, status=502)
     log_epicprod_action('web', 'segfault_reproduce', subject_type='crash_signature',
                         subject_key=key, username=request.user.username,
-                        sublevel='normal', live_default=True,
+                        sublevel='normal', live_default=False,
                         message=(f"segfault_reproduce {key}: job {entries[0]['pandaid']} "
                                  f"on {', '.join(queues)}"),
                         runs=len(entries))

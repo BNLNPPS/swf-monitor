@@ -875,7 +875,38 @@ def reconcile(sig_key, queue_diagnosis=None):
             sig.save(update_fields=fields + ['updated_at'])
     if to_queue and queue_diagnosis is not None:
         queue_diagnosis(to_queue, 'auto:reproduced')
+    if changed['outcome']:
+        log_settled(sig_key, changed)
     return changed
+
+
+# A settled reproduction outcome in a title's words and the detail's.
+SETTLED_TEXT = {
+    'reproduced': ('reproduced', 'Both runs crashed.'),
+    'site_dependent': ('crashes only at production', "Only the production queue's run crashed."),
+    'not_reproduced': ('not reproduced', 'Neither run crashed.'),
+    'inconclusive': ('reproduction inconclusive', 'A run failed for another reason.'),
+}
+
+
+def log_settled(sig_key, changed):
+    """Post a reproduction's result on epicprod-live when it settles, the one
+    record of it there; the request posts nothing (Torre Wenaus,
+    2026-11-03). The detail names the finding that reads the crash, or the
+    study queued for it."""
+    from .epicprod_logging import log_epicprod_action
+    outcome = changed['outcome']
+    words, detail = SETTLED_TEXT.get(outcome, (outcome.replace('_', ' '), ''))
+    if changed.get('covered'):
+        detail += f" Finding {changed['covered']} reads it."
+    elif changed.get('diagnosis'):
+        detail += ' Its study is queued.'
+    log_epicprod_action('reproductions', 'segfault_reproduction_settled',
+                        subject_type='crash_signature', subject_key=sig_key,
+                        sublevel='normal', live_default=True,
+                        message=f'Reproduction of {sig_key} settled: {outcome}',
+                        title=f'Crash {sig_key} {words}', summary=detail.strip(),
+                        result=outcome, url=f'panda/segfaults/{sig_key}/')
 
 
 def update_host_entry(sig_key, request_id, fields):

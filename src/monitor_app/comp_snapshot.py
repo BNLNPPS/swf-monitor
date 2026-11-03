@@ -77,6 +77,10 @@ LOG_STAGEOUT_CODES = (1137, 1151, 1152)
 # Measure 3), so it is registered.
 REGISTRATION_OWED = INCOMPLETE_REGISTRATION_OUTCOMES
 
+# The outcomes of an Event Service close (the harness record's
+# ``closes[].outcome``) under which its file is in JLab Rucio.
+ES_CLOSE_REGISTERED = ('registered', 'diverted')
+
 # The production output RSE: every production configuration names it as
 # OUT_RSE (swf-epicprod RUCIO_FAILOVER_STASH.md).
 OUTPUT_RSE = 'BNL-XRD'
@@ -369,6 +373,7 @@ class _Build:
         self.now = timezone.now()
         self.hour_ago = self.now - timedelta(hours=1)
         self.errors = []
+        self._es = None
 
     def part(self, name, fn, fallback=None):
         try:
@@ -377,6 +382,52 @@ class _Build:
             logger.exception('comp snapshot: %s failed', name)
             self.errors.append({'part': name, 'error': f'{type(exc).__name__}: {exc}'})
             return fallback
+
+    def es_closes(self):
+        """The Event Service closes registered at JLab in the last two days
+        (COMP_SNAPSHOT.md, Storage), read once per build: ``[(ended_at,
+        events, queue, jeditaskid)]``. An ES job registers each close as it
+        stands, so its job metrics carry no ``payloadRegistration`` mark and
+        the payload-report readers never see its output. The closes come
+        from the harness records filed with the jobs (``EpicProdJob.data
+        ['es_record']``, refreshed every five minutes for running jobs), the
+        queue and task from PanDA. A failed read is listed in ``errors[]``
+        once and reads as no closes."""
+        if self._es is None:
+            self._es = self.part('es_closes', self._read_es_closes, [])
+        return self._es
+
+    def production_running(self):
+        """Production jobs running now, anywhere: the work whose output the
+        JLab reading counts (canaries and other trials are not production)."""
+        return int(_rows(f'''SELECT COUNT(*) FROM "{self.S}"."jobsactive4"
+                             WHERE processingtype = 'epicproduction' AND jobstatus = 'running' ''')[0][0])
+
+    def _read_es_closes(self):
+        from monitor_app.models import EpicProdJob
+        since = self.now - timedelta(days=2)
+        closes = ("CASE WHEN jsonb_typeof(j.data -> 'es_record' -> 'record' -> 'closes') = 'array' "
+                  "THEN j.data -> 'es_record' -> 'record' -> 'closes' ELSE '[]'::jsonb END")
+        # A record is filed after each of its closes, so its row's
+        # updated_at bounds the closes it holds.
+        sql = f'''SELECT j.pandaid, (c ->> 'ended_at')::float, COALESCE((c ->> 'events')::bigint, 0)
+                  FROM "{EpicProdJob._meta.db_table}" j, jsonb_array_elements({closes}) c
+                  WHERE j.updated_at >= %s AND c ->> 'outcome' = ANY(%s)
+                    AND (c ->> 'ended_at')::float >= %s'''
+        with connections['default'].cursor() as cursor:
+            cursor.execute(sql, (since, list(ES_CLOSE_REGISTERED), since.timestamp()))
+            rows = cursor.fetchall()
+        ids = sorted({int(p) for p, _t, _e in rows})
+        jobs = {}
+        if ids:
+            for p, site, tid in _rows(f'''
+                    SELECT pandaid, computingsite, jeditaskid FROM "{self.S}"."jobsactive4" WHERE pandaid = ANY(%s)
+                    UNION ALL
+                    SELECT pandaid, computingsite, jeditaskid FROM "{self.S}"."jobsarchived4" WHERE pandaid = ANY(%s)''',
+                                      (ids, ids)):
+                jobs[int(p)] = (site or '', int(tid) if tid else None)
+        return [(datetime.fromtimestamp(t, dt_timezone.utc), int(events), *jobs.get(int(p), ('', None)))
+                for p, t, events in rows]
 
     # -- readings -------------------------------------------------------
 
@@ -616,7 +667,8 @@ class _Build:
         completed tasks; Torre Wenaus, 2026-10-24), per physics
         configuration (COMP_SNAPSHOT.md, Arrivals): the RECO files the
         finished production jobs registered and their events, from each
-        job's payload report, grouped by task and the task's PC. Newest
+        job's payload report, and the Event Service closes registered
+        (``es_closes``), grouped by task and the task's PC. Newest
         arrival first. Each PC carries its physics in words and the plan's
         delivered and target events, read from the stored completion
         record without building it."""
@@ -631,6 +683,23 @@ class _Build:
                     AND j.jobstatus = 'finished' AND j.jobmetrics LIKE %s
                   GROUP BY 1, 2, 3, 4'''
         rows = _rows(sql, (since, '%payloadRegistration=registered%'))
+        # Event Service closes, each a RECO file registered as it stood.
+        cutoff = self.now - timedelta(hours=hours)
+        es = {}
+        for ended_at, events, queue, tid in self.es_closes():
+            if tid is None or ended_at < cutoff:
+                continue
+            e = es.setdefault((tid, queue), [0, 0, ended_at, ended_at])
+            e[0] += 1
+            e[1] += events
+            e[2], e[3] = min(e[2], ended_at), max(e[3], ended_at)
+        if es:
+            tids = sorted({tid for tid, _q in es})
+            tasks = {int(t): (name, status) for t, name, status in _rows(
+                f'SELECT jeditaskid, taskname, status FROM "{self.S}"."jedi_tasks" WHERE jeditaskid = ANY(%s)',
+                (tids,))}
+            rows = list(rows) + [(tid, *tasks.get(tid, ('', '')), queue, *e)
+                                 for (tid, queue), e in es.items()]
         pcs = _task_pcs({(int(r[0]), r[1]) for r in rows})
         progress = _plan_progress()
         by_pc = {}
@@ -963,6 +1032,16 @@ class _Build:
                                                       '%payloadRegistration=diverted%')):
             out.setdefault(int(k) if bin_seconds else (k or ''), {})[kind] = (
                 int(n), int(nbytes or 0), int(events or 0))
+        # Event Service closes, each a RECO file registered as it stood,
+        # keyed by the close's end; a close record carries no byte count.
+        start, end = since or self.hour_ago, until or self.now
+        for ended_at, events, queue, _tid in self.es_closes():
+            if not start <= ended_at < end:
+                continue
+            k = (int((ended_at.timestamp() // bin_seconds + 1) * bin_seconds)
+                 if bin_seconds else queue)
+            n, nbytes, ev = out.setdefault(k, {}).get('reco', (0, 0, 0))
+            out[k]['reco'] = (n + 1, nbytes, ev + events)
         return out
 
     def registration_outcomes(self, since=None, until=None, bin_seconds=None):
@@ -1085,10 +1164,12 @@ class _Build:
             'registration_incomplete_jobs': [column[t][2] if t in column else None for t in ends],
         }
 
-    def storage(self, site_of, edges=None):
+    def storage(self, site_of, edges=None, running=None):
         """The E1s' Rucio storage (docs/COMP_SNAPSHOT.md, Storage): what
         arrived in the last hour, what did not, what is still owed, the
-        output RSE's capacity, and the health."""
+        output RSE's capacity, and the health. ``running`` is the
+        production jobs running now (``production_running``); with none,
+        the age of the newest JLab registration reads grey."""
         def site_id(queue):
             return site_of.get(queue) or re.sub(r'[^a-z0-9]+', '-', (queue or 'not reported').lower()).strip('-')
 
@@ -1115,12 +1196,21 @@ class _Build:
         if last is None:
             last = self.part('latest_registration',
                              lambda: self.latest_finished('%payloadRegistration=registered%'), None)
-        if last is None:
+        es_last = max((t for t, _e, _q, _tid in self.es_closes()), default=None)
+        if es_last is not None and (last is None or es_last > last):
+            last = es_last
+        jlab_age = max(0, int((self.now - last).total_seconds())) if last is not None else None
+        age_min = round(jlab_age / 60, 1) if jlab_age is not None else None
+        if running == 0:
+            # Nothing runs, so nothing is due to arrive: the age is no
+            # evidence either way.
+            arrival = _part('grey', age_min,
+                            'no production job running'
+                            + (f'; latest output registered {age_min} min ago' if age_min is not None
+                               else '; no output registered in two days'))
+        elif last is None:
             arrival = _part('red', None, 'no output registered in two days')
-            jlab_age = None
         else:
-            jlab_age = max(0, int((self.now - last).total_seconds()))
-            age_min = round(jlab_age / 60, 1)
             arrival = _part('green' if age_min <= 30 else 'amber' if age_min <= 120 else 'red',
                             age_min, f'latest output registered {age_min} min ago')
         jlab_sites, by_kind = {}, {}
@@ -1398,7 +1488,8 @@ def build():
     site_of = {q['id']: s['id'] for s in sites_cfg for q in s.get('queues', [])}
     trend = b.part('trend_series', lambda: _trend_series(sites), None)
     storage = b.part('storage', lambda: b.storage(
-        site_of, edges=trend['edges'] if trend else None), [])
+        site_of, edges=trend['edges'] if trend else None,
+        running=b.part('production_running', b.production_running, None)), [])
 
     ready = b.part('ready_tasks', lambda: _ready_tasks(), None)
     released = b.part('released', lambda: _released(b.hour_ago), None)

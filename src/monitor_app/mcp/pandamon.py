@@ -848,7 +848,7 @@ async def panda_segfault_reproduce(
             return {'error': str(e), 'plan': plan}
         log_epicprod_action('mcp', 'segfault_reproduce', subject_type='crash_signature',
                             subject_key=key, username=requested_by, sublevel='normal',
-                            live_default=True,
+                            live_default=False,
                             message=f"segfault_reproduce {key}: job {plan['pandaid']} on "
                                     f"{', '.join(chosen)}"[:300], queues=len(chosen))
         return {'key': key, 'plan': plan, 'queues': chosen, 'requests': entries}

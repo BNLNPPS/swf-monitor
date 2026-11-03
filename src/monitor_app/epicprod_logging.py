@@ -375,14 +375,26 @@ ACTION_DEFAULTS = {
                        "the dig itself is the segfault_dig event.",
     },
     'segfault_reproduce': {
-        'sublevel': 'normal', 'live': True,
+        'sublevel': 'normal', 'live': False,
         'description': "Operator request to reproduce a crash signature: "
                        "the crashed job's own manifest row run again as "
                        "payload canaries on the production queue and the "
                        "reference queue BNL_NPPS_GPU, queued to the canary "
                        "agent; the outcome (reproduced, site_dependent, "
                        "not_reproduced, inconclusive) settles on the "
-                       "signature from the runs' payload reports.",
+                       "signature from the runs' payload reports. Not "
+                       "live: the result is posted when it settles "
+                       "(segfault_reproduction_settled; Torre Wenaus, "
+                       "2026-11-03).",
+    },
+    'segfault_reproduction_settled': {
+        'sublevel': 'normal', 'live': True,
+        'description': "A crash signature's reproduction settled "
+                       "(reproductions.reconcile): its outcome "
+                       "(reproduced, site_dependent, not_reproduced, "
+                       "inconclusive) and the finding that reads it or "
+                       "the study queued; one record per settlement, "
+                       "posted to epicprod-live.",
     },
     'segfault_es_reproduction': {
         'sublevel': 'normal', 'live': False,
