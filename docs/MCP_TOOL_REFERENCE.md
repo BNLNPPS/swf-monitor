@@ -417,6 +417,8 @@ This tool aggregates information from workflow messages and logs, providing a si
 | `epic_get_ai_content` | `ids`, `corun_page_group_ids` | Retrieve append-only AI assessment content by corun-ai Page group ids and/or legacy AIContent ids. Use the arguments supplied in a detail payload's `ai_content.retrieval.arguments`. |
 | `epicprod_list_actions` | `action`, `instance`, `subject_type`, `subject_key`, `username`, `outcome`, `start_time`, `end_time`, `min_sublevel`, `summarize`, `limit`, `offset` | Query the epicprod action stream (structured production-action records with outcome and duration). Prefer `summarize=True` for reporting: counts by action with ok/error split and duration statistics. Raw listings default to an importance floor of `normal` (excluded records counted in `excluded_below_floor`; floor lifts for action/subject/outcome drill-downs and summaries); `min_sublevel` sets it explicitly. See [ACTION_STREAM.md](ACTION_STREAM.md). |
 | `epicprod_live_clear` | `ids`, `reason`, `username` | Take records off the computing centre's epicprod-live screen once Torre's question about them is answered as taken care of: one `live_cleared` action naming the record ids and why; the records are unchanged. See [COMP_SNAPSHOT.md](COMP_SNAPSHOT.md) § Live. |
+| `epicprod_declare_downtime` | `queue`, `start`, `end`, `reason`, `username` | Register a downtime window for an ePIC queue, as on the queue page's Declared state card: times ISO 8601, Eastern unless they carry an offset; the record names who registered it, and the front, the canary and failure attribution read it like a window from CRIC. Returns the window's `name`, line and standing. See swf-epicprod CONTINUOUS_PRODUCTION.md § Declared downtime. |
+| `epicprod_withdraw_downtime` | `name`, `reason`, `username` | Withdraw a window registered on a queue page or with `epicprod_declare_downtime`, before or during it; the record stays, cleared, with who withdrew it and why. A window from CRIC is withdrawn in CRIC. |
 | `epicprod_storage` | `listing`, `rse`, `campaign`, `state`, `limit`, `offset` | Exception listings from the production storage record's store: `ghosts` (registered files with no available replica on any RSE, each with its holding replicas by state; the envelope carries `by_rse`, the account of the filtered population by holding RSE with files, bytes, states, campaigns and the oldest entry), `stuck_rules`, `stalled_datasets`. Filter by `rse` (`none` for ghosts with no replica row), `campaign` family and `state`; paged oldest first; `as_of` names the last completed pass and any pass in progress. REST counterpart `pcs/api/storage/<listing>/`. See swf-epicprod STORAGE.md. |
 
 **Known subject types:**
@@ -690,6 +692,7 @@ them and a person reading the page see one history.
 | What's New | `whats_new_list`, `whats_new_get`, `whats_new_propose`, `whats_new_edit` | 4 |
 | Campaign Status | `epicprod_campaign_status` | 1 |
 | Action Stream | `epicprod_list_actions`, `epicprod_live_clear` | 2 |
+| Declared Downtime | `epicprod_declare_downtime`, `epicprod_withdraw_downtime` | 2 |
 | Storage Record | `epicprod_storage` | 1 |
 | Snapper State History | `snapper_latest`, `snapper_state_at`, `snapper_component_history`, `snapper_changes_between`, `snapper_context_around`, `snapper_series`, `snapper_cut_summary` | 7 |
 | PCS Tags | `pcs_list_tags`, `pcs_get_tag`, `pcs_search_tags` | 3 |
@@ -697,7 +700,7 @@ them and a person reading the page see one history.
 | PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers`, `panda_segfault_catalog`, `panda_segfault_signature`, `panda_segfault_findings`, `panda_segfault_finding_set`, `panda_segfault_reproduce` | 12 |
 | JLab Rucio | `jlab_rucio_*` | 14 |
 | BNL Rucio | `bnl_rucio_*` | 14 |
-| **Total** | | **103** |
+| **Total** | | **105** |
 
 ---
 

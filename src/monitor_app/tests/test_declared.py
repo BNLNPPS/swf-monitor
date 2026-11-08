@@ -108,7 +108,7 @@ def test_the_canary_provider_answers_per_queue():
     try:
         info = mod.canary_declared(['E1_BNL', 'E1_JLAB'], _t('2026-09-14T12:00:00'))
         assert set(info) == {'E1_BNL'}
-        assert info['E1_BNL']['in_force'].startswith('offline until 09/15 00:21 UTC')
+        assert info['E1_BNL']['in_force'].startswith('offline until 09/14 20:21 ET')
         assert info['E1_BNL']['spans'] == [('2026-09-14T02:20:19+00:00', '2026-09-15T00:31:00+00:00')]
         assert info['E1_BNL']['last_end'] == '2026-09-15T00:31:00+00:00'
         later = mod.canary_declared(['E1_BNL'], _t('2026-09-15T02:00:00'))
@@ -120,9 +120,10 @@ def test_the_canary_provider_answers_per_queue():
 
 def test_summary_lines_read_as_an_operator_would():
     r = rules_from_pandaqueuestatus(PQS, {'E1_BNL'})[0]
-    assert summary_line(r) == 'offline until 09/15 00:21 UTC: scheduled downtime (xzhao@bnl.gov)'
+    assert summary_line(r) == 'offline until 09/14 20:21 ET: scheduled downtime (xzhao@bnl.gov)'
     w = windows_from_downtime(
         {'1': {'id': 1, 'rc_site': 'BNL-OSG', 'severity': 'OUTAGE',
                'start_time': '2026-09-20T08:00:00', 'end_time': '2026-09-20T16:00:00',
                'description': 'farm maintenance', 'provider': 'gocdb'}}, {'BNL-OSG'})[0]
-    assert summary_line(w) == 'outage 09/20 08:00 UTC to 09/20 16:00 UTC: farm maintenance (gocdb)'
+    assert summary_line(w) == 'outage 09/20 04:00 ET to 09/20 12:00 ET: farm maintenance (gocdb)'
+

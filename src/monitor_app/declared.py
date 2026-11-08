@@ -19,14 +19,28 @@ The readers here are pure: ``rules_from_pandaqueuestatus``,
 CRIC documents into records, ``standing_of`` places a record in time,
 ``sync`` writes the store, ``declared_for`` and ``history_for`` serve the
 pages and the readers (attribution, node guard, canary, the front).
+
+A person enters a downtime window for a queue on its page or through the
+MCP tool, both through ``declare_window`` (and ``withdraw_window``): the
+same record shape, kept in its own context (``declared-operator``) so the
+CRIC sync never clears it, and read by every reader above alongside
+CRIC's. ``announce`` writes the change notice for both sources.
 """
 import logging
 from datetime import datetime, timedelta, timezone as dt_timezone
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
+EASTERN = ZoneInfo('America/New_York')
+
 DECLARED_KIND = 'declared'
 DECLARED_CONTEXT = 'cric'
+# Downtime entered by a person: the same kind, its own context, untouched
+# by the CRIC sync.
+OPERATOR_CONTEXT = 'declared-operator'
+OPERATOR_SOURCE = 'operator'
+DECLARED_CONTEXTS = (DECLARED_CONTEXT, OPERATOR_CONTEXT)
 STANDINGS = ('active', 'future', 'expired', 'cleared')
 # The pilot reads CRIC's cached queuedata, which lags a rule's expiration
 # by minutes: a job that dies on "specified queue is OFFLINE" this long
@@ -216,10 +230,22 @@ def _context():
     return ctx
 
 
+def _operator_context():
+    from .models import EntryContext
+    ctx, _ = EntryContext.objects.get_or_create(
+        name=OPERATOR_CONTEXT,
+        defaults={'title': 'Downtime entered by a person',
+                  'description': 'Downtime windows entered for an ePIC queue on its page or '
+                                 'through the MCP tool, with who entered them '
+                                 '(CONTINUOUS_PRODUCTION.md, Declared downtime).'})
+    return ctx
+
+
 def entries():
-    """Every declared entry as stored, not archived."""
+    """Every declared entry as stored, not archived: CRIC's and those a
+    person entered."""
     from .models import Entry
-    return list(Entry.objects.filter(kind=DECLARED_KIND, context_id=DECLARED_CONTEXT,
+    return list(Entry.objects.filter(kind=DECLARED_KIND, context_id__in=DECLARED_CONTEXTS,
                                      archived=False, deleted_at__isnull=True))
 
 
@@ -269,9 +295,11 @@ def job_declared(computingsite, endtime):
     if not hits:
         return None
     r = hits[0]
+    grade = ('declared record (entered on the queue page)'
+             if r.get('source') == OPERATOR_SOURCE else 'declared record (CRIC)')
     return {'label': 'declared downtime', 'line': summary_line(r),
             'queue': str(computingsite), 'record': r.get('name', ''),
-            'grade': 'declared record (CRIC)'}
+            'grade': grade}
 
 
 def windows_between(after, before, kind='queue', lag=CACHE_LAG):
@@ -458,22 +486,150 @@ def sync(found, now, changed_by='cric_declared_state'):
     return changes
 
 
+def announce(record, change, username, actor='prodops-agent'):
+    """The notice for one declared record that appeared, changed, expired
+    or cleared: one ``declared_state_changed`` action, with the record's
+    line as the summary and its target's page as the url, which notice
+    routing delivers (docs/NOTICE_ROUTING.md). The CRIC collector and the
+    entry of a person's window both announce through here."""
+    from .epicprod_logging import log_epicprod_action
+    r = record or {}
+    target = r.get('target') or r.get('name') or ''
+    kind = r.get('kind') or ''
+    url = (f'/panda/epic-queues/{target}/#declared' if kind == 'queue'
+           else f'/rucio-endpoints/{target}/' if kind == 'endpoint'
+           else '/panda/epic-queues/')
+    log_epicprod_action(
+        actor, 'declared_state_changed',
+        subject_type={'queue': 'panda_queue', 'endpoint': 'ddm_endpoint'}.get(kind, 'rc_site'),
+        subject_key=target, username=username,
+        outcome=change, sublevel='normal', live_default=True,
+        message=f"declared state {change}: {target}: {summary_line(r)}"[:300],
+        summary=summary_line(r), url=url,
+        severity='warning' if change in ('appeared', 'changed') else 'info',
+        kind=kind, record=r.get('name', ''), declared_by=r.get('declared_by', ''),
+        end=r.get('end'), start=r.get('start'), source=r.get('source', ''))
+
+
+# ------------------------------------------------- downtime a person enters
+
+class DeclareError(ValueError):
+    """A downtime entry that cannot be recorded; the text says why."""
+
+
+def _when_entered(text, field):
+    """A time a person entered: ISO 8601, read as Eastern time when it
+    carries no offset (the page's form sends local Eastern time)."""
+    try:
+        dt = datetime.fromisoformat(str(text or '').strip().replace('Z', '+00:00'))
+    except ValueError:
+        raise DeclareError(f'{field} must be a date and time, e.g. 2026-11-23T00:00 '
+                           f'(Eastern time unless it carries an offset)')
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=EASTERN)
+    return dt.astimezone(dt_timezone.utc)
+
+
+def declare_window(queue, start, end, reason, by, via='web', now=None):
+    """Record a downtime window a person enters for one ePIC queue, from
+    ``start`` to ``end`` with a reason, and who entered it. The window is a
+    declared record like CRIC's (kind queue, its target the queue, a start
+    and an end, source ``operator``): the front holds the queue ahead of
+    it, the canary leaves it alone, and failures inside it are attributed
+    to it. Returns the record with its line and standing; raises
+    DeclareError on input that cannot be recorded."""
+    import secrets
+    import time as time_mod
+    from django.utils import timezone
+    from .models import Entry, PandaQueue
+    from .signals import set_changed_by
+    now = now or timezone.now()
+    queue = str(queue or '').strip()
+    reason = str(reason or '').strip()
+    by = str(by or '').strip()
+    if not by or by == 'swf-remote-proxy':
+        raise DeclareError('sign in to enter a downtime: the record names who entered it')
+    if not queue or not PandaQueue.objects.filter(queue_name=queue).exists():
+        raise DeclareError(f'no ePIC queue named {queue!r}')
+    if not reason:
+        raise DeclareError('a reason is required')
+    start_dt, end_dt = _when_entered(start, 'start'), _when_entered(end, 'end')
+    if end_dt <= start_dt:
+        raise DeclareError('the end must be after the start')
+    if end_dt <= now:
+        raise DeclareError('the end has already passed')
+    record = {
+        'kind': 'queue', 'target': queue, 'source': OPERATOR_SOURCE,
+        'value': 'DOWNTIME', 'activity': '', 'probe': '',
+        'reason': reason[:500], 'declared_by': by, 'declared_at': _iso(now),
+        'start': _iso(start_dt), 'end': _iso(end_dt),
+        'info_url': '', 'severity': '', 'classification': '', 'description': '',
+        'entered_via': via, 'first_seen': _iso(now), 'observed_at': _iso(now),
+    }
+    name = f"operator:{queue}:{start_dt.strftime('%Y%m%dT%H%M')}:{secrets.token_hex(3)}"
+    standing = standing_of(record, now)
+    set_changed_by(by)
+    Entry(kind=DECLARED_KIND, context=_operator_context(), name=name, status=standing,
+          title=summary_line(record)[:255], data=record,
+          timestamp_modified=time_mod.time()).save()
+    _cache['records'] = None
+    record = dict(record, name=name, standing=standing)
+    announce(record, 'appeared', by, actor=via)
+    return dict(record, line=summary_line(record))
+
+
+def withdraw_window(name, by, reason='', via='web', now=None):
+    """Withdraw a downtime window a person entered, before or during it:
+    the record stays, cleared at this instant with who withdrew it and
+    why. Windows from CRIC are withdrawn in CRIC, not here."""
+    import time as time_mod
+    from django.utils import timezone
+    from .models import Entry
+    from .signals import set_changed_by
+    now = now or timezone.now()
+    by = str(by or '').strip()
+    if not by or by == 'swf-remote-proxy':
+        raise DeclareError('sign in to withdraw a downtime: the record names who withdrew it')
+    e = Entry.objects.filter(kind=DECLARED_KIND, context_id=OPERATOR_CONTEXT, name=name,
+                             archived=False, deleted_at__isnull=True).first()
+    if e is None:
+        raise DeclareError(f'no downtime entered by a person named {name!r} '
+                           '(a window from CRIC is withdrawn in CRIC)')
+    if (e.status or '') == 'cleared':
+        raise DeclareError('that downtime was already withdrawn')
+    data = dict(e.data or {})
+    if standing_of(data, now) == 'expired':
+        raise DeclareError('that downtime has already ended')
+    data.update(cleared_at=_iso(now), cleared_by=by,
+                clear_reason=str(reason or '').strip()[:500])
+    set_changed_by(by)
+    e.data = data
+    e.status = 'cleared'
+    e.timestamp_modified = time_mod.time()
+    e.save()
+    _cache['records'] = None
+    record = dict(data, name=name, standing='cleared')
+    announce(record, 'cleared', by, actor=via)
+    return dict(record, line=summary_line(record))
+
+
 # ------------------------------------------------------------- the readers
 
 def _fmt_when(text):
     dt = _dt(text)
-    return dt.strftime('%m/%d %H:%M UTC') if dt else ''
+    return dt.astimezone(EASTERN).strftime('%m/%d %H:%M ET') if dt else ''
 
 
 def summary_line(r):
     """One line for a queue line or an endpoint line: the rule or window
-    as an operator reads it. 'offline until 09/15 00:21 UTC: scheduled
-    downtime (xzhao@bnl.gov)'; 'downtime 09/20 08:00 to 16:00 UTC:
-    <description>'."""
+    as an operator reads it, in Eastern time. 'offline until 09/14 20:21
+    ET: scheduled downtime (xzhao@bnl.gov)'; 'outage 09/20 04:00 ET to
+    09/20 12:00 ET: <description>'. A record with a start (a site window,
+    or a window a person entered for a queue) reads as its span."""
     who = r.get('declared_by') or ''
     reason = (r.get('reason') or r.get('description') or '').strip()
     tail = (f': {reason}' if reason else '') + (f' ({who})' if who else '')
-    if r.get('kind') == 'site':
+    if r.get('kind') == 'site' or r.get('start'):
         span = _fmt_when(r.get('start'))
         if r.get('end'):
             span += f" to {_fmt_when(r.get('end'))}"
@@ -547,6 +703,9 @@ def for_detail_page(kind, target, now=None):
         standing = r.get('standing') if r.get('standing') == 'cleared' else standing_of(r, now)
         r['standing'] = standing
         r['standing_class'] = STANDING_CLASS.get(standing, '')
+        # A window a person entered can be withdrawn on the page until it ends.
+        r['withdrawable'] = (r.get('source') == OPERATOR_SOURCE
+                             and standing in ('active', 'future'))
         history.append(r)
         if standing in ('active', 'future'):
             current[standing].append(r)

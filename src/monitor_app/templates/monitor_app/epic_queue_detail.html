@@ -83,7 +83,7 @@
     <div class="card mb-3" id="declared">
         <div class="card-header queue-section-header">
             <strong>Declared state</strong>
-            <span class="ms-2 text-muted">what CRIC declares for this queue: status rules and downtime windows, read by the ops agent every ten minutes</span>
+            <span class="ms-2 text-muted">status rules and downtime windows from CRIC, read by the ops agent every ten minutes, and downtime entered here</span>
         </div>
         <div class="card-body p-0">
             {% if declared_now.active or declared_now.future %}
@@ -111,11 +111,88 @@
                     <td class="text-nowrap">{{ r.when }}</td>
                     <td>{{ r.declared_by }}</td>
                     <td>{{ r.line }}</td>
-                    <td class="{{ r.standing_class }}">{{ r.standing }}{% if r.cleared_when %} {{ r.cleared_when }}{% endif %}</td>
+                    <td class="{{ r.standing_class }}">{{ r.standing }}{% if r.cleared_when %} {{ r.cleared_when }}{% if r.cleared_by %} by {{ r.cleared_by }}{% endif %}{% endif %}
+                        {% if r.withdrawable and user.is_authenticated %}
+                        <button type="button" class="btn btn-danger btn-sm ms-2 declared-withdraw"
+                                data-name="{{ r.name }}">Withdraw</button>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
                 </tbody>
             </table>
+            {% endif %}
+            {% if user.is_authenticated %}
+            <form id="declared-enter" class="p-2 border-top" autocomplete="off">
+                <p class="mb-2"><strong>Enter a downtime for {{ queue_name }}</strong><br>
+                    Downtime entered here is logged in the system together with who registered the downtime.
+                    Times are Eastern time. Shortly before and during a downtime, production assigns
+                    this queue no new tasks, and failures during it are attributed to it.</p>
+                <div class="d-flex flex-wrap align-items-end gap-2">
+                    <label class="form-label mb-0">Start<br>
+                        <input type="datetime-local" name="start" class="form-control form-control-sm" required></label>
+                    <label class="form-label mb-0">End<br>
+                        <input type="datetime-local" name="end" class="form-control form-control-sm" required></label>
+                    <label class="form-label mb-0 flex-grow-1">Reason<br>
+                        <input type="text" name="reason" class="form-control form-control-sm" maxlength="500"
+                               placeholder="e.g. scheduled site maintenance" required></label>
+                    <button type="submit" class="btn btn-primary btn-sm">Register downtime</button>
+                </div>
+                <p id="declared-enter-msg" class="mb-0 mt-2 text-danger d-none"></p>
+            </form>
+            <script>
+            (function () {
+                var api = '{{ request.META.SCRIPT_NAME }}/pcs/api/declared/windows/';
+                function csrf() {
+                    return (document.cookie.match(/csrftoken[A-Za-z_]*=([^;]+)/) || [])[1] || '';
+                }
+                async function post(url, body) {
+                    var resp = await fetch(url, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf()},
+                        body: JSON.stringify(body)});
+                    if (!resp.ok) {
+                        var m = 'HTTP ' + resp.status;
+                        try { var j = await resp.json(); m = j.detail || j.error || m; } catch (_) {}
+                        throw new Error(m);
+                    }
+                    return resp.json();
+                }
+                var form = document.getElementById('declared-enter');
+                var msg = document.getElementById('declared-enter-msg');
+                form.addEventListener('submit', async function (e) {
+                    e.preventDefault();
+                    var btn = form.querySelector('button[type=submit]');
+                    btn.disabled = true;
+                    msg.classList.add('d-none');
+                    try {
+                        await post(api, {queue: '{{ queue_name|escapejs }}',
+                                         start: form.start.value, end: form.end.value,
+                                         reason: form.reason.value});
+                        window.location.hash = 'declared';
+                        window.location.reload();
+                    } catch (err) {
+                        btn.disabled = false;
+                        msg.textContent = 'The downtime was not registered: ' + err.message;
+                        msg.classList.remove('d-none');
+                    }
+                });
+                document.querySelectorAll('button.declared-withdraw').forEach(function (b) {
+                    b.addEventListener('click', async function () {
+                        var why = window.prompt('Withdraw this downtime? Say why (recorded with your name):');
+                        if (why === null) return;
+                        b.disabled = true;
+                        try {
+                            await post(api + 'withdraw/', {name: b.getAttribute('data-name'), reason: why});
+                            window.location.reload();
+                        } catch (err) {
+                            b.disabled = false;
+                            window.alert('The downtime was not withdrawn: ' + err.message);
+                        }
+                    });
+                });
+            })();
+            </script>
             {% endif %}
         </div>
     </div>

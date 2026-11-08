@@ -1127,3 +1127,71 @@ async def epicprod_live_clear(ids: list, reason: str, username: str = None) -> d
         return await sync_to_async(clear_live_records)(ids, reason, who)
     except (ValueError, RuntimeError) as e:
         return {"error": str(e)}
+
+
+@mcp.tool()
+@requires_authority
+async def epicprod_declare_downtime(queue: str, start: str, end: str, reason: str,
+                                    username: str = None) -> dict:
+    """
+    Register a downtime window for an ePIC PanDA queue, as on the queue
+    page's Declared state card (swf-epicprod CONTINUOUS_PRODUCTION.md,
+    Declared downtime).
+
+    WHEN: a person asks for a planned site or queue downtime to be
+    registered ("Grex is down Nov 23-24").
+
+    Args:
+        queue: The PanDA queue, e.g. 'UM_GREX_PanDA_1'.
+        start: When the downtime begins, ISO 8601 ('2026-11-23T00:00').
+            A time without an offset is Eastern time; give the offset for
+            another zone ('2026-11-23T00:00:00-06:00' for Winnipeg).
+        end: When it ends, the same form.
+        reason: What the downtime is, one line ('Grex scheduled downtime').
+        username: Who registers it (required for a token caller; a caller
+            through the proxy is recorded as the signed-in person).
+
+    The window is recorded with who registered it. While it is coming the
+    pressure front stops feeding the queue ahead of it, the canary leaves
+    the queue alone, and failures inside it are attributed to it; the
+    queue page and the queues list show it.
+
+    Returns:
+        name (to withdraw it), line, standing, start, end, url; or error.
+    """
+    from monitor_app.declared import DeclareError, declare_window
+    try:
+        who = _get_username(username)
+        r = await sync_to_async(declare_window)(queue, start, end, reason, who, via='mcp')
+    except (DeclareError, RuntimeError) as e:
+        return {"error": str(e)}
+    return {'name': r['name'], 'line': r['line'], 'standing': r['standing'],
+            'start': r['start'], 'end': r['end'], 'declared_by': r['declared_by'],
+            'url': _monitor_url(f"/panda/epic-queues/{r['target']}/#declared")}
+
+
+@mcp.tool()
+@requires_authority
+async def epicprod_withdraw_downtime(name: str, reason: str = '', username: str = None) -> dict:
+    """
+    Withdraw a downtime window registered on a queue page or with
+    epicprod_declare_downtime, before or during it. The record stays,
+    cleared, with who withdrew it. A window from CRIC is withdrawn in CRIC.
+
+    Args:
+        name: The window's name, as epicprod_declare_downtime returned it
+            ('operator:UM_GREX_PanDA_1:20261123T0500:3fa2c1').
+        reason: Why, one line.
+        username: Who withdraws it (required for a token caller).
+
+    Returns:
+        name, line, standing 'cleared'; or error.
+    """
+    from monitor_app.declared import DeclareError, withdraw_window
+    try:
+        who = _get_username(username)
+        r = await sync_to_async(withdraw_window)(name, who, reason, via='mcp')
+    except (DeclareError, RuntimeError) as e:
+        return {"error": str(e)}
+    return {'name': r['name'], 'line': r['line'], 'standing': r['standing'],
+            'cleared_by': r.get('cleared_by', '')}
