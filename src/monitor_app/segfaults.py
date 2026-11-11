@@ -1719,6 +1719,25 @@ def elsewhere_queue(origin):
     return ELSEWHERE_FROM.get(origin or '', ELSEWHERE_QUEUE)
 
 
+def production_stand_in(site):
+    """The queue a reproduction's production run goes to: the crash's own
+    queue or, when the queue record has it closed to new work, the open queue
+    that shares its slots (BNL_OSG_EPIC_PROD_1 drains in place and its pool's
+    open queue is BNL_OSG_PanDA_1; docs/QUEUE_REGISTRY.md). A closed queue
+    with no open pool member stays as it is, and the submission then refuses
+    it with the record's reason."""
+    from swf_epicprod import queues as registry
+    closed = registry.closed()
+    if not site or site not in closed:
+        return site
+    for members in registry.pools().values():
+        if site in members:
+            for queue in members:
+                if queue != site and queue not in closed:
+                    return queue
+    return site
+
+
 def run_role(queue, origin):
     """The role a run plays in a reproduction: ``production`` on the queue
     the crash happened on, ``reference`` on the reference queue,
@@ -1862,11 +1881,13 @@ def local_repro(sig, pandaid=None):
 def reproduction_plan(sig, pandaid=None):
     """What a reproduction of the signature runs: the crashed job (the
     representative unless named), its row, its PCS task, its production
-    queue and that queue's memory. Raises ValueError with the reason when
-    the run cannot be formed."""
+    queue and that queue's memory. The production queue is the crash's own,
+    or its open stand-in when that queue is closed (production_stand_in).
+    Raises ValueError with the reason when the run cannot be formed."""
     job, crash, row, row_text = crashed_run(sig, pandaid)
     pandaid = job.pandaid
-    site = crash.get('computingsite') or ''
+    crash_queue = crash.get('computingsite') or ''
+    site = production_stand_in(crash_queue)
     maxrss_mb = None
     if site:
         # The queue's memory from schedconfig (the PanDA record, a table
@@ -1880,7 +1901,8 @@ def reproduction_plan(sig, pandaid=None):
             maxrss_mb = None
     plan = {'pandaid': int(pandaid), 'task': job.prod_task.name, 'row_text': row_text,
             'container': crash.get('container') or '',
-            'production_queue': site, 'elsewhere_queue': elsewhere_queue(site),
+            'production_queue': site, 'crash_queue': crash_queue,
+            'elsewhere_queue': elsewhere_queue(site),
             'reference_queue': REFERENCE_QUEUE,
             'maxrss_mb': maxrss_mb, 'job_maxrss_mb': crash.get('maxrss_mb'),
             'memory': is_memory(sig), 'request_mb': crash.get('request_mb')}
