@@ -876,7 +876,7 @@ def reconcile(sig_key, queue_diagnosis=None):
     if to_queue and queue_diagnosis is not None:
         queue_diagnosis(to_queue, 'auto:reproduced')
     if changed['outcome']:
-        log_settled(sig_key, changed)
+        log_settled(sig_key, changed, memory=memory, measured=measured)
     return changed
 
 
@@ -887,16 +887,30 @@ SETTLED_TEXT = {
     'not_reproduced': ('not reproduced', 'Neither run crashed.'),
     'inconclusive': ('reproduction inconclusive', 'A run failed for another reason.'),
 }
+# A memory signature settles on kills and the measured peak against the
+# killed jobs' request, not on crashes (SEGFAULT_DIAGNOSIS.md, Memory kills).
+MEMORY_SETTLED_TEXT = {
+    'reproduced': ('reproduced', 'The row needs more memory than the killed jobs requested.'),
+    'site_dependent': ('kill only at production',
+                       "Only the production queue killed the row; elsewhere it stayed under the request."),
+    'not_reproduced': ('not reproduced', 'Neither run was killed, and the row stayed under the request.'),
+    'inconclusive': ('reproduction inconclusive', 'A run failed for another reason.'),
+}
 
 
-def log_settled(sig_key, changed):
+def log_settled(sig_key, changed, memory=False, measured=None):
     """Post a reproduction's result on epicprod-live when it settles, the one
     record of it there; the request posts nothing (Torre Wenaus,
     2026-11-03). The detail names the finding that reads the crash, or the
-    study queued for it."""
+    study queued for it; a memory signature's states the measured peak
+    against the request."""
     from .epicprod_logging import log_epicprod_action
     outcome = changed['outcome']
-    words, detail = SETTLED_TEXT.get(outcome, (outcome.replace('_', ' '), ''))
+    texts = MEMORY_SETTLED_TEXT if memory else SETTLED_TEXT
+    words, detail = texts.get(outcome, (outcome.replace('_', ' '), ''))
+    if memory and measured and measured.get('rss_max_mb') and measured.get('request_mb'):
+        detail += (f" Peak {round(measured['rss_max_mb']):,} MB RSS at {measured.get('queue') or 'the reference queue'}"
+                   f" against a {round(measured['request_mb']):,} MB request.")
     if changed.get('covered'):
         detail += f" Finding {changed['covered']} reads it."
     elif changed.get('diagnosis'):
@@ -905,7 +919,8 @@ def log_settled(sig_key, changed):
                         subject_type='crash_signature', subject_key=sig_key,
                         sublevel='normal', live_default=True,
                         message=f'Reproduction of {sig_key} settled: {outcome}',
-                        title=f'Crash {sig_key} {words}', summary=detail.strip(),
+                        title=f"{'Memory kill' if memory else 'Crash'} {sig_key} {words}",
+                        summary=detail.strip(),
                         result=outcome, url=f'panda/segfaults/{sig_key}/')
 
 
