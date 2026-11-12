@@ -46,10 +46,12 @@ payload report the sweep files under ``data['payload_report']`` and the
 registrar's notes stay as they are.
 
 After the crash pass, the memory pass (SEGFAULT_DIAGNOSIS.md, Memory
-kills) finds the production tasks with a memory kill in the window,
-rebuilds their memory signatures over their whole life from aggregate
-queries (``monitor_app.segfaults.build_memory_signatures``; no row per
-killed job), and gives each signature that lacks them three
+kills) finds the production tasks with a memory kill in the window and
+the tasks already holding a memory signature, rebuilds their memory
+signatures over their whole life from aggregate queries
+(``monitor_app.segfaults.build_memory_signatures``; no row per killed
+job), retires a signature the selection no longer yields unless a
+reproduction is recorded on it, and gives each signature that lacks them three
 representative jobs, ``phase = 'payload_memory'``: the shortest, median
 and longest time to kill among the kills whose manifest row resolves.
 ``--memory-only --since 2026-07-01`` is its back-fill.
@@ -648,10 +650,14 @@ def memory_representatives(sig, manifests, chains, counts):
 def memory_pass(since, manifests, chains, counts):
     """The memory signatures of the tasks with a memory kill since
     ``since``, rebuilt over their life, and their representatives."""
-    from monitor_app.segfaults import build_memory_signatures, memory_tasks
+    from monitor_app.segfaults import (build_memory_signatures, memory_signature_tasks,
+                                       memory_tasks)
     tids = memory_tasks(since)
     log.info('memory pass: %d tasks with a memory kill since %s', len(tids),
              since.isoformat(timespec='seconds'))
+    # The tasks already on record are rebuilt too, so a change to the
+    # selection rule reaches their signatures, retiring the ones it drops.
+    tids = sorted(set(tids) | set(memory_signature_tasks()))
     result = build_memory_signatures(tids)
     reps = 0
     for key in result['keys']:

@@ -531,11 +531,13 @@ MEMORY_MECHANISM_SQL = """CASE WHEN j."piloterrorcode" = 1212 THEN 'cgroup'
 def memory_kill_sql():
     """The condition selecting a memory kill among failed jobs (alias
     ``j``) and its parameters (SEGFAULT_DIAGNOSIS.md, Memory kills): a
-    cgroup kill; a SIGTERM eviction, or a SIGKILL under another pilot
-    label, whose peak resident memory reached the SysConfig fraction of
-    the request. ``maxrss`` is kB in the record, ``minramcount`` MB."""
+    cgroup kill, the pilot's report confirmed by the payload's exit 137;
+    a SIGTERM eviction, or a SIGKILL under another pilot label, whose
+    peak resident memory reached the SysConfig fraction of the request.
+    ``maxrss`` is kB in the record, ``minramcount`` MB."""
     frac = thresholds()['segfault_memory_rss_fraction']
-    sql = """((j."piloterrorcode" = 1212 AND j."piloterrordiag" ILIKE '%%out of memory%%')
+    sql = """((j."piloterrorcode" = 1212 AND j."piloterrordiag" ILIKE '%%out of memory%%'
+               AND j."transexitcode" = '137')
               OR (j."piloterrorcode" = 1201 AND j."piloterrordiag" ILIKE '%%SIGTERM%%'
                   AND j."maxrss" >= %s * j."minramcount" * 1024)
               OR (j."transexitcode" = '137' AND j."piloterrorcode" <> 1212
@@ -618,6 +620,7 @@ def build_memory_signatures(jeditaskids):
     and records them on the signature); everything a reproduction wrote
     survives. Returns a summary with the keys built."""
     import re
+    from django.db.models import Q
     from pcs.manifests import _taskparams
     from pcs.models import PandaTasks
     tids = sorted({int(t) for t in jeditaskids if t})
@@ -725,21 +728,37 @@ def build_memory_signatures(jeditaskids):
         summary['signatures'] += 1
         summary['created'] += int(created)
         summary['keys'].append(key)
-    # A split task whose kills all carry a stage leaves no plain entry; one
-    # left from before the split goes unless a reproduction is recorded on it.
-    for tid in split:
-        if (tid, '') in groups:
-            continue
-        plain = CrashSignature.objects.filter(key=memory_key(tid)).first()
-        if plain is None:
-            continue
-        if plain.reproduction:
-            logger.info('memory signature %s kept: its task now splits by stage, '
-                        'but a reproduction is recorded on it', plain.key)
-            continue
-        plain.delete()
-        summary['retired'] += 1
+    # A signature of these tasks that the selection no longer yields goes,
+    # unless a reproduction is recorded on it: the plain entry of a task
+    # that now splits by stage, or a signature whose every kill the rule
+    # has dropped (the pilot's stale kernel-log reports, 2026-11-12).
+    built = set(summary['keys'])
+    for tid in tids:
+        base = memory_key(tid)
+        for sig in CrashSignature.objects.filter(
+                Q(key=base) | Q(key__startswith=base + ':')):
+            if sig.key in built:
+                continue
+            if sig.reproduction:
+                logger.info('memory signature %s kept: the selection no longer '
+                            'yields it, but a reproduction is recorded on it', sig.key)
+                continue
+            sig.delete()
+            summary['retired'] += 1
     return summary
+
+
+def memory_signature_tasks():
+    """The tasks of the memory signatures on record, so a pass rebuilds
+    them under the current selection rule even when none of their jobs
+    failed in its window."""
+    tids = set()
+    for key in CrashSignature.objects.filter(key__startswith='memory:task').values_list(
+            'key', flat=True):
+        head = key.split(':')[1][len('task'):]
+        if head.isdigit():
+            tids.add(int(head))
+    return sorted(tids)
 
 
 def input_fail_sql():
