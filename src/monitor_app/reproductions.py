@@ -447,6 +447,7 @@ def _attempt(sig, entry, run, now, memory_fraction=None):
         'request_mb': d.get('request_mb'),
         'memory': d.get('memory') or {},
         'container': (entry or {}).get('container') or d.get('container') or '',
+        'container_swapped_from': (entry or {}).get('container_swapped_from') or '',
         'landed_site': d.get('landed_site') or '',
         'host': d.get('host') or '',
         'observed_at': _iso(observed),

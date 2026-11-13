@@ -1949,6 +1949,30 @@ def _append_reproduction(key, entry):
         return sig
 
 
+# The older tasks name their image by the ePIC repository's cvmfs path;
+# the OSG pilots serve OSG's copy of the same tag (IMAGE_PREFIX's).
+EIC_IMAGE_PREFIX = '/cvmfs/eic.opensciencegrid.org/singularity/eicweb/'
+OSG_IMAGE_PREFIX = '/cvmfs/singularity.opensciencegrid.org/eicweb/'
+
+
+def run_image(queue, image):
+    """The image a reproduction runs at ``queue``: the crashed job's, or
+    OSG's copy of the same tag when the queue's pilots refuse the job's
+    ePIC repository path and serve the copy (Torre Wenaus, 2026-11-13, for
+    reproductions only; SEGFAULT_DIAGNOSIS.md § 5). Returns the image and
+    the image it replaces, '' when it replaces none."""
+    if not image.startswith(EIC_IMAGE_PREFIX):
+        return image, ''
+    from swf_epicprod import queues
+    capability = queues.dispatch_capabilities().get(queue)
+    if not queues.image_problem(image, capability):
+        return image, ''
+    copy = OSG_IMAGE_PREFIX + image[len(EIC_IMAGE_PREFIX):]
+    if queues.image_problem(copy, capability):
+        return image, ''
+    return copy, image
+
+
 def reproduce(sig, pandaid, queues, mem_limits, username):
     """Queue one payload canary per queue to the canary agent for the
     crashed job's row, and record each request on the signature as it is
@@ -1969,8 +1993,9 @@ def reproduce(sig, pandaid, queues, mem_limits, username):
                'signature': sig.key, 'pandaid': plan['pandaid'],
                'request_id': request_id,
                'created_by': username or 'segfault_reproduce'}
-        if plan.get('container'):
-            msg['container'] = plan['container']
+        image, swapped_from = run_image(queue, plan.get('container') or '')
+        if image:
+            msg['container'] = image
         limit = mem_limits.get(queue)
         if limit:
             msg['mem_limit_mb'] = int(limit)
@@ -1984,7 +2009,7 @@ def reproduce(sig, pandaid, queues, mem_limits, username):
                  'pandaid': plan['pandaid'], 'queue': queue,
                  'role': run_role(queue, plan['production_queue']),
                  'row_text': plan['row_text'], 'mem_limit_mb': limit,
-                 'container': plan.get('container') or '',
+                 'container': image, 'container_swapped_from': swapped_from,
                  'requested_at': now, 'requested_by': username,
                  'outcome': 'submitted', 'jedi_task_id': None,
                  'canary_pandaid': None, 'minutes': None,
