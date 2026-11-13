@@ -72,7 +72,7 @@ def main():
                 entry, log_id = whats_new.item_create(
                     fields, changed_by=args.by, origin=origin)
                 _mark_decided(row, 'executed', args.decided_by, now,
-                              log_id=log_id)
+                              quality='', log_id=log_id)
         except whats_new.WhatsNewError as e:
             failed += 1
             print(f'  refused: {e.detail}', file=sys.stderr)
