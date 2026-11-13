@@ -62,6 +62,8 @@ Slices are numbered sequentially via `slice_id` (1-based within the FastMon file
 | `assigned_at` | DateTime | When the worker claimed the slice |
 | `completed_at` | DateTime | When processing finished |
 | `metadata` | JSON | Extensible metadata |
+| `result` | JSON | Processing result reported for the slice |
+| `error` | JSON | Error details when processing fails |
 
 ### TF Range Constraints Summary
 

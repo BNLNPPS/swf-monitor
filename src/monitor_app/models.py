@@ -475,6 +475,8 @@ class TFSlice(models.Model):
     status = models.CharField(max_length=20, default='queued')
     retries = models.IntegerField(default=0)
     metadata = models.JSONField(null=True, blank=True)
+    result = models.JSONField(null=True, blank=True)
+    error = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
