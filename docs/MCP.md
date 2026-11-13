@@ -113,7 +113,7 @@ The full tool catalog is in [MCP tool reference](MCP_TOOL_REFERENCE.md).
 | AI Memory | `swf_record_ai_memory`, `swf_get_ai_memory` | 2 |
 | AI Content | `epic_register_ai_assessment`, `epic_get_ai_content` | 2 |
 | AI Proposals | `ai_list_proposals`, `ai_decide_proposal` | 2 |
-| What's New | `whats_new_list`, `whats_new_get`, `whats_new_propose`, `whats_new_edit` | 4 |
+| What's New | `whats_new_list`, `whats_new_get`, `whats_new_add`, `whats_new_edit` | 4 |
 | Campaign Status | `epicprod_campaign_status` | 1 |
 | Action Stream | `epicprod_list_actions` | 1 |
 | Storage Record | `epicprod_storage` | 1 |
@@ -137,7 +137,7 @@ The full tool catalog is in [MCP tool reference](MCP_TOOL_REFERENCE.md).
 | `src/monitor_app/mcp/ai_memory.py` | AI memory tools. |
 | `src/monitor_app/mcp/ai_content.py` | epicprod AI-assessment tools. |
 | `src/monitor_app/mcp/ai_proposals.py` | AI proposal listing and human-decision relay (the bot review flow). |
-| `src/monitor_app/mcp/whats_new.py` | What's new: the list of developments, one item, propose, edit ([WHATS_NEW.md](WHATS_NEW.md)). |
+| `src/monitor_app/mcp/whats_new.py` | What's new: the list of developments, one item, add, edit ([WHATS_NEW.md](WHATS_NEW.md)). |
 | `src/monitor_app/mcp/pandamon.py` | PanDA production monitoring tools. |
 | `src/monitor_app/mcp/rucio.py` | Complete JLab and BNL Rucio service bridge; credentials stay local. |
 | `src/monitor_app/auth0.py` | JWT validation with Auth0 JWKS. |

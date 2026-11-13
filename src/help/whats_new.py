@@ -1,8 +1,7 @@
 """What's new: developments as versioned entry-store items (docs/WHATS_NEW.md).
 
 Every write to the What's new entries goes through this module: the pages,
-the REST API, the MCP tools and the AI proposal executor call it, and
-nothing else writes them. Items are ``Entry`` rows of kind ``development``
+the REST API and the MCP tools call it, and nothing else writes them. Items are ``Entry`` rows of kind ``development``
 in the ``whats-new`` context; comments are ``comment`` entries whose parent
 is the item. The entry versioning signal (monitor_app/signals.py) keeps
 each substantive edit; votes are an operational key and are not versioned.
@@ -25,7 +24,7 @@ IMPORTANCE_LABELS = {
 }
 SUMMARY_MAX = 600
 _TAG_RE = re.compile(r'^[a-z0-9][a-z0-9-]*$')
-# Item fields an edit or a proposal may set.
+# Item fields a creation or an edit may set.
 FIELDS = ('title', 'summary', 'details', 'refs', 'tags', 'importance',
           'shipped', 'contact', 'builds_on')
 
@@ -171,14 +170,6 @@ def _validate(fields, *, current=None, changed_by=''):
     }
 
 
-def validate_new(fields, *, changed_by=''):
-    """Check a new item's fields without writing; returns the normalized
-    fields with the slug the item would take. Used by the proposal path."""
-    clean = _validate(fields, changed_by=changed_by)
-    clean['slug'] = slug_for(clean['title'])
-    return clean
-
-
 def _write(entry, clean):
     entry.title = clean['title']
     entry.content = clean['details']
@@ -190,10 +181,13 @@ def _write(entry, clean):
 
 
 def item_create(fields, *, changed_by, origin=None):
-    """Create an item: the call the New item form, the API, and an approved
-    AI proposal make. Logs one origin-stamped ``whats_new_create`` event,
-    which epicprod-live posts and the live screen shows at INFO (Torre
-    Wenaus, 2026-10-30). Returns (entry, action log id)."""
+    """Create an item: the call the New item form, the API and the MCP add
+    tool make (an LLM session adds an item as part of the task that ships
+    the change, WHATS_NEW.md). Items made before 2026-11-12 from approved
+    AI proposals carry the proposal's origin. Logs one origin-stamped
+    ``whats_new_create`` event, which epicprod-live posts and the live
+    screen shows at INFO (Torre Wenaus, 2026-10-30). Returns (entry, action
+    log id)."""
     from monitor_app.alarms_data import _origin_attrs
     from monitor_app.epicprod_logging import log_epicprod_action
 

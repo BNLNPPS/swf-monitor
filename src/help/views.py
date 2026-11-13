@@ -3,7 +3,6 @@ from django.http import Http404
 from django.shortcuts import render
 
 from ai.assessments import render_assessment_markdown
-from ai.models import Proposal
 from monitor_app.authority import may_act
 from monitor_app.inclusive_filter import Facet, InclusiveFilter
 
@@ -34,20 +33,6 @@ def _facets(rows):
                   order=list(wn.IMPORTANCE) + tags)]
 
 
-def _proposals():
-    out = []
-    for p in (Proposal.objects.filter(action='whats_new', status='proposed')
-              .order_by('created_at')):
-        item = dict(p.payload or {})
-        item.setdefault('tags', [])
-        item['tags_text'] = ' '.join(item.get('tags') or [])
-        item['builds_on_text'] = ' '.join(item.get('builds_on') or [])
-        out.append({'id': p.pk, 'ref': p.ref, 'proposer': p.proposer,
-                    'comment': p.comment, 'created_at': p.created_at,
-                    'item': _render_fields(item)})
-    return out
-
-
 def whats_new(request):
     """The What's new list, newest shipped first; the filter shows the
     items carrying every selection."""
@@ -60,7 +45,6 @@ def whats_new(request):
         'rows': rows,
         'inclusive_filter': flt.context(rows, facets, request),
         'open_all': request.GET.get('open') == 'all',
-        'proposals': _proposals(),
         'username': username,
         'may_add': bool(username) and may_act(username),
         'importance_levels': wn.IMPORTANCE,

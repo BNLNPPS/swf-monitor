@@ -62,10 +62,11 @@ effect only when a person accepts it on the alarm dashboard, where
 decisions on proposals are made.
 
 What's new: whats_new_list answers "what is new" and "recent
-developments". When a change that users, operators or developers should
-know about is in production and not on the list, propose it with
-whats_new_propose (its shipped date, tags, importance and contact); a
-person approves it on the What's new page.
+developments". A change that users, operators or developers should know
+about gets its item as part of the task that ships it, like its
+documentation: once it is in production and not on the list, add it with
+whats_new_add (its shipped date, tags, importance and contact). It is not
+proposed and waits for no approval.
 
 The tool catalog is tools/list; call it rather than looking for a listing
 tool. The human-facing outline is
@@ -150,7 +151,7 @@ from .ai_content import (
 from .whats_new import (
     whats_new_list,
     whats_new_get,
-    whats_new_propose,
+    whats_new_add,
     whats_new_edit,
 )
 
@@ -250,7 +251,7 @@ __all__ = [
     # What's new
     'whats_new_list',
     'whats_new_get',
-    'whats_new_propose',
+    'whats_new_add',
     'whats_new_edit',
     # PanDA Monitor
     'panda_list_jobs',

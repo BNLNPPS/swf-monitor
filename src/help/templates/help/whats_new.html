@@ -14,34 +14,6 @@ add its address to a feed reader to follow the list. It needs the same sign-in a
 
 {% if may_add %}<div class="mb-3"><a class="btn btn-primary btn-sm" href="{% url 'help:whats_new_new' %}{% if request.GET.user_view %}?user_view={{ request.GET.user_view }}{% endif %}">Add</a></div>{% endif %}
 
-{% if proposals %}
-<h4 class="mt-3"><span class="ai-attr-text">Proposed items</span> ({{ proposals|length }})</h4>
-<p class="wn-intro">LLM sessions propose items here. Approving adds the item, after any changes made with Edit;
-denying keeps it from being proposed again.</p>
-{% for p in proposals %}
-<div class="wn-proposal ai-fill" data-proposal="{{ p.id }}">
-  <div class="d-flex flex-wrap align-items-baseline gap-2">
-    <span class="wn-imp wn-imp-{{ p.item.importance }}">{{ p.item.importance_label }}</span>
-    <span class="wn-title">{{ p.item.title }}</span>
-    <span>shipped {{ p.item.shipped }}, contact {{ p.item.contact }}</span>
-  </div>
-  <div class="wn-summary">{{ p.item.summary }}</div>
-  <div class="mt-1">{% include 'help/_wn_tags.html' with tags=p.item.tags %}</div>
-  {% if p.item.details %}<div class="mt-2">{{ p.item.details_html }}</div>{% endif %}
-  {% if p.item.refs %}<h6 class="mt-2 fw-bold">References</h6><div>{{ p.item.refs_html }}</div>{% endif %}
-  <div class="mt-2"><span class="ai-attr-text">{{ p.ref }}</span> proposed by {{ p.proposer|default:'an AI' }}
-    <span data-relative-time="{{ p.created_at|date:'c' }}"></span>: {{ p.comment }}</div>
-  {% if username %}
-  <div class="wn-edit-box mt-2" style="display:none">{% include 'help/_wn_form.html' with f=p.item %}</div>
-  <div class="mt-2 d-flex gap-2">
-    <button type="button" class="btn btn-success btn-sm wn-p-approve">Approve</button>
-    <button type="button" class="btn btn-dark-green btn-sm wn-p-edit">Edit</button>
-    <button type="button" class="btn btn-secondary btn-sm wn-p-deny">Deny</button>
-  </div>
-  {% endif %}
-</div>
-{% endfor %}
-{% endif %}
 
 {% include 'monitor_app/_inclusive_filter.html' %}
 
@@ -130,45 +102,6 @@ denying keeps it from being proposed again.</p>
   document.addEventListener('swf-if-change', function (ev) { markTags(ev.detail.selections); });
   if (filterRoot) markTags(JSON.parse(filterRoot.dataset.ifSelections || '[]'));
 
-  // Proposals: approve (with any edits as amendments), edit, deny.
-  document.querySelectorAll('.wn-proposal').forEach(function (box) {
-    const id = parseInt(box.dataset.proposal, 10);
-    const editBox = box.querySelector('.wn-edit-box');
-    if (!editBox) return;
-    const original = wn.readForm(editBox);
-    async function decide(decision) {
-      const body = { ids: [id], decision: decision };
-      if (decision === 'approve' && editBox.style.display !== 'none') {
-        const now = wn.readForm(editBox), changed = {};
-        Object.keys(now).forEach(function (k) {
-          if (JSON.stringify(now[k]) !== JSON.stringify(original[k])) changed[k] = now[k];
-        });
-        if (Object.keys(changed).length) body.amendments = { [id]: changed };
-      }
-      try {
-        const tokenEl = document.querySelector('[name=csrfmiddlewaretoken]');
-        const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/proposals/decide/', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': tokenEl ? tokenEl.value : '' },
-          body: JSON.stringify(body),
-        });
-        const j = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(j.detail || j.error || ('request failed (' + r.status + ')'));
-        if (j.stale && j.stale.length) alert('An item with this title was added since the proposal; it is withdrawn.');
-        window.location.reload();
-      } catch (err) {
-        editBox.style.display = '';
-        wn.showError(editBox, err);
-      }
-    }
-    box.querySelector('.wn-p-approve').addEventListener('click', function () { decide('approve'); });
-    box.querySelector('.wn-p-deny').addEventListener('click', function () {
-      if (confirm('Deny this proposal? It will not be proposed again.')) decide('deny');
-    });
-    box.querySelector('.wn-p-edit').addEventListener('click', function () {
-      editBox.style.display = editBox.style.display === 'none' ? '' : 'none';
-    });
-  });
 })();
 </script>
 {% endblock %}

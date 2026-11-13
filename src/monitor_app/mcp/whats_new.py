@@ -1,6 +1,6 @@
 """What's new MCP tools (docs/WHATS_NEW.md): read the list of developments,
-propose an item, edit an item. Every write goes through help.whats_new or
-the AI proposal services; nothing here writes the entries itself."""
+add an item, edit an item. Every write goes through help.whats_new; nothing
+here writes the entries itself."""
 from asgiref.sync import sync_to_async
 
 from monitor_app.mcp import mcp
@@ -116,17 +116,19 @@ async def whats_new_get(slug: str) -> dict:
 
 @mcp.tool()
 @requires_authority
-async def whats_new_propose(title: str, summary: str, tags: list[str],
-                            importance: str, shipped: str, contact: str,
-                            comment: str, proposer: str, details: str = '',
-                            refs: str = '', builds_on: list[str] = None) -> dict:
+async def whats_new_add(title: str, summary: str, tags: list[str],
+                        importance: str, shipped: str, contact: str,
+                        details: str = '', refs: str = '',
+                        builds_on: list[str] = None,
+                        username: str = None) -> dict:
     """
-    Propose a What's new item: a development in production that users,
-    operators or developers should know about. Nothing is added until a
-    person approves the proposal on the What's new page, where any field
-    can be changed first. Propose once the change is in production; check
-    whats_new_list first so an existing item is not proposed again (edit
-    it with whats_new_edit instead).
+    Add a What's new item: a development in production that users,
+    operators or developers should know about. Adding it is part of the
+    task that ships the change, like updating its documentation; it is
+    not proposed and waits for no approval. Add it once the change is in
+    production; check whats_new_list first so an existing item is not
+    added again (correct it with whats_new_edit instead). The addition is
+    posted to epicprod-live.
 
     Args:
         title: One line: what changed, in the reader's terms, e.g.
@@ -139,52 +141,36 @@ async def whats_new_propose(title: str, summary: str, tags: list[str],
         shipped: The date the change reached production, YYYY-MM-DD.
         contact: The account of the principal developer, an account with
             the operations role.
-        comment: Why this is proposed, with the evidence: the commit,
-            release notes or document it rests on.
-        proposer: The proposing AI's own name, e.g. "claude-swf-testbed".
-            Never a human's username.
         details: Optional Markdown: how to use it, what it replaces, limits.
         refs: Markdown: links to pages, documents, pull requests. An item
             on the operation or use of the system links first the section of
             the WFMS documentation (https://epic-wfms-docs.readthedocs.io)
             where its impact is described.
         builds_on: Optional slugs of earlier items this one develops further.
+        username: The person whose work the item records, recorded as who
+            added it. Through epic-devcloud.org it is the signed-in caller
+            and need not be given.
 
     Returns:
-        outcome text, the propose result, and the page URL.
+        The item's slug and URL, or the reason it was refused.
     """
     @sync_to_async
     def run():
-        from ai import services
-        from pcs.services import ServiceError
-        who = (proposer or '').strip()
-        if not who:
-            return {'success': False,
-                    'error': 'proposer (the proposing AI, e.g. '
-                             '"claude-swf-testbed") is required'}
+        from help import whats_new as wn
         try:
-            result = services.propose_whats_new(
-                [{'title': title, 'summary': summary, 'tags': tags,
-                  'importance': importance, 'shipped': shipped,
-                  'contact': contact, 'comment': comment,
-                  'details': details or '', 'refs': refs or '',
-                  'builds_on': builds_on or []}],
-                proposer=who, created_by=f'mcp:{who}')
-        except ServiceError as e:
+            who = _get_username(username)
+        except RuntimeError as e:
+            return {'success': False, 'error': str(e)}
+        fields = {'title': title, 'summary': summary, 'details': details or '',
+                  'refs': refs or '', 'tags': tags, 'importance': importance,
+                  'shipped': shipped, 'contact': contact,
+                  'builds_on': builds_on or []}
+        try:
+            entry, _log_id = wn.item_create(fields, changed_by=who)
+        except wn.WhatsNewError as e:
             return {'success': False, 'error': e.detail}
-        if result.get('invalid'):
-            return {'success': False,
-                    'error': f"refused: {'; '.join(result['invalid'])}"}
-        if result.get('denied'):
-            return {'success': False,
-                    'error': 'this item was denied before and is unchanged; '
-                             'not re-proposed'}
-        outcome = ('an identical proposal is already pending'
-                   if result.get('noop') else
-                   "proposed; a person approves it on the What's new page")
-        return {'success': True, 'outcome': outcome, 'result': result,
-                'monitor_urls': [{'title': "What's new",
-                                  'url': _monitor_url('/help/whats-new/')}]}
+        return {'success': True, 'slug': entry.name,
+                'url': _monitor_url(f'/help/whats-new/{entry.name}/')}
     return await run()
 
 
@@ -204,7 +190,7 @@ async def whats_new_edit(slug: str, title: str = None, summary: str = None,
     Args:
         slug: The item's address (from whats_new_list).
         title, summary, details, refs, tags, importance, shipped, contact,
-            builds_on: New values; see whats_new_propose for each field.
+            builds_on: New values; see whats_new_add for each field.
         username: The person editing. Through epic-devcloud.org it is the
             signed-in caller and need not be given.
 

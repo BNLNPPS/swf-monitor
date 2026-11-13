@@ -437,11 +437,12 @@ COMMON QUERIES:
 - What's new? Recent epicprod developments? → whats_new_list() (filters: tags='ops', importance='urgent,high', since='2026-10-01'); one item in full → whats_new_get(slug='...')
 
 WHAT'S NEW WATCH:
-When a change that users, operators or developers should know about is in
-production and is not on the What's new list (whats_new_list), propose it:
-whats_new_propose(title, summary, tags, importance, shipped, contact,
-comment, proposer). A person approves it on the What's new page. An item
-already on the list is corrected with whats_new_edit, not proposed again.
+A change that users, operators or developers should know about gets its
+What's new item as part of the task that ships it, like its documentation.
+Once it is in production and not on the list (whats_new_list), add it:
+whats_new_add(title, summary, tags, importance, shipped, contact,
+username). It is not proposed and waits for no approval. An item already on
+the list is corrected with whats_new_edit, not added again.
 
 AI CONTENT RETRIEVAL:
 Detail-style production tools such as pcs_prodtask_get, panda_study_job,

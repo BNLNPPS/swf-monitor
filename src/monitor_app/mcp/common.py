@@ -49,7 +49,7 @@ CALLER: contextvars.ContextVar = contextvars.ContextVar('mcp_caller', default=''
 #: declared name cannot go stale.
 AUTHORITY_GUARDED_TOOLS = frozenset({
     'ai_decide_proposal', 'ai_propose_ping', 'epic_register_ai_assessment',
-    'whats_new_propose', 'whats_new_edit',
+    'whats_new_add', 'whats_new_edit',
     'epicprod_live_clear', 'epicprod_declare_downtime', 'epicprod_withdraw_downtime',
     'pcs_dataset_intake', 'pcs_prodtask_intake', 'pcs_prodtask_link_input',
     'panda_segfault_finding_set', 'panda_segfault_reproduce', 'pcs_prodtask_set_status',
@@ -364,9 +364,9 @@ def get_available_tools_list() -> list:
             "parameters": ["slug"],
         },
         {
-            "name": "whats_new_propose",
-            "description": "Propose a What's new item for a development in production; a person approves it on the What's new page.",
-            "parameters": ["title", "summary", "tags", "importance", "shipped", "contact", "comment", "proposer", "details", "refs", "builds_on"],
+            "name": "whats_new_add",
+            "description": "Add a What's new item for a development in production, as part of the task that shipped it; posted to epicprod-live.",
+            "parameters": ["title", "summary", "tags", "importance", "shipped", "contact", "details", "refs", "builds_on", "username"],
         },
         {
             "name": "whats_new_edit",

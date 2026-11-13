@@ -215,19 +215,11 @@ propagation pilot is the worked example of each item.
   editions are permanent identities and a request or task made in error
   is withdrawn.
 
-- **What's new item** (`whats_new`, ref `wn`) — proposes an item for the
-  What's new list ([WHATS_NEW.md](WHATS_NEW.md)): a creation subject keyed
-  on the slug the title gives, the shipped date as `counterpart_key`;
-  payload every field of the item. Precondition: no item holds the slug
-  (stale once one does). Executor `help.whats_new.item_create`, the call
-  the New item form makes, logging one origin-stamped `whats_new_create`
-  event. **Edit-then-approve**: the reviewer may change any field, recorded
-  under `amended`. Review surface: the proposed section of the What's new
-  page, in the AI treatment with approve, edit and deny, plus the
-  proposals page. Propose surface: the propose endpoint with `action:
-  whats_new` and the MCP tool `whats_new_propose`. Proposers are LLM
-  sessions; the comment is the proposer's evidence. Reversibility:
-  mitigable, an item approved in error is archived.
+- **What's new item** (`whats_new`, ref `wn`) — retired 2026-11-12. A
+  What's new item is a required part of the task that ships the change,
+  like its documentation, not a proposal: the session adds it directly
+  ([WHATS_NEW.md](WHATS_NEW.md), Items added by LLM sessions; Torre
+  Wenaus, 2026-11-12). The category's earlier rows keep their `wn` refs.
 
 ## Review surfaces
 

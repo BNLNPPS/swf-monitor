@@ -5,8 +5,10 @@ operators and developers should know about, newest first. It is the
 first entry of the Help menu, before Workflow management doc. Each item is an
 entry in the monitor's entry store, so every edit is kept as a version.
 Items are edited, commented on and voted on by anyone with authority to
-act ([AUTHORITY.md](AUTHORITY.md)). LLM sessions propose items, and a
-person approves them.
+act ([AUTHORITY.md](AUTHORITY.md)). A development above the threshold
+below gets its item as part of the task that ships it, like its
+documentation: the LLM session doing the work adds it, with no proposal
+and no approval.
 
 ## The item
 
@@ -115,9 +117,6 @@ act, opens the New item form. On the item page, Archive (or Return to
 the list, for an archived item) stands at the very bottom and asks for
 confirmation.
 
-Proposed items wait in a section at the top of the list, in the AI
-treatment, each with its approve, edit and deny controls.
-
 The pages live in the `help` application (`src/help/`), mounted at
 `help/`, which also holds later Help pages. The external face proxies
 the `help/` tree through one catch-all route in swf-remote
@@ -150,36 +149,33 @@ Writes are JSON calls under `/help/api/whats-new/`, authenticated by
 the session on the internal face and by the forwarded `X-Remote-User`
 identity on the external face, answering JSON and never a redirect
 ([EXTERNAL_ACCESS.md](EXTERNAL_ACCESS.md)). One service module,
-`help/whats_new.py`, performs every write: the pages, the API, the MCP
-tools and the AI proposal executor call it, and nothing else writes
-the entries.
+`help/whats_new.py`, performs every write: the pages, the API and the
+MCP tools call it, and nothing else writes the entries.
 
-## LLM-proposed items
+## Items added by LLM sessions
 
-LLM sessions do not write items; they propose them through the AI
-proposal subsystem ([AI_PROPOSALS.md](AI_PROPOSALS.md)), category
-`whats_new`, reference prefix `wn`.
+What's new is not approval-gated, any more than documentation is (Torre
+Wenaus, 2026-11-12). A development reaches the threshold when users,
+operators or developers should know about it: it changes what they see,
+what they can do, or how they do it. Internal tooling fixes with no such
+effect are not items. For a development at the threshold, the item is a
+required part of the task that ships it: once the change is in
+production, the session checks `whats_new_list` and adds the item with
+`whats_new_add`, its shipped date, tags, importance and contact, recording
+the person whose work it is as who added it. An item already on the list
+is corrected with `whats_new_edit`, never added again. People edit,
+comment on or archive items afterwards; an item added in error is
+archived.
 
-- **Subject**: a creation subject keyed on the proposed slug.
-- **Payload**: every field of the item.
-- **Precondition**: no item with that slug exists; a proposal whose
-  slug has since been taken is stale.
-- **Executor**: the item-create call of `help/whats_new.py`, the call
-  the New item form makes.
-- **Edit-then-approve**: the reviewer may change any field before
-  approving; the changes are recorded under `amended` and the executor
-  creates the amended item.
-- **Review surfaces**: the proposed section of the What's new page and
-  the proposals page.
-- **Reversibility**: mitigable. An item approved in error is archived.
+The rule is guidance to every LLM session working on SWF, carried in the
+MCP server instructions and in TJAI guidance (`ai-swf-whats-new-watch`).
+The release procedure checks the release's changes against the list and
+adds the items that are missing.
 
-The watch that produces proposals is guidance to every LLM session
-working on SWF, carried in the MCP server instructions: a change that
-users, operators or developers should know about, once it is in
-production, is proposed as a What's new item with its shipped date,
-tags, importance and contact. The release procedure checks the
-release's changes against the list and proposes the items that are
-missing.
+Until 2026-11-12 sessions proposed items through the AI proposal
+subsystem, category `whats_new`, ref prefix `wn`; that category is
+retired ([AI_PROPOSALS.md](AI_PROPOSALS.md)), and its pending proposals
+were added as items or withdrawn.
 
 ## MCP
 
@@ -187,10 +183,11 @@ missing.
 |---|---|
 | `whats_new_list` | Recent items, newest first: filter by tags, importance, shipped date and text; each item's title, summary, tags, importance, shipped date, contact, up and down votes, comment count and URL; the tags in use with counts. |
 | `whats_new_get` | One item in full, with its links, comments and version count. |
-| `whats_new_propose` | Propose an item (the AI proposal path above). |
+| `whats_new_add` | Add an item, as the person whose work it records (Items added by LLM sessions, above). |
 | `whats_new_edit` | Edit an existing item's fields, as the calling person. |
 
-`whats_new_edit` changes the system and carries `@requires_authority`.
+`whats_new_add` and `whats_new_edit` change the system and carry
+`@requires_authority`.
 DISpatcher carries the two reads, `whats_new_list` and `whats_new_get`
 (`BOT_TOOL_PREFIXES`, [PANDA_BOT.md](PANDA_BOT.md)), so "what's new"
 can be asked in natural language in the bot; the list tool's

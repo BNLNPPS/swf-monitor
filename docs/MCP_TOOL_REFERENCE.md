@@ -476,7 +476,7 @@ verbatim and re-list.
 |------|------------|-------------|
 | `whats_new_list` | `tags`, `importance`, `since`, `search`, `limit`, `include_details` | The curated list of recent developments, newest shipped first: each item's slug, title, summary, tags, importance, shipped date, contact, up and down votes, comment count, awaiting-reply mark and URL; `tags` keeps items carrying every tag given, `importance` the levels given, `since` items shipped on or after a date. Returns `tags_in_use`, the vocabulary to reuse. |
 | `whats_new_get` | `slug` | One item in full: details and references (Markdown), the items it builds on and those that develop it further, the comment thread, the number of earlier versions. |
-| `whats_new_propose` | `title`, `summary`, `tags`, `importance`, `shipped`, `contact`, `comment`, `proposer`, `details`, `refs`, `builds_on` | Propose an item (AI proposal category `whats_new`, ref prefix `wn`); a person approves it on the What's new page, where any field can be changed first. Requires authority. |
+| `whats_new_add` | `title`, `summary`, `tags`, `importance`, `shipped`, `contact`, `details`, `refs`, `builds_on`, `username` | Add an item, as part of the task that ships the change; recorded as added by `username` (the signed-in caller through epic-devcloud.org) and posted to epicprod-live. Requires authority. |
 | `whats_new_edit` | `slug`, `title`, `summary`, `details`, `refs`, `tags`, `importance`, `shipped`, `contact`, `builds_on`, `username` | Edit an item's fields as the calling person; fields left out are unchanged and the previous state is kept as a version. Requires authority. |
 
 See [WHATS_NEW.md](WHATS_NEW.md).
@@ -689,7 +689,7 @@ them and a person reading the page see one history.
 | AI Memory | `swf_record_ai_memory`, `swf_get_ai_memory` | 2 |
 | AI Content | `epic_register_ai_assessment`, `epic_get_ai_content` | 2 |
 | AI Proposals | `ai_list_proposals`, `ai_decide_proposal` | 2 |
-| What's New | `whats_new_list`, `whats_new_get`, `whats_new_propose`, `whats_new_edit` | 4 |
+| What's New | `whats_new_list`, `whats_new_get`, `whats_new_add`, `whats_new_edit` | 4 |
 | Campaign Status | `epicprod_campaign_status` | 1 |
 | Action Stream | `epicprod_list_actions`, `epicprod_live_clear` | 2 |
 | Declared Downtime | `epicprod_declare_downtime`, `epicprod_withdraw_downtime` | 2 |
