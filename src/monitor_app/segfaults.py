@@ -2302,6 +2302,10 @@ def findings(*, name=None, version=None, include_history=False):
         f = source.data or {}
         keys = [str(k) for k in (f.get('signatures') or [e.name])]
         sigs = {s.key: s for s in CrashSignature.objects.filter(key__in=keys)}
+        # Each crash counts once: a frame entry carries its members' sums,
+        # so a member the finding also names adds nothing more.
+        in_named_frame = {m for s in sigs.values() if s.level == 'trace'
+                          for m in ((s.data or {}).get('members') or [])}
         rows, crashes, prod_tasks, rows_lost, events_lost = [], 0, set(), 0, 0
         for key in keys:
             s = sigs.get(key)
@@ -2309,13 +2313,14 @@ def findings(*, name=None, version=None, include_history=False):
                 rows.append({'key': key, 'missing': True})
                 continue
             rows.append(signature_summary(s))
-            if s.level == 'trace' or len(keys) == 1:
-                crashes = max(crashes, s.crashes)
-                cfg = s.configuration or {}
-                for t in cfg.get('prod_tasks') or ([cfg.get('prod_task')] if cfg.get('prod_task') else []):
-                    prod_tasks.add(t)
-                rows_lost += s.rows_lost or 0
-                events_lost += s.events_lost or 0
+            if key in in_named_frame:
+                continue
+            crashes += s.crashes or 0
+            cfg = s.configuration or {}
+            for t in cfg.get('prod_tasks') or ([cfg.get('prod_task')] if cfg.get('prod_task') else []):
+                prod_tasks.add(t)
+            rows_lost += s.rows_lost or 0
+            events_lost += s.events_lost or 0
         serial = (e.data or {}).get('serial') or 0
         entries.append({
             'n': i + 1, 'id': e.id, 'name': e.name,
