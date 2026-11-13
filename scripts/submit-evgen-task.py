@@ -186,6 +186,12 @@ REPORTING_ENV_FILE = os.environ.get(
 # adder fails the job on that, whatever the payload did (DDM 200, 2026-09-11,
 # every reproduction on npps0). A task sent there carries no log dataset.
 OBJECT_STORE_LOG_QUEUES = {"BNL_NPPS_GPU"}
+# Queues that run one job at a time on the whole node, with the node's core
+# count (the queue's corecount in CRIC and in its pilot queuedata). A payload
+# canary there asks for every core: the pilot allows a single-core job on a
+# multi-core queue only maxwdir/corecount of work directory (about 4.7 GB on
+# npps0), which a large row outgrows (canary job 6608307, 2026-11-13).
+WHOLE_NODE_CANARY_QUEUES = {"BNL_NPPS_GPU": 8}
 REPORTING_KEYS = ("REPORT_OUT_BUCKET", "REPORT_OUT_REGION",
                   "REPORT_OUT_ACCESS_KEY_ID", "REPORT_OUT_SECRET_ACCESS_KEY",
                   "REPORT_OUT_ENDPOINT")
@@ -340,7 +346,7 @@ def _assemble_sandbox(spec, proxy_path, root, payload_dir=None, token_path=None,
     # EPICPROD_PAYLOAD.md, Multithreading). An Event Service job's slots are
     # its parallelism; its units stay single-threaded.
     if 'nEventsPerWorker' not in spec:
-        env['EPICPROD_NTHREADS'] = str(max(1, int(spec.get('nCore') or 1)))
+        env['EPICPROD_NTHREADS'] = str(max(1, int(spec.get('payload_threads') or spec.get('nCore') or 1)))
     # Only Event Service jobs and trials carry the report key (Torre,
     # 2026-09-24): the fleet's reports tripped the bucket's growth guard on
     # 9/18. A trial is one job and the run we read, so it reports.
@@ -1061,6 +1067,18 @@ def main():
         # The kernel drops the log dataset on noLog (evgen_panda_submit.py).
         spec['noLog'] = True
         _log(f"site {spec['site']}: no log dataset (object-store log stage-out)")
+    node_cores = WHOLE_NODE_CANARY_QUEUES.get(spec.get('site'))
+    threads = max(1, int(spec.get('nCore') or 1))
+    if args.canary_stamp and node_cores and node_cores > threads and 'nEventsPerWorker' not in spec:
+        # The whole node, with the job's memory request and the payload's
+        # threads unchanged: memory is per core (MBPerCoreFixed), so the
+        # per-core figure falls as the cores rise.
+        memory = int(spec.get('memory', 4096))
+        spec.update(payload_threads=threads, nCore=node_cores,
+                    memory=-(-memory * threads // node_cores))
+        _log(f"site {spec['site']}: canary asks for the node's {node_cores} cores "
+             f"(work-directory allowance), {spec['memory']} MB per core, "
+             f"payload threads {threads}")
     _log(f"EVGEN spec for {args.task_name}: outDS={spec['outDS']} "
          f"nJobs={spec.get('nJobs')} skipScout={spec.get('skipScout')}")
 
