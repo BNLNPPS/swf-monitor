@@ -27,6 +27,7 @@ inventory as EpicProdJob rows of phase ``payload_memory``.
 import json
 import logging
 import re
+from swf_epicprod.payload import metric_keys
 from collections import defaultdict
 from datetime import datetime, timezone as dt_timezone
 
@@ -521,7 +522,7 @@ def _retire_plain(plain, stage_keys):
 # ------------------------------------------------------------ memory kills
 
 # The payload stage a job's digest names, and its minutes from start to end.
-MEMORY_STAGE_SQL = """substring(j."jobmetrics" from 'payloadStage=([A-Za-z_]+)')"""
+MEMORY_STAGE_SQL = metric_keys.sql_value('stage', column='j."jobmetrics"', value='[A-Za-z_]+')
 MEMORY_MINUTES_SQL = """extract(epoch FROM (j."endtime" - j."starttime")) / 60.0"""
 MEMORY_MECHANISM_SQL = """CASE WHEN j."piloterrorcode" = 1212 THEN 'cgroup'
                               WHEN j."piloterrorcode" = 1201 THEN 'eviction'
@@ -767,7 +768,7 @@ def input_fail_sql():
     payload exit 1 with the simulation or reconstruction stage named as
     the stage that failed."""
     sql = f"""(j."transexitcode" = '1'
-              AND j."jobmetrics" LIKE '%%payloadStageStatus=fail%%'
+              AND j."jobmetrics" ~ '{metric_keys.regex("stage_status", "fail")}'
               AND {MEMORY_STAGE_SQL} = ANY(%s))"""
     return sql, [list(INPUT_STAGES)]
 

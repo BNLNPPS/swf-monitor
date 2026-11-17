@@ -57,6 +57,7 @@ LIVE_SITE_LABELS = {}
 # GREX runs eight pilots per Slurm worker (2026-10-20).
 from swf_epicprod.regulation import PILOTS_PER_WORKER
 from swf_epicprod import perlmutter_production
+from swf_epicprod.payload import metric_keys
 OSG_SUBMIT_HOST = 'osgsub01'
 # The harvester reporters (docs/HARVESTER_REPORTER.md); each record names
 # the queues its harvester serves. osgsub01's own key is the OSG submit
@@ -680,9 +681,9 @@ class _Build:
                   JOIN "{self.S}"."jedi_tasks" t ON t.jeditaskid = j.jeditaskid
                   LEFT JOIN "{self.S}"."metatable" m ON m.pandaid = j.pandaid
                   WHERE j.endtime >= %s AND j.processingtype = 'epicproduction'
-                    AND j.jobstatus = 'finished' AND j.jobmetrics LIKE %s
+                    AND j.jobstatus = 'finished' AND j.jobmetrics ~ %s
                   GROUP BY 1, 2, 3, 4'''
-        rows = _rows(sql, (since, '%payloadRegistration=registered%'))
+        rows = _rows(sql, (since, metric_keys.regex('registration', 'registered')))
         # Event Service closes, each a RECO file registered as it stood.
         cutoff = self.now - timedelta(hours=hours)
         es = {}
@@ -1013,7 +1014,7 @@ class _Build:
               FROM "{self.S}"."metatable" m JOIN "{self.S}"."jobsarchived4" j ON j.pandaid = m.pandaid
               WHERE j.endtime >= %s AND j.endtime < %s
                 AND j.processingtype = 'epicproduction' AND j.jobstatus = 'finished'
-                AND (j.jobmetrics LIKE %s OR j.jobmetrics LIKE %s)),
+                AND (j.jobmetrics ~ %s OR j.jobmetrics ~ %s)),
             d AS (
               SELECT r.site, r.endtime, r.p, did FROM r, jsonb_array_elements_text(
                 CASE WHEN jsonb_typeof(r.p -> 'registration' -> 'dids') = 'array'
@@ -1028,8 +1029,8 @@ class _Build:
             GROUP BY 1, 2'''
         out = {}
         for k, kind, n, nbytes, events in _rows(sql, (since or self.hour_ago, until or self.now,
-                                                      '%payloadRegistration=registered%',
-                                                      '%payloadRegistration=diverted%')):
+                                                      metric_keys.regex('registration', 'registered'),
+                                                      metric_keys.regex('registration', 'diverted'))):
             out.setdefault(int(k) if bin_seconds else (k or ''), {})[kind] = (
                 int(n), int(nbytes or 0), int(events or 0))
         # Event Service closes, each a RECO file registered as it stood,
@@ -1052,7 +1053,7 @@ class _Build:
         key = (f'((FLOOR(EXTRACT(EPOCH FROM endtime) / {int(bin_seconds)}) + 1)'
                f' * {int(bin_seconds)})::bigint' if bin_seconds else 'computingsite')
         sql = f'''
-            SELECT {key}, substring(jobmetrics from 'payloadRegistration=([A-Za-z_]+)'),
+            SELECT {key}, {metric_keys.sql_value('registration', value='[A-Za-z_]+')},
                    COUNT(*), MAX(endtime)
             FROM "{self.S}"."jobsarchived4"
             WHERE endtime >= %s AND endtime < %s
@@ -1101,15 +1102,15 @@ class _Build:
                 last = end
         return out, _aware(last)
 
-    def latest_finished(self, metrics_like, negate=False):
+    def latest_finished(self, metrics_regex, negate=False):
         """The end time of the newest finished production job in two days
-        whose job metrics match (or, negated, do not match) the pattern:
-        the newest arrival when none arrived in the last hour."""
+        whose job metrics match (or, negated, do not match) the regular
+        expression: the newest arrival when none arrived in the last hour."""
         last = _rows(f'''
             SELECT MAX(endtime) FROM "{self.S}"."jobsarchived4"
             WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus = 'finished'
-              AND COALESCE(jobmetrics, '') {'NOT ' if negate else ''}LIKE %s''',
-                     (self.now - timedelta(days=2), metrics_like))[0][0]
+              AND COALESCE(jobmetrics, '') {'!' if negate else ''}~ %s''',
+                     (self.now - timedelta(days=2), metrics_regex))[0][0]
         return _aware(last)
 
     def jlab_flow(self, edges):
@@ -1195,7 +1196,7 @@ class _Build:
                                  f'{registered} registered, {unsettled} not registered (pending or unfinished)')
         if last is None:
             last = self.part('latest_registration',
-                             lambda: self.latest_finished('%payloadRegistration=registered%'), None)
+                             lambda: self.latest_finished(metric_keys.regex('registration', 'registered')), None)
         es_last = max((t for t, _e, _q, _tid in self.es_closes()), default=None)
         if es_last is not None and (last is None or es_last > last):
             last = es_last
@@ -1249,7 +1250,7 @@ class _Build:
             s['failed_1h'] += failed
         if last_log is None:
             last_log = self.part('latest_log',
-                                 lambda: self.latest_finished('%logHeld=%', negate=True), None)
+                                 lambda: self.latest_finished('(^|[[:space:]])logHeld=', negate=True), None)
         log_pending = self.part('log_pending', _log_pending, None)
 
         def site_rows(sites):

@@ -8,6 +8,7 @@ directly. Callers in async contexts should wrap with sync_to_async.
 import logging
 import json
 import re
+from swf_epicprod.payload import metric_keys
 from datetime import datetime, timedelta, timezone as dt_timezone
 from urllib.parse import unquote
 from django.utils import timezone
@@ -4343,9 +4344,9 @@ def _registration_clause(registration):
     if registration != 'incomplete':
         return '', []
     return ('"processingtype" = %s AND "jobstatus" = %s AND '
-            '("jobmetrics" LIKE %s OR "jobmetrics" LIKE %s)',
+            '("jobmetrics" ~ %s OR "jobmetrics" ~ %s)',
             ['epicproduction', 'finished'] + [
-                f'%payloadRegistration={outcome}%'
+                metric_keys.regex('registration', outcome)
                 for outcome in INCOMPLETE_REGISTRATION_OUTCOMES])
 
 

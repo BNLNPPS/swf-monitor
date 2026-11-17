@@ -5,6 +5,7 @@ from django.db import connections, transaction
 
 from .cached_product import get_product
 from .panda.constants import PANDA_SCHEMA
+from swf_epicprod.payload import metric_keys
 
 PRODUCT_KEY = 'task_resource_peaks:v3'
 BIN_SECONDS = 900
@@ -76,8 +77,8 @@ def build():
       ), measured AS (
         SELECT jeditaskid, FLOOR(EXTRACT(EPOCH FROM observed)/900)::bigint*900 bucket,
           CASE WHEN maxrss>0 THEN maxrss*1024/1e9 END memory,
-          substring(jobmetrics from '(?:^|[[:space:]])scratchPeakMB=([0-9]+)')::double precision*1048576/1e9 disk,
-          substring(jobmetrics from '(?:^|[[:space:]])scratchPeakFiles=([0-9]+)')::bigint files
+          {metric_keys.sql_value('scratch_peak_mb', value='[0-9]+')}::double precision*1048576/1e9 disk,
+          {metric_keys.sql_value('scratch_peak_files', value='[0-9]+')}::bigint files
         FROM jobs WHERE observed >= %s AND observed <= %s AND jeditaskid IS NOT NULL
       ), limits AS MATERIALIZED (SELECT {quantile_fields} FROM measured)
       SELECT m.jeditaskid,t.taskname,m.bucket,COUNT(*),MAX(m.memory),MAX(m.disk),MAX(m.files),

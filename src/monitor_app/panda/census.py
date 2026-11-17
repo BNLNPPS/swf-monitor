@@ -26,6 +26,7 @@ from django.utils import timezone
 
 from .constants import PANDA_SCHEMA
 from swf_epicprod.regulation import CAPACITY_POOLS
+from swf_epicprod.payload import metric_keys
 
 logger = logging.getLogger(__name__)
 
@@ -266,7 +267,7 @@ def _gate_window(calib_queues):
             SELECT "computingsite", "jobstatus",
                    EXTRACT(EPOCH FROM ("endtime" - "starttime")), "jeditaskid",
                    {memory_sql}, COALESCE(NULLIF(j."exeerrorcode", 0)::text, j."transexitcode"),
-                   substring(j."jobmetrics" from 'payloadStage=([A-Za-z_]+)')
+                   {metric_keys.sql_value('stage', column='j."jobmetrics"', value='[A-Za-z_]+')}
             FROM "{PANDA_SCHEMA}"."jobsarchived4" j
             WHERE "processingtype" = 'epicproduction'
               AND "endtime" > NOW() - INTERVAL %s

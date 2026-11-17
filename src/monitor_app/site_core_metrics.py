@@ -8,6 +8,7 @@ from .cached_product import get_product
 from .models import SysConfig
 from .panda.census import NOT_STARTED
 from .panda.queries import PANDA_SCHEMA
+from swf_epicprod.payload import metric_keys
 
 KEY = 'site_core_metrics:v1'
 TTL = 60
@@ -15,7 +16,7 @@ PRODUCTION = """workinggroup='EIC'
     AND (prodsourcelabel='managed' OR processingtype='epicproduction')
     AND COALESCE(processingtype,'') <> 'canary'"""
 CORES = """GREATEST(1, COALESCE(
-    NULLIF(SUBSTRING(COALESCE(jobmetrics,'') FROM 'payloadThreads=([0-9]+)')::integer,0),
+    NULLIF(""" + metric_keys.sql_value('threads', column="COALESCE(jobmetrics,'')", value='[0-9]+') + """::integer,0),
     NULLIF(actualcorecount,0), NULLIF(corecount,0), 1))"""
 
 

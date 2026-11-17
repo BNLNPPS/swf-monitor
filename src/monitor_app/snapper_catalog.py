@@ -214,22 +214,23 @@ def probe_reading(rucio_url, timeout_seconds, did):
 
 # ── Registrations from the digest ──────────────────────────────────────
 
-_REG_RE = re.compile(r"payloadRegistration=([A-Za-z_]+)")
-_EXIT_RE = re.compile(r"payloadExit=(-?\d+)")
-_VERSION_RE = re.compile(r"payloadVersion=([0-9.]+)")
+_REG_RE = re.compile(r"[A-Za-z_]+")
+_EXIT_RE = re.compile(r"-?\d+")
+_VERSION_RE = re.compile(r"[0-9.]+")
 
 
 def parse_digest(jobmetrics):
     """(outcome, exit code or None, payload version or '') from a job's
     metrics string; ('none', None, '') when the digest is absent."""
-    text = jobmetrics or ""
-    m = _REG_RE.search(text)
-    outcome = m.group(1) if m else "none"
+    from swf_epicprod.payload.metric_keys import parse
+    fields = parse(jobmetrics or "")
+    m = _REG_RE.match(fields.get("registration", ""))
+    outcome = m.group(0) if m else "none"
     if outcome not in OUTCOMES:
         outcome = "none" if outcome in ("", "None") else outcome
-    e = _EXIT_RE.search(text)
-    v = _VERSION_RE.search(text)
-    return outcome, (int(e.group(1)) if e else None), (v.group(1) if v else "")
+    e = _EXIT_RE.match(fields.get("exit", ""))
+    v = _VERSION_RE.match(fields.get("version", ""))
+    return outcome, (int(e.group(0)) if e else None), (v.group(0) if v else "")
 
 
 def _ended_jobs(mark, until):
@@ -360,20 +361,26 @@ def latency_reading(mark, until):
 
 # ── Registrar backlog ──────────────────────────────────────────────────
 
+def _pending_regex():
+    """The job metrics carrying a pending registration, under either name."""
+    from swf_epicprod.payload.metric_keys import regex
+    return regex("registration", "pending")
+
+
 def registrar_reading(until):
     """Pending registrations owed over the trailing day, from the
     digest, with the oldest pending job's age."""
     since = until - timedelta(hours=REGISTRAR_WINDOW_HOURS)
     sql = (f'SELECT "endtime" FROM "{PANDA_SCHEMA}"."{{table}}" '
            f'WHERE "processingtype" = %s AND "endtime" > %s AND "endtime" <= %s '
-           f'AND "jobmetrics" LIKE %s')
+           f'AND "jobmetrics" ~ %s')
     try:
         ends = []
         with connections["panda"].cursor() as cur:
             for table in ("jobsactive4", "jobsarchived4"):
                 cur.execute(sql.format(table=table),
                             ["epicproduction", _naive_utc(since), _naive_utc(until),
-                             "%payloadRegistration=pending%"])
+                             _pending_regex()])
                 ends.extend(r[0] for r in cur.fetchall() if r[0] is not None)
         oldest_h = None
         if ends:
