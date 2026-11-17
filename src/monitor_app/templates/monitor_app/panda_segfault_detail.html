@@ -19,6 +19,7 @@
     {% elif sig.class == 'hilog' %}
     <h1>Hilog: {{ sig.signal_name }}{% if sig.configuration.prod_task %}, {{ sig.configuration.prod_task }}{% endif %}</h1>
     <p class="mb-3">
+        {% if sig.hilog_reading.by_program %}Written by {% for p in sig.hilog_reading.by_program %}{{ p.program }} {{ p.mb }} MB{% if not forloop.last %}, {% endif %}{% endfor %} (of {{ sig.hilog_reading.total_mb }} MB, job <a href="{% url 'monitor_app:panda_job_detail' pandaid=sig.hilog_reading.read_from %}">{{ sig.hilog_reading.read_from }}</a>).{% endif %}
         <strong>{{ sig.crashes }}</strong> jobs whose stage logs reached {{ sig.hilog.threshold_mb }} MB{% if sig.rate_pct %}, <strong>{{ sig.rate_pct }}</strong> of the task's finished plus failed jobs{% endif %};
         job time p10 / p50 <strong>{{ sig.minutes_p10|default_if_none:'' }} / {{ sig.minutes_p50|default_if_none:'' }}</strong> min
     {% else %}

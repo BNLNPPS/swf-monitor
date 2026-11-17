@@ -1419,6 +1419,7 @@ def signature_summary(sig):
         'kind': (KIND_HIMEM if is_memory(sig) else KIND_INPUT if is_input(sig)
                  else KIND_HILOG if is_hilog(sig) else KIND_SEGFAULT),
         'hilog': (sig.data or {}).get('hilog') or {} if is_hilog(sig) else {},
+        'hilog_reading': (sig.data or {}).get('hilog_reading') or {} if is_hilog(sig) else {},
         'level': sig.level,
         'exit_code': sig.exit_code,
         'signal': sig.signal,
@@ -1673,6 +1674,32 @@ def reproduction_entry(sig, pandaid):
     return None
 
 
+def _metatable_payload(pandaid):
+    """The payload report the pilot lifted into the PanDA metatable with
+    jobReport.json, for a job that finished at the server: (report or
+    None, read_ok). A failed read or an unparsable record is logged and
+    returns (None, False)."""
+    import json
+    from .panda.constants import PANDA_SCHEMA
+    try:
+        with connections['panda'].cursor() as cur:
+            cur.execute(f'SELECT "metadata" FROM "{PANDA_SCHEMA}"."metatable" WHERE "pandaid" = %s',
+                        [int(pandaid)])
+            row = cur.fetchone()
+    except Exception as e:                                    # noqa: BLE001
+        logger.error('job %s: metatable read failed: %s', pandaid, e)
+        return None, False
+    meta = None
+    if row and row[0]:
+        try:
+            meta = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+        except (ValueError, TypeError) as e:
+            logger.error('job %s: metatable metadata unparsable: %s', pandaid, e)
+            return None, False
+    payload = meta.get('payload') if isinstance(meta, dict) else None
+    return (payload if isinstance(payload, dict) else None), True
+
+
 def report_note(pandaid):
     """(note, source) of a job's payload report: the sweep's filing on
     the job's inventory row (``payload_report``), else the PanDA
@@ -1681,32 +1708,61 @@ def report_note(pandaid):
     carries no log dataset, so its report reaches the record there and
     nowhere else). ('', '') when the job has none. The dig's and the
     reconciliation's call, never a page's."""
-    import json
-    from .panda.constants import PANDA_SCHEMA
     job = EpicProdJob.objects.filter(pandaid=int(pandaid)).only('data').first()
     filed = str(((((job.data if job else None) or {}).get('payload_report') or {})
                  .get('report') or {}).get('note') or '')
     if filed.startswith('crash:'):
         return filed, 'payload_report'
-    try:
-        with connections['panda'].cursor() as cur:
-            cur.execute(f'SELECT "metadata" FROM "{PANDA_SCHEMA}"."metatable" WHERE "pandaid" = %s',
-                        [int(pandaid)])
-            row = cur.fetchone()
-    except Exception as e:                                    # noqa: BLE001
-        logger.error('job %s: metatable read failed: %s', pandaid, e)
+    payload, ok = _metatable_payload(pandaid)
+    if not ok:
         return filed, 'payload_report' if filed else ''
-    meta = None
-    if row and row[0]:
-        try:
-            meta = json.loads(row[0]) if isinstance(row[0], str) else row[0]
-        except (ValueError, TypeError) as e:
-            logger.error('job %s: metatable metadata unparsable: %s', pandaid, e)
-    payload = meta.get('payload') if isinstance(meta, dict) else None
-    note = str((payload or {}).get('note') or '') if isinstance(payload, dict) else ''
+    note = str((payload or {}).get('note') or '')
     if note:
         return note, 'metatable'
     return filed, 'payload_report' if filed else ''
+
+
+def report_logs(pandaid):
+    """(logs, source) of a job's payload report: the stage-log sizes the
+    report carries under the short job-metric names (EPICPROD_PAYLOAD.md,
+    The job digest), from the sweep's filing, else the metatable. (None,
+    '') when neither holds them. The Hilog reading's call, never a
+    page's."""
+    job = EpicProdJob.objects.filter(pandaid=int(pandaid)).only('data').first()
+    filed = ((((job.data if job else None) or {}).get('payload_report') or {})
+             .get('report') or {}).get('logs')
+    if isinstance(filed, dict) and filed.get('by_program'):
+        return filed, 'payload_report'
+    payload, _ = _metatable_payload(pandaid)
+    logs = (payload or {}).get('logs')
+    if isinstance(logs, dict) and logs.get('by_program'):
+        return logs, 'metatable'
+    return None, ''
+
+
+def read_hilog_programs(sig):
+    """Give a Hilog signature its reading when it has none: which programs
+    wrote the volume, bytes per program largest first, from the first
+    representative whose payload report carries them (SEGFAULT_DIAGNOSIS.md,
+    Hilog). Kept under ``data['hilog_reading']``, which a record rebuild
+    leaves alone. Returns True when a reading was recorded."""
+    data = dict(sig.data or {})
+    if (data.get('hilog_reading') or {}).get('by_program'):
+        return False
+    for pid in data.get('representatives') or []:
+        logs, source = report_logs(pid)
+        if not logs:
+            continue
+        by_program = sorted(((str(k), int(v)) for k, v in logs['by_program'].items()
+                             if isinstance(v, int)), key=lambda kv: -kv[1])
+        data['hilog_reading'] = {
+            'by_program': [{'program': k, 'mb': round(v / 2**20, 1)} for k, v in by_program],
+            'total_mb': round(int(logs.get('bytes') or 0) / 2**20, 1),
+            'read_from': pid, 'source': source, 'read_at': _iso(timezone.now())}
+        sig.data = data
+        sig.save(update_fields=['data', 'updated_at'])
+        return True
+    return False
 
 
 def trace_from_report(sig, pandaid):

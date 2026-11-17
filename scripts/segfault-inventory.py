@@ -730,24 +730,27 @@ def hilog_pass(since, manifests, chains, counts):
     and of those already on record, rebuilt over their life under the
     current threshold, and their representatives (SEGFAULT_DIAGNOSIS.md,
     Hilog)."""
-    from monitor_app.segfaults import build_hilog_signatures, hilog_signature_tasks, hilog_tasks
+    from monitor_app.segfaults import (build_hilog_signatures, hilog_signature_tasks, hilog_tasks,
+                                       read_hilog_programs)
     tids = hilog_tasks(since)
     log.info('Hilog pass: %d tasks with a chatty job since %s', len(tids),
              since.isoformat(timespec='seconds'))
     tids = sorted(set(tids) | set(hilog_signature_tasks()))
     before = counts['memory_rows_unresolved']
     result = build_hilog_signatures(tids)
-    reps = 0
+    reps = readings = 0
     for key in result['keys']:
         sig = CrashSignature.objects.filter(key=key).first()
         if sig is not None:
             reps += memory_representatives(sig, manifests, chains, counts)
-    log.info('  %d Hilog signatures (%d new, %d retired), %d representatives written',
-             result['signatures'], result['created'], result['retired'], reps)
+            sig.refresh_from_db()
+            readings += int(read_hilog_programs(sig))
+    log.info('  %d Hilog signatures (%d new, %d retired), %d representatives written, %d read',
+             result['signatures'], result['created'], result['retired'], reps, readings)
     return {'hilog_tasks': len(tids), 'hilog_signatures': result['signatures'],
             'hilog_signatures_new': result['created'],
             'hilog_signatures_retired': result['retired'],
-            'hilog_representatives': reps,
+            'hilog_representatives': reps, 'hilog_readings': readings,
             'hilog_rows_unresolved': counts['memory_rows_unresolved'] - before}
 
 
