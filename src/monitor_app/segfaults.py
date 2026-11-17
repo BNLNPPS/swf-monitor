@@ -44,6 +44,10 @@ MEMORY_PHASE = 'payload_memory'
 MEMORY_CLASS = 'memory'
 INPUT_PHASE = 'payload_input'
 INPUT_CLASS = 'input'
+# A job whose stage logs ran over the Hilog threshold, finished or failed
+# (SEGFAULT_DIAGNOSIS.md, Hilog).
+HILOG_PHASE = 'payload_hilog'
+HILOG_CLASS = 'hilog'
 # An Event Service unit that crashed inside a finished job
 # (SEGFAULT_DIAGNOSIS.md, Event Service units).
 ES_CLASS = 'es_unit'
@@ -52,16 +56,20 @@ CLASS_LABELS = {
     'storm': 'Storm', 'configuration_dead': 'Config dead',
     'sparse': 'Sparse', 'abort': 'Abort', 'mixed': 'Mixed',
     MEMORY_CLASS: 'Memory', INPUT_CLASS: 'Bad input', ES_CLASS: 'ES unit',
+    HILOG_CLASS: 'Hilog',
 }
 STAGE_LABELS = {'simulation': 'simu', 'reconstruction': 'reco'}
 # What a signature records, the Kind facet of the catalog and the runs
 # page: a segfault (the payload died on a signal it raised itself:
 # SIGSEGV, SIGABRT, SIGBUS, SIGFPE), a himem job (killed from outside
-# for its memory) or bad input (a stage that stopped on an error it
-# reported, exit 1; SEGFAULT_DIAGNOSIS.md, Bad input).
-KIND_SEGFAULT, KIND_HIMEM, KIND_INPUT = 'segfault', 'himem', 'badinput'
-KIND_LABELS = {KIND_SEGFAULT: 'Segfault', KIND_HIMEM: 'Himem', KIND_INPUT: 'Bad input'}
-KIND_ORDER = [KIND_SEGFAULT, KIND_HIMEM, KIND_INPUT]
+# for its memory), bad input (a stage that stopped on an error it
+# reported, exit 1; SEGFAULT_DIAGNOSIS.md, Bad input) or hilog (a job whose
+# stage logs ran over the threshold, whether or not it failed;
+# SEGFAULT_DIAGNOSIS.md, Hilog).
+KIND_SEGFAULT, KIND_HIMEM, KIND_INPUT, KIND_HILOG = 'segfault', 'himem', 'badinput', 'hilog'
+KIND_LABELS = {KIND_SEGFAULT: 'Segfault', KIND_HIMEM: 'Himem', KIND_INPUT: 'Bad input',
+               KIND_HILOG: 'Hilog'}
+KIND_ORDER = [KIND_SEGFAULT, KIND_HIMEM, KIND_INPUT, KIND_HILOG]
 # The stages whose reported stop is a bad-input failure.
 INPUT_STAGES = ('simulation', 'reconstruction')
 # How a memory kill removed the job, read from the pilot error, with the
@@ -81,9 +89,14 @@ def is_input(sig):
     return getattr(sig, 'class_hint', '') == INPUT_CLASS
 
 
+def is_hilog(sig):
+    return getattr(sig, 'class_hint', '') == HILOG_CLASS
+
+
 def sig_phase(sig):
     """The EpicProdJob phase of a signature's jobs."""
-    return MEMORY_PHASE if is_memory(sig) else INPUT_PHASE if is_input(sig) else PHASE
+    return (MEMORY_PHASE if is_memory(sig) else INPUT_PHASE if is_input(sig)
+            else HILOG_PHASE if is_hilog(sig) else PHASE)
 
 
 def stage_label(stage):
@@ -114,6 +127,12 @@ def input_key(jeditaskid, stage=''):
     return f'{key}:{stage}' if stage else key
 
 
+def hilog_key(jeditaskid):
+    """A Hilog signature's key: the task. A job's log total is not by
+    stage, so a task holds one."""
+    return f'hilog:task{int(jeditaskid)}'
+
+
 def job_filter(sig):
     """The Q that selects a signature's own crashed jobs: its tasks, its
     exit code, and its stage where the entry is a stage entry; for a
@@ -131,9 +150,9 @@ def job_filter(sig):
         # records carry its crashed units.
         return Q(pandaid__in=sorted({c.get('pandaid') for u in ((sig.data or {}).get('units') or [])
                                      for c in u.get('crashes') or [] if c.get('pandaid')}))
-    if is_memory(sig) or is_input(sig):
-        # A memory or bad-input signature's jobs are its representatives,
-        # whatever status the failure left.
+    if is_memory(sig) or is_input(sig) or is_hilog(sig):
+        # A memory, bad-input or Hilog signature's jobs are its
+        # representatives, whatever status the job ended in.
         q = Q(phase=sig_phase(sig), jeditaskid__in=task_ids)
     else:
         q = Q(phase=PHASE, jeditaskid__in=task_ids, data__crash__exit_code=sig.exit_code)
@@ -145,7 +164,7 @@ def job_filter(sig):
             q &= (Q(data__crash__stage='') | Q(data__crash__stage__isnull=True))
     return q
 CLASS_ORDER = ['storm', 'configuration_dead', 'mixed', 'sparse', 'abort', ES_CLASS, MEMORY_CLASS,
-               INPUT_CLASS]
+               INPUT_CLASS, HILOG_CLASS]
 STATUS_LABELS = dict(CrashSignature.STATUSES)
 
 # Fields the record pass owns; everything else on a signature (status,
@@ -164,6 +183,10 @@ THRESHOLD_DEFAULTS = {
     # A SIGTERM eviction or a SIGKILL is a memory kill when the job's peak
     # resident memory reached this fraction of its request.
     'segfault_memory_rss_fraction': 0.9,
+    # A job is chatty (the Hilog kind) when its stage logs reach this many
+    # MB (the payload digest's pLogMB). Provisional, to be set from the
+    # first readings (SEGFAULT_DIAGNOSIS.md, Hilog).
+    'segfault_hilog_mb': 100,
 }
 
 
@@ -956,6 +979,166 @@ def read_input_fatal(sig, fetch=None):
     return False
 
 
+# ------------------------------------------------------------ Hilog
+
+# The job's stage-log total in MB from its digest, NULL where none.
+HILOG_MB_SQL = ('(' + metric_keys.sql_value('log_mb', column='j."jobmetrics"', value='[0-9]+')
+                + ')::bigint')
+
+
+def hilog_job_sql():
+    """The condition selecting a chatty job (alias ``j``) and its
+    parameters (SEGFAULT_DIAGNOSIS.md, Hilog): a finished or failed job
+    whose digest's stage-log total reached ``segfault_hilog_mb``. The LIKE
+    is a cheap first cut before the pattern."""
+    sql = f"""(j."jobstatus" IN ('finished', 'failed')
+              AND j."jobmetrics" LIKE %s AND {HILOG_MB_SQL} >= %s)"""
+    return sql, [f"%{metric_keys.name('log_mb')}=%", thresholds()['segfault_hilog_mb']]
+
+
+def hilog_tasks(since):
+    """The production tasks with a chatty job recorded after ``since``;
+    the builder's call, never a page's."""
+    from .panda.constants import PANDA_SCHEMA
+    cond, params = hilog_job_sql()
+    rows = _panda_rows(
+        f"""SELECT DISTINCT j."jeditaskid" FROM "{PANDA_SCHEMA}"."jobsarchived4" j
+            JOIN "{PANDA_SCHEMA}"."jedi_tasks" t ON t."jeditaskid" = j."jeditaskid"
+            WHERE j."modificationtime" > %s
+              AND t."processingtype" = 'epicproduction' AND {cond}""",
+        [since] + params)
+    return sorted(int(r['jeditaskid']) for r in rows)
+
+
+def hilog_signature_tasks():
+    """The tasks of the Hilog signatures on record, so a pass rebuilds them
+    under the current threshold even when none of their jobs ended in its
+    window."""
+    tids = set()
+    for key in CrashSignature.objects.filter(key__startswith='hilog:task').values_list(
+            'key', flat=True):
+        head = key.split(':')[1][len('task'):]
+        if head.isdigit():
+            tids.add(int(head))
+    return sorted(tids)
+
+
+def _hilog_aggregate(tids, by_site=False):
+    """The chatty jobs of the tasks over their whole life, by task and by
+    queue when asked: how many, how many failed, the hosts, the job time
+    and the stage-log totals."""
+    from .panda.constants import PANDA_SCHEMA
+    if not tids:
+        return []
+    cond, params = hilog_job_sql()
+    site_col = ', j."computingsite" AS site' if by_site else ''
+    group = '1' + (', 2' if by_site else '')
+    return _panda_rows(
+        f"""SELECT j."jeditaskid"{site_col},
+                   count(*) AS jobs, count(*) FILTER (WHERE j."jobstatus" = 'failed') AS failed,
+                   count(DISTINCT j."modificationhost") AS hosts,
+                   percentile_cont(0.10) WITHIN GROUP (ORDER BY {MEMORY_MINUTES_SQL}) AS p10,
+                   percentile_cont(0.50) WITHIN GROUP (ORDER BY {MEMORY_MINUTES_SQL}) AS p50,
+                   percentile_cont(0.50) WITHIN GROUP (ORDER BY {HILOG_MB_SQL}) AS mb_p50,
+                   max({HILOG_MB_SQL}) AS mb_max,
+                   min(j."endtime") AS first, max(j."endtime") AS last,
+                   max(t."taskname") AS taskname
+            FROM "{PANDA_SCHEMA}"."jobsarchived4" j
+            JOIN "{PANDA_SCHEMA}"."jedi_tasks" t ON t."jeditaskid" = j."jeditaskid"
+            WHERE j."jeditaskid" = ANY(%s) AND {cond}
+            GROUP BY {group}""",
+        [list(tids)] + params)
+
+
+def build_hilog_signatures(jeditaskids):
+    """The Hilog signatures of the tasks, recomputed over each task's life
+    from the PanDA record and upserted, one per task; a task's signature
+    the threshold no longer yields is retired unless a reproduction is
+    recorded on it, as a memory signature is. Representatives are the
+    inventory's; everything a later stage wrote survives. Returns a
+    summary with the keys built."""
+    import re
+    from django.db.models import Q
+    from pcs.manifests import _taskparams
+    from pcs.models import PandaTasks
+    tids = sorted({int(t) for t in jeditaskids if t})
+    summary = {'signatures': 0, 'created': 0, 'retired': 0, 'keys': []}
+    if not tids:
+        return summary
+    groups = {int(r['jeditaskid']): r for r in _hilog_aggregate(tids)}
+    sites = defaultdict(list)
+    for r in _hilog_aggregate(sorted(groups), by_site=True):
+        sites[int(r['jeditaskid'])].append(r)
+    totals = task_totals(sorted(groups))
+    prod_tasks, payload_versions = {}, {}
+    for pt in PandaTasks.objects.filter(jedi_task_id__in=sorted(groups)).select_related(
+            'prod_task', 'prod_task__dataset', 'prod_task__prod_config',
+            'prod_task__dataset__physics_tag', 'prod_task__campaign',
+            'prod_task__dataset__campaign'):
+        prod_tasks[pt.jedi_task_id] = pt.prod_task
+        payload_versions[pt.jedi_task_id] = (pt.metadata or {}).get('payload_version', '')
+    threshold = thresholds()['segfault_hilog_mb']
+    now = timezone.now()
+    for tid, g in sorted(groups.items(), key=lambda kv: -int(kv[1]['jobs'])):
+        key = hilog_key(tid)
+        sig = CrashSignature.objects.filter(key=key).first()
+        created = sig is None
+        if created:
+            sig = CrashSignature(key=key, status='new')
+        jobs = int(g['jobs'])
+        tot = totals.get(tid, {'finished': 0, 'failed': 0})
+        denom = tot['finished'] + tot['failed']
+        sig.level = 'record'
+        sig.class_hint = HILOG_CLASS
+        sig.exit_code, sig.signal = 0, 0  # not a failure of its own: a job that wrote a lot
+        first, last = _utc(g['first']), _utc(g['last'])
+        sig.tasks = [{'jeditaskid': tid, 'taskname': g['taskname'] or '', 'crashes': jobs,
+                      'finished': tot['finished'], 'failed': tot['failed'],
+                      'first_seen': _iso(first), 'last_seen': _iso(last)}]
+        sig.configuration = _configuration(prod_tasks.get(tid), payload_versions.get(tid, ''))
+        m = re.search(r'"container_name":\s*"([^"]+)"', _taskparams(tid) or '')
+        sig.configuration['container_image_ran'] = m.group(1) if m else ''
+        sig.sites = [{'site': s['site'], 'crashes': int(s['jobs']), 'hosts': int(s['hosts'])}
+                     for s in sorted(sites.get(tid, []), key=lambda s: -int(s['jobs']))]
+        sig.crashes = jobs
+        sig.rate = round(jobs / denom, 4) if denom else None
+        sig.minutes_p10, sig.minutes_p50 = _min(g['p10']), _min(g['p50'])
+        sig.first_seen, sig.last_seen = first, last
+        sig.rows_lost, sig.events_lost = None, None
+        data = dict(sig.data or {})
+        data.update({
+            'kind': HILOG_CLASS,
+            'hosts': int(g['hosts']),
+            'hilog': {'threshold_mb': threshold, 'failed': int(g['failed']),
+                      'log_mb_p50': _min(g['mb_p50']), 'log_mb_max': int(g['mb_max'] or 0)},
+            'rows_lost_note': 'not a loss: a chatty job may have delivered its output',
+            'record_built_at': _iso(now),
+            'stage': '',
+            'split': False,
+        })
+        data.setdefault('representatives', [])
+        data.setdefault('rows_resolved', 0)
+        sig.data = data
+        sig.updated_at = now
+        sig.save()
+        summary['signatures'] += 1
+        summary['created'] += int(created)
+        summary['keys'].append(key)
+    built = set(summary['keys'])
+    for tid in tids:
+        base = hilog_key(tid)
+        for sig in CrashSignature.objects.filter(Q(key=base) | Q(key__startswith=base + ':')):
+            if sig.key in built:
+                continue
+            if sig.reproduction:
+                logger.info('Hilog signature %s kept: the threshold no longer yields it, '
+                            'but a reproduction is recorded on it', sig.key)
+                continue
+            sig.delete()
+            summary['retired'] += 1
+    return summary
+
+
 # ------------------------------------------------- Event Service units
 
 # A unit of an Event Service job that crashed fails alone inside a job
@@ -1222,6 +1405,11 @@ def signature_summary(sig):
     elif is_input(sig):
         fatal = ((sig.data or {}).get('input') or {}).get('fatal') or ''
         signal_name = f'stopped on its error (exit 1){": " + fatal if fatal else ""}'
+    elif is_hilog(sig):
+        hilog = (sig.data or {}).get('hilog') or {}
+        signal_name = (f"wrote {hilog.get('log_mb_p50')} MB of stage logs (median; largest "
+                       f"{hilog.get('log_mb_max')} MB, threshold {hilog.get('threshold_mb')} MB; "
+                       f"{hilog.get('failed', 0)} of these jobs failed)")
     elif is_es_unit(sig) and not sig.signal:
         signal_name = 'died during its request, signal not recorded'
     else:
@@ -1229,7 +1417,8 @@ def signature_summary(sig):
     return {
         'key': sig.key,
         'kind': (KIND_HIMEM if is_memory(sig) else KIND_INPUT if is_input(sig)
-                 else KIND_SEGFAULT),
+                 else KIND_HILOG if is_hilog(sig) else KIND_SEGFAULT),
+        'hilog': (sig.data or {}).get('hilog') or {} if is_hilog(sig) else {},
         'level': sig.level,
         'exit_code': sig.exit_code,
         'signal': sig.signal,
@@ -1370,7 +1559,8 @@ def signature_for_job(pandaid):
     """The signature a crashed job belongs to, for the job page's card,
     or None. A memory signature's representative names its memory
     signature."""
-    job = EpicProdJob.objects.filter(pandaid=pandaid, phase__in=(PHASE, MEMORY_PHASE, INPUT_PHASE)).only(
+    job = EpicProdJob.objects.filter(
+        pandaid=pandaid, phase__in=(PHASE, MEMORY_PHASE, INPUT_PHASE, HILOG_PHASE)).only(
         'jeditaskid', 'phase', 'data').first()
     if job is None:
         # An Event Service job whose filed record carries a crashed unit.
@@ -1393,6 +1583,9 @@ def signature_for_job(pandaid):
         sig = (CrashSignature.objects.filter(
                    key=memory_key(job.jeditaskid, stage_label(crash.get('stage')))).first()
                or CrashSignature.objects.filter(key=memory_key(job.jeditaskid)).first())
+        return signature_summary(sig) if sig else None
+    if job.phase == HILOG_PHASE:
+        sig = CrashSignature.objects.filter(key=hilog_key(job.jeditaskid)).first()
         return signature_summary(sig) if sig else None
     if job.phase == INPUT_PHASE:
         sig = (CrashSignature.objects.filter(

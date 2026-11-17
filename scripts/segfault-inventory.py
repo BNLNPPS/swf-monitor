@@ -109,6 +109,7 @@ BATCH = 1000
 PHASE = 'payload_crash'
 MEMORY_PHASE = 'payload_memory'
 INPUT_PHASE = 'payload_input'
+HILOG_PHASE = 'payload_hilog'
 MEMORY_REPRESENTATIVES = 3
 # Candidates tried around each anchor (shortest, median, longest) for a
 # representative whose manifest row resolves.
@@ -471,7 +472,7 @@ def write_batch(jobs, manifests, chains, dry_run, counts):
 
 # ------------------------------------------------------------ memory kills
 
-MEMORY_JOB_FIELDS = JOB_FIELDS + ('minramcount', 'maxvmem')
+MEMORY_JOB_FIELDS = JOB_FIELDS + ('minramcount', 'maxvmem', 'jobstatus')
 
 
 def memory_record(j, seq, row, seq_source):
@@ -522,6 +523,12 @@ def _memory_summary(rec):
             f"at {rec.get('computingsite') or 'unknown site'}")
 
 
+def _hilog_summary(rec):
+    when = f" after {rec['minutes']:g} min" if rec.get('minutes') is not None else ''
+    return (f"{rec.get('log_mb')} MB of stage logs, job {rec.get('jobstatus') or 'ended'}{when} "
+            f"at {rec.get('computingsite') or 'unknown site'}")
+
+
 def _input_summary(rec):
     when = f" after {rec['minutes']:g} min" if rec.get('minutes') is not None else ''
     return (f"{rec.get('stage') or 'payload'} stopped on its error (exit 1){when} "
@@ -530,12 +537,22 @@ def _input_summary(rec):
 
 def memory_candidates(sig):
     """The pandaids of a memory or bad-input signature's failures, by time
-    to failure."""
-    from monitor_app.segfaults import (MEMORY_MINUTES_SQL, MEMORY_STAGE_SQL, STAGE_LABELS,
-                                       input_fail_sql, is_input, memory_kill_sql)
+    to failure; of a Hilog signature's chatty jobs, by log size."""
+    from monitor_app.segfaults import (HILOG_MB_SQL, MEMORY_MINUTES_SQL, MEMORY_STAGE_SQL,
+                                       STAGE_LABELS, hilog_job_sql, input_fail_sql, is_hilog,
+                                       is_input, memory_kill_sql)
     tid = int((sig.tasks or [{}])[0].get('jeditaskid') or 0)
     if not tid:
         return []
+    if is_hilog(sig):
+        cond, params = hilog_job_sql()
+        rows = _panda(
+            f"""SELECT j."pandaid", {HILOG_MB_SQL} AS mb
+                FROM "{PANDA_SCHEMA}"."jobsarchived4" j
+                WHERE j."jeditaskid" = %s AND {cond}
+                ORDER BY mb, j."pandaid" """,
+            [tid] + params)
+        return [int(r['pandaid']) for r in rows]
     cond, params = input_fail_sql() if is_input(sig) else memory_kill_sql()
     stage = (sig.data or {}).get('stage') or ''
     stage_cond, stage_params = '', []
@@ -570,9 +587,13 @@ def memory_representatives(sig, manifests, chains, counts):
     MEMORY_REPRESENTATIVES: the shortest, median and longest time to kill
     among the kills whose manifest row resolves, written as EpicProdJob
     rows of phase payload_memory and named on the signature. Kept once
-    chosen, so a reproduction requested against one stays valid."""
-    from monitor_app.segfaults import is_input, job_filter
+    chosen, so a reproduction requested against one stays valid. A
+    bad-input or Hilog signature's are chosen the same way, a Hilog
+    signature's by log size (smallest, median, largest)."""
+    from monitor_app.segfaults import is_hilog, is_input, job_filter
+    from swf_epicprod.payload import metric_keys
     bad_input = is_input(sig)
+    hilog = is_hilog(sig)
     have = list(EpicProdJob.objects.filter(job_filter(sig)).values_list('pandaid', flat=True))
     if len(have) >= MEMORY_REPRESENTATIVES:
         return 0
@@ -620,14 +641,20 @@ def memory_representatives(sig, manifests, chains, counts):
             rec['container'] = manifests.container(tid)
             if bad_input:
                 rec['kind'], rec['mechanism'] = 'input', 'stage_error'
+            if hilog:
+                rec['kind'], rec['mechanism'] = 'hilog', 'log_volume'
+                rec['jobstatus'] = j.get('jobstatus') or ''
+                mb = metric_keys.parse(j.get('jobmetrics') or '').get('log_mb')
+                rec['log_mb'] = int(mb) if str(mb or '').isdigit() else None
             obj = EpicProdJob.objects.filter(pandaid=pid).first() or EpicProdJob(pandaid=pid)
             obj.jeditaskid = tid
             obj.prod_task = manifests.prod_task(tid)
             obj.seq_number = seq
             obj.job_index = seq - 1
-            obj.status = 'failed'
-            obj.phase = INPUT_PHASE if bad_input else MEMORY_PHASE
-            obj.failure_summary = _input_summary(rec) if bad_input else _memory_summary(rec)
+            obj.status = (j.get('jobstatus') or 'failed') if hilog else 'failed'
+            obj.phase = HILOG_PHASE if hilog else INPUT_PHASE if bad_input else MEMORY_PHASE
+            obj.failure_summary = (_hilog_summary(rec) if hilog else _input_summary(rec) if bad_input
+                                   else _memory_summary(rec))
             data = dict(obj.data or {})
             data['crash'] = rec
             obj.data = data
@@ -698,6 +725,32 @@ def input_pass(since, manifests, chains, counts):
             'input_rows_unresolved': counts['memory_rows_unresolved'] - before}
 
 
+def hilog_pass(since, manifests, chains, counts):
+    """The Hilog signatures of the tasks with a chatty job since ``since``
+    and of those already on record, rebuilt over their life under the
+    current threshold, and their representatives (SEGFAULT_DIAGNOSIS.md,
+    Hilog)."""
+    from monitor_app.segfaults import build_hilog_signatures, hilog_signature_tasks, hilog_tasks
+    tids = hilog_tasks(since)
+    log.info('Hilog pass: %d tasks with a chatty job since %s', len(tids),
+             since.isoformat(timespec='seconds'))
+    tids = sorted(set(tids) | set(hilog_signature_tasks()))
+    before = counts['memory_rows_unresolved']
+    result = build_hilog_signatures(tids)
+    reps = 0
+    for key in result['keys']:
+        sig = CrashSignature.objects.filter(key=key).first()
+        if sig is not None:
+            reps += memory_representatives(sig, manifests, chains, counts)
+    log.info('  %d Hilog signatures (%d new, %d retired), %d representatives written',
+             result['signatures'], result['created'], result['retired'], reps)
+    return {'hilog_tasks': len(tids), 'hilog_signatures': result['signatures'],
+            'hilog_signatures_new': result['created'],
+            'hilog_signatures_retired': result['retired'],
+            'hilog_representatives': reps,
+            'hilog_rows_unresolved': counts['memory_rows_unresolved'] - before}
+
+
 def es_pass(since):
     """The Event Service unit signatures of the tasks with a crashed unit
     among the records filed since ``since``, rebuilt over all of each
@@ -734,6 +787,12 @@ def run(args):
         summary.update(input_pass(since, manifests, RetryChains(), counts))
         summary['seconds'] = round(time.monotonic() - t0, 1)
         return summary, t0
+    if args.hilog_only:
+        manifests = ManifestRows(establish=not args.no_manifest_establish)
+        summary = {'since': since.isoformat(timespec='seconds'), 'hilog_only': True}
+        summary.update(hilog_pass(since, manifests, RetryChains(), counts))
+        summary['seconds'] = round(time.monotonic() - t0, 1)
+        return summary, t0
     if args.es_only:
         summary = {'since': since.isoformat(timespec='seconds'), 'es_only': True}
         summary.update(es_pass(since))
@@ -768,6 +827,8 @@ def run(args):
         summary.update(memory_pass(since, manifests, chains, counts))
     if not args.dry_run and not args.no_input:
         summary.update(input_pass(since, manifests, chains, counts))
+    if not args.dry_run and not args.no_hilog:
+        summary.update(hilog_pass(since, manifests, chains, counts))
     if not args.dry_run and not args.no_es:
         summary.update(es_pass(since))
     summary['seconds'] = round(time.monotonic() - t0, 1)
@@ -832,6 +893,10 @@ def main():
                     help='skip the bad-input pass')
     ap.add_argument('--input-only', action='store_true',
                     help='the bad-input pass alone over the window (its back-fill)')
+    ap.add_argument('--no-hilog', action='store_true',
+                    help='skip the Hilog pass')
+    ap.add_argument('--hilog-only', action='store_true',
+                    help='the Hilog pass alone over the window (its back-fill)')
     ap.add_argument('--no-es', action='store_true',
                     help='skip the Event Service unit pass')
     ap.add_argument('--es-only', action='store_true',
@@ -883,6 +948,12 @@ def main():
                      f"{summary.get('input_tasks', 0)} tasks, "
                      f"{summary.get('input_representatives', 0)} representatives written"
                      if 'input_signatures' in summary else '')
+        hilog = (f"{summary.get('hilog_signatures', 0)} Hilog signatures "
+                 f"({summary.get('hilog_signatures_new', 0)} new, "
+                 f"{summary.get('hilog_signatures_retired', 0)} retired) over "
+                 f"{summary.get('hilog_tasks', 0)} tasks, "
+                 f"{summary.get('hilog_representatives', 0)} representatives written"
+                 if 'hilog_signatures' in summary else '')
         es_units = (f"{summary.get('es_signatures', 0)} Event Service unit signatures "
                     f"({summary.get('es_signatures_new', 0)} new) over "
                     f"{summary.get('es_tasks', 0)} tasks, "
@@ -899,6 +970,8 @@ def main():
                      if args.memory_only else
                      f"segfault inventory since {summary['since'][:10]}: {bad_input}"
                      if args.input_only else
+                     f"segfault inventory since {summary['since'][:10]}: {hilog}"
+                     if args.hilog_only else
                      f"segfault inventory since {summary['since'][:10]}: {es_units}"
                      if args.es_only else
                      f"segfault inventory since {summary['since'][:10]}: "
@@ -911,6 +984,7 @@ def main():
                      f"({summary.get('signatures_new', 0)} new)"
                      + (f"; {memory}" if memory else '')
                      + (f"; {bad_input}" if bad_input else '')
+                     + (f"; {hilog}" if hilog else '')
                      + (f"; {es_units}" if es_units else '')),
             **{k: v for k, v in summary.items() if isinstance(v, int) and not isinstance(v, bool)})
     print(json.dumps(summary))

@@ -16,6 +16,11 @@
     <p class="mb-3">
         <strong>{{ sig.crashes }}</strong> unit crashes on <strong>{{ sig.es_requests }}</strong> distinct requests{% if sig.rate_pct %}, {{ sig.rate_pct }} of the units the task's filed records ran{% endif %};
         time into the request p10 / p50 <strong>{{ sig.minutes_p10|default_if_none:'' }} / {{ sig.minutes_p50|default_if_none:'' }}</strong> min
+    {% elif sig.class == 'hilog' %}
+    <h1>Hilog: {{ sig.signal_name }}{% if sig.configuration.prod_task %}, {{ sig.configuration.prod_task }}{% endif %}</h1>
+    <p class="mb-3">
+        <strong>{{ sig.crashes }}</strong> jobs whose stage logs reached {{ sig.hilog.threshold_mb }} MB{% if sig.rate_pct %}, <strong>{{ sig.rate_pct }}</strong> of the task's finished plus failed jobs{% endif %};
+        job time p10 / p50 <strong>{{ sig.minutes_p10|default_if_none:'' }} / {{ sig.minutes_p50|default_if_none:'' }}</strong> min
     {% else %}
     <h1>{{ sig.class_label }}: exit {{ sig.exit_code }} ({{ sig.signal_name }}){% if sig.configuration.prod_task %}, {{ sig.configuration.prod_task }}{% endif %}</h1>
     <p class="mb-3">
