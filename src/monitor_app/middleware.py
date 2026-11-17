@@ -96,10 +96,12 @@ def tunnel_context(request):
 # Writes that must work for anyone, or that carry a stricter check of their
 # own: signing in and out, changing a password, and the two authority
 # endpoints, which admit only the swf-remote service identity or an
-# administrator (viewdir/authority_api.py, viewdir/user_admin.py).
+# administrator (viewdir/authority_api.py, viewdir/user_admin.py), and a
+# person's own API token, whose issue needs authority checked in the view
+# and whose revocation must work for anyone (pcs api_views.my_api_token).
 AUTHORITY_EXEMPT_URL_NAMES = frozenset({
     'login', 'logout', 'password_change', 'password_change_done',
-    'user-authority', 'user-rights',
+    'user-authority', 'user-rights', 'my_api_token',
 })
 
 _UNSAFE_METHODS = frozenset({'POST', 'PATCH', 'PUT', 'DELETE'})

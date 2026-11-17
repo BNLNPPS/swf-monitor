@@ -254,7 +254,14 @@ def account_view(request):
     authority_record = get_authority(request.user.username) \
         if request.user.is_authenticated else None
 
+    # The person's own API token, managed on the Account tab through
+    # pcs api_views.my_api_token; the key itself is fetched only on Show.
+    from rest_framework.authtoken.models import Token
+    api_token = Token.objects.filter(user=request.user).first() \
+        if request.user.is_authenticated else None
+
     return render(request, 'monitor_app/account.html', {
+        'api_token_created': api_token.created.isoformat() if api_token else '',
         'form': form,
         'user': request.user,
         'authority': {

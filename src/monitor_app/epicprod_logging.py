@@ -70,6 +70,13 @@ SUBLEVEL_ORDER = {'high': 2, 'normal': 1, 'low': 0}
 # rendered on the log entry page and the live-policy page, so a stream reader
 # is never left guessing what an event was.
 ACTION_DEFAULTS = {
+    # a person's own API token, from the Account tab (docs/AUTHORITY.md,
+    # Tokens; swf-epicprod pcs api_views.my_api_token)
+    'api_token': {
+        'sublevel': 'low', 'live': False,
+        'description': "A person created, regenerated or revoked their own "
+                       "API token on the Account tab: who and which.",
+    },
     # the PanDA database's Event Service range rows (swf-epicprod
     # docs/ES_EVENT_CLEANUP.md)
     'es_event_cleanup': {

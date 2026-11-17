@@ -87,6 +87,19 @@ For programmatic access, the API uses token-based authentication for write opera
 
 #### Generate a Token
 
+A person gets their own token on the Account tab of their account page
+(`/account/?tab=account`, on either face): Show, Create, Regenerate and
+Revoke. Only an account that may act on the production system is issued
+one (AUTHORITY.md, Tokens). The same actions are an API call:
+
+```bash
+# GET: whether you have one; ?show=1 returns the key
+# POST {"action": "create" | "regenerate" | "revoke"}
+curl -H "Authorization: Token $TOKEN" https://epic-devcloud.org/prod/pcs/api/my-token/
+```
+
+Service accounts are issued tokens on the monitor host:
+
 ```bash
 # Get token for existing user
 python manage.py get_token <username>
