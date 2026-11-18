@@ -92,8 +92,8 @@ columns retain JEDI input-file accounting; fail counts final failures
 after retries. Task rows extend downward without an internal scrollbar.
 
 Running numbers and pillars are labelled **cores** and count cores carrying
-production payload work. Native
-jobs use the payload's chosen `payloadThreads` report; one-core native jobs
+production payload work. Direct-pilot
+jobs use the payload's chosen `payloadThreads` report; one-core direct-pilot jobs
 use one thread, while an unreported multicore thread width remains unknown.
 Event Service jobs count work lanes with assigned units in the shipped
 harness record. Each lane runs one single-threaded payload; empty lanes and
