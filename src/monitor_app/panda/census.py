@@ -44,11 +44,12 @@ GATE_HOURS = 6
 # median finished walltime (20 minutes where no median exists).
 FAST_FAILURE_FRACTION = 0.25
 FAST_FAILURE_FLOOR_S = 20 * 60
-# A queue's calibration counts from this many finished production jobs
-# in the window: one fast trial job read a p90 start latency of 0.04 h at
-# UM_GREX_PanDA_1 (2026-09-30). Below it the queue reads uncalibrated.
-CALIBRATION_MIN_JOBS = 20
-CALIBRATION_CACHE_KEY = 'panda:queue-census:calibration:v4'
+# A queue's calibration is read from whatever finished production jobs it
+# has in the window. The 20-job minimum added on 2026-09-30 held every queue
+# that ran fewer than 20 there (Torre Wenaus, 2026-11-18: "MANIFESTLY
+# UNACCEPTABLE"); a queue with none is fed on its own unstarted work instead
+# (swf-epicprod swf_epicprod/front.py, decide).
+CALIBRATION_CACHE_KEY = 'panda:queue-census:calibration:v5'
 CALIBRATION_TTL_S = 3600
 # JEDI task statuses that end a task (as monitor_app.snapper_panda reads them).
 TASK_TERMINAL_STATUSES = ('done', 'finished', 'failed', 'broken', 'aborted',
@@ -172,8 +173,7 @@ def _ungenerated():
 def _calibration():
     """Per queue over the last CALIBRATION_DAYS days: the finished
     production jobs' median and p90 walltime in hours, their p90 start
-    latency (creation to start) in hours and their count (the three
-    measures None below CALIBRATION_MIN_JOBS jobs), and the peak
+    latency (creation to start) in hours and their count, and the peak
     number of concurrently running jobs of any type (a sweep over start
     and end times, the currently running jobs included)."""
     days = f"{CALIBRATION_DAYS} days"
@@ -214,8 +214,6 @@ def _calibration():
     with connections['panda'].cursor() as cursor:
         cursor.execute(walltime_sql, [days])
         for site, n, med, p90, start_p90 in cursor.fetchall():
-            if int(n or 0) < CALIBRATION_MIN_JOBS:
-                med = p90 = start_p90 = None
             out.setdefault(str(site), {}).update({
                 'finished_jobs': int(n or 0),
                 'median_walltime_h': round(float(med) / 3600.0, 3) if med is not None else None,
