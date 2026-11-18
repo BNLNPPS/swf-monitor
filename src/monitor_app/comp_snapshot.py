@@ -384,6 +384,14 @@ class _Build:
             self.errors.append({'part': name, 'error': f'{type(exc).__name__}: {exc}'})
             return fallback
 
+    def not_trial(self, column='jeditaskid'):
+        """`` AND NOT <trial>``: trials run as production jobs but are not
+        production, and no production reading of the room counts them
+        (Torre Wenaus, 2026-11-18, after one trial job turned the JLab Rucio
+        line red: "trials are not prod"; compute_efficiency.trial_sql)."""
+        from monitor_app.compute_efficiency import trial_sql
+        return f' AND NOT {trial_sql(column)}'
+
     def es_closes(self):
         """The Event Service closes registered at JLab in the last two days
         (COMP_SNAPSHOT.md, Storage), read once per build: ``[(ended_at,
@@ -402,7 +410,8 @@ class _Build:
         """Production jobs running now, anywhere: the work whose output the
         JLab reading counts (canaries and other trials are not production)."""
         return int(_rows(f'''SELECT COUNT(*) FROM "{self.S}"."jobsactive4"
-                             WHERE processingtype = 'epicproduction' AND jobstatus = 'running' ''')[0][0])
+                             WHERE processingtype = 'epicproduction' AND jobstatus = 'running'
+                             {self.not_trial()}''')[0][0])
 
     def _read_es_closes(self):
         from monitor_app.models import EpicProdJob
@@ -443,11 +452,11 @@ class _Build:
             FROM (
               SELECT {column}, jobstatus, corecount, endtime, starttime FROM "{self.S}"."jobsactive4"
                WHERE endtime >= %s AND processingtype = 'epicproduction'
-                 AND jobstatus IN ('finished', 'failed')
+                 AND jobstatus IN ('finished', 'failed'){self.not_trial()}
               UNION ALL
               SELECT {column}, jobstatus, corecount, endtime, starttime FROM "{self.S}"."jobsarchived4"
                WHERE endtime >= %s AND processingtype = 'epicproduction'
-                 AND jobstatus IN ('finished', 'failed')) t
+                 AND jobstatus IN ('finished', 'failed'){self.not_trial()}) t
             GROUP BY 1, 2'''
         for key, status, n, core_h in _rows(sql, (self.hour_ago, self.hour_ago)):
             entry = out.setdefault(key or '', {'finished': 0, 'failed': 0,
@@ -476,10 +485,10 @@ class _Build:
                      CASE {diag_case} ELSE '' END AS diag
                 FROM (
                   SELECT computingsite, transexitcode, {fields} FROM "{self.S}"."jobsactive4"
-                   WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus = 'failed'
+                   WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus = 'failed'{self.not_trial()}
                   UNION ALL
                   SELECT computingsite, transexitcode, {fields} FROM "{self.S}"."jobsarchived4"
-                   WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus = 'failed') j) t
+                   WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus = 'failed'{self.not_trial()}) j) t
             GROUP BY 1, 2, 3, 5'''
         cats = {}
         for site, component, code, diag, exitcode, n in _rows(sql, (self.hour_ago, self.hour_ago)):
@@ -681,7 +690,7 @@ class _Build:
                   JOIN "{self.S}"."jedi_tasks" t ON t.jeditaskid = j.jeditaskid
                   LEFT JOIN "{self.S}"."metatable" m ON m.pandaid = j.pandaid
                   WHERE j.endtime >= %s AND j.processingtype = 'epicproduction'
-                    AND j.jobstatus = 'finished' AND j.jobmetrics ~ %s
+                    AND j.jobstatus = 'finished' AND j.jobmetrics ~ %s{self.not_trial('j.jeditaskid')}
                   GROUP BY 1, 2, 3, 4'''
         rows = _rows(sql, (since, metric_keys.regex('registration', 'registered')))
         # Event Service closes, each a RECO file registered as it stood.
@@ -778,7 +787,7 @@ class _Build:
                   LEFT JOIN "{self.S}"."jedi_datasets" d ON d.jeditaskid = t.jeditaskid
                        AND d.masterid IS NULL AND d.type IN ('input', 'pseudo_input')
                   WHERE t.status IN ('done', 'finished') AND t.processingtype = 'epicproduction'
-                    AND COALESCE(t.endtime, t.statechangetime) >= %s
+                    AND COALESCE(t.endtime, t.statechangetime) >= %s{self.not_trial('t.jeditaskid')}
                   GROUP BY 1, 2, 3, 4, 5 ORDER BY 5 DESC, 1 DESC'''
         items = []
         rows = _rows(sql, (since.astimezone(dt_timezone.utc).replace(tzinfo=None),))
@@ -1014,7 +1023,7 @@ class _Build:
               FROM "{self.S}"."metatable" m JOIN "{self.S}"."jobsarchived4" j ON j.pandaid = m.pandaid
               WHERE j.endtime >= %s AND j.endtime < %s
                 AND j.processingtype = 'epicproduction' AND j.jobstatus = 'finished'
-                AND (j.jobmetrics ~ %s OR j.jobmetrics ~ %s)),
+                AND (j.jobmetrics ~ %s OR j.jobmetrics ~ %s){self.not_trial('j.jeditaskid')}),
             d AS (
               SELECT r.site, r.endtime, r.p, did FROM r, jsonb_array_elements_text(
                 CASE WHEN jsonb_typeof(r.p -> 'registration' -> 'dids') = 'array'
@@ -1057,7 +1066,7 @@ class _Build:
                    COUNT(*), MAX(endtime)
             FROM "{self.S}"."jobsarchived4"
             WHERE endtime >= %s AND endtime < %s
-              AND processingtype = 'epicproduction' AND jobstatus = 'finished'
+              AND processingtype = 'epicproduction' AND jobstatus = 'finished'{self.not_trial()}
             GROUP BY 1, 2'''
         out, last = {}, None
         for k, outcome, n, end in _rows(sql, (since or self.hour_ago, until or self.now)):
@@ -1086,11 +1095,11 @@ class _Build:
             FROM (
               SELECT pandaid, computingsite, jobstatus, jobmetrics, piloterrorcode, piloterrordiag, endtime
                 FROM "{self.S}"."jobsarchived4"
-               WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus IN ('finished', 'failed')
+               WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus IN ('finished', 'failed'){self.not_trial()}
               UNION ALL
               SELECT pandaid, computingsite, jobstatus, jobmetrics, piloterrorcode, piloterrordiag, endtime
                 FROM "{self.S}"."jobsactive4"
-               WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus IN ('finished', 'failed')) j
+               WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus IN ('finished', 'failed'){self.not_trial()}) j
             JOIN "{self.S}"."filestable4" f ON f.pandaid = j.pandaid AND f.type = 'log'
             GROUP BY 1'''
         diag, held = '%stage-out%', '%logHeld=%'
@@ -1109,7 +1118,7 @@ class _Build:
         last = _rows(f'''
             SELECT MAX(endtime) FROM "{self.S}"."jobsarchived4"
             WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus = 'finished'
-              AND COALESCE(jobmetrics, '') {'!' if negate else ''}~ %s''',
+              AND COALESCE(jobmetrics, '') {'!' if negate else ''}~ %s{self.not_trial()}''',
                      (self.now - timedelta(days=2), metrics_regex))[0][0]
         return _aware(last)
 

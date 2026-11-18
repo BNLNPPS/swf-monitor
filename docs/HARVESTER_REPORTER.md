@@ -123,8 +123,12 @@ under an m3763 member's token (`swf_epicprod/nersc_iri.py`):
 | Errors | `harvester_dialogs` | `dialogs`: the harvester's ERROR and CRITICAL messages to the PanDA server over 24 hours, per module with the latest, and per kind of message (the message with its numbers set aside) with its count, first and latest (reporter 1.1) |
 | Service metrics | `harvester_metrics` | the latest per login node: memory, CPU, scratch use, proxy lifetime |
 
-Job fetching, the adjuster's applied limit, failed calls and log freshness
-come from the logs and are error fields naming why. The queue page shows a
+Job fetching, failed calls and log freshness come from the logs and are
+error fields naming why. The adjuster's applied limit is not needed here
+(every queue sets no ratio, below), so its read is recorded as
+`adjustment.read.unavailable`, never as an error: as an error it raised a
+false amber on the room's Perlmutter pilot supply while supply was healthy
+(swf-watch, 2026-11-16; Torre Wenaus, 2026-11-18). The queue page shows a
 queue each kind of error that names it or names none of the harvester's
 queues; a kind that names only another of its queues is not shown there,
 so an error on a queue we do not use

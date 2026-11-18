@@ -78,16 +78,18 @@ def commissioning_tasks():
 TRIAL_NAME_PATTERN = r'\.trial[0-9]*(\.|$)'
 
 
-def trial_sql():
+def trial_sql(column='jeditaskid'):
     """SQL true for a job or task of a trial: its JEDI task on the trial
     list, or a PCS trial by its name. Trials never count in a production
     metric (Torre Wenaus, 2026-10-29), and a production task relabelled a
-    trial (``relabel_trial``) leaves every one through this condition."""
-    named = (f'COALESCE(jeditaskid, 0) IN (SELECT jeditaskid FROM "{PANDA_SCHEMA}".jedi_tasks'
+    trial (``relabel_trial``) leaves every one through this condition.
+    ``column`` names the row's JEDI task id where a join qualifies it
+    (``j.jeditaskid``)."""
+    named = (f'COALESCE({column}, 0) IN (SELECT jeditaskid FROM "{PANDA_SCHEMA}".jedi_tasks'
              f" WHERE taskname ~ '{TRIAL_NAME_PATTERN}')")
     tasks = commissioning_tasks()
     # integers by construction, so written in place
-    listed = f"COALESCE(jeditaskid, 0) IN ({','.join(map(str, tasks))}) OR " if tasks else ''
+    listed = f"COALESCE({column}, 0) IN ({','.join(map(str, tasks))}) OR " if tasks else ''
     return f'({listed}{named})'
 
 

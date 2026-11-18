@@ -47,6 +47,14 @@ request wait for it.
 ## The record (schema 1)
 
 Every number is the value at `observed_at` or over the hour before it.
+A production count leaves trials out: a trial runs as an `epicproduction`
+job but is not production (Torre Wenaus, 2026-11-18, after one trial job
+read the JLab Rucio line red: "trials are not prod"). Every reading of
+production jobs or tasks (the activity and failure counts, the storage
+readings, arrivals, completed tasks, production running) applies the one
+trial test, `compute_efficiency.trial_sql` (the trial list and PCS
+`.trialN` names), through the builder's `not_trial`. The task board and
+the paused pillar list tasks, trials among them, and count nothing.
 Every entity carries a stable `id`. The room keys its layout on these
 ids, so an id never changes once published. Display names may change.
 
@@ -403,7 +411,7 @@ Health parts for `jlab-rucio`:
 - `latest_arrival`: the age of the newest registration, a finished job's
   or an Event Service close's; `amber` over 30 minutes, `red` over two
   hours or with none in two days. `grey` when no production job
-  (`epicproduction`; canaries and other trials are not production) is
+  (`epicproduction`, trials apart; canaries are not production either) is
   running anywhere: nothing is due to arrive, so the age is no evidence
   either way (Torre Wenaus, 2026-11-03).
 
@@ -672,7 +680,7 @@ was paused outside our tools, directly in PanDA: `paused_by` reads
 `completed` lists the production tasks completed in the last 24 hours,
 for the dashboard's panel under the paused tasks (Torre Wenaus,
 2026-10-24): every `epicproduction` task whose PanDA status is `done`
-(every input file finished) or `finished` (some lost), trials included,
+(every input file finished) or `finished` (some lost), trials apart,
 by its end time, except a task ended quietly (swf-epicprod EPICPROD_OPS.md,
 Quiet end).
 
