@@ -13,9 +13,11 @@ failed, fast failures) is read on every call.
 
 Hours at capacity is the depth the dispatcher regulates on: the
 not-started jobs of a queue times the queue's median finished walltime,
-divided by its running ceiling (the 14-day peak, or the current running
-count when that is higher). It is None where the queue has no
-calibration.
+divided by its running ceiling (the peak over the 90-day memory, or the
+current running count when that is higher). A queue with no finished
+production job in 14 days is read at its walltimes over the memory
+window, so a quiet spell of weeks does not erase what it runs at. It is
+None where the queue has no calibration in either window.
 """
 import logging
 from datetime import timedelta
@@ -51,6 +53,12 @@ FAST_FAILURE_FLOOR_S = 20 * 60
 # (swf-epicprod swf_epicprod/front.py, decide).
 CALIBRATION_CACHE_KEY = 'panda:queue-census:calibration:v5'
 CALIBRATION_TTL_S = 3600
+# A queue's memory across a quiet spell (``memory``): its peak running and,
+# where the 14-day window has no finished production job, its walltimes,
+# over this many days, rebuilt daily.
+MEMORY_DAYS = 90
+MEMORY_PRODUCT_KEY = 'queue_memory:v1'
+MEMORY_TTL_S = 24 * 3600
 # JEDI task statuses that end a task (as monitor_app.snapper_panda reads them).
 TASK_TERMINAL_STATUSES = ('done', 'finished', 'failed', 'broken', 'aborted',
                           'exhausted', 'passed')
@@ -170,13 +178,13 @@ def _ungenerated():
     return per
 
 
-def _calibration():
-    """Per queue over the last CALIBRATION_DAYS days: the finished
+def _calibration(window_days=CALIBRATION_DAYS):
+    """Per queue over the last ``window_days`` days: the finished
     production jobs' median and p90 walltime in hours, their p90 start
     latency (creation to start) in hours and their count, and the peak
     number of concurrently running jobs of any type (a sweep over start
     and end times, the currently running jobs included)."""
-    days = f"{CALIBRATION_DAYS} days"
+    days = f"{window_days} days"
     walltime_sql = f"""
         SELECT "computingsite", COUNT(*),
                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM ("endtime" - "starttime"))),
@@ -227,7 +235,7 @@ def _calibration():
                 pools[str(site)[5:]] = int(peak or 0)
             else:
                 out.setdefault(str(site), {})['peak_running'] = int(peak or 0)
-    return {'built_at': timezone.now().isoformat(), 'days': CALIBRATION_DAYS,
+    return {'built_at': timezone.now().isoformat(), 'days': window_days,
             'queues': out, 'pools': pools}
 
 
@@ -240,6 +248,22 @@ def calibration(refresh=False):
     built = _calibration()
     cache.set(CALIBRATION_CACHE_KEY, built, CALIBRATION_TTL_S)
     return built
+
+
+def memory():
+    """The queue memory: the calibration over MEMORY_DAYS, a cached product
+    rebuilt daily behind its readers (swf-monitor docs/CACHED_PRODUCTS.md;
+    the build reads about a minute), {} until its first fill lands.
+    A queue that ran nothing for weeks keeps the capacity and walltime it
+    last ran at, so its first cycle after the quiet spell is regulated as
+    before it (Torre Wenaus, 2026-11-18: "WE NEED A FRONT THAT SMOOTHLY
+    RESTARTS AFTER A QUIET PERIOD OF WEEKS"). The 14-day calibration alone
+    read OSG's ceiling as 18 on 2026-11-18, after two quiet weeks, where it
+    had run 4,425 at once in October."""
+    from monitor_app.cached_product import get_product
+    product = get_product(MEMORY_PRODUCT_KEY, lambda: _calibration(MEMORY_DAYS),
+                          MEMORY_TTL_S, async_first_fill=True)
+    return product.get('value') or {}
 
 
 def _explained_tasks():
@@ -305,6 +329,13 @@ def queue_census(refresh=False):
     ungenerated = _ungenerated()
     calib = calibration(refresh=refresh)
     calib_queues = calib.get('queues') or {}
+    memory_error = ''
+    try:
+        mem = memory()
+    except Exception as exc:  # noqa: BLE001 - the 14-day calibration still stands
+        logger.exception('census: queue memory unreadable; the 14-day calibration alone sizes queues')
+        mem, memory_error = {}, f'queue memory unreadable: {exc}'
+    mem_queues = mem.get('queues') or {}
     gate = _gate_window(calib_queues)
     names = set(live) | set(calib_queues) | set(gate) | set(tasks)
     queues = {}
@@ -315,9 +346,18 @@ def queue_census(refresh=False):
         running = sum(v['jobs'] for s, v in by_status.items() if s in RUNNING)
         finishing = sum(v['jobs'] for s, v in by_status.items() if s in FINISHING)
         c = calib_queues.get(name) or {}
+        m = mem_queues.get(name) or {}
+        # A queue with no finished production job in 14 days is read at the
+        # walltimes it last ran at; its ceiling is the most it ran at once
+        # over the memory window (``memory``).
+        remembered = not c.get('median_walltime_h') and bool(m.get('median_walltime_h'))
+        if remembered:
+            c = dict(c, **{k: m.get(k) for k in ('median_walltime_h', 'p90_walltime_h',
+                                                 'p90_start_latency_h')})
         g = gate.get(name) or {'finished': 0, 'failed': 0, 'fast_failed': 0,
                                'explained': 0, 'explained_by': []}
-        peak = int(c.get('peak_running') or 0)
+        peak_recent = int(c.get('peak_running') or 0)
+        peak = max(peak_recent, int(m.get('peak_running') or 0))
         ceiling = max(peak, running)
         med_h = c.get('median_walltime_h')
         hours = (round(not_started * med_h / ceiling, 2)
@@ -336,6 +376,8 @@ def queue_census(refresh=False):
                 'p90_start_latency_h': c.get('p90_start_latency_h'),
                 'finished_jobs': c.get('finished_jobs', 0),
                 'peak_running': peak,
+                'peak_running_recent': peak_recent,
+                'remembered': remembered,
             },
             'ceiling': ceiling,
             'hours_at_capacity': hours,
@@ -352,6 +394,7 @@ def queue_census(refresh=False):
     for pool, members in CAPACITY_POOLS.items():
         present = [queues[q] for q in members if q in queues]
         ceiling = max(int((calib.get('pools') or {}).get(pool, 0)),
+                      int((mem.get('pools') or {}).get(pool, 0)),
                       sum(q['running'] for q in present))
         runnable_h = ungenerated_h = 0.0
         calibrated = ceiling > 0
@@ -373,5 +416,8 @@ def queue_census(refresh=False):
         'observed_at': observed_at.isoformat(),
         'calibration_built_at': calib.get('built_at'),
         'calibration_days': calib.get('days', CALIBRATION_DAYS),
+        'memory_built_at': mem.get('built_at'),
+        'memory_days': mem.get('days', MEMORY_DAYS),
+        'memory_error': memory_error,
         'queues': queues,
     }

@@ -73,6 +73,7 @@ variant.
 | `harvester_workers:v1:<queue>` | the queue's harvester workers reading (`monitor_app/workers.py`), the Workers card of the queue detail page | 300 s |
 | `task_resource_peaks:v2` | twelve-hour per-task production-job memory, scratch disk and file-count peaks with outlier scale bounds (`monitor_app.task_resources`), on the production dashboard | 60 s; asynchronous first fill |
 | `es_reading:v1:<queue>` | the node harness across the queue's Event Service jobs of the last 7 days, from the job reports (`monitor_app/es_reading.py`), the Event Service card of the queue detail page | 300 s |
+| `queue_memory:v1` | every queue's 90-day calibration, peak running and walltimes (`monitor_app.panda.census.memory`), which the census reads so a queue quiet for weeks keeps its capacity (swf-epicprod CONTINUOUS_PRODUCTION.md, The pressure measure) | 24 h; asynchronous first fill |
 | `allocation:v1:<harvester>:<worker>` | one batch allocation's pilot occupancy timeline (`workers.allocation_product` over `panda.queries.allocation_timeline`), the allocation page | 120 s while the slot runs; kept without rebuilding once it has ended, since PanDA drops the worker record after three months, and never replaced by a build that has lost it |
 | `storage_ghosts:v1` | the storage record's ghost population with holders (`swf_epicprod.analytics.storage_listings.build_ghost_population`), behind the Storage exceptions page, the `epicprod_storage` tool and the REST listing | 90 min; refreshed by the storage sweep as its last step (`refresh_ghost_product`) |
 
