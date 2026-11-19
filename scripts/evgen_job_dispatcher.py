@@ -9,7 +9,7 @@ row of the one sandbox'd CSV and hands it to the ePIC production payload.
 
 It is our owned equivalent of job_submission_condor/scripts/submit_panda.py
 (spec only — never run from that repo); the CSV row shape
-(``file,ext,nevents,ichunk``) and the payload entry point
+(``file,ext,nevents,ichunk[,start]``) and the payload entry point
 (``/opt/campaigns/hepmc3/scripts/run.sh``) are the fixed contract with the
 payload. The payload's run.sh sources ``environment*.sh`` from the unpacked
 sandbox itself, so no env is set here.
@@ -195,6 +195,15 @@ def run_row(n, csv_base, workdir, extra_env=None):
         print(f"Error: malformed CSV row {n}: {row!r}", file=sys.stderr)
         return 1, None
     file_path, ext, nevents, ichunk = row[0], row[1], row[2], row[3]
+    # The short last chunk of a file carries its start, the zero-based
+    # position of its first event in the file (swf-epicprod
+    # JEDI_INTEGRATION.md, Components); run.sh takes it as
+    # EPICPROD_SKIP_EVENTS. Every other row starts at ichunk x nevents,
+    # which run.sh computes itself.
+    start = row[4].strip() if len(row) > 4 else ""
+    if start and not start.isdigit():
+        print(f"Error: malformed start in CSV row {n}: {row!r}", file=sys.stderr)
+        return 1, None
     # A trial runs the manifest row for real but small (docs/PCS.md,
     # Trials): same input, same payload, same path, a hundred events
     # instead of ten thousand. The other trial settings — the output
@@ -210,6 +219,9 @@ def run_row(n, csv_base, workdir, extra_env=None):
     env = dict(os.environ)
     if extra_env:
         env.update(extra_env)
+    if start:
+        env["EPICPROD_SKIP_EVENTS"] = start
+        print(f"row {n} starts at event {start} of its file")
     # A reproduction's reference run matches the production queue's memory
     # (SEGFAULT_DIAGNOSIS.md, Reproduction): CANARY_MEM_LIMIT_MB puts an
     # address-space limit on the payload and everything it starts.

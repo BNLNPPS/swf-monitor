@@ -2046,8 +2046,25 @@ def crashed_run(sig, pandaid=None):
     if not row:
         raise ValueError(f"job {pandaid}'s manifest row is unresolved; the attempt has "
                          f'no manifest record')
-    row_text = f"{row['file']},{row['ext']},{row['nevents']},{int(row['ichunk']):04d}"
-    return job, crash, row, row_text
+    return job, crash, row, manifest_line(row)
+
+
+def row_start(row):
+    """The zero-based position in its file of a crash row's first event:
+    ``ichunk x nevents``, except on a file's short last chunk, which
+    carries its own start (swf-epicprod JEDI_INTEGRATION.md, Components)."""
+    start = row.get('start')
+    return int(start) if start is not None else int(row['ichunk']) * int(row['nevents'])
+
+
+def manifest_line(row):
+    """A crash row as the manifest line the dispatcher reads: the start
+    is written only on a row that does not begin at ``ichunk x nevents``."""
+    line = f"{row['file']},{row['ext']},{row['nevents']},{int(row['ichunk']):04d}"
+    start = row_start(row)
+    if start != int(row['ichunk']) * int(row['nevents']):
+        line += f",{start}"
+    return line
 
 
 def repro_environment(prod_task):
@@ -2101,6 +2118,7 @@ def local_repro(sig, pandaid=None):
     payload_version = str(((attempt.metadata if attempt else None) or {}).get('payload_version') or '')
     ichunk = int(row['ichunk'])
     nevents = int(row['nevents'])
+    start = row_start(row)
     input_url = f"{INPUT_DOOR}/EVGEN/{row['file']}.{row['ext']}"
     if is_memory(sig):
         mechanism = MEMORY_MECHANISMS.get(crash.get('mechanism') or '', {})
@@ -2133,9 +2151,10 @@ def local_repro(sig, pandaid=None):
     lines += [f'export {k}={v}' for k, v in env.items()]
     lines += [
         'EOF',
-        f"swf-epicprod/{PAYLOAD_PATH} EVGEN/{row['file']} {row['ext']} {nevents} {ichunk:04d}",
+        (f"EPICPROD_SKIP_EVENTS={start} " if start != ichunk * nevents else '')
+        + f"swf-epicprod/{PAYLOAD_PATH} EVGEN/{row['file']} {row['ext']} {nevents} {ichunk:04d}",
         f"# Input (public read): {input_url}",
-        f"# Manifest row {ichunk + 1}: {nevents} events after skipping {ichunk} x {nevents}, "
+        f"# Manifest row {ichunk + 1}: {nevents} events after skipping {start:,}, "
         f"seed {ichunk + 1}; outputs stay in the working directory, nothing is registered.",
     ]
     if is_memory(sig):

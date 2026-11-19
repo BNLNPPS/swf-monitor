@@ -337,8 +337,12 @@ class ManifestRows:
         rows = self._rows[jeditaskid]
         if rows is None or seq < 1 or seq > len(rows):
             return None
-        f, e, n, c = rows[seq - 1]
-        return {'file': f, 'ext': e, 'nevents': n, 'ichunk': c}
+        row = rows[seq - 1]
+        f, e, n, c = row
+        # A file's short last chunk carries its own start (pcs.manifests.Row);
+        # every other row starts at ichunk x nevents.
+        return {'file': f, 'ext': e, 'nevents': n, 'ichunk': c,
+                'start': getattr(row, 'start', c * n)}
 
 
 def _minutes(start, end):

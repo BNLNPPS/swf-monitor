@@ -43,7 +43,7 @@ django.setup()
 
 from monitor_app.models import CrashSignature, EpicProdJob  # noqa: E402
 from monitor_app.segfaults import (MEMORY_MECHANISMS, SIGNAL_NAMES,  # noqa: E402
-                                   repro_environment, signature_for_job)
+                                   manifest_line, repro_environment, signature_for_job)
 
 SWF_TMP_DIR = os.environ.get('SWF_TMP_DIR', '/data/swf-tmp')
 PACKAGE_ROOT = os.path.join(SWF_TMP_DIR, 'segfault-packages')
@@ -92,7 +92,7 @@ def build(pandaid):
 
     env = repro_environment(job.prod_task)
     container = _container(job.prod_task)
-    row_text = f"{row['file']},{row['ext']},{row['nevents']},{int(row['ichunk']):04d}"
+    row_text = manifest_line(row)
     with open(os.path.join(outdir, 'manifest.csv'), 'w') as fh:
         fh.write(row_text + '\n')
     with open(os.path.join(outdir, 'environment-manifest.sh'), 'w') as fh:
