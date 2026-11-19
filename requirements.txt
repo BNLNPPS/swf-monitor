@@ -61,7 +61,7 @@ rucio-clients
 # MCP (official Python SDK) — explicit dep; provides FastMCP and pulls in Starlette.
 mcp>=1.26.0,<2
 # Embedded collaboration uses this reviewed package revision, installed non-editable.
-teamcomms-ai @ git+https://github.com/wenaus/teamcomms-ai.git@c6b007dea7b1b5d756200efd835da9d4d4ff17c4
+teamcomms-ai @ git+https://github.com/wenaus/teamcomms-ai.git@3f0d2c07e377e5e43d1d8238871aae19a69789da
 wrangle-ai @ git+https://github.com/BNLNPPS/wrangle-ai.git@55d4def263187a9cab5d07b2f6a706dd9a4cd357
 httpx>=0.28,<1
 # Brotli comes in through weasyprint (fonttools[woff]); with it installed urllib3
