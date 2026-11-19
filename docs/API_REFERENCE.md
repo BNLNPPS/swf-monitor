@@ -153,7 +153,7 @@ export REQUESTS_CA_BUNDLE=/opt/swf-monitor/current/full-chain.pem
   trailing 24 hours. Rows return oldest-first so a consumer's next cursor is
   the last row's `created_at`; `more` flags a page-capped response that
   should be drained again immediately. Open read. Malformed `since` returns
-  HTTP 400. Rows past a 30-day retention window are pruned at ingest;
+  HTTP 400. Rows past a 90-day retention window are pruned at ingest;
   consumers keep their own history.
 - `POST /api/capcom/notices/ingest/` - Token-authenticated notice write from
   the production operations agent: `{source, title, severity?, detail?,

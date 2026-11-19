@@ -25,7 +25,7 @@ and vacuum load they would join for nothing. Layout::
     <root>/YYYY-MM-DD/<pandaid>.error    why the fetch failed
     <root>/keep/<pattern>/<pandaid>.log  exemplars and unmatched logs
 
-Retention is one month, and the date directory is the unit of deletion.
+Retention is ninety days, and the date directory is the unit of deletion.
 Anything the learning pass rescues moves under ``keep`` before its
 directory goes, so nothing at delete time has to decide anything.
 """
@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 FETCH_MAX_BYTES = 4 * 1024 * 1024
 FETCH_TIMEOUT_S = 20
 FETCH_WORKERS = 8
-RETENTION_DAYS = 30
+RETENTION_DAYS = 90
 
 
 def store_root():

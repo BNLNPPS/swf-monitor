@@ -3,14 +3,15 @@
 
 Deletes log rows older than the retention window, in bounded batches so
 the table is never long-locked. Retention is per level: the default
-keeps every level 30 days; --error-days widens the window for ERROR and
+keeps every level 90 days; --error-days widens the window for ERROR and
 CRITICAL rows when a longer post-mortem trail is wanted.
 
 Standalone, no Django. Database credentials come from the same DB_* env
 vars the monitor settings read (source the deployment .env). Intended
 for cron; every run logs row counts before and after. See
-docs/CACHED_PRODUCTS.md for the page-serving half of the log-volume
-story.
+docs/ACTION_STREAM.md (Retention) for the window and the platform's other
+retention periods, and docs/CACHED_PRODUCTS.md for the page-serving half
+of the log-volume story.
 """
 import argparse
 import logging
@@ -66,8 +67,8 @@ def batched_delete(conn, where_sql, params, dry_run):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--days", type=int, default=30,
-                        help="retention window in days (default 30)")
+    parser.add_argument("--days", type=int, default=90,
+                        help="retention window in days (default 90)")
     parser.add_argument("--error-days", type=int, default=None,
                         help="retention for ERROR/CRITICAL rows "
                              "(default: same as --days)")

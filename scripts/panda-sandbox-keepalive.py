@@ -256,7 +256,7 @@ def main():
     args = parser.parse_args()
 
     final_days = int(SysConfig.get_setting(
-        "panda_sandbox_keepalive_final_days", 30))
+        "panda_sandbox_keepalive_final_days", 90))
 
     tasks = _candidate_tasks(final_days)
     # One sandbox can serve several tasks (sandbox reuse); touch each once.

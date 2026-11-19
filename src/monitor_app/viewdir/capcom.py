@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 # The notice buffer is a hand-off, not an archive: consumers keep their
 # own history, so rows past this window are pruned on each ingest.
-NOTICE_RETENTION_DAYS = 30
+NOTICE_RETENTION_DAYS = 90
 # Page cap on one notices read; 'more' flags a truncated response.
 NOTICE_PAGE_MAX = 500
 
