@@ -48,7 +48,11 @@ Then:
 to epicprod-live through the REST log endpoint (`--title`, `--detail`,
 `--subject-type`, `--subject-key`, `--resolves` the record it resolves,
 `--evidence` links, `--dry-run`); `scripts/live-clear.py` takes a taken-care-of
-record off the room's screen the same way.
+record off the room's screen the same way. `scripts/sysconfig-set.py`
+sets the SysConfig keys it is given (`KEY=VALUE`, the value read as
+JSON; `--by`, `--reason`, `--dry-run`) and records one `sysconfig_edit`
+action with the old and new values; the System page's editor replaces
+the whole document instead.
 
 ## Running one by hand
 
