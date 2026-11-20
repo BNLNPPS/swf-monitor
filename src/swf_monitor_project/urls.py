@@ -32,6 +32,7 @@ urlpatterns = [
     path("accounts/", include("django.contrib.auth.urls")),  # Add this line
     path("canary/", include("canary.store.urls")),  # site-canary site health
     path("pcs/", include("pcs.urls")),  # Physics Configuration System
+    path("analysis/", include("analysis.urls")),  # Analysis runs (swf-epicprod)
     path("ai/", include("ai.urls")),  # AI proposals
     path("help/", include("help.urls")),  # Help menu pages: What's new
     path("snapper/", include("snapper_ai.urls")),  # Snapper state history (UI ships in the package)

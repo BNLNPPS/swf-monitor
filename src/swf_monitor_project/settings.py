@@ -121,6 +121,7 @@ INSTALLED_APPS = [
     "snapper_ai",  # Coherent operational state history
     "canary.store",  # site-canary: site health and landscape map
     "pcs",  # Physics Configuration System
+    "analysis",  # Analysis runs on PCS samples (swf-epicprod docs/ANALYSIS.md)
     "ai",  # AI proposals and human-in-the-loop automation
     "help",  # Help menu pages: What's new
     "monitor_app",  # Changed from "swf_monitor_project.monitor_app"
