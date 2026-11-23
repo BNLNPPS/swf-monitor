@@ -1173,7 +1173,7 @@ class PandaBot:
     # Maps server name → keywords that trigger inclusion.
     _SERVER_KEYWORDS = {
         'github': ('github', 'repo', 'pr ', 'pull request', 'issue', 'commit', 'branch', 'discussion'),
-        'xrootd': ('xrootd', 'file', 'storage', 'directory', 'volatile', 'cache'),
+        'xrootd': ('xrootd', 'file', 'storage', 'directory', 'volatile', '/cache'),
         'zenodo': ('zenodo', 'record', 'doi', 'deposit'),
         'lxr': ('lxr', 'code browser', 'cross-reference', 'source code', 'identifier',
                 'class definition', 'where is', 'defined', 'header file', 'algorithm'),
