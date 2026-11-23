@@ -97,7 +97,7 @@ if _xrootd_server:
         ],
         'env': {
             'XROOTD_SERVER': os.environ.get('XROOTD_SERVER', 'root://dtn2304.jlab.org:8443'),
-            'XROOTD_BASE_DIR': os.environ.get('XROOTD_BASE_DIR', '/jlab-osdf-ro/eic/EPIC/volatile'),
+            'XROOTD_BASE_DIR': os.environ.get('XROOTD_BASE_DIR', '/jlab-osdf-ro/eic/EPIC/cache'),
         },
         'repo_dir': '/data/wenauseic/github/xrootd-mcp-server',
         'update_commands': [
@@ -1173,7 +1173,7 @@ class PandaBot:
     # Maps server name → keywords that trigger inclusion.
     _SERVER_KEYWORDS = {
         'github': ('github', 'repo', 'pr ', 'pull request', 'issue', 'commit', 'branch', 'discussion'),
-        'xrootd': ('xrootd', 'file', 'storage', 'directory', 'volatile'),
+        'xrootd': ('xrootd', 'file', 'storage', 'directory', 'volatile', 'cache'),
         'zenodo': ('zenodo', 'record', 'doi', 'deposit'),
         'lxr': ('lxr', 'code browser', 'cross-reference', 'source code', 'identifier',
                 'class definition', 'where is', 'defined', 'header file', 'algorithm'),
