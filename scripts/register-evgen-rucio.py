@@ -53,7 +53,7 @@ from concurrent.futures import ThreadPoolExecutor
 # from. DID name = door path minus XRD_BASE; PFN = door + '/' + door path
 # (the '//' after the port is the xrootd absolute-path form).
 XRD_DOOR = os.environ.get('EVGEN_XRD_DOOR', 'root://dtn-rucio.jlab.org:1094')
-XRD_BASE = '/volatile/eic/EPIC'
+XRD_BASE = os.environ.get('EVGEN_XRD_BASE', '/cache/eic/EPIC')
 RUCIO_HOST = os.environ.get('JLAB_RUCIO_URL', 'https://rucio-server.jlab.org:443')
 RUCIO_ACCOUNT = os.environ.get('EVGEN_RUCIO_ACCOUNT', 'eicprod')
 RUCIO_SCOPE = 'epic'
@@ -241,7 +241,7 @@ def plan_datasets(files, adlers):
 
     The PFN is the RSE prefix followed by the DID name, which carries its
     own leading slash: the deterministic mapping the RSE expects yields
-    ``/volatile/eic/EPIC//EVGEN/...``, and add_replicas refuses a PFN that
+    ``/cache/eic/EPIC//EVGEN/...``, and add_replicas refuses a PFN that
     differs from it by so much as that slash."""
     datasets = defaultdict(list)
     for door_path, size in files:
