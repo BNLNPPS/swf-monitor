@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """pcs-catalog-import.py — run a PCS catalog import in the background.
 
-The prod-ops agent's doer for the catalog 'Update from CSV' and 'Update from
-epic-prod' buttons: the web view publishes ``catalog_import`` to the agent,
-which runs this script off the WSGI request (the epic-prod walk of ~4900
-datasets times the gateway out) and pushes ``catalog_import_ready`` to the
-browser when done. Django-bootstrap standalone — also usable by hand or cron.
+The prod-ops agent's doer for the catalog 'Update from epic-prod' button:
+the web view publishes ``catalog_import`` to the agent, which runs this
+script off the WSGI request (the epic-prod walk of ~4900 datasets times the
+gateway out) and pushes ``catalog_import_ready`` to the browser when done. Django-bootstrap standalone — also usable by hand or cron.
 See ``docs/EPICPROD_OPS_AGENT.md`` and ``docs/SSE_PUSH.md``.
 
 Usage::
 
     cd /data/wenauseic/github/swf-monitor/src
     source ../../swf-testbed/.venv/bin/activate && source ~/.env
-    python ../scripts/pcs-catalog-import.py {csv|epic-prod}
+    python ../scripts/pcs-catalog-import.py epic-prod
 """
 import os
 import sys
@@ -27,21 +26,15 @@ django.setup()
 
 def main(argv):
     source = argv[1] if len(argv) > 1 else ''
-    from pcs.services import (import_default_datasets_csv,
-                              import_epic_prod_past_campaigns, ServiceError)
+    from pcs.services import import_epic_prod_past_campaigns, ServiceError
     try:
-        if source == 'csv':
-            s = import_default_datasets_csv(created_by='prodops_agent')
-            print(f"csv: {s['created']} new, {s['updated']} updated, "
-                  f"{s['requests_created']} new / {s['requests_updated']} updated requests, "
-                  f"{len(s['errors'])} errors (of {s['rows']} rows)")
-        elif source == 'epic-prod':
+        if source == 'epic-prod':
             s = import_epic_prod_past_campaigns(created_by='prodops_agent')
             print(f"epic-prod: {s['created']} new, {s['updated']} updated, across "
                   f"{s['campaigns']} campaigns, {len(s['errors'])} errors "
                   f"(of {s['rows']} rows)")
         else:
-            print(f"unknown source {source!r}; expected 'csv' or 'epic-prod'",
+            print(f"unknown source {source!r}; expected 'epic-prod'",
                   file=sys.stderr)
             return 2
     except (ServiceError, FileNotFoundError, OSError) as e:
