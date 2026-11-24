@@ -290,7 +290,7 @@ and `monitor_urls` when web UI links are available.
 
 All parameters are optional - defaults are read from the user's `testbed.toml`:
 - `workflow_name`: Name of workflow (default: from config, typically 'stf_datataking')
-- `namespace`: Testbed namespace (default: from config)
+- `namespace`: Testbed namespace (default: the caller's own: a signed-in caller's running agent manager's namespace, else their username; for a bearer-token caller, the host's `testbed.toml` namespace, which unset is the server user's name)
 - `config`: Workflow config name (default: from config, e.g., 'fast_processing_default')
 - `realtime`: Run in real-time mode (default: from config, typically True)
 - `duration`: Max duration in seconds (0 = run until complete)

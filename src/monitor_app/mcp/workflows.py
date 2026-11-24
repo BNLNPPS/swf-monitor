@@ -15,7 +15,9 @@ from monitor_app.mcp import mcp
 
 from ..models import Run, StfFile, TFSlice, AppLog, SystemAgent
 from ..workflow_models import WorkflowDefinition, WorkflowExecution, WorkflowMessage
-from .common import _parse_time, _default_start_time, _monitor_url, _get_testbed_config_path, _get_username, requires_authority
+from swf_common_lib.config_utils import testbed_namespace
+
+from .common import CALLER, _parse_time, _default_start_time, _monitor_url, _get_testbed_config_path, _get_username, requires_authority
 
 logger = logging.getLogger(__name__)
 
@@ -704,7 +706,8 @@ async def swf_start_workflow(
 
     Args:
         workflow_name: Name of the workflow (default: from config, typically 'stf_datataking')
-        namespace: Testbed namespace (default: from config, e.g., 'torre1')
+        namespace: Testbed namespace (default: the caller's own: their agent manager's
+            namespace, else their name; for a bearer-token caller, this host's testbed config's)
         config: Workflow config name (default: from config, e.g., 'fast_processing_default')
         realtime: Run in real-time mode (default: from config, typically True)
         duration: Max duration in seconds (0 = run until complete)
@@ -742,7 +745,7 @@ async def swf_start_workflow(
                 import tomllib
                 with open(testbed_toml, 'rb') as f:
                     toml_data = tomllib.load(f)
-                toml_namespace = toml_data.get('testbed', {}).get('namespace')
+                toml_namespace = testbed_namespace(toml_data)
                 workflow_section = toml_data.get('workflow', {})
                 toml_workflow_name = workflow_section.get('name')
                 toml_config = workflow_section.get('config')
@@ -754,25 +757,24 @@ async def swf_start_workflow(
                 logger.warning(f"Failed to read {testbed_toml}: {e}")
 
         actual_workflow_name = workflow_name or toml_workflow_name or 'stf_datataking'
-        actual_namespace = namespace or toml_namespace
         actual_config = config or toml_config or 'fast_processing_default'
 
-        # If namespace not from caller or TOML, use the running agent manager's
-        # namespace from DB — it reflects the actual loaded config
+        # The namespace, when the call names none, is the caller's own: a
+        # signed-in caller's running agent manager's namespace (it reflects
+        # the config actually loaded), else their name; a bearer-token caller,
+        # who carries no identity, gets this host's testbed config's, whose
+        # unset namespace is the server user's name. Never another user's.
+        actual_namespace = namespace
+        caller = CALLER.get()
+        if not actual_namespace and caller:
+            cutoff = timezone.now() - timedelta(minutes=5)
+            am = SystemAgent.objects.filter(
+                instance_name=f'agent-manager-{caller}', last_heartbeat__gte=cutoff,
+            ).first()
+            actual_namespace = (am.namespace if am and am.namespace else caller)
+            logger.info(f"Using namespace '{actual_namespace}' for caller '{caller}'")
         if not actual_namespace:
-            try:
-                cutoff = timezone.now() - timedelta(minutes=5)
-                am = SystemAgent.objects.filter(
-                    agent_type='agent_manager',
-                    last_heartbeat__gte=cutoff
-                ).order_by('-last_heartbeat').first()
-                if am and am.namespace:
-                    actual_namespace = am.namespace
-                    logger.info(f"Using namespace '{am.namespace}' from agent manager '{am.instance_name}'")
-            except Exception:
-                pass
-        if not actual_namespace:
-            actual_namespace = 'torre1'
+            actual_namespace = toml_namespace or testbed_namespace({})
         actual_realtime = realtime if realtime is not None else (toml_realtime if toml_realtime is not None else True)
 
         params = dict(toml_params)
