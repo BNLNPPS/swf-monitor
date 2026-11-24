@@ -316,19 +316,22 @@ All parameters are optional - defaults are read from the user's `testbed.toml`:
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `swf_kill_agent` | `name` (required) | Kill an agent process by sending SIGKILL to its PID. |
+| `swf_kill_agent` | `name` (required), `username` | Kill one of the caller's own agent processes by sending SIGKILL to its PID. |
 
 **`swf_kill_agent` behavior:**
-- Looks up the agent by `instance_name`
-- Retrieves its `pid` and `hostname`
-- Sends SIGKILL if the agent is on the current host
-- Always marks the agent's status and operational_state as `EXITED`
-- Agent will no longer appear in default `swf_list_agents` results
+- The caller is the signed-in user on the swf-remote proxy; a bearer-token caller passes its own `username`, which is required
+- Only the agent's owner may kill it: the user in its instance name (`<type>-agent-<user>-<id>`, `agent-manager-<user>`) must be the caller, or the call is refused and the agent is left untouched
+- Sends SIGKILL only to a process on the current host that the caller owns
+- Marks the agent's status and operational_state `EXITED` when the kill succeeds or the process is already gone (including a PID now held by another user's process, which is not killed)
+- A refused, remote, permission-denied or PID-less kill changes nothing
+- An `EXITED` agent no longer appears in default `swf_list_agents` results
 
 **Returns:**
-- `success`: Whether the operation completed
-- `killed`: Whether the process was actually killed (may be False if already dead or on different host)
-- `kill_error`: Error message if kill failed (permission denied, process not found, remote host)
+- `success`: Whether the agent was killed or found gone and marked `EXITED`
+- `killed`: Whether a process was actually killed
+- `owner`: The user the agent belongs to
+- `error`: Why nothing was done (another user's agent, remote host, permission denied, no PID)
+- `note`: Why a record was marked `EXITED` without a kill (process already gone)
 - `old_state`, `new_state`: State transition
 
 ---
@@ -372,7 +375,7 @@ The User Agent Manager is a per-user daemon that enables MCP-driven testbed cont
 
 **`swf_stop_user_testbed`:**
 - Sends `stop_testbed` command to the user's agent manager
-- If agent manager is not running, use `swf_kill_agent` to stop agents directly
+- If agent manager is not running, use `swf_kill_agent` to stop your own agents directly
 
 **Starting the agent manager:**
 ```bash
@@ -815,7 +818,7 @@ LLM calls:
 LLM calls:
 1. `swf_get_agent(name="fast_processing-agent-wenauseic-123")` - agent status
 2. `swf_list_logs(instance_name="fast_processing-agent-wenauseic-123", level='WARNING')` - recent issues
-3. If needed: `kill_agent(name="...")` to terminate unresponsive agent
+3. If needed: `swf_kill_agent(name="...", username="wenauseic")` to terminate an unresponsive agent of your own
 
 ### Managing User Testbed
 

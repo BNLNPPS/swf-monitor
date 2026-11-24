@@ -275,8 +275,8 @@ def get_available_tools_list() -> list:
         },
         {
             "name": "swf_kill_agent",
-            "description": "Kill an agent process by sending SIGKILL to its PID. Sets status to EXITED.",
-            "parameters": ["name"],
+            "description": "Kill one of your own agent processes (SIGKILL to its PID); another user's agent is refused. Marks it EXITED when killed or already gone.",
+            "parameters": ["name", "username"],
         },
         {
             "name": "swf_check_agent_manager",

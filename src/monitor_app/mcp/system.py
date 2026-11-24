@@ -641,25 +641,37 @@ async def swf_get_log_entry(log_id: int) -> dict:
 
 @mcp.tool()
 @requires_authority
-async def swf_kill_agent(name: str) -> dict:
+async def swf_kill_agent(name: str, username: str = None) -> dict:
     """
-    Kill an agent process by sending SIGKILL to its PID.
+    Kill one of your own agent processes by sending SIGKILL to its PID.
 
-    Looks up the agent by instance_name, retrieves its pid and hostname,
-    and sends SIGKILL if the agent is on the current host. Sets the agent's
-    status and operational_state to EXITED, so it won't appear in default
-    list_agents results.
+    Only the agent's owner may kill it: the user in its instance name
+    (<type>-agent-<user>-<id>, agent-manager-<user>) and the owner of its
+    process must both be the caller. Another user's agent is refused and
+    left untouched; ask its owner. The agent is marked EXITED only when
+    the kill succeeded or its process is already gone.
 
     Args:
         name: The exact agent instance name (e.g., 'daq_simulator-agent-wenauseic-308')
+        username: Your own username. Taken from your sign-in when the call
+            comes through the swf-remote proxy; required otherwise.
 
     Returns:
-        Success/failure status with details
+        success, killed, and on refusal or failure an error naming why;
+        old_state and new_state when the record changed.
     """
     import os
+    import pwd
     import signal
     import socket
 
+    try:
+        caller = _get_username(username)
+    except RuntimeError:
+        return {
+            "success": False,
+            "error": "username is required: your own username. Only an agent's owner may kill it.",
+        }
     current_host = socket.gethostname()
 
     @sync_to_async
@@ -672,44 +684,74 @@ async def swf_kill_agent(name: str) -> dict:
                 "error": f"Agent '{name}' not found. Use swf_list_agents to see available agents.",
             }
 
+        owner = agent_owner(name)
+        if owner != caller:
+            logger.info(f"MCP kill_agent: refused '{name}' (owner {owner!r}) for {caller!r}")
+            return {
+                "success": False,
+                "name": name,
+                "owner": owner,
+                "error": (f"Agent '{name}' belongs to {owner or 'an unknown user'}, not {caller}. "
+                          "Only its owner may kill it; ask them."),
+            }
+
         pid = agent.pid
         hostname = agent.hostname
         old_state = agent.operational_state
-        killed = False
-        kill_error = None
+        result = {"name": name, "pid": pid, "hostname": hostname, "owner": owner,
+                  "killed": False, "old_state": old_state}
 
-        if pid:
-            if hostname and hostname != current_host:
-                kill_error = f"Agent on '{hostname}', not '{current_host}' - cannot kill remotely"
+        if not pid:
+            result.update(success=False, error=f"Agent '{name}' has no recorded pid; nothing to kill.")
+            return result
+        if hostname and hostname != current_host:
+            result.update(success=False,
+                          error=f"Agent on '{hostname}', not '{current_host}': cannot kill remotely.")
+            return result
+
+        try:
+            proc_owner = pwd.getpwuid(os.stat(f'/proc/{pid}').st_uid).pw_name
+        except FileNotFoundError:
+            proc_owner = None
+        if proc_owner is None:
+            note = f"Process {pid} not found (already gone)"
+        elif proc_owner != caller:
+            # The agent's pid now names another user's process: the agent
+            # itself is gone, and that process is not the caller's to kill.
+            note = f"Process {pid} now belongs to {proc_owner}; the agent is gone, nothing killed"
+        else:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                note = f"Process {pid} not found (already gone)"
+            except PermissionError:
+                logger.warning(f"MCP kill_agent: permission denied for '{name}' pid={pid}")
+                result.update(success=False, error=f"Permission denied to kill process {pid}; record unchanged.")
+                return result
             else:
-                try:
-                    os.kill(pid, signal.SIGKILL)
-                    killed = True
-                except ProcessLookupError:
-                    kill_error = f"Process {pid} not found (already dead)"
-                except PermissionError:
-                    kill_error = f"Permission denied to kill process {pid}"
-                except Exception as e:
-                    kill_error = str(e)
+                result["killed"] = True
+                note = None
 
         agent.operational_state = 'EXITED'
         agent.status = 'EXITED'
         agent.save(update_fields=['operational_state', 'status'])
-
-        logger.info(f"MCP kill_agent: '{name}' pid={pid} killed={killed} error={kill_error}")
-
-        return {
-            "success": True,
-            "name": name,
-            "pid": pid,
-            "hostname": hostname,
-            "killed": killed,
-            "kill_error": kill_error,
-            "old_state": old_state,
-            "new_state": "EXITED",
-        }
+        logger.info(f"MCP kill_agent: '{name}' pid={pid} by {caller} killed={result['killed']} note={note}")
+        result.update(success=True, new_state='EXITED')
+        if note:
+            result['note'] = note
+        return result
 
     return await do_kill()
+
+
+def agent_owner(instance_name: str):
+    """The user an agent instance belongs to, from its name: BaseAgent
+    names an agent <type>-agent-<user>-<id> and the agent manager is
+    agent-manager-<user> (swf-common-lib base_agent.py). None when the
+    name carries no user."""
+    import re
+    m = re.fullmatch(r'agent-manager-(.+)', instance_name) or re.fullmatch(r'.+?-agent-(.+)-[^-]+', instance_name)
+    return m.group(1) if m else None
 
 
 # -----------------------------------------------------------------------------
@@ -918,7 +960,7 @@ async def swf_stop_user_testbed(username: str = None) -> dict:
             "success": False,
             "error": manager_status.get('error') or f"Agent manager for '{username}' is not running",
             "username": username,
-            "note": "If agents are still running, you can kill them directly with kill_agent()",
+            "note": "If your own agents are still running, you can kill them directly with swf_kill_agent(name, username)",
         }
 
     control_queue = f'/queue/agent_control.{username}'
