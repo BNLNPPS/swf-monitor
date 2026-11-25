@@ -89,7 +89,8 @@ The agent starts a periodic refresh loop:
 
 - `EPICPROD_SYSTEM_STATUS_INTERVAL`, default `300` seconds
 - `EPICPROD_SYSTEM_STATUS_INITIAL_DELAY`, default `30` seconds
-- `EPICPROD_SYSTEM_STATUS_TIMEOUT`, default `60` seconds
+- `EPICPROD_SYSTEM_STATUS_TIMEOUT`, default `120` seconds (60 until
+  2026-11-02; refreshes overran 60 on 2026-10-31)
 
 Snapper component data has one size limit, snapper-ai's 1 MiB. A publication
 over it is rejected and recorded as the `snapper_publication_too_large`

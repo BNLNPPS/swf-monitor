@@ -33,10 +33,12 @@ PARAMS = {
     # auto-created as accounts here and hold no authority by design; the
     # list is swf-remote's ACCOUNT_USERNAME_BLACKLIST. The host reporters'
     # token accounts carry no person either; those created before the
-    # check's start date are outside its window.
+    # check's start date are outside its window. `claude` is the AI
+    # sessions' page-verification login, which only reads (Torre,
+    # 2026-10-31).
     "service_accounts": ["swf-remote-authority", "swf-remote-proxy",
                          "swf-remote-sync", "swf-sweeper", "swf-alarms",
-                         "pandaharvester01-reporter"],
+                         "pandaharvester01-reporter", "claude"],
 }
 
 FAILED_QUERY = """

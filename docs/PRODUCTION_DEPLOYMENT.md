@@ -590,11 +590,26 @@ next reloaded, every client that verifies the chain, the MCP endpoint's
 among them, failed with "unable to verify the first certificate" until the
 chain was repointed (2026-10-02, backup beside the file).
 
-certbot here has no renewal schedule. Its deploy hook,
+certbot is run by SDCC's Puppet: a root cron entry (`5 3,15 * * *`) runs
+`/opt/puppetlabs/puppet/cache/letsencrypt/renew-pandaserver02.sdcc.bnl.gov.sh`,
+a `certbot certonly --keep-until-expiring`. Its deploy hook,
 `/etc/letsencrypt/renewal-hooks/deploy/reload-apache.sh`, runs
 `apachectl configtest && apachectl graceful`, so a certificate renewed
 through certbot reaches Apache at once; one installed by hand still needs a
-reload. The `tls_served_chain` alarm verifies the chain served at this host
+reload.
+
+Renewal is held. On 2026-11-15 the ACME service's renewal-info window had
+certbot replace the InCommon certificate with one from SSL.com, which the
+grid CA set (`/etc/grid-security/certificates`) does not trust. The same
+happened on pandaserver01 and pandamon01. On Torre's word the lineage was
+put back on its InCommon version and held there with
+distcomp-services `panda-server/certbot-hold.py`:
+`autorenew = False` in its renewal configuration, the SSL.com files moved
+to `/etc/letsencrypt-held/`, and the live links on version 2 (valid to
+2027-05-06). Nothing renews the certificate while the hold stands, so a
+grid-trusted replacement must be installed before then. The rollback and
+the full record are in distcomp-services `panda-server/CHANGES.md`,
+2026-11-15. The `tls_served_chain` alarm verifies the chain served at this host
 and the other endpoints the agents use every five minutes, as the agents
 verify it, and fires when it does not verify. By hand:
 `openssl s_client -connect pandaserver02.sdcc.bnl.gov:443` (verify return

@@ -47,6 +47,14 @@ request wait for it.
 ## The record (schema 1)
 
 Every number is the value at `observed_at` or over the hour before it.
+A production count leaves trials out: a trial runs as an `epicproduction`
+job but is not production (Torre Wenaus, 2026-11-18, after one trial job
+read the JLab Rucio line red: "trials are not prod"). Every reading of
+production jobs or tasks (the activity and failure counts, the storage
+readings, arrivals, completed tasks, production running) applies the one
+trial test, `compute_efficiency.trial_sql` (the trial list and PCS
+`.trialN` names), through the builder's `not_trial`. The task board and
+the paused pillar list tasks, trials among them, and count nothing.
 Every entity carries a stable `id`. The room keys its layout on these
 ids, so an id never changes once published. Display names may change.
 
@@ -335,6 +343,15 @@ EPICPROD_PAYLOAD.md):
   internal EVGEN task's own kind), `other` for a derived name.
 - `failed_1h`: jobs whose registration did not complete (`pending` or
   `unfinished`); the registrar completes a pending registration later.
+- An Event Service job registers each close, a RECO file, as it stands,
+  hours before the job ends, and its job metrics carry no registration
+  mark, so the payload reports never list its files. Its closes are read
+  from the harness records filed with the jobs (`EpicProdJob.data
+  ['es_record']`, refreshed every five minutes for running jobs,
+  EVENT_SERVICE_PLOTS.md): every close of the last two days whose outcome
+  is `registered` or `diverted`, read once per build, at the close's end,
+  under its job's queue and task. Each counts in `arrived_1h`, `events_1h`
+  and `reco`; a close record carries no byte count, so it adds no bytes.
 - `pending`: the files owed the catalog now, the sum of
   `pending_parts`: `stash`, the failover stash's entries not yet home
   (the drain's record, cached product `stash_state`,
@@ -370,7 +387,8 @@ For `jlab-rucio`, `flow` is the output flow on the trends axis
 files the finished production jobs ending in each bin registered and
 their bytes, and `registration_incomplete_jobs`, those jobs whose
 registration did not complete, all from the same payload-report reading
-as `arrived_1h`. These are registrations as the payload reports them,
+as `arrived_1h`, with the Event Service closes in the bin of each close's
+end. These are registrations as the payload reports them,
 grouped by the job's end, not measured transfer bandwidth or the files'
 availability times; volume per hour is the bin's bytes times four. A
 bin's jobs are final once archived, so the bins are kept (cached product
@@ -390,8 +408,12 @@ Health parts for `jlab-rucio`:
 
 - `registration`: the share of the last hour's finished jobs whose
   registration did not complete; `amber` over 5%, `red` over half.
-- `latest_arrival`: the age of the newest registration; `amber` over 30
-  minutes, `red` over two hours or with none in two days.
+- `latest_arrival`: the age of the newest registration, a finished job's
+  or an Event Service close's; `amber` over 30 minutes, `red` over two
+  hours or with none in two days. `grey` when no production job
+  (`epicproduction`, trials apart; canaries are not production either) is
+  running anywhere: nothing is due to arrive, so the age is no evidence
+  either way (Torre Wenaus, 2026-11-03).
 
 Health parts for `bnl-rucio`:
 
@@ -452,12 +474,20 @@ OSG. Queue identifiers and links retain their canonical names.
     2026-10-28), with the pool and the negotiation cycle's time
     (`site.fair_share.notice`).
 
+  A recorded reason is shown as written, so whoever records one writes a
+  short clause (NOTICE_ROUTING.md, Findings and resolutions; Torre Wenaus,
+  2026-10-30).
+
   Then why the front feeds nothing (the global front is off, each live
   queue's front decision in the words of CONTINUOUS_PRODUCTION.md's
   states and reasons, a feed switch apart), every amber or red health
   part with its note,
   every active alarm event (red) and approaching deadline ping (amber),
-  storage parts not green, and late or missing scheduled campaign
+  storage parts not green, a line a person put up (grey, informational,
+  standing for the hours it was given: a `prod_now_notice` record written
+  by `scripts/prod-now-notice.py`, its text the line, linking to the page
+  it names; Torre Wenaus, 2026-10-30, for the campaign's billionth
+  delivered event, 24 hours), and late or missing scheduled campaign
   assessments (the System
   page's campaign-assessments row; the verdicts are held by corun-ai,
   which this build does not call). The text before the first ": " names
@@ -499,7 +529,10 @@ completes, and stays on the screen at INFO for three hours (SysConfig
 failure like any other. A task the front released from the ready buffer
 to a queue (its `front_decision` record with outcome `fed`) is shown the
 same way, one line per task (`Move ready buffer to Perlmutter · p4499.e106`),
-with why the queue took it. The records ride
+with why the queue took it. An item added to What's new is shown at
+INFO for 12 hours (SysConfig `comp.live.whats_new_hours`; Torre Wenaus,
+2026-10-30; WHATS_NEW.md), titled "What's new: <item title>" with its
+summary as the detail. The records ride
 in the snapshot because the room reads it anonymously and the logs page
 is behind the login wall; they name tasks, queues, nodes and errors and
 carry no credential.
@@ -647,7 +680,7 @@ was paused outside our tools, directly in PanDA: `paused_by` reads
 `completed` lists the production tasks completed in the last 24 hours,
 for the dashboard's panel under the paused tasks (Torre Wenaus,
 2026-10-24): every `epicproduction` task whose PanDA status is `done`
-(every input file finished) or `finished` (some lost), trials included,
+(every input file finished) or `finished` (some lost), trials apart,
 by its end time, except a task ended quietly (swf-epicprod EPICPROD_OPS.md,
 Quiet end).
 
@@ -668,8 +701,9 @@ Quiet end).
 configuration, for the dashboard's panel under the completed tasks
 (Torre Wenaus, 2026-10-24): the RECO files the finished production jobs
 registered and their events, from each job's payload report (the record the
-JLab Rucio pillar reads), grouped by task and the task's PC (`_task_pcs`, as
-for `completed`).
+JLab Rucio pillar reads), and the Event Service closes registered (Storage,
+above), grouped by task and the task's PC (`_task_pcs`, as for
+`completed`).
 
 - `pcs`, `files`, `events`, `window_hours` (24), `link` (the campaign view)
   and `detail` (the totals in words).

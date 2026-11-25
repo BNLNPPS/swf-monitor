@@ -27,7 +27,11 @@ running, queued, pilot and hourly outcome figures, cylinders and
 Perlmutter, Google, Compute Canada and JLab follow in two columns.
 Tasks in flight, epicprod-live, Production now and Science data occupy
 the remaining columns. Site panes open by default; Open and Close act
-on every site pane.
+on every site pane. Beside them a note reads "Numeric codes reference
+*Production now* items": the numbers at a site pane's upper right are
+its Production now lines. The note is boxed as the numbers are, by a
+1-pixel muted outline that takes no space, so nothing around it moves
+(Torre Wenaus, 2026-10-30).
 
 Site labels, reasons and phase colours come from the feed's `status_label`,
 `status_reason` and `status_level`. A site's bullet is the feed's
@@ -57,10 +61,9 @@ The Computing now, Work available and Campaign blocks consume
 `report.header`: display-ready values, labels, colours, details and links.
 The room places the same three blocks beneath the Production now title.
 
-The right column is bounded by the visible viewport using the existing
-screen-height measurement. Production now wraps its notices without growing
-to fill unused space. When the notices would push Storage off screen, their
-body scrolls within the available height. Storage follows directly below.
+Production now wraps its notices and grows downward with them, never
+scrolling (Torre Wenaus, 2026-10-30); the right column is not bounded by
+the viewport, and Storage follows directly below.
 Notices use 10-pixel text, and every notice is accessible. A notice has
 no hover text, which would repeat the line (Torre Wenaus, 2026-10-28:
 "they are noise"). There is no separate inactive-site footer.
@@ -89,8 +92,8 @@ columns retain JEDI input-file accounting; fail counts final failures
 after retries. Task rows extend downward without an internal scrollbar.
 
 Running numbers and pillars are labelled **cores** and count cores carrying
-production payload work. Native
-jobs use the payload's chosen `payloadThreads` report; one-core native jobs
+production payload work. Direct-pilot
+jobs use the payload's chosen `payloadThreads` report; one-core direct-pilot jobs
 use one thread, while an unreported multicore thread width remains unknown.
 Event Service jobs count work lanes with assigned units in the shipped
 harness record. Each lane runs one single-threaded payload; empty lanes and
@@ -169,7 +172,11 @@ site panel's title row cites its lines' numbers at the upper right, each
 in its colour, with the line's text on hover and its link: a grid of small
 numbers that wraps into columns and shrinks its type until every number
 fits, followed by the weekly average cores in grey. The core limit, the
-fair-share notice and the feed switch no longer write words there.
+fair-share notice and the feed switch no longer write words there. A 1px
+grey outline draws each Production now number in its own box and a
+site's cited numbers in one box together, so a site's codes read as
+references to the list; an outline takes no space, so the text does not
+move.
 
 While a pool's negotiator holds our OSG submitter at its fair-share
 limit, OSG has a grey, informational line naming the pool and the time of
@@ -210,7 +217,7 @@ test and canary jobs. It plots reported peak memory, scratch disk and
 scratch file counts over the preceding twelve hours, with one colour per task across all three
 plots. Hovering a curve gives the task name and window peak; hovering a
 point gives its time bin, peak and reporting coverage. Each curve links
-to the task. Memory and disk use GiB; file counts are integers.
+to the task. Memory and disk are in GB (10^9 bytes); file counts are integers.
 
 Each fifteen-minute bin contains the maximum reported job peak. Completed
 jobs are placed at their end time; active jobs use their latest update.
@@ -243,7 +250,11 @@ Production compute sits directly below Storage in the right column. Its
 three plots show efficiency, total average cores (labelled cores/day) and
 productive average cores, with OSG, Perlmutter and GREX curves in each. Each plot has an
 overall last-24-hour figure and one overall monthly average since May.
-The current month is marked with an asterisk. All three use ended-job
+The current month is marked with an asterisk. The efficiency plot labels
+its axis in whole percent and its monthly figures in whole numbers
+without the percent sign, and productive average cores shows its monthly
+figures in thousands (1.1k), so they fit side by side; the last-24-hour
+figures and the hover text keep full precision. All three use ended-job
 walltime times cores, without processor-performance weighting. Efficiency
 is the successful fraction; an Event Service job's successful part is its
 saved-processing share, not its PanDA status (COMPUTE_EFFICIENCY.md, Event
@@ -311,7 +322,9 @@ unfinished payload registration in the same completion hour.
 Each site panel's name has **TASKS** centred beneath it, in 8-pixel text, a
 step below the pillar scale's: what has been sent to that allocation, the PCS page Prod tasks in
 flight for it (`pcs/in-flight/?site=<name>`), the production tasks sent to its
-queues that have not ended, paused ones included.
+queues that have not ended, paused ones included. Its hover text lists
+the site's tasks on the task board by JEDI task id, in ascending order
+(`tasks[].sites`, COMP_SNAPSHOT.md, Tasks; Torre Wenaus, 2026-10-30).
 
 Drilldown queue filters come from each snapshot site's queues. The site's
 primary queue page is also selected in the feed. The dashboard's panel-name

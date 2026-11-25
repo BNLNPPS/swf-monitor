@@ -1,0 +1,37 @@
+<style>
+.wn-intro { max-width: 60em; }
+/* Tags are text everywhere: links separated by spaces; a tag selected in
+   the filter is bold and underlined, as the filter marks it. */
+.wn-tag { text-decoration: none; cursor: pointer; white-space: nowrap; }
+.wn-tag:hover { text-decoration: underline; }
+.wn-tag.wn-tag-on { font-weight: bold; text-decoration: underline; }
+.wn-imp { display: inline-block; padding: .05em .5em; border-radius: 4px;
+          font-weight: 600; white-space: nowrap; border: 1px solid transparent; }
+/* Importance in shades of green: the lighter, the less important. */
+.wn-imp-urgent { background: #14532d; color: #fff; }
+.wn-imp-high { background: #3f9a47; color: #fff; }
+.wn-imp-routine { background: #c6e5c8; color: #10361a; border-color: #7db382; }
+.wn-imp-minor { background: #eef7ee; color: #14361a; border-color: #8fbf93; }
+.wn-title { font-weight: 600; font-size: 1.05em; }
+.wn-summary { margin-top: .15em; white-space: pre-line; }
+.wn-toggle { background: none; border: none; padding: 0 .3em; font-size: 1.1em;
+             cursor: pointer; color: #1f3550; transition: transform .15s ease-in-out; }
+.wn-row.wn-open .wn-toggle { transform: rotate(90deg); }
+.wn-more { display: none; margin-top: .6em; padding-top: .5em;
+           border-top: 1px solid #c5d0db; max-width: 60em; }
+.wn-row.wn-open .wn-more { display: block; }
+.wn-more h6, .wn-section h5 { font-weight: 600; margin: .6em 0 .25em; }
+.wn-vote { white-space: nowrap; }
+.wn-vote button { border: 1px solid #8a9bad; background: #fff; color: #1f2933;
+                  border-radius: 4px; padding: 0 .4em; line-height: 1.4; }
+.wn-vote button.wn-mine { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+.wn-awaiting { color: #8a4b00; font-weight: 600; }
+.wn-form label { font-weight: 600; margin-top: .5em; margin-bottom: .1em; display: block; }
+.wn-form .wn-hint { color: #3d4b5a; }
+.wn-form textarea, .wn-form input[type=text] { max-width: 60em; }
+.wn-section { max-width: 62em; }
+.wn-comment { margin: .5em 0; padding: .5em .75em; background: #f6f8fb;
+              border: 1px solid #c5d0db; border-radius: 4px; }
+.wn-comment .wn-meta { color: #3d4b5a; margin-bottom: .2em; }
+.wn-error { color: #b42318; font-weight: 600; }
+</style>

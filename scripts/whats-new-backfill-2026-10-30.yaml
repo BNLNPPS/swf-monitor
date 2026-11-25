@@ -1,0 +1,327 @@
+# What's new bootstrap backfill (docs/WHATS_NEW.md), reviewed by Torre in the
+# TJAI Pouch and ingested on his word on 2026-10-30 by
+# scripts/whats-new-ingest.py. Evidence is for review and is not an item field.
+
+- title: Help menu in the epicprod menu bar
+  summary: >-
+    A Help menu stands before System in the full view and before the account name in the user view. Documentation opens the WFMS documentation on readthedocs.
+  tags: [users]
+  importance: routine
+  shipped: 2026-10-30
+  contact: wenaus
+  refs:
+    - "[USER_VIEW.md](https://github.com/BNLNPPS/swf-monitor/blob/infra/baseline-v47/docs/USER_VIEW.md)"
+  evidence: >-
+    swf-monitor commit "Help menu before System, in the full and user views" (2026-10-30)
+
+- title: "What's new: developments listed under Help"
+  summary: >-
+    What's new lists the developments users, operators and developers should know about, newest first, with tags, importance, comments and votes. The MCP tool whats_new_list answers "what's new" from the same list.
+  tags: [users, ops, dev]
+  importance: routine
+  shipped: 2026-10-30
+  contact: wenaus
+  builds_on: [help-menu-in-the-epicprod-menu-bar]
+  refs:
+    - "[WHATS_NEW.md](https://github.com/BNLNPPS/swf-monitor/blob/infra/baseline-v47/docs/WHATS_NEW.md)"
+  evidence: >-
+    swf-monitor commit "What's new under Help: versioned developments list, proposals, MCP tools" (2026-10-30). Reaches epic-devcloud.org when swf-remote proxies help/.
+
+- title: Trials and commissioning left out of production metrics
+  summary: >-
+    Every production metric leaves out trial and commissioning work by one rule, and a task can be relabelled a trial afterwards.
+  tags: [users, ops, pcs]
+  importance: routine
+  shipped: 2026-10-29
+  contact: wenaus
+  refs:
+    - "[Release notes v46](https://github.com/BNLNPPS/swf-testbed/blob/main/RELEASE_NOTES.md)"
+  evidence: >-
+    swf-epicprod commit "Trials never count in production metrics: one rule, relabel after the fact" (2026-10-29)
+
+- title: Remove datasets from a disk RSE once JLab tape holds them
+  summary: >-
+    The RSE removal page previews and removes datasets from a disk RSE when JLab tape holds a complete copy, and keeps those whose task is still active. It is for the operations role.
+  details: >-
+    25.12.0 FULL was removed from BNL-XRD with it.
+  tags: [ops, ddm]
+  importance: routine
+  shipped: 2026-10-29
+  contact: srahman
+  refs:
+    - "[STORAGE.md, Removing datasets from an RSE](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/STORAGE.md#removing-datasets-from-an-rse)"
+  evidence: >-
+    swf-monitor PR 59 merged 2026-10-29, swf-epicprod PR 17; release notes v46 (Payload and data)
+
+- title: New production output goes to EIC-XRD
+  summary: >-
+    Tasks configured since 28 October write their output to EIC-XRD and their logs to EIC-XRD-LOG, in place of BNL-XRD.
+  tags: [users, ops, ddm]
+  importance: high
+  shipped: 2026-10-28
+  contact: wenaus
+  refs:
+    - "[EPICPROD_PAYLOAD.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/EPICPROD_PAYLOAD.md)"
+  evidence: >-
+    swf-epicprod commits "PCS: new standard configurations write output to EIC-XRD" and "EPICPROD_PAYLOAD: production output moved from BNL-XRD to EIC-XRD on 2026-10-28" (2026-10-28); 10/30 meeting report
+
+- title: New production submits under the epic VO
+  summary: >-
+    Production tasks submitted since 28 October run under the PanDA VO epic, regulated together with the older tasks under wlcg.
+  tags: [ops, panda]
+  importance: routine
+  shipped: 2026-10-28
+  contact: wenaus
+  refs:
+    - "[EPIC_VO_MIGRATION.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/EPIC_VO_MIGRATION.md)"
+  evidence: >-
+    release notes v46 (Regulation and placement); 10/30 meeting report
+
+- title: A ready task holds no queue until a queue needs work
+  summary: >-
+    The pressure front gives a ready task to a queue when that queue needs work; only a person's pin overrides that. Unplace on a task's Site control returns a placed task whose work has not started to the ready buffer, with the reason recorded.
+  tags: [users, ops, pcs]
+  importance: routine
+  shipped: 2026-10-28
+  contact: wenaus
+  refs:
+    - "[CONTINUOUS_PRODUCTION.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/CONTINUOUS_PRODUCTION.md)"
+  evidence: >-
+    swf-epicprod commits "Front: ready tasks hold no queue; a queue under a core limit is sized at it" and "PCS: Unplace returns a placed task whose work has not started to the front" (2026-10-28)
+
+- title: Every site state is a numbered Production now line
+  summary: >-
+    Production now lists each site state (feed off, exempt, paused tasks, core limit) as a numbered line saying who set it, when and why, and the dashboard's site panels cite the numbers. A number is never reused.
+  tags: [users, ops]
+  importance: routine
+  shipped: 2026-10-28
+  contact: wenaus
+  refs:
+    - "[Production dashboard](https://epic-devcloud.org/prod/panda/dashboard/)"
+  evidence: >-
+    swf-monitor commit "Production now: every site state a numbered line with who, when and why; panels cite the numbers" and swf-epicprod commit "Front feed switch: a recorded reason, who and when, always; exempt for self-fed queues" (2026-10-28)
+
+- title: "Prod tasks in flight: what each allocation has been sent"
+  summary: >-
+    The PCS page Prod tasks in flight shows what has been sent to each allocation, in PanDA's own states, readable without PanDA knowledge. The TASKS link under each site on the dashboard opens it.
+  tags: [users, ops, pcs]
+  importance: routine
+  shipped: 2026-10-27
+  contact: wenaus
+  refs:
+    - "[Prod tasks in flight](https://epic-devcloud.org/prod/pcs/in-flight/)"
+  evidence: >-
+    swf-epicprod commit "PCS: Prod tasks in flight, what has been sent to each allocation" (2026-10-27); 10/30 meeting report
+
+- title: Idle queues take unstarted work automatically
+  summary: >-
+    The pressure front moves a task whose work has not started from a backed-up queue to an idle one that can run it, never to a queue failing 20% or more. A task that has run stays where it runs.
+  tags: [ops, pcs]
+  importance: routine
+  shipped: 2026-10-26
+  contact: wenaus
+  refs:
+    - "[CONTINUOUS_PRODUCTION.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/CONTINUOUS_PRODUCTION.md)"
+  evidence: >-
+    swf-epicprod commits "Move unstarted tasks to an idle production queue automatically" and "Idle-queue move: no move to a queue failing 20% or more" (2026-10-26); 10/30 meeting report
+
+- title: Event Service production on Google Cloud and Perlmutter
+  summary: >-
+    Google Cloud's Event Service queue went to production on 25 October and Perlmutter's on 26 October. Each job takes a whole node; simulation stays resident in each slot and reconstruction is shared across the node.
+  details: >-
+    Event Service work goes only to these whole-node queues, and they take no other work. Work before those dates and later trials stay out of the production metrics.
+  tags: [users, ops, panda]
+  importance: high
+  shipped: 2026-10-25
+  contact: wenaus
+  refs:
+    - "[NERSC_PERLMUTTER.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/NERSC_PERLMUTTER.md)"
+    - "[GKE_PILOT_FLOW.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/GKE_PILOT_FLOW.md)"
+    - "[NODE_EVENT_DISPATCHER.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/NODE_EVENT_DISPATCHER.md)"
+  evidence: >-
+    release notes v46 (Event Service in production); 10/30 meeting report
+
+- title: Failing production tasks pause themselves and say why
+  summary: >-
+    A production task whose recent attempts keep failing across several hosts is paused automatically, and the pause says why ("last 50 attempts failed, on 7 hosts"). Resuming stays an operator action; a resume or a Move starts a fresh count.
+  details: >-
+    The guard pauses at 50 or more completed attempts with 95% or more failed; running jobs finish. Since 28 October every pause, by the guard or a feeder, states its reason.
+  tags: [users, ops, pcs]
+  importance: high
+  shipped: 2026-10-23
+  contact: wenaus
+  refs:
+    - "[CONTINUOUS_PRODUCTION.md, Task failure guard](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/CONTINUOUS_PRODUCTION.md#task-failure-guard-23-october-2026)"
+  evidence: >-
+    CONTINUOUS_PRODUCTION.md, Task failure guard (23 October 2026); commits "Every pause carries its reason" (2026-10-28) and "Task failure guard: a verified Move starts a fresh sample" (2026-10-29)
+
+- title: Production dashboard for collaborators
+  summary: >-
+    The home page's Dash tab shows each site's running cores and twelve-hour trends, the production tasks in flight, paused and completed tasks, the ready buffer, and data arriving at JLab per physics configuration. The computing-centre room display reads the same live record.
+  tags: [users]
+  importance: high
+  shipped: 2026-10-23
+  contact: wenaus
+  refs:
+    - "[Production dashboard](https://epic-devcloud.org/prod/panda/dashboard/)"
+    - "[PROD_DASHBOARD.md](https://github.com/BNLNPPS/swf-monitor/blob/infra/baseline-v47/docs/PROD_DASHBOARD.md)"
+  evidence: >-
+    swf-monitor commit "Publish the production dashboard in the home Dash tab" (2026-10-23)
+
+- title: The native ePIC pilot runs production on OSG and GREX
+  summary: >-
+    A single-container pilot without the ATLAS setup has been the production pilot on OSG since 23 October and on GREX since 24 October. In its direct mode a site needs only Singularity and the image repository.
+  tags: [ops, dev, panda]
+  importance: high
+  shipped: 2026-10-23
+  contact: wenaus
+  refs:
+    - "[NATIVE_PILOT_CANARY.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/NATIVE_PILOT_CANARY.md)"
+    - "[OSG_SUBMISSION.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/OSG_SUBMISSION.md)"
+  evidence: >-
+    release notes v46 (The native ePIC pilot); 10/30 meeting report
+
+- title: Production status grids per generator family
+  summary: >-
+    Status grids show each generator family's samples, beam against Q², with each sample's delivery and registration. A background-mixed production is its own family, and an x-binned family is one grid of species and beam against Bjorken x.
+  tags: [users, pcs]
+  importance: routine
+  shipped: 2026-10-22
+  contact: wenaus
+  refs:
+    - "[Release notes v46](https://github.com/BNLNPPS/swf-testbed/blob/main/RELEASE_NOTES.md)"
+  evidence: >-
+    swf-epicprod commit "Production status grids: per generator family, beam against Q2, each sample's delivery and registration" (2026-10-22); swf-epicprod PRs 15 and 16
+
+- title: Jobs write at JLab with storage tokens from PanDA
+  summary: >-
+    Production jobs write and register their output at JLab with storage tokens issued by PanDA, with the eicprod proxy kept as fallback.
+  tags: [dev, ddm]
+  importance: routine
+  shipped: 2026-10-22
+  contact: panta-123
+  refs:
+    - "[EPICPROD_PAYLOAD.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/EPICPROD_PAYLOAD.md)"
+  evidence: >-
+    swf-epicprod PR 5, merged 2026-10-22; release notes v46 (Payload and data)
+
+- title: The job throttler regulates both PanDA VOs
+  summary: >-
+    The ePIC job throttler in JEDI has throttled both PanDA VOs, epic and wlcg, since 21 October; before that it only observed. Task, job and pilot regulation are coordinated.
+  tags: [ops, panda]
+  importance: routine
+  shipped: 2026-10-21
+  contact: wenaus
+  refs:
+    - "[EPIC_JOB_THROTTLER.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/EPIC_JOB_THROTTLER.md)"
+  evidence: >-
+    release notes v46 (Regulation and placement)
+
+- title: The ready buffer on every production page
+  summary: >-
+    Work waiting for the pressure front shows as "in the ready buffer" on every page. The compose page's task list and the catalog gain a Queue column and filter, and a task's Site control says who put it in the buffer, when, and what the front does next.
+  tags: [users, ops, pcs]
+  importance: routine
+  shipped: 2026-10-19
+  contact: wenaus
+  refs:
+    - "[CONTINUOUS_PRODUCTION.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/CONTINUOUS_PRODUCTION.md)"
+  evidence: >-
+    release notes v45 (The ready buffer); swf-epicprod commit "Ready buffer: an off queue is never recommended; the pages say so" (2026-10-19)
+
+- title: Background mixing follows the dataset's background tag
+  summary: >-
+    A background (k) tag over a real signal turns background mixing on in the task's configuration; standalone samples never mix. The task page shows the task's own mixing, and readiness requires the tag's background files.
+  tags: [users, pcs]
+  importance: high
+  shipped: 2026-10-19
+  contact: wenaus
+  refs:
+    - "[PCS_BACKGROUND_TAG.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/PCS_BACKGROUND_TAG.md)"
+  evidence: >-
+    swf-epicprod commit "Background mixing follows the k tag; a trial needs no campaign plan" (2026-10-19); release notes v45 (PCS)
+
+- title: A trial needs no campaign plan
+  summary: >-
+    Composing, locking and submitting a trial skip the event target, priority and per-job count; a trial sizes its job from its own event count.
+  tags: [users, pcs]
+  importance: routine
+  shipped: 2026-10-19
+  contact: wenaus
+  refs:
+    - "[Release notes v45](https://github.com/BNLNPPS/swf-testbed/blob/main/RELEASE_NOTES.md)"
+  evidence: >-
+    swf-epicprod commit "Background mixing follows the k tag; a trial needs no campaign plan" (2026-10-19); release notes v45 (PCS)
+
+- title: Developer payload canaries from a pull request or branch
+  summary: >-
+    A developer can run the epicprod payload from a pull request or branch as a payload canary, with switches and a token-only credential, at task priority 1000.
+  tags: [dev]
+  importance: routine
+  shipped: 2026-10-19
+  contact: wenaus
+  refs:
+    - "[DEVELOPING_THE_PAYLOAD.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/DEVELOPING_THE_PAYLOAD.md)"
+  evidence: >-
+    swf-monitor commit "Payload canaries from a pull request or branch, with switches and a token-only credential" (2026-10-19)
+
+- title: Memory-failed jobs retry at the next memory step
+  summary: >-
+    A job that failed on memory, by an out-of-memory kill or an OSG glidein eviction, is retried at the next memory step, so its retry does not fail again on the same slot size.
+  tags: [users, ops, panda]
+  importance: routine
+  shipped: 2026-10-19
+  contact: wenaus
+  refs:
+    - "[EPICPROD_RETRIES.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/EPICPROD_RETRIES.md)"
+  evidence: >-
+    swf-epicprod commit "Retries: memory-failed jobs retry at the next memory step" (2026-10-19)
+
+- title: stomp.py 9.0.0 required for agents and user testbeds
+  summary: >-
+    swf-common-lib requires stomp.py 9.0.0 and Python 3.10. Release 8.2 lost about 4% of TLS connections to the broker; user testbed installations must upgrade.
+  tags: [dev, testbed]
+  importance: urgent
+  shipped: 2026-10-19
+  contact: wenaus
+  refs:
+    - "[Release notes v45](https://github.com/BNLNPPS/swf-testbed/blob/main/RELEASE_NOTES.md)"
+  evidence: >-
+    swf-common-lib commit "Require stomp.py 9.0.0: one thread for TLS I/O" (2026-10-19); release notes v45 (Messaging)
+
+- title: TeamComms embedded in epicprod
+  summary: >-
+    Developers and their LLM sessions message each other through TeamComms, signed in with devcloud authentication.
+  tags: [dev]
+  importance: routine
+  shipped: 2026-09-14
+  contact: wenaus
+  refs:
+    - "[TeamComms](https://github.com/eic/epic-wfms-docs/blob/main/docs/teamcomms.md)"
+  evidence: >-
+    swf-monitor commit "Embed TeamComms with devcloud authentication and durable messaging" (2026-09-14)
+
+- title: "The user view: epicprod reduced for collaborators"
+  summary: >-
+    The bold User view link, or any URL with ?user_view=1, shows epicprod with less on it: Requests, Campaign, Find data and Help.
+  tags: [users]
+  importance: high
+  shipped: 2026-09-10
+  contact: wenaus
+  refs:
+    - "[User view](https://epic-devcloud.org/prod/?user_view=1)"
+    - "[USER_VIEW.md](https://github.com/BNLNPPS/swf-monitor/blob/infra/baseline-v47/docs/USER_VIEW.md)"
+  evidence: >-
+    swf-monitor commit "User view: the reduced epicprod face behind one parameter" (2026-09-10)
+
+- title: MCP access to the live system with a personal token
+  summary: >-
+    Sign in at epic-devcloud.org, create a token at /prod/account/tokens/ and add the MCP server to an LLM client; its tools run as the signed-in user.
+  tags: [users, dev]
+  importance: high
+  shipped: 2026-09-04
+  contact: wenaus
+  refs:
+    - "[MCP_CLIENTS.md](https://github.com/BNLNPPS/swf-monitor/blob/infra/baseline-v47/docs/MCP_CLIENTS.md)"
+  evidence: >-
+    swf-remote commit "MCP relay at /prod/mcp/ with per-user tokens for headless clients" (2026-09-04)

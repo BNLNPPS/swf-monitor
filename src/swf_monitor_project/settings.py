@@ -122,6 +122,7 @@ INSTALLED_APPS = [
     "canary.store",  # site-canary: site health and landscape map
     "pcs",  # Physics Configuration System
     "ai",  # AI proposals and human-in-the-loop automation
+    "help",  # Help menu pages: What's new
     "monitor_app",  # Changed from "swf_monitor_project.monitor_app"
     "teamcomms.service.apps.ServiceConfig",
     "teamcomms.entries.apps.EntriesConfig",
@@ -433,6 +434,15 @@ COMMON QUERIES:
 - Retrieve AI assessment rows? → Use the exact ai_content.retrieval block returned by detail tools, e.g. epic_get_ai_content(ids=[17, 23])
 - Outstanding AI proposals for human review? → ai_list_proposals() — show the returned display text to the human verbatim; each line starts with the proposal ref (e.g. cp-12)
 - Human says 'approve cp-12'? → ai_decide_proposal(ref='cp-12', decision='approve', username=<the deciding human's username>) — relay only explicit human instructions naming the ref; deciders must be on the SysConfig approver list (ai_proposal_mcp_approvers)
+- What's new? Recent epicprod developments? → whats_new_list() (filters: tags='ops', importance='urgent,high', since='2026-10-01'); one item in full → whats_new_get(slug='...')
+
+WHAT'S NEW WATCH:
+A change that users, operators or developers should know about gets its
+What's new item as part of the task that ships it, like its documentation.
+Once it is in production and not on the list (whats_new_list), add it:
+whats_new_add(title, summary, tags, importance, shipped, contact,
+username). It is not proposed and waits for no approval. An item already on
+the list is corrected with whats_new_edit, not added again.
 
 AI CONTENT RETRIEVAL:
 Detail-style production tools such as pcs_prodtask_get, panda_study_job,

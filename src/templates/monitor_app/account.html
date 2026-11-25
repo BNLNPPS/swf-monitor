@@ -156,6 +156,94 @@
         </p>
         <p class="text-muted">Ops: act on the production system, administer accounts, set request priorities. PAC: set request priorities, as a physics analysis coordinator. Admin: staff on this system. Roles are granted on the <a href="{% url 'monitor_app:user_admin' %}">User admin</a> page.</p>
 
+        <h3 style="margin-top: 24px;">API token</h3>
+        <p>A token lets a script or a command line use the API as you, for
+          example to compose PCS draft tasks. Send it as the header
+          <code>Authorization: Token &lt;key&gt;</code> to
+          <code>https://epic-devcloud.org/prod/pcs/api/</code>, or inside BNL to
+          <code>https://pandaserver02.sdcc.bnl.gov/swf-monitor/pcs/api/</code>.
+          Keep it private: anyone holding it acts as you.</p>
+        <div id="api-token" data-url="{% url 'pcs:my_api_token' %}"
+             data-may-issue="{% if authority.may_act %}1{% endif %}">
+          {% csrf_token %}
+          <p id="api-token-state">
+            {% if api_token_created %}You have a token, made
+              <span data-relative-time="{{ api_token_created }}"></span>
+              (on {{ api_token_created|slice:":10" }}).
+            {% else %}You have no token.{% endif %}
+          </p>
+          <p>
+            <button type="button" class="btn btn-secondary btn-sm" data-token-action="show"{% if not api_token_created %} hidden{% endif %}>Show token</button>
+            {% if authority.may_act %}
+            <button type="button" class="btn btn-primary btn-sm" data-token-action="create"{% if api_token_created %} hidden{% endif %}>Create token</button>
+            <button type="button" class="btn btn-success btn-sm" data-token-action="regenerate"{% if not api_token_created %} hidden{% endif %}>Regenerate</button>
+            {% endif %}
+            <button type="button" class="btn btn-danger btn-sm" data-token-action="revoke"{% if not api_token_created %} hidden{% endif %}>Revoke</button>
+          </p>
+          {% if not authority.may_act %}
+          <p>A token is issued only to an account that may act on the
+            production system: a token passes writes without the authority
+            check, so issuing it is the check.</p>
+          {% endif %}
+          <p id="api-token-key" hidden><code style="font-size: 1.05rem; user-select: all;"></code></p>
+          <p id="api-token-error" style="color: #a4001d;" hidden></p>
+        </div>
+        <script>
+        (function () {
+          const box = document.getElementById('api-token');
+          const url = box.dataset.url;
+          const csrf = box.querySelector('[name=csrfmiddlewaretoken]').value;
+          const keyRow = document.getElementById('api-token-key');
+          const errRow = document.getElementById('api-token-error');
+          const stateRow = document.getElementById('api-token-state');
+          const confirmText = {
+            regenerate: 'Regenerate your token? The current one stops working at once, in every script that uses it.',
+            revoke: 'Revoke your token? It stops working at once, in every script that uses it.',
+          };
+          function show(state) {
+            const has = state.has_token;
+            stateRow.textContent = has
+              ? 'You have a token, made ' + state.created.slice(0, 10) + '.'
+              : 'You have no token.';
+            box.querySelectorAll('[data-token-action]').forEach(function (b) {
+              const a = b.dataset.tokenAction;
+              b.hidden = (a === 'create') ? has : !has;
+            });
+            if (state.token) {
+              keyRow.querySelector('code').textContent = state.token;
+              keyRow.hidden = false;
+            } else {
+              keyRow.hidden = true;
+            }
+          }
+          box.addEventListener('click', async function (e) {
+            const b = e.target.closest('[data-token-action]');
+            if (!b) return;
+            const action = b.dataset.tokenAction;
+            if (confirmText[action] && !confirm(confirmText[action])) return;
+            errRow.hidden = true;
+            b.disabled = true;
+            try {
+              const r = action === 'show'
+                ? await fetch(url + '?show=1', { credentials: 'same-origin' })
+                : await fetch(url, {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+                    body: JSON.stringify({ action: action }),
+                  });
+              const j = await r.json().catch(function () { return {}; });
+              if (!r.ok) throw new Error(j.error || j.detail || ('request failed, HTTP ' + r.status));
+              show(j);
+            } catch (err) {
+              errRow.textContent = err.message;
+              errRow.hidden = false;
+            } finally {
+              b.disabled = false;
+            }
+          });
+        })();
+        </script>
+
         <h3 style="margin-top: 24px;">Change Password</h3>
         {% if is_tunnel %}
         <p><a class="btn btn-primary btn-sm" href="/prod/accounts/password_change/">Change password</a></p>

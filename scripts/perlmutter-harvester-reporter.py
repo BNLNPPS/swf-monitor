@@ -305,7 +305,11 @@ def collect(state):
         record['queue_status'] = error(exc)
     record['harvester_db'] = harvester_db(since, now, now, limits)
     record['fetching'] = {'error': FETCH}
-    record['adjustment'] = {'queues': {}, 'read': {'error': LOGS}}
+    # Unavailable by design, not a failed read: every Perlmutter queue sets no
+    # ratio, so the limit in force is the launch limits' nQueueLimitWorker
+    # and the adjuster's log is never needed. As an error it raised a false
+    # amber on the room (swf-watch, 2026-11-16; Torre Wenaus, 2026-11-18: yes).
+    record['adjustment'] = {'queues': {}, 'read': {'unavailable': LOGS}}
     record['failed_calls'] = {'error': LOGS}
     record['daemons'] = {'error': LOGS}
     record['processes'] = {'error': "the harvester runs on a NERSC login node, whose process "

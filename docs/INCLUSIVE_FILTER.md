@@ -40,7 +40,8 @@ bookmark opens it. Back leaves the page.
     ?f=process:DIS|beam:10x100
 
 Match all adds `match=all`; Match any, the default, is the parameter's
-absence.
+absence. A page with one mode fixes it (`InclusiveFilter(..., match='all')`):
+the include then shows no Match control and the URLs carry no `match`.
 
 A link may frame the page with `n`, the same syntax: pairs every row
 must carry, an intersection, which is what a count on another page
@@ -108,6 +109,7 @@ anchors keep server URLs, so a middle click opens the right page.
 | Page | Since |
 |---|---|
 | Campaign plan (`/pcs/plan/`), both the plan and the assembly view; its delivery map follows the selection through the Snapper embed's `setHidden` hook (snapper-ai docs/INTEGRATION.md § 4) | 2026-09-10 |
+| What's new (`/help/whats-new/`), fixed to match all | 2026-10-30 |
 
 Other pages switch as decided, one at a time, by replacing their facet
 construction with the calls above.

@@ -215,6 +215,12 @@ propagation pilot is the worked example of each item.
   editions are permanent identities and a request or task made in error
   is withdrawn.
 
+- **What's new item** (`whats_new`, ref `wn`) — retired 2026-11-12. A
+  What's new item is a required part of the task that ships the change,
+  like its documentation, not a proposal: the session adds it directly
+  ([WHATS_NEW.md](WHATS_NEW.md), Items added by LLM sessions; Torre
+  Wenaus, 2026-11-12). The category's earlier rows keep their `wn` refs.
+
 ## Review surfaces
 
 Proposals are **visible but inert** on the open face: anyone can see a

@@ -5,8 +5,9 @@ from django.db import connections, transaction
 
 from .cached_product import get_product
 from .panda.constants import PANDA_SCHEMA
+from swf_epicprod.payload import metric_keys
 
-PRODUCT_KEY = 'task_resource_peaks:v2'
+PRODUCT_KEY = 'task_resource_peaks:v3'
 BIN_SECONDS = 900
 
 
@@ -37,7 +38,7 @@ def assemble(rows, now):
     return {'from': (now - timedelta(hours=12)).isoformat(),
             'through': now.isoformat(), 'times': [datetime.fromtimestamp(t, timezone.utc).isoformat() for t in times],
             'bin_minutes': 15, 'tasks': sorted(tasks.values(), key=lambda t: t['id']),
-            'units': {'memory': 'GiB', 'disk': 'GiB', 'files': 'files'},
+            'units': {'memory': 'GB', 'disk': 'GB', 'files': 'files'},
             'scale_peaks': scale_peaks,
             'basis': 'Production jobs only. Maximum reported job peak in each 15-minute observation/completion bin; running jobs use their latest update.'}
 
@@ -75,9 +76,9 @@ def build():
         SELECT DISTINCT ON (pandaid) * FROM raw ORDER BY pandaid, observed DESC
       ), measured AS (
         SELECT jeditaskid, FLOOR(EXTRACT(EPOCH FROM observed)/900)::bigint*900 bucket,
-          CASE WHEN maxrss>0 THEN maxrss/1048576.0 END memory,
-          substring(jobmetrics from '(?:^|[[:space:]])scratchPeakMB=([0-9]+)')::double precision/1024 disk,
-          substring(jobmetrics from '(?:^|[[:space:]])scratchPeakFiles=([0-9]+)')::bigint files
+          CASE WHEN maxrss>0 THEN maxrss*1024/1e9 END memory,
+          {metric_keys.sql_value('scratch_peak_mb', value='[0-9]+')}::double precision*1048576/1e9 disk,
+          {metric_keys.sql_value('scratch_peak_files', value='[0-9]+')}::bigint files
         FROM jobs WHERE observed >= %s AND observed <= %s AND jeditaskid IS NOT NULL
       ), limits AS MATERIALIZED (SELECT {quantile_fields} FROM measured)
       SELECT m.jeditaskid,t.taskname,m.bucket,COUNT(*),MAX(m.memory),MAX(m.disk),MAX(m.files),

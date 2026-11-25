@@ -1,5 +1,6 @@
 """Worker filesystem headroom from native-pilot heartbeats, with retained history."""
 from datetime import datetime, timezone
+from swf_epicprod.payload import metric_keys
 import re
 
 SITES = ('UM_GREX_PanDA_1',)
@@ -10,13 +11,31 @@ MEASURES = (lambda row: row['free_fraction'], lambda row: row['free_bytes'],
             lambda row: row['free_inodes'] / row['total_inodes'] if row['total_inodes'] else 1)
 
 
+def _disk_values(metrics):
+    """The native pilot's disk readings of a job metrics string, keyed by
+    their long names (ceFreeMB, diskSample, ...), read from the short names
+    written now or the long ones of older jobs (swf-epicprod
+    payload/metric_keys.py)."""
+    parsed = metric_keys.parse(metrics or '')
+    values = {}
+    for label in ('ce', 'pilot', 'scratch'):
+        for old, field in (('FreeMB', 'free_mb'), ('TotalMB', 'total_mb'),
+                           ('IFree', 'inodes_free'), ('ITotal', 'inodes_total')):
+            value = parsed.get(f'{label}_{field}', '')
+            if value.isdigit():
+                values[label + old] = int(value)
+    stamp = parsed.get('disk_sample', '')
+    if stamp.isdigit():
+        values['diskSample'] = int(stamp)
+    return values
+
+
 def summarize(rows, now=None):
     now = now or datetime.now(timezone.utc).timestamp()
     volumes, worst, running, reporting = {}, {}, 0, 0
     for site, pandaid, metrics in rows:
         running += 1
-        values = {key: int(value) for key, value in
-                  re.findall(r'\b(diskSample|(?:ce|pilot|scratch)(?:FreeMB|TotalMB|IFree|ITotal))=(\d+)', metrics or '')}
+        values = _disk_values(metrics)
         stamp = values.get('diskSample')
         if not stamp or not -60 <= now - stamp <= 900:
             continue

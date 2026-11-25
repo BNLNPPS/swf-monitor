@@ -57,6 +57,7 @@ LIVE_SITE_LABELS = {}
 # GREX runs eight pilots per Slurm worker (2026-10-20).
 from swf_epicprod.regulation import PILOTS_PER_WORKER
 from swf_epicprod import perlmutter_production
+from swf_epicprod.payload import metric_keys
 OSG_SUBMIT_HOST = 'osgsub01'
 # The harvester reporters (docs/HARVESTER_REPORTER.md); each record names
 # the queues its harvester serves. osgsub01's own key is the OSG submit
@@ -76,6 +77,10 @@ LOG_STAGEOUT_CODES = (1137, 1151, 1152)
 # registered under a derived name (swf-epicprod RUCIO_RESILIENCE.md,
 # Measure 3), so it is registered.
 REGISTRATION_OWED = INCOMPLETE_REGISTRATION_OUTCOMES
+
+# The outcomes of an Event Service close (the harness record's
+# ``closes[].outcome``) under which its file is in JLab Rucio.
+ES_CLOSE_REGISTERED = ('registered', 'diverted')
 
 # The production output RSE: every production configuration names it as
 # OUT_RSE (swf-epicprod RUCIO_FAILOVER_STASH.md).
@@ -105,6 +110,10 @@ LIVE_WINDOW_H = 12
 # A task Move is normal operation, shown at INFO for this long (SysConfig
 # comp.live.move_hours; Torre Wenaus, 2026-10-29: "make it 3hrs").
 LIVE_MOVE_HOURS = 3
+# An item added to What's new is shown at INFO for this long (SysConfig
+# comp.live.whats_new_hours; Torre Wenaus, 2026-10-30: "info level, visible.
+# lifetime, what, 12hr?"). The screen's window bounds it.
+LIVE_WHATS_NEW_HOURS = 12
 
 
 def _worst(levels):
@@ -365,6 +374,7 @@ class _Build:
         self.now = timezone.now()
         self.hour_ago = self.now - timedelta(hours=1)
         self.errors = []
+        self._es = None
 
     def part(self, name, fn, fallback=None):
         try:
@@ -373,6 +383,61 @@ class _Build:
             logger.exception('comp snapshot: %s failed', name)
             self.errors.append({'part': name, 'error': f'{type(exc).__name__}: {exc}'})
             return fallback
+
+    def not_trial(self, column='jeditaskid'):
+        """`` AND NOT <trial>``: trials run as production jobs but are not
+        production, and no production reading of the room counts them
+        (Torre Wenaus, 2026-11-18, after one trial job turned the JLab Rucio
+        line red: "trials are not prod"; compute_efficiency.trial_sql)."""
+        from monitor_app.compute_efficiency import trial_sql
+        return f' AND NOT {trial_sql(column)}'
+
+    def es_closes(self):
+        """The Event Service closes registered at JLab in the last two days
+        (COMP_SNAPSHOT.md, Storage), read once per build: ``[(ended_at,
+        events, queue, jeditaskid)]``. An ES job registers each close as it
+        stands, so its job metrics carry no ``payloadRegistration`` mark and
+        the payload-report readers never see its output. The closes come
+        from the harness records filed with the jobs (``EpicProdJob.data
+        ['es_record']``, refreshed every five minutes for running jobs), the
+        queue and task from PanDA. A failed read is listed in ``errors[]``
+        once and reads as no closes."""
+        if self._es is None:
+            self._es = self.part('es_closes', self._read_es_closes, [])
+        return self._es
+
+    def production_running(self):
+        """Production jobs running now, anywhere: the work whose output the
+        JLab reading counts (canaries and other trials are not production)."""
+        return int(_rows(f'''SELECT COUNT(*) FROM "{self.S}"."jobsactive4"
+                             WHERE processingtype = 'epicproduction' AND jobstatus = 'running'
+                             {self.not_trial()}''')[0][0])
+
+    def _read_es_closes(self):
+        from monitor_app.models import EpicProdJob
+        since = self.now - timedelta(days=2)
+        closes = ("CASE WHEN jsonb_typeof(j.data -> 'es_record' -> 'record' -> 'closes') = 'array' "
+                  "THEN j.data -> 'es_record' -> 'record' -> 'closes' ELSE '[]'::jsonb END")
+        # A record is filed after each of its closes, so its row's
+        # updated_at bounds the closes it holds.
+        sql = f'''SELECT j.pandaid, (c ->> 'ended_at')::float, COALESCE((c ->> 'events')::bigint, 0)
+                  FROM "{EpicProdJob._meta.db_table}" j, jsonb_array_elements({closes}) c
+                  WHERE j.updated_at >= %s AND c ->> 'outcome' = ANY(%s)
+                    AND (c ->> 'ended_at')::float >= %s'''
+        with connections['default'].cursor() as cursor:
+            cursor.execute(sql, (since, list(ES_CLOSE_REGISTERED), since.timestamp()))
+            rows = cursor.fetchall()
+        ids = sorted({int(p) for p, _t, _e in rows})
+        jobs = {}
+        if ids:
+            for p, site, tid in _rows(f'''
+                    SELECT pandaid, computingsite, jeditaskid FROM "{self.S}"."jobsactive4" WHERE pandaid = ANY(%s)
+                    UNION ALL
+                    SELECT pandaid, computingsite, jeditaskid FROM "{self.S}"."jobsarchived4" WHERE pandaid = ANY(%s)''',
+                                      (ids, ids)):
+                jobs[int(p)] = (site or '', int(tid) if tid else None)
+        return [(datetime.fromtimestamp(t, dt_timezone.utc), int(events), *jobs.get(int(p), ('', None)))
+                for p, t, events in rows]
 
     # -- readings -------------------------------------------------------
 
@@ -387,11 +452,11 @@ class _Build:
             FROM (
               SELECT {column}, jobstatus, corecount, endtime, starttime FROM "{self.S}"."jobsactive4"
                WHERE endtime >= %s AND processingtype = 'epicproduction'
-                 AND jobstatus IN ('finished', 'failed')
+                 AND jobstatus IN ('finished', 'failed'){self.not_trial()}
               UNION ALL
               SELECT {column}, jobstatus, corecount, endtime, starttime FROM "{self.S}"."jobsarchived4"
                WHERE endtime >= %s AND processingtype = 'epicproduction'
-                 AND jobstatus IN ('finished', 'failed')) t
+                 AND jobstatus IN ('finished', 'failed'){self.not_trial()}) t
             GROUP BY 1, 2'''
         for key, status, n, core_h in _rows(sql, (self.hour_ago, self.hour_ago)):
             entry = out.setdefault(key or '', {'finished': 0, 'failed': 0,
@@ -420,10 +485,10 @@ class _Build:
                      CASE {diag_case} ELSE '' END AS diag
                 FROM (
                   SELECT computingsite, transexitcode, {fields} FROM "{self.S}"."jobsactive4"
-                   WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus = 'failed'
+                   WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus = 'failed'{self.not_trial()}
                   UNION ALL
                   SELECT computingsite, transexitcode, {fields} FROM "{self.S}"."jobsarchived4"
-                   WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus = 'failed') j) t
+                   WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus = 'failed'{self.not_trial()}) j) t
             GROUP BY 1, 2, 3, 5'''
         cats = {}
         for site, component, code, diag, exitcode, n in _rows(sql, (self.hour_ago, self.hour_ago)):
@@ -612,7 +677,8 @@ class _Build:
         completed tasks; Torre Wenaus, 2026-10-24), per physics
         configuration (COMP_SNAPSHOT.md, Arrivals): the RECO files the
         finished production jobs registered and their events, from each
-        job's payload report, grouped by task and the task's PC. Newest
+        job's payload report, and the Event Service closes registered
+        (``es_closes``), grouped by task and the task's PC. Newest
         arrival first. Each PC carries its physics in words and the plan's
         delivered and target events, read from the stored completion
         record without building it."""
@@ -624,9 +690,26 @@ class _Build:
                   JOIN "{self.S}"."jedi_tasks" t ON t.jeditaskid = j.jeditaskid
                   LEFT JOIN "{self.S}"."metatable" m ON m.pandaid = j.pandaid
                   WHERE j.endtime >= %s AND j.processingtype = 'epicproduction'
-                    AND j.jobstatus = 'finished' AND j.jobmetrics LIKE %s
+                    AND j.jobstatus = 'finished' AND j.jobmetrics ~ %s{self.not_trial('j.jeditaskid')}
                   GROUP BY 1, 2, 3, 4'''
-        rows = _rows(sql, (since, '%payloadRegistration=registered%'))
+        rows = _rows(sql, (since, metric_keys.regex('registration', 'registered')))
+        # Event Service closes, each a RECO file registered as it stood.
+        cutoff = self.now - timedelta(hours=hours)
+        es = {}
+        for ended_at, events, queue, tid in self.es_closes():
+            if tid is None or ended_at < cutoff:
+                continue
+            e = es.setdefault((tid, queue), [0, 0, ended_at, ended_at])
+            e[0] += 1
+            e[1] += events
+            e[2], e[3] = min(e[2], ended_at), max(e[3], ended_at)
+        if es:
+            tids = sorted({tid for tid, _q in es})
+            tasks = {int(t): (name, status) for t, name, status in _rows(
+                f'SELECT jeditaskid, taskname, status FROM "{self.S}"."jedi_tasks" WHERE jeditaskid = ANY(%s)',
+                (tids,))}
+            rows = list(rows) + [(tid, *tasks.get(tid, ('', '')), queue, *e)
+                                 for (tid, queue), e in es.items()]
         pcs = _task_pcs({(int(r[0]), r[1]) for r in rows})
         progress = _plan_progress()
         by_pc = {}
@@ -704,7 +787,7 @@ class _Build:
                   LEFT JOIN "{self.S}"."jedi_datasets" d ON d.jeditaskid = t.jeditaskid
                        AND d.masterid IS NULL AND d.type IN ('input', 'pseudo_input')
                   WHERE t.status IN ('done', 'finished') AND t.processingtype = 'epicproduction'
-                    AND COALESCE(t.endtime, t.statechangetime) >= %s
+                    AND COALESCE(t.endtime, t.statechangetime) >= %s{self.not_trial('t.jeditaskid')}
                   GROUP BY 1, 2, 3, 4, 5 ORDER BY 5 DESC, 1 DESC'''
         items = []
         rows = _rows(sql, (since.astimezone(dt_timezone.utc).replace(tzinfo=None),))
@@ -940,7 +1023,7 @@ class _Build:
               FROM "{self.S}"."metatable" m JOIN "{self.S}"."jobsarchived4" j ON j.pandaid = m.pandaid
               WHERE j.endtime >= %s AND j.endtime < %s
                 AND j.processingtype = 'epicproduction' AND j.jobstatus = 'finished'
-                AND (j.jobmetrics LIKE %s OR j.jobmetrics LIKE %s)),
+                AND (j.jobmetrics ~ %s OR j.jobmetrics ~ %s){self.not_trial('j.jeditaskid')}),
             d AS (
               SELECT r.site, r.endtime, r.p, did FROM r, jsonb_array_elements_text(
                 CASE WHEN jsonb_typeof(r.p -> 'registration' -> 'dids') = 'array'
@@ -955,10 +1038,20 @@ class _Build:
             GROUP BY 1, 2'''
         out = {}
         for k, kind, n, nbytes, events in _rows(sql, (since or self.hour_ago, until or self.now,
-                                                      '%payloadRegistration=registered%',
-                                                      '%payloadRegistration=diverted%')):
+                                                      metric_keys.regex('registration', 'registered'),
+                                                      metric_keys.regex('registration', 'diverted'))):
             out.setdefault(int(k) if bin_seconds else (k or ''), {})[kind] = (
                 int(n), int(nbytes or 0), int(events or 0))
+        # Event Service closes, each a RECO file registered as it stood,
+        # keyed by the close's end; a close record carries no byte count.
+        start, end = since or self.hour_ago, until or self.now
+        for ended_at, events, queue, _tid in self.es_closes():
+            if not start <= ended_at < end:
+                continue
+            k = (int((ended_at.timestamp() // bin_seconds + 1) * bin_seconds)
+                 if bin_seconds else queue)
+            n, nbytes, ev = out.setdefault(k, {}).get('reco', (0, 0, 0))
+            out[k]['reco'] = (n + 1, nbytes, ev + events)
         return out
 
     def registration_outcomes(self, since=None, until=None, bin_seconds=None):
@@ -969,11 +1062,11 @@ class _Build:
         key = (f'((FLOOR(EXTRACT(EPOCH FROM endtime) / {int(bin_seconds)}) + 1)'
                f' * {int(bin_seconds)})::bigint' if bin_seconds else 'computingsite')
         sql = f'''
-            SELECT {key}, substring(jobmetrics from 'payloadRegistration=([A-Za-z_]+)'),
+            SELECT {key}, {metric_keys.sql_value('registration', value='[A-Za-z_]+')},
                    COUNT(*), MAX(endtime)
             FROM "{self.S}"."jobsarchived4"
             WHERE endtime >= %s AND endtime < %s
-              AND processingtype = 'epicproduction' AND jobstatus = 'finished'
+              AND processingtype = 'epicproduction' AND jobstatus = 'finished'{self.not_trial()}
             GROUP BY 1, 2'''
         out, last = {}, None
         for k, outcome, n, end in _rows(sql, (since or self.hour_ago, until or self.now)):
@@ -1002,11 +1095,11 @@ class _Build:
             FROM (
               SELECT pandaid, computingsite, jobstatus, jobmetrics, piloterrorcode, piloterrordiag, endtime
                 FROM "{self.S}"."jobsarchived4"
-               WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus IN ('finished', 'failed')
+               WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus IN ('finished', 'failed'){self.not_trial()}
               UNION ALL
               SELECT pandaid, computingsite, jobstatus, jobmetrics, piloterrorcode, piloterrordiag, endtime
                 FROM "{self.S}"."jobsactive4"
-               WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus IN ('finished', 'failed')) j
+               WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus IN ('finished', 'failed'){self.not_trial()}) j
             JOIN "{self.S}"."filestable4" f ON f.pandaid = j.pandaid AND f.type = 'log'
             GROUP BY 1'''
         diag, held = '%stage-out%', '%logHeld=%'
@@ -1018,15 +1111,15 @@ class _Build:
                 last = end
         return out, _aware(last)
 
-    def latest_finished(self, metrics_like, negate=False):
+    def latest_finished(self, metrics_regex, negate=False):
         """The end time of the newest finished production job in two days
-        whose job metrics match (or, negated, do not match) the pattern:
-        the newest arrival when none arrived in the last hour."""
+        whose job metrics match (or, negated, do not match) the regular
+        expression: the newest arrival when none arrived in the last hour."""
         last = _rows(f'''
             SELECT MAX(endtime) FROM "{self.S}"."jobsarchived4"
             WHERE endtime >= %s AND processingtype = 'epicproduction' AND jobstatus = 'finished'
-              AND COALESCE(jobmetrics, '') {'NOT ' if negate else ''}LIKE %s''',
-                     (self.now - timedelta(days=2), metrics_like))[0][0]
+              AND COALESCE(jobmetrics, '') {'!' if negate else ''}~ %s{self.not_trial()}''',
+                     (self.now - timedelta(days=2), metrics_regex))[0][0]
         return _aware(last)
 
     def jlab_flow(self, edges):
@@ -1081,10 +1174,12 @@ class _Build:
             'registration_incomplete_jobs': [column[t][2] if t in column else None for t in ends],
         }
 
-    def storage(self, site_of, edges=None):
+    def storage(self, site_of, edges=None, running=None):
         """The E1s' Rucio storage (docs/COMP_SNAPSHOT.md, Storage): what
         arrived in the last hour, what did not, what is still owed, the
-        output RSE's capacity, and the health."""
+        output RSE's capacity, and the health. ``running`` is the
+        production jobs running now (``production_running``); with none,
+        the age of the newest JLab registration reads grey."""
         def site_id(queue):
             return site_of.get(queue) or re.sub(r'[^a-z0-9]+', '-', (queue or 'not reported').lower()).strip('-')
 
@@ -1110,13 +1205,22 @@ class _Build:
                                  f'{registered} registered, {unsettled} not registered (pending or unfinished)')
         if last is None:
             last = self.part('latest_registration',
-                             lambda: self.latest_finished('%payloadRegistration=registered%'), None)
-        if last is None:
+                             lambda: self.latest_finished(metric_keys.regex('registration', 'registered')), None)
+        es_last = max((t for t, _e, _q, _tid in self.es_closes()), default=None)
+        if es_last is not None and (last is None or es_last > last):
+            last = es_last
+        jlab_age = max(0, int((self.now - last).total_seconds())) if last is not None else None
+        age_min = round(jlab_age / 60, 1) if jlab_age is not None else None
+        if running == 0:
+            # Nothing runs, so nothing is due to arrive: the age is no
+            # evidence either way.
+            arrival = _part('grey', age_min,
+                            'no production job running'
+                            + (f'; latest output registered {age_min} min ago' if age_min is not None
+                               else '; no output registered in two days'))
+        elif last is None:
             arrival = _part('red', None, 'no output registered in two days')
-            jlab_age = None
         else:
-            jlab_age = max(0, int((self.now - last).total_seconds()))
-            age_min = round(jlab_age / 60, 1)
             arrival = _part('green' if age_min <= 30 else 'amber' if age_min <= 120 else 'red',
                             age_min, f'latest output registered {age_min} min ago')
         jlab_sites, by_kind = {}, {}
@@ -1155,7 +1259,7 @@ class _Build:
             s['failed_1h'] += failed
         if last_log is None:
             last_log = self.part('latest_log',
-                                 lambda: self.latest_finished('%logHeld=%', negate=True), None)
+                                 lambda: self.latest_finished('(^|[[:space:]])logHeld=', negate=True), None)
         log_pending = self.part('log_pending', _log_pending, None)
 
         def site_rows(sites):
@@ -1394,7 +1498,8 @@ def build():
     site_of = {q['id']: s['id'] for s in sites_cfg for q in s.get('queues', [])}
     trend = b.part('trend_series', lambda: _trend_series(sites), None)
     storage = b.part('storage', lambda: b.storage(
-        site_of, edges=trend['edges'] if trend else None), [])
+        site_of, edges=trend['edges'] if trend else None,
+        running=b.part('production_running', b.production_running, None)), [])
 
     ready = b.part('ready_tasks', lambda: _ready_tasks(), None)
     released = b.part('released', lambda: _released(b.hour_ago), None)
@@ -1419,7 +1524,8 @@ def build():
         'report': {'text': _report_text(front, sites, storage),
                    'items': _drift_items(drift) + _report_items(
                        front, sites, storage, alarms,
-                       b.part('assessment', _assessment_freshness, None)),
+                       b.part('assessment', _assessment_freshness, None))
+                   + b.part('notices', _notice_items, []),
                    'assessment': b.part('daily_assessment', _latest_daily_assessment, None)},
         'live': b.part('live', _live_records, None),
         'tasks': b.part('tasks', lambda: b.floor_tasks(site_name, alarms, site_of), None),
@@ -1601,6 +1707,7 @@ FRONT_REASONS = {
     'unsized_task': 'a task that cannot be sized', 'no_calibration': 'no calibration yet',
     'canary': 'the canary is failing', 'burn_through': 'jobs burning through',
     'failure_window': 'the failure rate over its threshold', 'credential': 'a credential',
+    'regulator_unverified': "JEDI's job throttler not seen deciding",
 }
 PART_NAMES = {'prod_activity': 'jobs', 'canary': 'canary',
               'snapper_errors': 'failures', 'pilot_supply': 'pilot supply'}
@@ -1656,16 +1763,16 @@ def _latest_daily_assessment():
             'narration': x.get('narration')}
 
 
-def _live_move_hours():
-    """How long a task Move stays on the epicprod-live screen, SysConfig
-    ``comp.live.move_hours``."""
+def _live_hours(key, default):
+    """How long an INFO record of one kind stays on the epicprod-live
+    screen, SysConfig ``key``: ``comp.live.move_hours`` for a task Move,
+    ``comp.live.whats_new_hours`` for an item added to What's new."""
     from monitor_app.models import SysConfig
-    value = SysConfig.get_setting('comp.live.move_hours', LIVE_MOVE_HOURS)
+    value = SysConfig.get_setting(key, default)
     if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
         return value
-    logger.warning('comp.live.move_hours %r is not a number of hours; using %s',
-                   value, LIVE_MOVE_HOURS)
-    return LIVE_MOVE_HOURS
+    logger.warning('%s %r is not a number of hours; using %s', key, value, default)
+    return default
 
 
 def _move_detail(extra, at, task_name):
@@ -1701,7 +1808,8 @@ def _feed_text(extra):
 def _live_records():
     """The epicprod-live screen: the newest warning and error records of
     the live stream, the logs page's live view (ACTION_STREAM.md), each
-    with its own page, and a task Move at INFO for ``comp.live.move_hours``.
+    with its own page, a task Move at INFO for ``comp.live.move_hours``, and
+    an item added to What's new at INFO for ``comp.live.whats_new_hours``.
     The room reads the record anonymously and the logs page is behind the
     login wall, so the records ride here. The floor is live now: records
     from the window only, a node guard trip only for a node new to the
@@ -1719,14 +1827,19 @@ def _live_records():
                         extra_data__action='live_cleared')
                 .values_list('extra_data__cleared_ids', flat=True)):
         cleared.update(int(i) for i in ids or ())
-    moves_since = timezone.now() - timedelta(hours=_live_move_hours())
+    moves_since = timezone.now() - timedelta(
+        hours=_live_hours('comp.live.move_hours', LIVE_MOVE_HOURS))
+    whats_new_since = timezone.now() - timedelta(
+        hours=_live_hours('comp.live.whats_new_hours', LIVE_WHATS_NEW_HOURS))
     rows = (AppLog.objects.filter(live_stream_q())
             .filter(Q(levelname__in=LIVE_LEVELS)
                     | Q(levelname='INFO', timestamp__gte=moves_since,
                         extra_data__action='panda_task_operation',
                         extra_data__operation='reassign')
                     | Q(levelname='INFO', timestamp__gte=moves_since,
-                        extra_data__action='front_decision', extra_data__outcome='fed'))
+                        extra_data__action='front_decision', extra_data__outcome='fed')
+                    | Q(levelname='INFO', timestamp__gte=whats_new_since,
+                        extra_data__action='whats_new_create'))
             .exclude(id__in=cleared)
             .order_by('-timestamp')
             .values('id', 'timestamp', 'levelname', 'message', 'instance_name',
@@ -2293,6 +2406,22 @@ def _stable_numbers(keys, now=None):
     return {key: (held[key]['n'], held[key]['since']) for key in keys}
 
 
+# A measured quantity on a line: a percent or a byte size.
+LINE_QUANTITY = re.compile(r'(?<![\w.])(\d+\.\d+)(?=\s*(?:%|[kMGTP]B\b))')
+
+
+def _rounded(text):
+    """A line's quantities rounded for the space the floor has (Torre Wenaus,
+    2026-10-30: "round off and '.0' on 100.0 is utterly superfluous"):
+    whole numbers, one decimal below 10, never a trailing .0."""
+    def whole(match):
+        value = float(match.group(1))
+        if value >= 10:
+            return str(int(value + 0.5))
+        return f'{value:.1f}'.rstrip('0').rstrip('.')
+    return LINE_QUANTITY.sub(whole, text)
+
+
 def _numbered(items, sites):
     """The report's lines newest first, the biggest number at the top
     (Torre Wenaus, 2026-10-28: "reverse time order, which means I should
@@ -2302,6 +2431,7 @@ def _numbered(items, sites):
     worst of its health, status and lines."""
     for item in items:
         item.setdefault('key', item.get('text') or '')
+        item['text'] = _rounded(item.get('text') or '')
     try:
         numbers = _stable_numbers(list(dict.fromkeys(i['key'] for i in items)))
     except Exception:
@@ -2366,6 +2496,32 @@ def _pause_accounts(task_ids):
     return out
 
 
+def _notice_items():
+    """Production now lines a person put up (``prod_now_notice`` records,
+    scripts/prod-now-notice.py): grey, informational, each shown for the
+    hours it was given (Torre Wenaus, 2026-10-30: "add a visible prod now
+    entry info level ... lifetime 24hrs")."""
+    from monitor_app.epicprod_logging import EPICPROD_APP_NAME
+    from monitor_app.models import AppLog
+    now = timezone.now()
+    items = []
+    for r in (AppLog.objects
+              .filter(app_name=EPICPROD_APP_NAME, extra_data__action='prod_now_notice')
+              .order_by('-timestamp').values('id', 'timestamp', 'extra_data')):
+        extra = r['extra_data'] or {}
+        try:
+            hours = float(extra.get('hours'))
+        except (TypeError, ValueError):
+            logger.warning('prod_now_notice %s has no number of hours', r['id'])
+            continue
+        if r['timestamp'] + timedelta(hours=hours) <= now or not extra.get('title'):
+            continue
+        items.append({'level': 'grey', 'key': f"notice:{r['id']}",
+                      'text': str(extra['title']),
+                      'link': extra.get('url') or f"{PUBLIC}/logs/{r['id']}/"})
+    return items
+
+
 def _report_items(front, sites, storage, alarms, assessment):
     """The report as items (docs/COMP_SNAPSHOT.md, Report): what the room's
     floor cannot show, each one line with a level and the page to open.
@@ -2387,6 +2543,9 @@ def _report_items(front, sites, storage, alarms, assessment):
             if (f.get('state') and f.get('state') not in ('supplied', 'fed')
                     and f.get('reason') not in FEED_SWITCH_REASONS):
                 reason = FRONT_REASONS.get(f.get('reason'), '')
+                # A known gate names itself in place of "a gate is red".
+                if f.get('state') == 'degraded' and reason:
+                    words = 'holds new releases'
                 items.append({'level': level, 'site': s['id'], 'key': f"front:{q['id']}",
                               'text': f"Front, {subject}: {words}{', ' + reason if reason else ''}",
                               'link': front.get('link')})
@@ -2423,7 +2582,11 @@ def _report_items(front, sites, storage, alarms, assessment):
             text = f"{'Due' if ping else 'Overdue, due'} {date}: {what}"
             key = f'due:{date}:{what}'
         else:
-            text = f"{'Due' if ping else 'Alarm'}: {title.replace(' — ', ': ')}"
+            # An alarm's title says what is wrong; only a ping is labelled
+            # (Torre Wenaus, 2026-10-30: "'Alarm:' is not needed in prod now").
+            text = title.replace(' — ', ': ')
+            if ping:
+                text = f'Due: {text}'
             key = f'alarm:{title}'
         items.append({'level': 'amber' if ping else 'red', 'text': text, 'key': key,
                       'link': f"{PUBLIC}/alarms/events/{a['id']}/"})

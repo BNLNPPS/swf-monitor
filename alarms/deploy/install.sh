@@ -6,6 +6,13 @@
 # Usage:  bash deploy/install.sh
 set -euo pipefail
 
+# The cron runs the engine as the deploy user. A root pip run leaves
+# root-owned files in the venv that every later install fails on.
+if [ "$(id -u)" -eq 0 ]; then
+    echo "[swf-alarms install] run as the deploy user, not root" >&2
+    exit 1
+fi
+
 HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 DEPLOY_ROOT="${SWF_MONITOR_DEPLOY_ROOT:-/opt/swf-monitor}"
 VENV="${SWF_ALARMS_VENV:-$DEPLOY_ROOT/shared/alarms-venv}"

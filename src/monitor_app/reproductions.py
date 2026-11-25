@@ -447,6 +447,7 @@ def _attempt(sig, entry, run, now, memory_fraction=None):
         'request_mb': d.get('request_mb'),
         'memory': d.get('memory') or {},
         'container': (entry or {}).get('container') or d.get('container') or '',
+        'container_swapped_from': (entry or {}).get('container_swapped_from') or '',
         'landed_site': d.get('landed_site') or '',
         'host': d.get('host') or '',
         'observed_at': _iso(observed),
@@ -875,7 +876,55 @@ def reconcile(sig_key, queue_diagnosis=None):
             sig.save(update_fields=fields + ['updated_at'])
     if to_queue and queue_diagnosis is not None:
         queue_diagnosis(to_queue, 'auto:reproduced')
+    if changed['outcome']:
+        log_settled(sig_key, changed, memory=memory, measured=measured)
     return changed
+
+
+# A settled reproduction outcome in a title's words and the detail's.
+# Reproduced means the reference run crashed, whether the production
+# run crashed, completed or has not settled (reconcile).
+SETTLED_TEXT = {
+    'reproduced': ('reproduced', 'The reference run crashed.'),
+    'site_dependent': ('crashes only at production', "Only the production queue's run crashed."),
+    'not_reproduced': ('not reproduced', 'Neither run crashed.'),
+    'inconclusive': ('reproduction inconclusive', 'A run failed for another reason.'),
+}
+# A memory signature settles on kills and the measured peak against the
+# killed jobs' request, not on crashes (SEGFAULT_DIAGNOSIS.md, Memory kills).
+MEMORY_SETTLED_TEXT = {
+    'reproduced': ('reproduced', 'The row needs more memory than the killed jobs requested.'),
+    'site_dependent': ('kill only at production',
+                       "Only the production queue killed the row; elsewhere it stayed under the request."),
+    'not_reproduced': ('not reproduced', 'Neither run was killed, and the row stayed under the request.'),
+    'inconclusive': ('reproduction inconclusive', 'A run failed for another reason.'),
+}
+
+
+def log_settled(sig_key, changed, memory=False, measured=None):
+    """Post a reproduction's result on epicprod-live when it settles, the one
+    record of it there; the request posts nothing (Torre Wenaus,
+    2026-11-03). The detail names the finding that reads the crash, or the
+    study queued for it; a memory signature's states the measured peak
+    against the request."""
+    from .epicprod_logging import log_epicprod_action
+    outcome = changed['outcome']
+    texts = MEMORY_SETTLED_TEXT if memory else SETTLED_TEXT
+    words, detail = texts.get(outcome, (outcome.replace('_', ' '), ''))
+    if memory and measured and measured.get('rss_max_mb') and measured.get('request_mb'):
+        detail += (f" Peak {round(measured['rss_max_mb']):,} MB RSS at {measured.get('queue') or 'the reference queue'}"
+                   f" against a {round(measured['request_mb']):,} MB request.")
+    if changed.get('covered'):
+        detail += f" Finding {changed['covered']} reads it."
+    elif changed.get('diagnosis'):
+        detail += ' Its study is queued.'
+    log_epicprod_action('reproductions', 'segfault_reproduction_settled',
+                        subject_type='crash_signature', subject_key=sig_key,
+                        sublevel='normal', live_default=True,
+                        message=f'Reproduction of {sig_key} settled: {outcome}',
+                        title=f"{'Memory kill' if memory else 'Crash'} {sig_key} {words}",
+                        summary=detail.strip(),
+                        result=outcome, url=f'panda/segfaults/{sig_key}/')
 
 
 def update_host_entry(sig_key, request_id, fields):

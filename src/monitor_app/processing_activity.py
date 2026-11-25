@@ -8,6 +8,7 @@ from django.db import connections, transaction
 from .cached_product import get_product
 from .models import CachedProduct, EpicProdJob
 from .panda.queries import PANDA_SCHEMA
+from swf_epicprod.payload import metric_keys
 
 KEY = 'processing_activity:v1'
 TTL = 60
@@ -31,9 +32,9 @@ def payload_threads(corecount, actualcorecount, eventservice, metrics, record, n
         if not 0 <= age <= ES_STALE_SECONDS or 'in_flight' not in record:
             return None
         return len({unit['slot'] for unit in record['in_flight'] if 'slot' in unit})
-    chosen = re.search(r'(?:^|\s)payloadThreads=(\d+)(?:\s|$)', metrics or '')
-    if chosen:
-        return int(chosen[1])
+    chosen = metric_keys.parse(metrics or '').get('threads', '')
+    if chosen.isdigit():
+        return int(chosen)
     # A native one-core job launches one processing thread. Do not turn an
     # unmeasured multicore reservation into an equivalent thread count.
     if int(corecount or 1) == 1 and int(actualcorecount or 1) == 1:

@@ -87,6 +87,19 @@ For programmatic access, the API uses token-based authentication for write opera
 
 #### Generate a Token
 
+A person gets their own token on the Account tab of their account page
+(`/account/?tab=account`, on either face): Show, Create, Regenerate and
+Revoke. Only an account that may act on the production system is issued
+one (AUTHORITY.md, Tokens). The same actions are an API call:
+
+```bash
+# GET: whether you have one; ?show=1 returns the key
+# POST {"action": "create" | "regenerate" | "revoke"}
+curl -H "Authorization: Token $TOKEN" https://epic-devcloud.org/prod/pcs/api/my-token/
+```
+
+Service accounts are issued tokens on the monitor host:
+
 ```bash
 # Get token for existing user
 python manage.py get_token <username>
@@ -140,7 +153,7 @@ export REQUESTS_CA_BUNDLE=/opt/swf-monitor/current/full-chain.pem
   trailing 24 hours. Rows return oldest-first so a consumer's next cursor is
   the last row's `created_at`; `more` flags a page-capped response that
   should be drained again immediately. Open read. Malformed `since` returns
-  HTTP 400. Rows past a 30-day retention window are pruned at ingest;
+  HTTP 400. Rows past a 90-day retention window are pruned at ingest;
   consumers keep their own history.
 - `POST /api/capcom/notices/ingest/` - Token-authenticated notice write from
   the production operations agent: `{source, title, severity?, detail?,

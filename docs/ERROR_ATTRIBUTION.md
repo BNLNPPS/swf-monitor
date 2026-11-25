@@ -201,7 +201,7 @@ hours, costs 18 MB. Pilot stdout is two orders larger, 200 KB for a job
 that ran, and is fetched on demand only; it is absent for a job that
 never started.
 
-**Retention and learning.** Raw logs are kept one month. A scheduled
+**Retention and learning.** Raw logs are kept ninety days. A scheduled
 pass mines the corpus before it ages out and maintains the knowledge
 base the parser reads: the catalogue of event codes that occur, with
 counts and examples; the taxonomy of recurring reasons, with the queues
@@ -210,7 +210,7 @@ signal, derived from which lines are stable across the corpus. The
 parser is derived from what the logs contain rather than from an
 author's expectation of them.
 
-Deletion is conditional. A log is removed at one month only once it has
+Deletion is conditional. A log is removed at ninety days only once it has
 been matched to a known pattern that already holds an exemplar. One
 exemplar per pattern is kept permanently, so every entry in the
 knowledge base retains the raw evidence behind it. A log matching no

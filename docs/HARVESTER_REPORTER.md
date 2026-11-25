@@ -123,8 +123,12 @@ under an m3763 member's token (`swf_epicprod/nersc_iri.py`):
 | Errors | `harvester_dialogs` | `dialogs`: the harvester's ERROR and CRITICAL messages to the PanDA server over 24 hours, per module with the latest, and per kind of message (the message with its numbers set aside) with its count, first and latest (reporter 1.1) |
 | Service metrics | `harvester_metrics` | the latest per login node: memory, CPU, scratch use, proxy lifetime |
 
-Job fetching, the adjuster's applied limit, failed calls and log freshness
-come from the logs and are error fields naming why. The queue page shows a
+Job fetching, failed calls and log freshness come from the logs and are
+error fields naming why. The adjuster's applied limit is not needed here
+(every queue sets no ratio, below), so its read is recorded as
+`adjustment.read.unavailable`, never as an error: as an error it raised a
+false amber on the room's Perlmutter pilot supply while supply was healthy
+(swf-watch, 2026-11-16; Torre Wenaus, 2026-11-18). The queue page shows a
 queue each kind of error that names it or names none of the harvester's
 queues; a kind that names only another of its queues is not shown there,
 so an error on a queue we do not use
@@ -179,13 +183,13 @@ node from admission declines.
 Version 1.5 adds `queue_status`: each queue's `queueStatus` in the harvester queue configuration, the copy the queue registry's drift check compares (swf-epicprod QUEUE_REGISTRY.md).
 
 Version 1.6 adds `queue_status.pilot_dispatch`, read from each queue's
-actual `submitter.templateFile`: native pilots' exact bound image, known
+actual `submitter.templateFile`: direct pilots' exact bound image, known
 legacy ALRB launchers' dynamic image selection, or an explicit unknown
 with its reason. Each reading includes the template path and SHA-256.
 The registry's admission check reads this fresh host evidence; unavailable,
 unresolved or conflicting image bindings never imply compatibility.
 
-Version 1.7 follows an image allocator named by the native template's
+Version 1.7 follows an image allocator named by the direct-pilot template's
 `EpicprodImagePolicyFile`. It advertises that policy's images only while
 the allocator's matching active state is fresh. Missing or expired state
 is unknown capability, so a stopped allocator cannot keep authorizing new

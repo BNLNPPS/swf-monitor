@@ -39,7 +39,7 @@
       <span class="log-state {{ log.levelname|state_class }}" title="{{ log.levelname|state_title }}">{{ log.levelname }}</span>
       <a href="{% url 'monitor_app:log_list' %}?app_name={{ log.app_name|urlencode }}">{{ log.app_name }}</a>
       {% if agent_exists %}<a href="{% url 'monitor_app:agent_detail' log.instance_name %}">{{ log.instance_name }}</a>{% else %}<span>{{ log.instance_name }}</span>{% endif %}
-      {% if detail.subject %}<span>{{ detail.subject_type }}: {{ detail.subject }}</span>{% endif %}
+      {% if detail.subject %}<span>{% if detail.subject_type %}{{ detail.subject_type }}: {% endif %}{{ detail.subject }}</span>{% endif %}
       {% if detail.username %}<span>By {{ detail.username }}</span>{% endif %}
       {% if detail.duration %}<span>{{ detail.duration }}</span>{% endif %}
       <span>Log {{ log.id }}</span>

@@ -16,13 +16,13 @@ copy that could not be made is visible rather than absent; a 404 is
 the cache having let the file go.
 
 The store is a filesystem tree outside the reclaimable scratch cache,
-so the thirty-day prune of ``panda-logs`` never touches it. Layout::
+so the ninety-day prune of ``panda-logs`` never touches it. Layout::
 
     <root>/<jeditaskid>/<pandaid>.stdout.gz   the text, gzip (220 KB against 4 MB)
     <root>/<jeditaskid>/<pandaid>.json     source, fetched, bytes, status
     <root>/<jeditaskid>/<pandaid>.error    why the fetch failed
 
-Lifetime: ``harvester_stdout.keep_days``, 30 by default (0 keeps them);
+Lifetime: ``harvester_stdout.keep_days``, 90 by default (0 keeps them);
 the hourly pass prunes copies older than that by their capture time.
 """
 import gzip
@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 # reaches it is recorded as capped rather than silently shortened.
 FETCH_MAX_BYTES = 64 * 1024 * 1024
 FETCH_TIMEOUT_S = 60
-DEFAULTS = {'finished': False, 'keep_days': 30, 'backfill_days': 7}
+DEFAULTS = {'finished': False, 'keep_days': 90, 'backfill_days': 7}
 
 
 def store_root():

@@ -290,7 +290,7 @@ and `monitor_urls` when web UI links are available.
 
 All parameters are optional - defaults are read from the user's `testbed.toml`:
 - `workflow_name`: Name of workflow (default: from config, typically 'stf_datataking')
-- `namespace`: Testbed namespace (default: from config)
+- `namespace`: Testbed namespace (default: the caller's own: a signed-in caller's running agent manager's namespace, else their username; for a bearer-token caller, the host's `testbed.toml` namespace, which unset is the server user's name)
 - `config`: Workflow config name (default: from config, e.g., 'fast_processing_default')
 - `realtime`: Run in real-time mode (default: from config, typically True)
 - `duration`: Max duration in seconds (0 = run until complete)
@@ -316,19 +316,22 @@ All parameters are optional - defaults are read from the user's `testbed.toml`:
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `swf_kill_agent` | `name` (required) | Kill an agent process by sending SIGKILL to its PID. |
+| `swf_kill_agent` | `name` (required), `username` | Kill one of the caller's own agent processes by sending SIGKILL to its PID. |
 
 **`swf_kill_agent` behavior:**
-- Looks up the agent by `instance_name`
-- Retrieves its `pid` and `hostname`
-- Sends SIGKILL if the agent is on the current host
-- Always marks the agent's status and operational_state as `EXITED`
-- Agent will no longer appear in default `swf_list_agents` results
+- The caller is the signed-in user on the swf-remote proxy; a bearer-token caller passes its own `username`, which is required
+- Only the agent's owner may kill it: the user in its instance name (`<type>-agent-<user>-<id>`, `agent-manager-<user>`) must be the caller, or the call is refused and the agent is left untouched
+- Sends SIGKILL only to a process on the current host that the caller owns
+- Marks the agent's status and operational_state `EXITED` when the kill succeeds or the process is already gone (including a PID now held by another user's process, which is not killed)
+- A refused, remote, permission-denied or PID-less kill changes nothing
+- An `EXITED` agent no longer appears in default `swf_list_agents` results
 
 **Returns:**
-- `success`: Whether the operation completed
-- `killed`: Whether the process was actually killed (may be False if already dead or on different host)
-- `kill_error`: Error message if kill failed (permission denied, process not found, remote host)
+- `success`: Whether the agent was killed or found gone and marked `EXITED`
+- `killed`: Whether a process was actually killed
+- `owner`: The user the agent belongs to
+- `error`: Why nothing was done (another user's agent, remote host, permission denied, no PID)
+- `note`: Why a record was marked `EXITED` without a kill (process already gone)
 - `old_state`, `new_state`: State transition
 
 ---
@@ -372,7 +375,7 @@ The User Agent Manager is a per-user daemon that enables MCP-driven testbed cont
 
 **`swf_stop_user_testbed`:**
 - Sends `stop_testbed` command to the user's agent manager
-- If agent manager is not running, use `swf_kill_agent` to stop agents directly
+- If agent manager is not running, use `swf_kill_agent` to stop your own agents directly
 
 **Starting the agent manager:**
 ```bash
@@ -417,6 +420,8 @@ This tool aggregates information from workflow messages and logs, providing a si
 | `epic_get_ai_content` | `ids`, `corun_page_group_ids` | Retrieve append-only AI assessment content by corun-ai Page group ids and/or legacy AIContent ids. Use the arguments supplied in a detail payload's `ai_content.retrieval.arguments`. |
 | `epicprod_list_actions` | `action`, `instance`, `subject_type`, `subject_key`, `username`, `outcome`, `start_time`, `end_time`, `min_sublevel`, `summarize`, `limit`, `offset` | Query the epicprod action stream (structured production-action records with outcome and duration). Prefer `summarize=True` for reporting: counts by action with ok/error split and duration statistics. Raw listings default to an importance floor of `normal` (excluded records counted in `excluded_below_floor`; floor lifts for action/subject/outcome drill-downs and summaries); `min_sublevel` sets it explicitly. See [ACTION_STREAM.md](ACTION_STREAM.md). |
 | `epicprod_live_clear` | `ids`, `reason`, `username` | Take records off the computing centre's epicprod-live screen once Torre's question about them is answered as taken care of: one `live_cleared` action naming the record ids and why; the records are unchanged. See [COMP_SNAPSHOT.md](COMP_SNAPSHOT.md) § Live. |
+| `epicprod_declare_downtime` | `queue`, `start`, `end`, `reason`, `username` | Register a downtime window for an ePIC queue, as on the queue page's Declared state card: times ISO 8601, Eastern unless they carry an offset; the record names who registered it, and the front, the canary and failure attribution read it like a window from CRIC. Returns the window's `name`, line and standing. See swf-epicprod CONTINUOUS_PRODUCTION.md § Declared downtime. |
+| `epicprod_withdraw_downtime` | `name`, `reason`, `username` | Withdraw a window registered on a queue page or with `epicprod_declare_downtime`, before or during it; the record stays, cleared, with who withdrew it and why. A window from CRIC is withdrawn in CRIC. |
 | `epicprod_storage` | `listing`, `rse`, `campaign`, `state`, `limit`, `offset` | Exception listings from the production storage record's store: `ghosts` (registered files with no available replica on any RSE, each with its holding replicas by state; the envelope carries `by_rse`, the account of the filtered population by holding RSE with files, bytes, states, campaigns and the oldest entry), `stuck_rules`, `stalled_datasets`. Filter by `rse` (`none` for ghosts with no replica row), `campaign` family and `state`; paged oldest first; `as_of` names the last completed pass and any pass in progress. REST counterpart `pcs/api/storage/<listing>/`. See swf-epicprod STORAGE.md. |
 
 **Known subject types:**
@@ -465,6 +470,19 @@ This tool aggregates information from workflow messages and logs, providing a si
 The bot flow: list, show `display` verbatim, and relay only explicit human
 instructions naming a ref ('approve cp-12'). On any refusal, report the error
 verbatim and re-list.
+
+---
+
+### What's New
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `whats_new_list` | `tags`, `importance`, `since`, `search`, `limit`, `include_details` | The curated list of recent developments, newest shipped first: each item's slug, title, summary, tags, importance, shipped date, contact, up and down votes, comment count, awaiting-reply mark and URL; `tags` keeps items carrying every tag given, `importance` the levels given, `since` items shipped on or after a date. Returns `tags_in_use`, the vocabulary to reuse. |
+| `whats_new_get` | `slug` | One item in full: details and references (Markdown), the items it builds on and those that develop it further, the comment thread, the number of earlier versions. |
+| `whats_new_add` | `title`, `summary`, `tags`, `importance`, `shipped`, `contact`, `details`, `refs`, `builds_on`, `username` | Add an item, as part of the task that ships the change; recorded as added by `username` (the signed-in caller through epic-devcloud.org) and posted to epicprod-live. Requires authority. |
+| `whats_new_edit` | `slug`, `title`, `summary`, `details`, `refs`, `tags`, `importance`, `shipped`, `contact`, `builds_on`, `username` | Edit an item's fields as the calling person; fields left out are unchanged and the previous state is kept as a version. Requires authority. |
+
+See [WHATS_NEW.md](WHATS_NEW.md).
 
 ---
 
@@ -674,8 +692,10 @@ them and a person reading the page see one history.
 | AI Memory | `swf_record_ai_memory`, `swf_get_ai_memory` | 2 |
 | AI Content | `epic_register_ai_assessment`, `epic_get_ai_content` | 2 |
 | AI Proposals | `ai_list_proposals`, `ai_decide_proposal` | 2 |
+| What's New | `whats_new_list`, `whats_new_get`, `whats_new_add`, `whats_new_edit` | 4 |
 | Campaign Status | `epicprod_campaign_status` | 1 |
 | Action Stream | `epicprod_list_actions`, `epicprod_live_clear` | 2 |
+| Declared Downtime | `epicprod_declare_downtime`, `epicprod_withdraw_downtime` | 2 |
 | Storage Record | `epicprod_storage` | 1 |
 | Snapper State History | `snapper_latest`, `snapper_state_at`, `snapper_component_history`, `snapper_changes_between`, `snapper_context_around`, `snapper_series`, `snapper_cut_summary` | 7 |
 | PCS Tags | `pcs_list_tags`, `pcs_get_tag`, `pcs_search_tags` | 3 |
@@ -683,7 +703,7 @@ them and a person reading the page see one history.
 | PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers`, `panda_segfault_catalog`, `panda_segfault_signature`, `panda_segfault_findings`, `panda_segfault_finding_set`, `panda_segfault_reproduce` | 12 |
 | JLab Rucio | `jlab_rucio_*` | 14 |
 | BNL Rucio | `bnl_rucio_*` | 14 |
-| **Total** | | **99** |
+| **Total** | | **105** |
 
 ---
 
@@ -798,7 +818,7 @@ LLM calls:
 LLM calls:
 1. `swf_get_agent(name="fast_processing-agent-wenauseic-123")` - agent status
 2. `swf_list_logs(instance_name="fast_processing-agent-wenauseic-123", level='WARNING')` - recent issues
-3. If needed: `kill_agent(name="...")` to terminate unresponsive agent
+3. If needed: `swf_kill_agent(name="...", username="wenauseic")` to terminate an unresponsive agent of your own
 
 ### Managing User Testbed
 

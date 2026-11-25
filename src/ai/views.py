@@ -21,6 +21,9 @@ PROPOSAL_KINDS = {
                           'asks': 'whether to take a registered EVGEN sample nobody requested into the campaign'},
     'propagation': {'label': 'campaign propagation',
                     'asks': "whether to set an edition's propagation"},
+    'whats_new': {'label': "What's new item",
+                  'asks': "whether to add a development to the What's new list, "
+                          "after any changes to its wording, tags or importance"},
 }
 
 
@@ -36,6 +39,8 @@ def _review_surface(action, counterpart):
         return 'EVGEN inputs', reverse('pcs:evgen_inputs')
     if action == 'propagation':
         return 'the task catalog', reverse('pcs:pcs_catalog')
+    if action == 'whats_new':
+        return "What's new", reverse('help:whats_new')
     return '', ''
 
 

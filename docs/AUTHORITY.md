@@ -295,6 +295,16 @@ person: on the external face the proxy forwards `Authorization` and sets
 `X-Remote-User` from the session, so the person is present and gated; on the
 internal face a bare token carries no person and is governed by the view's
 authentication, as any API token is. Token issuance is the control there.
+
+A person manages their own token on the Account tab of their account page,
+on either face, through `/pcs/api/my-token/` (swf-epicprod
+`pcs/api_views.py`, `my_api_token`): show it, create it, regenerate it,
+revoke it. Create and regenerate are refused unless the account may act,
+which keeps issuance under the same rule as a write; showing and revoking
+need only the sign-in, and the route is exempt from the gate so that a
+person without authority can still revoke. Each create, regenerate and
+revoke is an `api_token` action in the action stream, naming the person and
+never the key. `manage.py get_token` remains for service accounts.
 The agents authenticate with a person's token; giving the machinery its own
 identity is a separate cleanup.
 

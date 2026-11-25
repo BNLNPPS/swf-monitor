@@ -1,10 +1,10 @@
-"""Warn on worker filesystem pressure before the pilot's final 1 GiB abort."""
+"""Warn on worker filesystem pressure before the pilot's final 1 GB abort."""
 import json
 
 from ..common import Detection
 
 PARAMS = {'warn_free_fraction': 0.20, 'critical_free_fraction': 0.10,
-          'warn_free_gib': 20, 'warn_inode_fraction': 0.10}
+          'warn_free_gb': 20, 'warn_inode_fraction': 0.10}
 
 
 def _key(volume):
@@ -30,20 +30,20 @@ def _last_measured(client):
 
 
 def _judge(volume, params):
-    free = volume['free_bytes'] / 2**30
+    free = volume['free_bytes'] / 1e9
     fraction = volume['free_fraction']
     inode_total = volume.get('total_inodes', 0)
     inode_fraction = volume.get('free_inodes', 0) / inode_total if inode_total else 1
     if (fraction >= float(params.get('warn_free_fraction', 0.20))
-            and free >= float(params.get('warn_free_gib', 20))
+            and free >= float(params.get('warn_free_gb', 20))
             and inode_fraction >= float(params.get('warn_inode_fraction', 0.10))):
         return None
     critical = fraction < float(params.get('critical_free_fraction', 0.10)) or free < 5
     return Detection('worker-disk:' + _key(volume),
-                     'GREX {} disk {}: {:.1f} GiB free ({:.1f}%)'.format(
+                     'GREX {} disk {}: {:.1f} GB free ({:.1f}%)'.format(
                          volume['volume'], 'critical' if critical else 'low', free, fraction * 100),
                      'Filesystem headroom from native pilot job {}, sampled at {}. '
-                     'Free space or use the site scratch before pilots abort at 1 GiB. '
+                     'Free space or use the site scratch before pilots abort at 1 GB. '
                      'Available inodes: {} of {}. Seven days of measurements are retained '
                      'in worker_disk_space_history:v1.'.format(
                          volume['pandaid'], volume['observed_at'],

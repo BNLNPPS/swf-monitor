@@ -3,11 +3,11 @@
 #
 # cron does not source the deploy's EnvironmentFile, but the liveness ping needs
 # the ACTIVEMQ_* settings to reach the broker. Load production.env, then exec
-# the standalone reaper. All args are passed through (e.g. --prune-days 30).
+# the standalone reaper. All args are passed through (e.g. --prune-days 90).
 #
 # Install (Torre, root) — see docs/EPICPROD_OPS.md:
 #   */2 * * * *  /opt/swf-monitor/current/scripts/prodops-cleaner-killer.sh
-#   30 3 * * *   /opt/swf-monitor/current/scripts/prodops-cleaner-killer.sh --no-liveness --prune-days 30
+#   30 3 * * *   /opt/swf-monitor/current/scripts/prodops-cleaner-killer.sh --no-liveness --prune-days 90
 set -eo pipefail
 
 ENV_FILE="${EPICPROD_ENV_FILE:-/opt/swf-monitor/config/env/production.env}"

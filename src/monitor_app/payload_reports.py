@@ -144,11 +144,10 @@ def candidates(since, limit=None):
 
 
 def _digest(jobmetrics):
-    """The payload trail carried in the job metrics string, or ''."""
-    for token in str(jobmetrics or '').split():
-        if token.startswith('payloadTrail='):
-            return token.partition('=')[2]
-    return ''
+    """The payload trail carried in the job metrics string, or '', under
+    its short name or its long one (swf-epicprod payload/metric_keys.py)."""
+    from swf_epicprod.payload.metric_keys import parse
+    return parse(str(jobmetrics or '')).get('trail', '')
 
 
 def signature(job):

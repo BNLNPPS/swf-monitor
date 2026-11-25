@@ -1,10 +1,14 @@
 """Alarm: tls_cert_expiry.
 
-The PanDA and OSG service hosts carry one-year InCommon IGTF host
-certificates that renew by hand. An expired certificate reaches
-collaborators first, as a browser error on every log link, and a
-certificate served without its intermediate fails in any browser
-without the grid CA bundle. This alarm reads the certificate each
+The PanDA and OSG service hosts and the BNL_PROD_DISK_1 storage doors
+carry one-year InCommon IGTF host certificates that renew by hand. An
+expired certificate reaches collaborators first, as a browser error on
+every log link, and a certificate served without its intermediate fails
+in any browser without the grid CA bundle. The doors are listed by node,
+not by their round-robin name ``dcintdoor``, so that one node's expired
+certificate is not hidden behind the other's; on 2026-11-16
+dcint-door001 was found serving a certificate expired since 10/14,
+refusing every pilot stage-out that reached it. This alarm reads the certificate each
 listed host serves and raises a ping when it is inside the warning
 window, expired, unreadable, or served without its chain. The event
 clears on the tick after the certificate is renewed.
@@ -22,7 +26,12 @@ PARAMS = {
     # host or host:port, comma separated; port defaults to 443.
     "hosts": ("osgsub01.sdcc.bnl.gov, pandaharvester01.sdcc.bnl.gov, "
               "pandamon01.sdcc.bnl.gov, pandaserver02.sdcc.bnl.gov, "
-              "pandaserver01.sdcc.bnl.gov:25443"),
+              "pandaserver01.sdcc.bnl.gov:25443, "
+              "dcint-door001.sdcc.bnl.gov, dcint-door002.sdcc.bnl.gov"),
+    # Hosts judged on expiry alone: grid storage doors, whose clients
+    # verify against the IGTF CA directory, which holds the intermediate
+    # the doors do not send.
+    "expiry_only_hosts": "dcint-door001.sdcc.bnl.gov, dcint-door002.sdcc.bnl.gov",
     # Ping this many days before expiry.
     "warn_days": 7,
     # Per-host connect and handshake limit, seconds.
@@ -99,6 +108,8 @@ def detect(client, params):
     warn_days = int(params.get("warn_days", 7))
     timeout = int(params.get("timeout_s", 8))
     now = datetime.now(timezone.utc)
+    expiry_only = {h for h, _ in _targets(
+        params.get("expiry_only_hosts", PARAMS["expiry_only_hosts"]))}
     for host, port in _targets(params.get("hosts", PARAMS["hosts"])):
         key = f"cert:{host}:{port}"
         label = host if port == 443 else f"{host}:{port}"
@@ -122,12 +133,13 @@ def detect(client, params):
         issuer = _cn(facts["issuer"])
         self_signed = _cn(facts["subject"]) == issuer
         chain_complete = self_signed or len(chain) > 1
+        chain_missing = not chain_complete and host not in expiry_only
         problems = []
         if days_left < 0:
             problems.append(f"expired {int(-days_left)} days ago ({expiry})")
         elif days_left <= warn_days:
             problems.append(f"expires in {int(days_left)} days ({expiry})")
-        if not chain_complete:
+        if chain_missing:
             problems.append("served without its intermediate")
         if not problems:
             continue
@@ -143,7 +155,7 @@ def detect(client, params):
                 + ("The server sends only the leaf, so a browser without "
                    "the grid CA bundle cannot verify it; include the "
                    "intermediate in the served chain. "
-                   if not chain_complete else "")),
+                   if chain_missing else "")),
             extra_data={"severity": SEVERITY, "host": host, "port": port,
                         "days_left": round(days_left, 1),
                         "not_after": facts["not_after"].isoformat(),

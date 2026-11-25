@@ -70,6 +70,13 @@ SUBLEVEL_ORDER = {'high': 2, 'normal': 1, 'low': 0}
 # rendered on the log entry page and the live-policy page, so a stream reader
 # is never left guessing what an event was.
 ACTION_DEFAULTS = {
+    # a person's own API token, from the Account tab (docs/AUTHORITY.md,
+    # Tokens; swf-epicprod pcs api_views.my_api_token)
+    'api_token': {
+        'sublevel': 'low', 'live': False,
+        'description': "A person created, regenerated or revoked their own "
+                       "API token on the Account tab: who and which.",
+    },
     # the PanDA database's Event Service range rows (swf-epicprod
     # docs/ES_EVENT_CLEANUP.md)
     'es_event_cleanup': {
@@ -107,12 +114,16 @@ ACTION_DEFAULTS = {
     # the node guard (site-canary docs/NODE_GUARD.md)
     'node_guard_decision': {
         'sublevel': 'normal', 'live': True,
-        'outcomes': {'would_exclude': {'sublevel': 'low', 'live': False}},
+        # an expiry into half open excludes nothing new: quiet (Torre
+        # Wenaus, 2026-11-02)
+        'outcomes': {'would_exclude': {'sublevel': 'low', 'live': False},
+                     'half_open': {'sublevel': 'low', 'live': False}},
         'description': "One node's verdict from the node guard's cycle: a "
                        "black hole tripped (would_exclude in shadow mode, "
-                       "excluded live) or cleared after a trip, with the "
-                       "evidence; recorded on a trip, on the clear after "
-                       "one, and hourly while tripped.",
+                       "excluded live), expired into half open, or cleared "
+                       "after a trip, with the evidence; recorded on a "
+                       "trip, an expiry, the clear after one, and hourly "
+                       "while tripped.",
     },
     'node_guard_cycle': {
         'sublevel': 'low', 'live': False,
@@ -159,6 +170,25 @@ ACTION_DEFAULTS = {
         'description': "Enter a ping, a dated obligation the alarm system "
                        "raises ahead of its due date, on the alarm "
                        "dashboard.",
+    },
+    # Production now: a person's informational line (docs/COMP_SNAPSHOT.md)
+    'prod_now_notice': {
+        'sublevel': 'normal', 'live': False,
+        'description': "Put an informational line, such as a production "
+                       "milestone, on Production now for a set number of "
+                       "hours.",
+    },
+    # Help menu: What's new (docs/WHATS_NEW.md)
+    'whats_new_create': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Add an item to What's new, the list of developments "
+                       "users, operators and developers should know about; "
+                       "posted to epicprod-live and shown on the live "
+                       "screen at INFO.",
+    },
+    'whats_new_archive': {
+        'sublevel': 'normal', 'live': False,
+        'description': "Take a What's new item off the list, or return it.",
     },
     'ping_fulfil': {
         'sublevel': 'normal', 'live': True,
@@ -352,14 +382,26 @@ ACTION_DEFAULTS = {
                        "the dig itself is the segfault_dig event.",
     },
     'segfault_reproduce': {
-        'sublevel': 'normal', 'live': True,
+        'sublevel': 'normal', 'live': False,
         'description': "Operator request to reproduce a crash signature: "
                        "the crashed job's own manifest row run again as "
                        "payload canaries on the production queue and the "
                        "reference queue BNL_NPPS_GPU, queued to the canary "
                        "agent; the outcome (reproduced, site_dependent, "
                        "not_reproduced, inconclusive) settles on the "
-                       "signature from the runs' payload reports.",
+                       "signature from the runs' payload reports. Not "
+                       "live: the result is posted when it settles "
+                       "(segfault_reproduction_settled; Torre Wenaus, "
+                       "2026-11-03).",
+    },
+    'segfault_reproduction_settled': {
+        'sublevel': 'normal', 'live': True,
+        'description': "A crash signature's reproduction settled "
+                       "(reproductions.reconcile): its outcome "
+                       "(reproduced, site_dependent, not_reproduced, "
+                       "inconclusive) and the finding that reads it or "
+                       "the study queued; one record per settlement, "
+                       "posted to epicprod-live.",
     },
     'segfault_es_reproduction': {
         'sublevel': 'normal', 'live': False,
@@ -526,10 +568,11 @@ ACTION_DEFAULTS = {
                        "is taken.",
     },
     'workflow_execution_completed': {
-        'sublevel': 'low', 'live': False,
+        'sublevel': 'low', 'live': False, 'testbed': True,
         'description': "A testbed workflow execution reached a terminal "
                        "state (completed or failed); carries the run's "
-                       "notice stamp for notice routing.",
+                       "notice stamp for notice routing. Testbed, not "
+                       "production: a failed run stays low and not live.",
     },
     'notice_subscription_edit': {
         'sublevel': 'normal', 'live': False,
@@ -582,6 +625,7 @@ ACTION_DEFAULTS = {
     },
     'proposal_created': {
         'sublevel': 'normal', 'live': True,
+        'flags': {'rule': {'sublevel': 'low', 'live': False}},
         'description': "AI proposal pending human review; one event per "
                        "propose call with the proposed count and batch. A "
                        "session's proposal is normal and live; a rule "
@@ -936,19 +980,28 @@ def publication(extra, levelname=''):
     """Set an action record's importance (``sublevel``) and live default by
     their meaning (ACTION_STREAM.md, Importance), in place, at the write:
     a failure (an error, timeout, partial or unrecorded outcome, or a record
-    at ERROR) is high and live, a maintenance pass's failure normal; any
+    at ERROR) is high and live, a maintenance pass's failure normal, a
+    testbed action's failure its declaration (``testbed``: a testbed
+    workflow execution is not production); any
     other record takes its action's catalog declaration, the outcome's own
-    where the catalog declares one. A low record is never live by default.
+    where the catalog declares one, and a flag's own where the record
+    carries a flag the catalog declares (``flags``: a rule proposer's
+    ``proposal_created``). A low record is never live by default.
     An action the catalog lacks keeps its call site's values and is logged
     once, so it is catalogued."""
     from .live_notices import FAILURE_OUTCOMES, MAINTENANCE
     action = str(extra.get('action') or '')
     outcome = str(extra.get('outcome') or '')
     declared = ACTION_DEFAULTS.get(action)
-    if outcome in FAILURE_OUTCOMES or levelname in FAILURE_LEVELS:
+    if declared and declared.get('testbed'):
+        sublevel, live = declared['sublevel'], declared['live']
+    elif outcome in FAILURE_OUTCOMES or levelname in FAILURE_LEVELS:
         sublevel, live = ('normal' if action in MAINTENANCE else 'high'), True
     elif declared:
         entry = dict(declared, **(declared.get('outcomes') or {}).get(outcome, {}))
+        for flag, axes in (declared.get('flags') or {}).items():
+            if extra.get(flag):
+                entry.update(axes)
         sublevel, live = entry['sublevel'], entry['live']
     else:
         if action not in _uncatalogued:

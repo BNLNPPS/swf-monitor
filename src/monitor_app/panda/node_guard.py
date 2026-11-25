@@ -172,7 +172,8 @@ def window_rows(window_h, queues=()):
     sql = f"""
         SELECT "computingsite", "modificationhost", "jobstatus", "jeditaskid",
                EXTRACT(EPOCH FROM ("endtime" - "starttime")), "endtime", "pandaid",
-               "destinationsite", "piloterrorcode", "exeerrorcode", "transexitcode"
+               "destinationsite", "piloterrorcode", "exeerrorcode", "transexitcode",
+               "taskbuffererrorcode"
         FROM "{PANDA_SCHEMA}"."jobsarchived4"
         WHERE "processingtype" = 'epicproduction'
           AND "endtime" > NOW() - INTERVAL %s
@@ -187,7 +188,7 @@ def window_rows(window_h, queues=()):
         rows = cursor.fetchall()
     out = []
     for (queue, host, status, task, seconds, end, pandaid,
-         dest_site, pilot, exe, trans) in rows:
+         dest_site, pilot, exe, trans, taskbuffer) in rows:
         out.append({'queue': str(queue) if queue else None, 'host': host,
                     'jobstatus': status, 'jeditaskid': task,
                     'duration_s': float(seconds) if seconds is not None else None,
@@ -202,7 +203,14 @@ def window_rows(window_h, queues=()):
                     # the landing check's decline on an excluded node (exit
                     # 80): the guard's own action, never evidence about the node
                     'declined': status == 'failed' and '80' in (str(exe or '').strip(),
-                                                                str(trans or '').strip())})
+                                                                str(trans or '').strip()),
+                    # the batch worker went away under the job (taskbuffer
+                    # 300, "The worker was cancelled while the job was
+                    # running") with no pilot, payload or transformation
+                    # code: the glidein's loss, never evidence about the node
+                    'glidein_lost': (status == 'failed' and str(taskbuffer or '').strip() == '300'
+                                     and not pilot and not exe
+                                     and str(trans or '').strip() in ('', '0'))})
     return out
 
 

@@ -34,8 +34,9 @@ page itself works on swf-monitor.
 `re_path(r'^pcs/', views.pcs_proxy)` and `re_path(r'^panda/',
 views.panda_proxy)` — so any `pcs/` or `panda/` page is proxied to
 external users with no per-route maintenance, and the REST API is
-covered by the `pcs/api/<path:path>` catch-all. A new page under those
-trees needs no swf-remote change.
+covered by the `pcs/api/<path:path>` catch-all. The Help pages have
+their own catch-all, `re_path(r'^help/', views.help_proxy)`. A new page
+under those trees needs no swf-remote change.
 
 An explicit named entry is still required in two cases:
 

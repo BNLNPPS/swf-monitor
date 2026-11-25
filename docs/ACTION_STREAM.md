@@ -62,12 +62,19 @@ made to MEAN something"):
 The catalog (`ACTION_DEFAULTS`, below) declares each action's importance
 and live default when it succeeds, and where one outcome matters more than
 the rest, that outcome's own (`outcomes`: a front decision that `fed`, a
-feeder pass that `submitted`). A failure (an `error`, `timeout`, `partial`
+feeder pass that `submitted`), and where a record's flag sets it apart,
+the flag's own (`flags`: a rule proposer's `proposal_created` carries
+`rule` and is low and not live, AI_PROPOSALS.md). A failure (an `error`, `timeout`, `partial`
 or `unrecorded` outcome, or a record at ERROR) is `high` and live, a
-maintenance pass's failure `normal`. These are set at the write, whoever
+maintenance pass's failure `normal`. A testbed action (`testbed`:
+`workflow_execution_completed`) is not production work: every outcome
+takes its declaration, low and not live, so a failed testbed run stays
+off epicprod-live; the nightly testbed heartbeat reaches its operator by
+its own subscription (NOTICE_ROUTING.md). These are set at the write, whoever
 writes the record (the web tier, the MCP tools, the cron runners, the ops
 agent's REST posts): `AppLog.save` applies `epicprod_logging.publication`,
-so a call site's own values are not consulted for a catalogued action. An
+so a call site's own values are not consulted for a catalogued action
+beyond the flags its declaration names. An
 action missing from the catalog keeps its call site's values and is logged
 as uncatalogued. Over the seven days before the rule, 68 records would have
 been `high` (37 guard pauses, the rest failures and findings) against more
@@ -254,6 +261,33 @@ its own record with duration; the chain logs a summary record — the
 catalog-freshness timestamp. Measured 2026-07-05: csv 8 s, association sweep
 2.3 s (14-day window), Rucio snapshot 36 s, EVGEN 16 s, match 2 s, progress
 5 s. Runbook: [EPICPROD_OPS.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/EPICPROD_OPS.md#nightly-catalog-sync).
+
+## Retention
+
+The log table (`swf_applog`) keeps every record, of every application and
+level, for 90 days. `scripts/applog-retention.py` deletes older rows
+nightly at 04:50 ET from the deployment account's cron, in batches of
+50,000 rows so the table is never locked for long, and writes the row
+counts before and after to
+`/opt/swf-monitor/shared/logs/applog-retention.log`. The 90-day window is
+the script's default; `--error-days` gives ERROR and CRITICAL rows a
+longer one, and `--dry-run` counts the rows a run would delete. On 18
+November 2026, under the earlier 30-day window, the table held 2.09
+million rows in 1.4 GB, 111,000 of them action records and most of the
+rest agent logs.
+
+The platform's other records keep the same 90 days (set 2026-11-18): the
+batch-layer records ([ERROR_ATTRIBUTION.md](ERROR_ATTRIBUTION.md)), the
+capcom notice buffer ([API_REFERENCE.md](API_REFERENCE.md)), and, in
+swf-epicprod, the harvester stdout copies and the payload-log cache
+([EPICPROD_OPS.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/EPICPROD_OPS.md))
+and the sandbox keepalive that keeps finished tasks retryable
+([EPICPROD_RETRIES.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/EPICPROD_RETRIES.md)).
+Two schedules differ by design: Event Service range rows in the PanDA
+database are deleted three days after their task ends
+([ES_EVENT_CLEANUP.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/ES_EVENT_CLEANUP.md)),
+and the database backups keep nightly dumps 14 days and first-of-month
+dumps 400 days ([PRODUCTION_DEPLOYMENT.md](PRODUCTION_DEPLOYMENT.md)).
 
 ## SysConfig
 

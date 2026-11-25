@@ -1,0 +1,43 @@
+<div class="wn-form">
+  <label for="wn-field-title">Title</label>
+  <div class="wn-hint">One line: what changed, in the reader's terms.</div>
+  <input type="text" class="form-control" id="wn-field-title" data-field="title" value="{{ f.title|default:'' }}">
+  <label for="wn-field-summary">Summary</label>
+  <div class="wn-hint">One to three lines: what it does and who it is for.</div>
+  <textarea class="form-control" rows="3" id="wn-field-summary" data-field="summary">{{ f.summary|default:'' }}</textarea>
+  <label for="wn-field-details">Details</label>
+  <div class="wn-hint">Optional, Markdown: how to use it, what it replaces, limits.</div>
+  <textarea class="form-control" rows="8" id="wn-field-details" data-field="details">{{ f.details|default:'' }}</textarea>
+  <label for="wn-field-refs">References</label>
+  <div class="wn-hint">Markdown: pages, documents, pull requests. An item on the operation or use of the system links first the section of the WFMS documentation (readthedocs) where its impact is described.</div>
+  <textarea class="form-control" rows="3" id="wn-field-refs" data-field="refs">{{ f.refs|default:'' }}</textarea>
+  <label for="wn-field-tags">Tags</label>
+  <div class="wn-hint">Separated by spaces, e.g. users ops pcs. Tags in use (click to add):
+    {% for t, n in tags_in_use.items %}{% if not forloop.first %} {% endif %}<a class="wn-tag wn-add-tag" data-tag="{{ t }}">{{ t }}</a>{% empty %}none yet{% endfor %}</div>
+  <input type="text" class="form-control" id="wn-field-tags" data-field="tags" value="{{ f.tags_text|default:'' }}">
+  <div class="d-flex flex-wrap gap-4">
+    <div>
+      <label for="wn-field-importance">Importance</label>
+      <select class="form-select" id="wn-field-importance" data-field="importance">
+        {% for level in importance_levels %}<option value="{{ level }}"{% if f.importance == level or not f.importance and level == 'routine' %} selected{% endif %}>{{ level|capfirst }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="wn-field-shipped">Shipped</label>
+      <input type="date" class="form-control" id="wn-field-shipped" data-field="shipped" value="{% if f.shipped %}{{ f.shipped }}{% else %}{{ today }}{% endif %}">
+    </div>
+    <div>
+      <label for="wn-field-contact">Contact</label>
+      {% with chosen=f.contact|default:username %}
+      <select class="form-select" id="wn-field-contact" data-field="contact" title="The principal developer, the person to ask: an account with the operations role">
+        {% if chosen not in contacts %}<option value="" selected>Choose the contact</option>{% endif %}
+        {% for c in contacts %}<option value="{{ c }}"{% if c == chosen %} selected{% endif %}>{{ c }}</option>{% endfor %}
+      </select>
+      {% endwith %}
+    </div>
+  </div>
+  <label for="wn-field-builds-on">Builds on</label>
+  <div class="wn-hint">Optional: earlier items this one develops further, by their address (the last part of the item's URL), separated by spaces.</div>
+  <input type="text" class="form-control" id="wn-field-builds-on" data-field="builds_on" value="{{ f.builds_on_text|default:'' }}">
+  <div class="wn-error mt-2"></div>
+</div>
