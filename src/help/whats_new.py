@@ -170,6 +170,15 @@ def _validate(fields, *, current=None, changed_by=''):
     }
 
 
+def validate_new(fields, *, changed_by=''):
+    """Check a new item's fields without writing; returns the normalized
+    fields with the slug the item would take. The same checks item_create
+    makes; used by scripts/whats-new-ingest.py --dry-run."""
+    clean = _validate(fields, changed_by=changed_by)
+    clean['slug'] = slug_for(clean['title'])
+    return clean
+
+
 def _write(entry, clean):
     entry.title = clean['title']
     entry.content = clean['details']

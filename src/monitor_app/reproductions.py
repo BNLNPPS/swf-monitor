@@ -882,8 +882,10 @@ def reconcile(sig_key, queue_diagnosis=None):
 
 
 # A settled reproduction outcome in a title's words and the detail's.
+# Reproduced means the reference run crashed, whether the production
+# run crashed, completed or has not settled (reconcile).
 SETTLED_TEXT = {
-    'reproduced': ('reproduced', 'Both runs crashed.'),
+    'reproduced': ('reproduced', 'The reference run crashed.'),
     'site_dependent': ('crashes only at production', "Only the production queue's run crashed."),
     'not_reproduced': ('not reproduced', 'Neither run crashed.'),
     'inconclusive': ('reproduction inconclusive', 'A run failed for another reason.'),
