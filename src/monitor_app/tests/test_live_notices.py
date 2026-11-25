@@ -36,7 +36,7 @@ class LiveNoticeSelectionTests(TestCase):
 
     def test_actual_changes_inside_routine_passes_remain_visible(self):
         for action, summary in (
-                ('catalog_import', 'csv: 2 new, 405 updated'),
+                ('catalog_import', 'epic-prod: 2 new, 405 updated'),
                 ('past_import', 'created=1 updated=5541 errors=0'),
                 ('questionnaire_import', 'request questionnaire: 0 new, 1 updated, 76 unchanged'),
                 ('association_sweep', 'checked=22 new=0 intaken=1 unmatched=3'),
@@ -49,7 +49,7 @@ class LiveNoticeSelectionTests(TestCase):
 
     def test_rewritten_import_rows_are_not_new_information(self):
         self.assertIsNone(self.select(action='past_import', summary='created=0 updated=5541 errors=0'))
-        self.assertIsNone(self.select(action='catalog_import', summary='csv: 0 new, 405 updated'))
+        self.assertIsNone(self.select(action='catalog_import', summary='epic-prod: 0 new, 405 updated'))
 
     def test_operator_requested_operations_are_not_quieted(self):
         self.assertIsNotNone(self.select(username='wenaus'))

@@ -2,11 +2,10 @@
 """
 pcs_automatch_dryrun.py — read-only preview of the physics-tag automatch.
 
-The catalog import pins every legacy ``csv_import`` row to one placeholder
-physics tag; the automatch (``derive_physics`` + ``find_or_create_physics_tag``,
-wired into ``import_default_datasets_csv``) derives each row's real physics from
-its EVGEN path and rebinds it to the matching locked tag, creating or locking
-tags as needed. This script runs that derivation + matching against the live
+A legacy ``csv_import`` row may still sit on the placeholder physics tag;
+the automatch (``derive_physics`` + ``find_or_create_physics_tag``) derives
+each row's real physics from its EVGEN path and rebinds it to the matching
+locked tag, creating or locking tags as needed. This script runs that derivation + matching against the live
 catalog **without writing anything** (``dry_run=True`` throughout, no save) and
 reports what a reload would do: tags reused, drafts that would be locked in
 place, distinct new tags created, rows rebound, backgrounds parked, and any

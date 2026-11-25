@@ -317,8 +317,8 @@ ACTION_DEFAULTS = {
     },
     'catalog_import': {
         'sublevel': 'low', 'live': False,
-        'description': "Import the production CSV manifest catalog: create "
-                       "or update campaign task records from the source rows.",
+        'description': "Import the past-campaign output catalog on request: "
+                       "create or update its dataset records.",
     },
     'association_sweep': {
         'sublevel': 'low', 'live': False,

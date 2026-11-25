@@ -1769,8 +1769,6 @@ class EpicProdOpsAgent(BaseAgent):
             ('segfault_dig', self._do_segfault_dig_auto),
             ('segfault_study', self._do_segfault_study_auto),
             ('segfault_notice', self._do_segfault_notice),
-            ('catalog_import_csv',
-             lambda msg: self._do_catalog_import(dict(msg, source='csv'))),
             ('epic_prod_past_import', self._do_epic_prod_past_import),
             ('questionnaire_import', self._do_questionnaire_import),
             ('association_sweep', self._do_association_sweep),
@@ -4608,9 +4606,10 @@ class EpicProdOpsAgent(BaseAgent):
         self._do_evgen_rucio_update(m)
 
     def _handle_catalog_import(self, m):
-        """Run a PCS catalog import (csv / epic-prod) off the receiver thread —
-        the epic-prod walk of ~4900 datasets is far too slow for the web request
-        (which is why it moved here). Deduped per source."""
+        """Run a PCS catalog import (source epic-prod, the past-campaign
+        output) off the receiver thread — the walk of ~4900 datasets is far
+        too slow for the web request (which is why it moved here). Deduped
+        per source."""
         source = m.get('source', '')
         self.run_in_background(
             self._do_catalog_import, m,
