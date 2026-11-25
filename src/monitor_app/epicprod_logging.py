@@ -542,6 +542,13 @@ ACTION_DEFAULTS = {
                        "rendered progress table cache.",
     },
     # web and MCP
+    # scripts/canary-probe-config.py (site-canary docs/IMPLEMENTATION.md, Probes)
+    'canary_probe_config': {
+        'sublevel': 'normal', 'live': False,
+        'description': "Operator change to a queue's scheduled canary probe "
+                       "from a session: enabled with its interval and payload "
+                       "task, or disabled; the block before and after, who and why.",
+    },
     'sysconfig_edit': {
         'sublevel': 'normal', 'live': True,
         'description': "Operator edit of the SysConfig system-configuration "
