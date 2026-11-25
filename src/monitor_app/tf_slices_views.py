@@ -3,8 +3,8 @@ TF Slices views for fast processing workflow monitoring.
 """
 
 from django.db.models import F
-from django.shortcuts import render
-from django.http import JsonResponse
+from django.shortcuts import get_object_or_404, render
+from django.http import Http404, JsonResponse
 from django.urls import reverse
 from .models import TFSlice
 from .utils import DataTablesProcessor, get_filter_params, format_datetime
@@ -40,6 +40,8 @@ def tf_slices_list(request):
         {'name': 'status', 'title': 'Status', 'orderable': True},
         {'name': 'assigned_worker', 'title': 'Worker', 'orderable': True},
         {'name': 'created_at', 'title': 'Created', 'orderable': True},
+        {'name': 'result', 'title': 'Result', 'orderable': False},
+        {'name': 'error', 'title': 'Error', 'orderable': False},
     ]
 
     context = {
@@ -67,7 +69,7 @@ def tf_slices_datatable_ajax(request):
 
     columns = ['run_number', 'stf_filename', 'tf_filename', 'slice_id',
                'tf_first', 'tf_count', 'status', 'assigned_worker',
-               'created_at']
+               'created_at', 'result', 'error']
     dt = DataTablesProcessor(request, columns, default_order_column=8,
                              default_order_direction='desc')
 
@@ -119,6 +121,8 @@ def tf_slices_datatable_ajax(request):
             fill_cell(slice_obj.status, slice_obj.status),
             slice_obj.assigned_worker or '-',
             format_datetime(slice_obj.created_at),
+            _json_link(slice_obj, 'result'),
+            _json_link(slice_obj, 'error'),
         ])
 
     # Return DataTables-formatted response
@@ -128,3 +132,20 @@ def tf_slices_datatable_ajax(request):
         'recordsFiltered': records_filtered,
         'data': data
     })
+
+
+def _json_link(slice_obj, field):
+    """A table cell linking to one JSON field of the slice; '-' when empty."""
+    if getattr(slice_obj, field) is None:
+        return '-'
+    url = reverse('monitor_app:tf_slice_json', args=[slice_obj.id, field])
+    return f'<a href="{url}" target="_blank">view</a>'
+
+
+def tf_slice_json(request, pk, field):
+    """One slice's result or error JSON, pretty-printed."""
+    if field not in ('result', 'error'):
+        raise Http404
+    slice_obj = get_object_or_404(TFSlice.objects.only(field), pk=pk)
+    return JsonResponse(getattr(slice_obj, field), safe=False,
+                        json_dumps_params={'indent': 2})

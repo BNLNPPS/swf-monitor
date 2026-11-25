@@ -150,6 +150,7 @@ from .fastmon_views import (
 from .tf_slices_views import (
     tf_slices_list,
     tf_slices_datatable_ajax,
+    tf_slice_json,
 )
 from .workflow_views import (
     workflows_home,
@@ -207,6 +208,7 @@ urlpatterns = [
     # TF Slices (Fast Processing)
     path('tf-slices/', tf_slices_list, name='tf_slices_list'),
     path('tf-slices/datatable/', tf_slices_datatable_ajax, name='tf_slices_datatable_ajax'),
+    path('tf-slices/<int:pk>/<str:field>/', tf_slice_json, name='tf_slice_json'),
 
     path('subscribers/', subscribers_list, name='subscribers_list'),
     path('subscribers/datatable/', subscribers_datatable_ajax, name='subscribers_datatable_ajax'),
