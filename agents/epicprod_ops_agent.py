@@ -28,6 +28,10 @@ Capabilities:
   submit_task        — submit one PCS ProdTask to PanDA via prun, reusing the
                        cached production token (delegates to
                        scripts/submit-prod-task.py).
+  submit_analysis_run — submit one stage (map or merge) of a PCS analysis run
+                       from the specification PCS builds, and record the
+                       jediTaskID on the run (delegates to
+                       scripts/submit-analysis-run.py).
   rucio_snapshot_update — refresh the JLab Rucio output snapshot for the current
                        (+last) campaign and rematch produced datasets onto each
                        task's overrides['outputs'] (delegates to
@@ -173,6 +177,10 @@ SUBMIT_TIMEOUT = int(os.environ.get("EPICPROD_SUBMIT_TIMEOUT", "300"))
 # (manifest + env + dispatcher + JLab proxy) and submits noInput+noOutput.
 SUBMIT_EVGEN_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "submit-evgen-task.py"
 SUBMIT_EVGEN_TIMEOUT = int(os.environ.get("EPICPROD_SUBMIT_EVGEN_TIMEOUT", "300"))
+# Analysis run submission doer (swf-epicprod docs/ANALYSIS.md): one stage
+# (map or merge) of a frozen run, from the specification PCS builds.
+SUBMIT_ANALYSIS_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "submit-analysis-run.py"
+SUBMIT_ANALYSIS_TIMEOUT = int(os.environ.get("EPICPROD_SUBMIT_ANALYSIS_TIMEOUT", "300"))
 PANDA_TASK_OPERATION_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "panda-task-operation.py"
 PANDA_TASK_OPERATION_TIMEOUT = int(os.environ.get("EPICPROD_PANDA_TASK_OPERATION_TIMEOUT", "120"))
 # A Move PanDA accepted but the doer could not verify in its first wait is
@@ -421,6 +429,7 @@ class EpicProdOpsAgent(BaseAgent):
     """Production operations agent — dispatches ops messages to handlers."""
 
     KNOWN_TYPES = {"fetch_payload_log", "submit_task", "submit_evgen_task",
+                   "submit_analysis_run",
                    "panda_task_operation", "panda_task_operations",
                    "rse_deletion",
                    "panda_sandbox_keepalive",
@@ -778,6 +787,84 @@ class EpicProdOpsAgent(BaseAgent):
                              subject_type='campaign_task', subject_key=task_name,
                              username=str(m.get('owner') or ''),
                              sublevel='high', live_default=True, level=logging.ERROR)
+
+    def _handle_submit_analysis_run(self, m):
+        """Validate, then submit one stage of an analysis run on the worker
+        pool. Deduped per run and stage, so two triggers cannot submit the
+        same stage twice."""
+        run_card_id = str(m.get("run_card_id") or "")
+        stage = str(m.get("stage") or "")
+        if not run_card_id or stage not in ("map", "merge"):
+            self.logger.error(
+                f"PRODOPS submit_analysis_run: need run_card_id and stage map|merge, got "
+                f"run_card_id={run_card_id!r} stage={stage!r}")
+            return
+        self.run_in_background(
+            self._do_submit_analysis_run, m,
+            dedup_key=f"analysis:{run_card_id}:{stage}",
+            label=f"submit_analysis_run {run_card_id[:12]} {stage}")
+
+    def _do_submit_analysis_run(self, m):
+        """Submit one stage of a PCS analysis run via the standalone doer.
+
+        The doer fetches the stage's specification from PCS, assembles the
+        sandbox (manifest, environment, the run's files, the JLab proxy,
+        the payload), submits with the cached production token and records
+        the jediTaskID on the run (record-submission), which pages read.
+        Every outcome emits an event on /topic/epictopic, as the production
+        submissions do. Message: {run_card_id, stage, owner?, label?}; label
+        test sends a canary under the test label."""
+        run_card_id, stage = str(m["run_card_id"]), str(m["stage"])
+        subject = f"{run_card_id[:12]}.{stage}"
+        cmd = [sys.executable, str(SUBMIT_ANALYSIS_SCRIPT),
+               "--run-card-id", run_card_id, "--stage", stage]
+        if m.get("owner"):
+            cmd += ["--owner", str(m["owner"])]
+        if m.get("label") in ("user", "test"):
+            cmd += ["--label", str(m["label"])]
+        self.logger.info(f"PRODOPS submit_analysis_run: {subject}")
+        t0 = time.monotonic()
+        event = {'run_card_id': run_card_id, 'stage': stage}
+        log = dict(subject_type='analysis_run', subject_key=subject,
+                   username=str(m.get('owner') or ''), sublevel='high', live_default=True)
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=SUBMIT_ANALYSIS_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            reason = f'submission timed out after {SUBMIT_ANALYSIS_TIMEOUT}s'
+            self.logger.error(f"PRODOPS submit_analysis_run TIMEOUT: {subject}")
+            self.send_message('/topic/epictopic', dict(
+                event, msg_type='analysis_submit_failed', reason=reason))
+            self._log_action('analysis_submit', t0, outcome='timeout', reason=reason,
+                             level=logging.ERROR, **log)
+            return
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  submit-analysis-run: {line}")
+        jedi_task_id = (p.stdout or '').strip()
+        reason = self._derive_reason(p)
+        if p.returncode == 0 and jedi_task_id:
+            self.logger.info(
+                f"PRODOPS submit_analysis_run done: {subject} -> jediTaskID={jedi_task_id}")
+            self.send_message('/topic/epictopic', dict(
+                event, msg_type='analysis_submitted', jedi_task_id=jedi_task_id))
+            self._log_action('analysis_submit', t0, jedi_task_id=jedi_task_id, **log)
+        elif p.returncode == 7 and jedi_task_id:
+            # Submitted, but not recorded on the run; record-submission is
+            # idempotent, so the id can be recorded again.
+            self.logger.error(
+                f"PRODOPS submit_analysis_run UNRECORDED: {subject} submitted as "
+                f"jediTaskID={jedi_task_id}")
+            self.send_message('/topic/epictopic', dict(
+                event, msg_type='analysis_submit_unrecorded', jedi_task_id=jedi_task_id,
+                reason=reason))
+            self._log_action('analysis_submit', t0, outcome='unrecorded', reason=reason,
+                             level=logging.ERROR, jedi_task_id=jedi_task_id, **log)
+        else:
+            self.logger.error(f"PRODOPS submit_analysis_run FAILED rc={p.returncode}: {subject}")
+            self.send_message('/topic/epictopic', dict(
+                event, msg_type='analysis_submit_failed', reason=reason))
+            self._log_action('analysis_submit', t0, outcome='error', reason=reason,
+                             level=logging.ERROR, **log)
 
     def _handle_panda_task_operation(self, m):
         """Run a PanDA-native operation on an existing JEDI task."""

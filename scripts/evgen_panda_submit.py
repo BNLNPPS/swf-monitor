@@ -308,6 +308,12 @@ def build_task_params(spec, archive_name):
     if spec.get('containerImage'):
         params['container_name'] = spec['containerImage']
 
+    # The global share, when the spec names one: an analysis run's
+    # Validation or User share (swf-epicprod ANALYSIS.md). Production
+    # specs name none and keep the server's choice.
+    if spec.get('gshare'):
+        params['gshare'] = spec['gshare']
+
     # No log dataset at all (the prun --noSeparateLog shape): nothing for
     # the refiner to validate against Rucio and nothing for the Adder to
     # register. For queues whose log stage-out is an object store outside
