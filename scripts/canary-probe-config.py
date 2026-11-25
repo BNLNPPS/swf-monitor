@@ -14,7 +14,7 @@ By hand, from swf-monitor/src:
     ../../swf-testbed/.venv/bin/python ../scripts/canary-probe-config.py \\
         QUEUE --disable --by wenauseic --reason "..." [--dry-run]
     ../../swf-testbed/.venv/bin/python ../scripts/canary-probe-config.py \\
-        QUEUE --interval-hours 12 [--payload-task NAME] --by ... --reason ...
+        QUEUE --interval-hours 12 [--payload-task NAME [--es-events N]] --by ... --reason ...
 """
 import argparse
 import json
@@ -49,6 +49,10 @@ def main():
     parser.add_argument('--payload-task', default=None,
                         help='PCS task whose payload canary is the scheduled probe '
                              '(empty: a landing probe; omitted: unchanged)')
+    parser.add_argument('--es-events', type=int, default=None,
+                        help='with a payload task: an Event Service canary over this '
+                             "many of the task's events in the queue's production "
+                             'shape (0: a one-row canary; omitted: unchanged)')
     parser.add_argument('--by', required=True,
                         help='who the change is recorded for')
     parser.add_argument('--reason', required=True,
@@ -70,7 +74,8 @@ def main():
                           'action': action, 'before': before}))
         return 0
 
-    error = _apply_probe_config(queue, action, args.interval_hours, args.payload_task)
+    error = _apply_probe_config(queue, action, args.interval_hours, args.payload_task,
+                                args.es_events)
     if error:
         log.error('refused: %s', error)
         log_epicprod_action(

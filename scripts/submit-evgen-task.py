@@ -652,6 +652,12 @@ def main():
                     help="payload canary: cores the job requests and threads "
                          "npsim and eicrecon run with (where the image "
                          "supports it); memory stays per core")
+    ap.add_argument("--canary-es-events", type=int, default=0,
+                    help="payload canary as an Event Service job in the canary "
+                         "queue's production shape: the first N events of the "
+                         "task, a feeder's particle-gun sample, on the whole "
+                         "node (swf-epicprod production_es.canary; site-canary "
+                         "IMPLEMENTATION.md, Payload canaries)")
     ap.add_argument("--es-events-per-range", type=int, default=0,
                     help="Event Service canary: events per range "
                          "(nEventsPerWorker); with --es-input-dataset")
@@ -768,6 +774,12 @@ def main():
     if args.canary_defer_datasets and not args.canary_stamp:
         _log("ERROR: --canary-defer-datasets is for payload canaries only")
         return 2
+    if args.canary_es_events and (not args.canary_stamp or args.es_input_dataset
+                                  or args.canary_row or args.canary_row_text
+                                  or args.canary_threads or args.canary_mem_limit_mb):
+        _log("ERROR: --canary-es-events is a payload canary of its own: no "
+             "--es-input-dataset, row, thread or memory-limit settings")
+        return 2
     # A developer's canary (swf-epicprod docs/DEVELOPING_THE_PAYLOAD.md):
     # its settings are checked before anything is fetched or submitted.
     developer = bool(args.canary_payload_ref or args.canary_switch
@@ -815,6 +827,11 @@ def main():
         spec_query["row"] = args.canary_row_text.strip()
     if args.canary_container:
         spec_query["container"] = args.canary_container.strip()
+    if args.canary_es_events:
+        # PCS builds the spec in the queue's production shape now, over the
+        # sample's plan (swf-epicprod production_es.canary_settings).
+        spec_query.update(es_canary_queue=args.canary_queue,
+                          es_canary_events=int(args.canary_es_events))
     try:
         raw = _api_get(args.swf_monitor_url, "/pcs/api/prod-tasks/command/",
                        spec_query, args.token)
@@ -855,16 +872,29 @@ def main():
         else:
             spec['csvRows'] = rows[:1]
         spec['outDS'] = f"group.EIC.canary.{qtag}.{args.canary_stamp}"
-        if args.canary_threads > 0:
-            spec['nCore'] = int(args.canary_threads)
-            _log(f"canary threads: {spec['nCore']} cores requested, "
-                 f"{spec.get('memory', 4096)} MB per core")
-        # Settings ride as an environment prefix on the dispatcher command,
-        # as a trial's do.
-        prefix = (f"CANARY_MEM_LIMIT_MB={int(args.canary_mem_limit_mb)} "
-                  if args.canary_mem_limit_mb else "")
-        spec['exec'] = (f"{prefix}python3 evgen_job_dispatcher.py payload-canary "
-                        f"{spec['csvBase']} {args.canary_stamp}")
+        if args.canary_es_events:
+            # The production Event Service job on the whole node: the
+            # dispatcher's es mode with the harness settings production
+            # carries, its closes registered into the expiring canary dataset.
+            from swf_epicprod.production_es import canary as es_canary
+            try:
+                es_canary(spec, args.canary_stamp)
+            except ValueError as e:
+                _log(f"ERROR: {e}")
+                return 2
+            _log(f"event service canary: {args.canary_es_events} events in the "
+                 f"production shape of {args.canary_queue}, {spec.get('nCore')} cores")
+        else:
+            if args.canary_threads > 0:
+                spec['nCore'] = int(args.canary_threads)
+                _log(f"canary threads: {spec['nCore']} cores requested, "
+                     f"{spec.get('memory', 4096)} MB per core")
+            # Settings ride as an environment prefix on the dispatcher command,
+            # as a trial's do.
+            prefix = (f"CANARY_MEM_LIMIT_MB={int(args.canary_mem_limit_mb)} "
+                      if args.canary_mem_limit_mb else "")
+            spec['exec'] = (f"{prefix}python3 evgen_job_dispatcher.py payload-canary "
+                            f"{spec['csvBase']} {args.canary_stamp}")
         # Above the production band: a canary is one job whose point is a
         # prompt verdict. At its PCS task's priority it waited behind every
         # older production job of the same priority on the queue (2,875 at
