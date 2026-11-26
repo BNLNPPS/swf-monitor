@@ -1066,22 +1066,29 @@ def main():
         # what a trial proves; only PCS knows it is a trial, from the
         # suffix in its name (docs/PCS.md, Trials).
         lifetime_s = int(args.trial_lifetime_days) * 86400
-        spec['csvRows'] = list(spec['csvRows'])[:1]
-        spec['exec'] = (
-            f"TRIAL_OUTPUT_ROOT={args.trial_root} "
-            f"TRIAL_LIFETIME_S={lifetime_s} "
-            f"TRIAL_EVENTS={int(args.trial_events)} "
-            # %RNDM=0 is the token JEDI substitutes when it makes job
-            # parameters, and is what the production exec uses; a shell
-            # ${SEQNUMBER} is not resolved and job generation crashes.
-            f"python3 evgen_job_dispatcher.py %RNDM=0 {spec['csvBase']}"
-        )
-        spec.update(nJobs=1, maxAttempt=1, skipScout=True)
+        if spec.get('event_service'):
+            # An Event Service trial is already one job of the task's shape
+            # at the trial's events, its RECO under the trial root with the
+            # lifetime (swf_epicprod.production_es.trial_settings and apply).
+            spec['skipScout'] = True
+        else:
+            spec['csvRows'] = list(spec['csvRows'])[:1]
+            spec['exec'] = (
+                f"TRIAL_OUTPUT_ROOT={args.trial_root} "
+                f"TRIAL_LIFETIME_S={lifetime_s} "
+                f"TRIAL_EVENTS={int(args.trial_events)} "
+                # %RNDM=0 is the token JEDI substitutes when it makes job
+                # parameters, and is what the production exec uses; a shell
+                # ${SEQNUMBER} is not resolved and job generation crashes.
+                f"python3 evgen_job_dispatcher.py %RNDM=0 {spec['csvBase']}"
+            )
+            spec.update(nJobs=1, maxAttempt=1, skipScout=True)
         if args.trial_queue:
             spec['site'] = args.trial_queue
         _log(f"trial {spec['outDS']} on {spec.get('site') or '(brokered)'}: "
-             f"{args.trial_events} events, outputs under "
-             f"epic:/{args.trial_root}, lifetime {args.trial_lifetime_days}d")
+             f"{args.trial_events} events"
+             + (" (Event Service)" if spec.get('event_service') else "")
+             + f", outputs under epic:/{args.trial_root}, lifetime {args.trial_lifetime_days}d")
     # Recheck the final destination in the credentialed doer: a request
     # queued before retirement, a trial or a payload canary bypasses the
     # current PCS admission check. This creates tasks, never existing jobs.

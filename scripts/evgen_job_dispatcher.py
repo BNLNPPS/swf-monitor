@@ -425,7 +425,10 @@ def run_event_service(csv_base, stamp, workdir, channel, production=False):
         os.chmod(target, 0o600)
     dataset = (os.environ.get('ES_OUTPUT_DATASET', '').lstrip('/') if production
                else f"{CANARY_DATASET_ROOT}/{stamp}")
-    if production and not dataset.startswith('RECO/'):
+    # A trial's RECO is under its own root (swf-epicprod docs/PCS.md, Trials).
+    trial_root = os.environ.get('TRIAL_OUTPUT_ROOT', '').strip('/')
+    if production and not (dataset.startswith('RECO/')
+                           or (trial_root and dataset == f'{trial_root}/RECO')):
         print('ERROR: production ES requires its declared RECO output dataset', file=sys.stderr)
         return 2
     work = os.path.join(os.path.dirname(workdir), ES_WORK_DIR)
