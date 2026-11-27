@@ -64,7 +64,9 @@ and live default when it succeeds, and where one outcome matters more than
 the rest, that outcome's own (`outcomes`: a front decision that `fed`, a
 feeder pass that `submitted`), and where a record's flag sets it apart,
 the flag's own (`flags`: a rule proposer's `proposal_created` carries
-`rule` and is low and not live, AI_PROPOSALS.md). A failure (an `error`, `timeout`, `partial`
+`rule` and is low and not live, AI_PROPOSALS.md; a SysConfig key seeded at
+its code default on first read is a `sysconfig_edit` carrying `autoseed`,
+low and not live). A failure (an `error`, `timeout`, `partial`
 or `unrecorded` outcome, or a record at ERROR) is `high` and live, a
 maintenance pass's failure `normal`. A testbed action (`testbed`:
 `workflow_execution_completed`) is not production work: every outcome

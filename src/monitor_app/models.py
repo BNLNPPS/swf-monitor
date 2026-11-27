@@ -633,8 +633,10 @@ class SysConfig(models.Model):
         from .epicprod_logging import log_epicprod_action
         # Mechanical seeding, not an operator decision: recorded, never
         # on the live feed (operator edits via update_config stay live).
+        # The catalog's autoseed flag sets it low and not live; a call
+        # site's own values do not override the catalog.
         log_epicprod_action(
-            'web', 'sysconfig_edit', username='autoseed',
+            'web', 'sysconfig_edit', username='autoseed', autoseed=True,
             sublevel='low', live_default=False,
             summary=f'seeded {key} at its code default {default!r}',
             message=f'sysconfig_edit ok — autoseeded {key}={default!r} '

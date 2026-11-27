@@ -564,8 +564,11 @@ ACTION_DEFAULTS = {
     },
     'sysconfig_edit': {
         'sublevel': 'normal', 'live': True,
+        'flags': {'autoseed': {'sublevel': 'low', 'live': False}},
         'description': "Operator edit of the SysConfig system-configuration "
-                       "document on the System page.",
+                       "document on the System page. The first read of an "
+                       "unset key seeds its code default (models.SysConfig."
+                       "get_setting) with autoseed: low and not live.",
     },
     'live_policy_edit': {
         'sublevel': 'normal', 'live': True,
