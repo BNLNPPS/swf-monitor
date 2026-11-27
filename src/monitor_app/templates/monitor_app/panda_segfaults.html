@@ -93,6 +93,7 @@
                 <th>Stage</th>
                 <th>Status</th>
                 <th title="Reruns of a crashed row as canary jobs: attempts still queued or running, and attempts ended; a trace-level row counts its members' attempts">Reproductions</th>
+                <th title="Delegated through its finding to a person or group outside the operations team">Delegated</th>
             </tr>
         </thead>
         <tbody>
@@ -114,6 +115,7 @@
                 <td>{% for stage, n in r.stages.items %}{{ stage }} ({{ n }}){% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
                 <td>{{ r.status_label }}</td>
                 <td data-order="{{ r.repro_active }}{{ r.repro_ended|stringformat:'04d' }}">{{ r.repro_state_label }}{% if r.repro_active or r.repro_ended %}<br><a href="{% url 'monitor_app:panda_segfault_reproductions' %}?signature={{ r.key|urlencode }}">{% if r.repro_active %}{{ r.repro_active }} active{% endif %}{% if r.repro_active and r.repro_ended %}, {% endif %}{% if r.repro_ended %}{{ r.repro_ended }} ended{% endif %}</a>{% endif %}</td>
+                <td>{% if r.delegation %}<a href="{% url 'monitor_app:panda_segfault_findings' %}#{{ r.delegation.anchor }}">{{ r.delegation.delegates|join:", " }}</a><br>{% if r.delegation.state == 'open' %}open{% else %}{{ r.delegation.state }}{% endif %}{% endif %}</td>
             </tr>
             {% endfor %}
         </tbody>

@@ -1,0 +1,85 @@
+{% extends 'base.html' %}
+{% load swf_fmt %}
+
+{% block title %}Segfault Delegations{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h1>{% if show_all %}Segfault Delegations{% else %}Delegated to me{% endif %}</h1>
+    {% with segfault_tab='delegated' %}{% include 'monitor_app/_segfault_tabs.html' %}{% endwith %}
+    <p class="mb-3" style="max-width: 70em">
+        Segfault findings delegated to a person or a group outside the production operations team, each with what is asked.
+        {% if show_all %}Every delegation is listed, open ones first.
+        <a href="{% url 'monitor_app:panda_segfault_delegated' %}">Only mine</a>{% else %}Listed here: the delegations to
+        {% if viewer %}<strong>{{ viewer }}</strong>{% else %}the signed-in account{% endif %}{% if my_groups %} and to {{ my_groups|join:", " }}{% endif %},
+        open ones first. <a href="{% url 'monitor_app:panda_segfault_delegated' %}?all=1">All delegations</a>{% endif %}.
+        The delegate accepts a delegation, answers it, or returns it; the reply is kept on the finding.
+    </p>
+    {% if not rows %}
+    <p>No delegations{% if not show_all %} to you or your groups{% endif %}.</p>
+    {% else %}
+    <table class="table table-striped table-bordered table-sm align-top w-auto swf-sortable" id="delegated-table">
+        <thead>
+            <tr>
+                <th>Delegated</th>
+                <th>Finding</th>
+                <th>Delegate</th>
+                <th>Asked by</th>
+                <th>What is asked</th>
+                <th>Crashes</th>
+                <th>Rows lost</th>
+                <th>State</th>
+                <th>Replies</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for d in rows %}
+            <tr>
+                <td data-order="{{ d.at }}">{% with t=d.at|fmt_dt %}{{ t|slice:":8" }}<br>{{ t|slice:"9:" }}{% endwith %}</td>
+                <td style="max-width: 24em"><a href="{% url 'monitor_app:panda_segfault_findings' %}#{{ d.anchor }}"><strong>{{ d.fid }}</strong>: {{ d.title }}</a></td>
+                <td>{{ d.delegate }}{% if d.kind == 'group' %} (group){% endif %}</td>
+                <td>{{ d.by }}</td>
+                <td style="max-width: 30em">{{ d.ask }}</td>
+                <td data-order="{{ d.crashes|default_if_none:'-1' }}">{{ d.crashes|default_if_none:'' }}</td>
+                <td data-order="{{ d.rows_lost|default_if_none:'-1' }}">{% if d.rows_lost %}{{ d.rows_lost }}{% if d.events_lost %}<br>{{ d.events_lost }} ev{% endif %}{% endif %}</td>
+                <td>{{ d.state }}</td>
+                <td style="max-width: 34em">
+                    {% for rep in d.replies %}<div>{{ rep.state }} by {{ rep.by }}, {{ rep.at|fmt_dt }}{% if rep.text %}: {{ rep.text }}{% endif %}</div>{% endfor %}
+                    {% if d.may_reply %}
+                    <form class="reply-form mt-1" method="post" action="{% url 'monitor_app:panda_segfault_delegation_reply' name=d.finding delegation_id=d.id %}">
+                        {% csrf_token %}
+                        <textarea name="text" class="form-control mb-1" rows="2" placeholder="Reply (needed to answer or return)"></textarea>
+                        {% if d.state == 'delegated' %}<button type="submit" name="state" value="accepted" class="btn btn-sm btn-primary">Accept</button>{% endif %}
+                        <button type="submit" name="state" value="answered" class="btn btn-sm btn-success">Answer</button>
+                        <button type="submit" name="state" value="returned" class="btn btn-sm btn-secondary">Return</button>
+                        <span class="reply-msg ms-2"></span>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+<script>
+    // A reply is a JSON action that works through the proxy; the page
+    // reloads on success (swf-epicprod docs/SEGFAULT_DELEGATION.md).
+    document.querySelectorAll('form.reply-form').forEach(function (form) {
+        form.addEventListener('submit', function (ev) {
+            ev.preventDefault();
+            const msg = form.querySelector('.reply-msg');
+            const body = new URLSearchParams(new FormData(form));
+            if (ev.submitter && ev.submitter.name) body.set(ev.submitter.name, ev.submitter.value);
+            const token = form.querySelector('[name=csrfmiddlewaretoken]').value;
+            msg.textContent = 'Sending...'; msg.className = 'reply-msg ms-2';
+            fetch(form.action, {method: 'POST', body: body.toString(),
+                                headers: {'X-CSRFToken': token, 'X-Requested-With': 'XMLHttpRequest',
+                                          'Content-Type': 'application/x-www-form-urlencoded'}})
+              .then(function (resp) { return resp.json().then(function (d) { return {ok: resp.ok, d: d}; }); })
+              .then(function (r) { if (r.ok) { window.location.reload(); } else { msg.textContent = r.d.error || 'Could not send the reply.'; msg.className = 'reply-msg ms-2 text-danger'; } })
+              .catch(function () { msg.textContent = 'Could not send the reply.'; msg.className = 'reply-msg ms-2 text-danger'; });
+        });
+    });
+</script>
+{% endblock %}

@@ -2763,6 +2763,45 @@ def reply_delegation(ref, delegation_id, state, text, by):
     return dict(delegation, finding=entry.name, fid=fid)
 
 
+DELEGATION_SUMMARY_LABELS = {'open': 'Open', 'answered': 'Answered', 'returned': 'Returned',
+                             'none': 'Not delegated'}
+DELEGATION_SUMMARY_ORDER = ['open', 'answered', 'returned', 'none']
+
+
+def delegation_summary(listed):
+    """One state for a finding's delegations: open while any is delegated
+    or accepted, else answered or returned as the latest stands; none
+    without any."""
+    if not listed:
+        return 'none'
+    if any(d.get('state') in DELEGATION_OPEN for d in listed):
+        return 'open'
+    return 'returned' if listed[-1].get('state') == 'returned' else 'answered'
+
+
+def delegations_by_signature():
+    """``{signature key: {'state', 'delegates', 'fid', 'anchor'}}`` for the
+    signatures named by findings that carry delegations; a frame entry's
+    members carry their frame's. ``delegates`` are the open delegations'
+    delegates, else the latest's."""
+    out = {}
+    for entry in finding_entries():
+        listed = (entry.data or {}).get(DELEGATIONS_KEY) or []
+        if not listed:
+            continue
+        keys = [str(k) for k in ((entry.data or {}).get('signatures') or [entry.name])]
+        summary = {'state': delegation_summary(listed),
+                   'delegates': ([d['delegate'] for d in listed if d.get('state') in DELEGATION_OPEN]
+                                 or [listed[-1]['delegate']]),
+                   'fid': finding_id((entry.data or {}).get('serial')),
+                   'anchor': keys[0].replace(':', '-')}
+        members = [m for s in CrashSignature.objects.filter(key__in=keys, level='trace')
+                   for m in ((s.data or {}).get('members') or [])]
+        for key in keys + members:
+            out.setdefault(key, summary)
+    return out
+
+
 def delegations(*, person=None, open_only=False):
     """Every delegation on the findings, open ones first and then newest
     first, each with its finding's name, fid and title. With ``person``,

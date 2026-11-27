@@ -1996,9 +1996,14 @@ def panda_segfaults(request):
     from ..narrowing_filter import Facet, NarrowingFilter
     from ..reproductions import (REPRODUCTION_STATE_LABELS, REPRODUCTION_STATE_ORDER, attempts,
                                  counts_by_signature, global_counts, reproduction_states)
-    from ..segfaults import (CLASS_LABELS, CLASS_ORDER, KIND_LABELS, KIND_ORDER, STATUS_LABELS,
-                             catalog)
+    from ..segfaults import (CLASS_LABELS, CLASS_ORDER, DELEGATION_SUMMARY_LABELS,
+                             DELEGATION_SUMMARY_ORDER, KIND_LABELS, KIND_ORDER, STATUS_LABELS,
+                             catalog, delegations_by_signature)
     rows_all, _class_counts = catalog()
+    delegated = delegations_by_signature()
+    for r in rows_all:
+        r['delegation'] = delegated.get(r['key'])
+        r['delegation_state'] = (r['delegation'] or {}).get('state') or 'none'
     # The reproduction attempts per row, active and ended, each attempt
     # counted once; a trace-level row carries its members' attempts; and
     # where each signature stands on reproduction (run needed, in
@@ -2026,6 +2031,10 @@ def panda_segfaults(request):
         Facet('reproduction', 'Reproduction', lambda r: r['repro_state'],
               display=lambda v: REPRODUCTION_STATE_LABELS.get(v, v), order=REPRODUCTION_STATE_ORDER),
         Facet('level', 'Level', lambda r: r['level']),
+        # Delegated to a person or group outside the operations team
+        # (swf-epicprod docs/SEGFAULT_DELEGATION.md), through its finding.
+        Facet('delegated', 'Delegated', lambda r: r['delegation_state'],
+              display=lambda v: DELEGATION_SUMMARY_LABELS.get(v, v), order=DELEGATION_SUMMARY_ORDER),
     ]
     flt = NarrowingFilter(request.GET, facets)
     # Every row is rendered with its facet values; the browser applies the
@@ -2106,8 +2115,68 @@ def panda_segfault_findings(request):
         raise Http404('No such finding version')
     if name is not None and not entries:
         raise Http404('No such finding')
+    from ..authority import may_act
+    from ..segfaults import delegate_groups
+    user = request.user.username if request.user.is_authenticated else ''
     return render(request, 'monitor_app/panda_segfault_findings.html',
-                  {'entries': entries, 'error': error, 'historical': version is not None})
+                  {'entries': entries, 'error': error, 'historical': version is not None,
+                   'may_delegate': bool(user) and may_act(user) and version is None,
+                   'delegate_groups': sorted(delegate_groups()), 'viewer': user})
+
+
+def panda_segfault_delegate(request, name):
+    """Delegate a finding to a person or a delegate group (swf-epicprod
+    docs/SEGFAULT_DELEGATION.md): an authenticated operator decision under
+    the authority gate. Form fields delegate and ask; JSON out, so it
+    works through the swf-remote proxy."""
+    from ..segfaults import delegate_finding
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST only'}, status=405)
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'sign in to delegate'}, status=403)
+    try:
+        return JsonResponse(delegate_finding(name, request.POST.get('delegate'),
+                                             request.POST.get('ask'), request.user.username))
+    except ValueError as exc:
+        return JsonResponse({'error': str(exc)}, status=400)
+
+
+def panda_segfault_delegation_reply(request, name, delegation_id):
+    """The delegate's reply to an open delegation: form fields state
+    (accepted, answered, returned) and text; only the delegate or a member
+    of the delegated group. JSON out."""
+    from ..segfaults import reply_delegation
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST only'}, status=405)
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'sign in to reply'}, status=403)
+    try:
+        return JsonResponse(reply_delegation(name, delegation_id, request.POST.get('state'),
+                                             request.POST.get('text'), request.user.username))
+    except ValueError as exc:
+        return JsonResponse({'error': str(exc)}, status=400)
+
+
+def panda_segfault_delegated(request):
+    """Delegated to me: the delegations to the signed-in account and to the
+    groups that list it, open ones first, each with its finding and a reply
+    form (swf-epicprod docs/SEGFAULT_DELEGATION.md). ``?all=1`` lists every
+    delegation."""
+    from ..segfaults import delegate_groups, delegations, findings
+    user = request.user.username if request.user.is_authenticated else ''
+    show_all = request.GET.get('all') == '1'
+    rows = delegations(person=None if show_all else (user or '-'))
+    groups = delegate_groups()
+    mine = {g for g, v in groups.items() if user and (user in v['conveners'] or user in v['members'])}
+    entries = {e['name']: e for e in findings()[0]} if rows else {}
+    for r in rows:
+        e = entries.get(r['finding']) or {}
+        r.update(anchor=e.get('anchor', ''), crashes=e.get('crashes'), rows_lost=e.get('rows_lost'),
+                 events_lost=e.get('events_lost'), signatures=[s.get('key') for s in e.get('signatures') or []],
+                 may_reply=bool(user) and r.get('state') in ('delegated', 'accepted')
+                 and (r.get('delegate') == user or r.get('delegate') in mine))
+    return render(request, 'monitor_app/panda_segfault_delegated.html',
+                  {'rows': rows, 'viewer': user, 'my_groups': sorted(mine), 'show_all': show_all})
 
 
 def panda_segfault_detail(request, key):
