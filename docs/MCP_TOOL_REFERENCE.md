@@ -507,6 +507,9 @@ Tools for querying the ePIC PanDA production database (`doma_panda` schema). Rea
 | `panda_segfault_findings` | | The segfault findings: the curated reading of the catalog, one entry per crashing frame with its permanent id (f-8), joined live to the catalog counts. |
 | `panda_segfault_finding_set` | `name` (required), `title`, `what`, `date`, `frame`, `stage`, `class_hint`, `action`, `standing`, `fix`, `notes`, `sources`, `signatures`, `model_reading`, `changed_by` | Create or update a segfault finding; versioned, stamped; under the authority gate. |
 | `panda_segfault_reproduce` | `key` (required), `pandaid`, `queues`, `requested_by` | Request a signature's reproduction: the crashed row as one payload canary on the production queue and the reference queue, recorded on the signature; the claim the nightly notice asks for; under the authority gate. |
+| `panda_segfault_delegate` | `finding` (required), `delegate` (required), `ask` (required), `delegated_by` | Delegate a finding to a person or a delegate group outside the operations team, with what is asked; an operator decision; under the authority gate (swf-epicprod SEGFAULT_DELEGATION.md). |
+| `panda_segfault_delegation_reply` | `finding`, `delegation_id`, `state` (all required), `text`, `replied_by` | The delegate's reply to an open delegation: accepted, answered or returned; only the delegate or a member of the delegated group; under the authority gate. |
+| `panda_segfault_delegations` | `person`, `open_only` | The delegations, open ones first, optionally one person's directly or through a group, and the group registry. |
 
 **`panda_get_activity`** — Pre-digested overview, no individual records:
 - `days`: Time window in days (default 1)
@@ -700,7 +703,7 @@ them and a person reading the page see one history.
 | Snapper State History | `snapper_latest`, `snapper_state_at`, `snapper_component_history`, `snapper_changes_between`, `snapper_context_around`, `snapper_series`, `snapper_cut_summary` | 7 |
 | PCS Tags | `pcs_list_tags`, `pcs_get_tag`, `pcs_search_tags` | 3 |
 | PCS Datasets and Prod Tasks | `pcs_dataset_list`, `pcs_dataset_get`, `pcs_data_provenance`, `pcs_dataset_intake`, `pcs_prodtask_list`, `pcs_prodtask_get`, `pcs_prodtask_artifact`, `pcs_prodtask_intake`, `pcs_prodtask_link_input`, `pcs_prodtask_set_status`, `pcs_prodtask_unplace` | 11 |
-| PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers`, `panda_segfault_catalog`, `panda_segfault_signature`, `panda_segfault_findings`, `panda_segfault_finding_set`, `panda_segfault_reproduce` | 12 |
+| PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers`, `panda_segfault_catalog`, `panda_segfault_signature`, `panda_segfault_findings`, `panda_segfault_finding_set`, `panda_segfault_reproduce`, `panda_segfault_delegate`, `panda_segfault_delegation_reply`, `panda_segfault_delegations` | 18 |
 | JLab Rucio | `jlab_rucio_*` | 14 |
 | BNL Rucio | `bnl_rucio_*` | 14 |
 | **Total** | | **105** |

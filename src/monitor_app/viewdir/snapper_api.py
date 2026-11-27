@@ -283,3 +283,68 @@ def segfault_findings_api(request):
         return JsonResponse({'error': str(exc)}, status=400)
     return JsonResponse({'name': name, 'created': created, 'versions': entry.versions.count(),
                          'title': entry.title, 'standing': entry.status})
+
+
+def _delegation_body(request, who_field):
+    """The JSON body and the acting account: a signed-in person acts as
+    themselves; a service token may name who acts in ``who_field``."""
+    import json as _json
+    if not request.user.is_authenticated:
+        return None, None, JsonResponse({'error': 'a token or a signed-in account is required'}, status=403)
+    try:
+        body = _json.loads(request.body or b'{}')
+    except ValueError:
+        return None, None, JsonResponse({'error': 'the body must be JSON'}, status=400)
+    who = (str(body.get(who_field) or request.user.username) if request.auth is not None
+           else request.user.username)
+    return body, who, None
+
+
+@api_view(['POST'])
+@authentication_classes([SessionAuthentication, TokenAuthentication])
+@permission_classes([AllowAny])
+def segfault_delegate_api(request, name):
+    """POST /api/segfaults/findings/<name>/delegations/ — delegate the
+    finding (its name or f-N) to a person or a delegate group, JSON body
+    {delegate, ask, delegated_by (token only)} (swf-epicprod
+    docs/SEGFAULT_DELEGATION.md)."""
+    from ..segfaults import delegate_finding
+    body, who, refused = _delegation_body(request, 'delegated_by')
+    if refused:
+        return refused
+    try:
+        return JsonResponse(delegate_finding(name, body.get('delegate'), body.get('ask'), who))
+    except ValueError as exc:
+        return JsonResponse({'error': str(exc)}, status=400)
+
+
+@api_view(['POST'])
+@authentication_classes([SessionAuthentication, TokenAuthentication])
+@permission_classes([AllowAny])
+def segfault_delegation_reply_api(request, name, delegation_id):
+    """POST /api/segfaults/findings/<name>/delegations/<id>/ — the
+    delegate's reply, JSON body {state: accepted|answered|returned, text,
+    replied_by (token only)}."""
+    from ..segfaults import reply_delegation
+    body, who, refused = _delegation_body(request, 'replied_by')
+    if refused:
+        return refused
+    try:
+        return JsonResponse(reply_delegation(name, delegation_id, body.get('state'),
+                                             body.get('text'), who))
+    except ValueError as exc:
+        return JsonResponse({'error': str(exc)}, status=400)
+
+
+@api_view(['GET'])
+@authentication_classes([SessionAuthentication, TokenAuthentication])
+@permission_classes([AllowAny])
+def segfault_delegations_api(request):
+    """GET /api/segfaults/delegations/?person=<account>&open=1 — the
+    delegations, open ones first, and the group registry (the payload of
+    panda_segfault_delegations)."""
+    from ..segfaults import delegate_groups, delegations
+    person = (request.GET.get('person') or '').strip() or None
+    open_only = request.GET.get('open') in ('1', 'true', 'yes')
+    return JsonResponse({'delegations': delegations(person=person, open_only=open_only),
+                         'groups': delegate_groups()})

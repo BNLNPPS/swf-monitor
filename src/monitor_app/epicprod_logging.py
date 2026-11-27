@@ -476,6 +476,19 @@ ACTION_DEFAULTS = {
                        "(kind finding, context segfault), versioned and "
                        "stamped; through the MCP tool or REST.",
     },
+    'segfault_delegated': {
+        'sublevel': 'normal', 'live': False,
+        'description': "A segfault finding delegated to a person or a "
+                       "delegate group outside the operations team, with "
+                       "what is asked (swf-epicprod docs/"
+                       "SEGFAULT_DELEGATION.md); an operator decision through "
+                       "the MCP tool, REST or the findings page.",
+    },
+    'segfault_delegation_answered': {
+        'sublevel': 'normal', 'live': False,
+        'description': "The delegate's reply to a segfault delegation: "
+                       "accepted, answered or returned, with its text.",
+    },
     'segfault_package': {
         'sublevel': 'low', 'live': False,
         'description': "A crashed job's reproduction package built for a "

@@ -785,6 +785,108 @@ async def panda_segfault_finding_set(
 
 @mcp.tool()
 @requires_authority
+async def panda_segfault_delegate(
+    finding: str,
+    delegate: str,
+    ask: str,
+    delegated_by: str = 'mcp',
+) -> dict:
+    """
+    Delegate a segfault finding to a person or a delegate group outside the
+    operations team (swf-epicprod docs/SEGFAULT_DELEGATION.md). Delegating
+    is an operator decision: an LLM session delegates only on its
+    operator's word, and may recommend a delegation in a reading instead.
+    The delegation is kept on the finding, versioned, and is a
+    segfault_delegated action.
+
+    Args:
+        finding: The finding's name (its catalog key) or number (f-23).
+        delegate: An epicprod account name, or a group of the registry
+            (SysConfig segfault_delegate_groups).
+        ask: What the delegate is asked to do, in one or two sentences.
+        delegated_by: The operator who delegates (a signed-in caller is
+            recorded as themselves).
+
+    Returns:
+        The delegation (id, delegate, kind, ask, by, at, state, replies)
+        with its finding and fid, or {'error': ...}.
+    """
+    from monitor_app.mcp.common import CALLER
+    from monitor_app.segfaults import delegate_finding
+
+    def _work():
+        try:
+            return delegate_finding(finding, delegate, ask, CALLER.get() or delegated_by)
+        except ValueError as exc:
+            return {'error': str(exc)}
+    return await sync_to_async(_work)()
+
+
+@mcp.tool()
+@requires_authority
+async def panda_segfault_delegation_reply(
+    finding: str,
+    delegation_id: str,
+    state: str,
+    text: str = '',
+    replied_by: str = 'mcp',
+) -> dict:
+    """
+    Reply to an open segfault delegation as its delegate: accept it, answer
+    it, or return it (swf-epicprod docs/SEGFAULT_DELEGATION.md). Only the
+    delegate, or a convener or member of the delegated group, may reply.
+    Each reply is a segfault_delegation_answered action.
+
+    Args:
+        finding: The finding's name or number (f-23).
+        delegation_id: The delegation's id, from panda_segfault_delegations.
+        state: accepted, answered or returned.
+        text: The reply; required to answer or return.
+        replied_by: Who replies (a signed-in caller is recorded as
+            themselves).
+
+    Returns:
+        The delegation as it now stands, with its finding and fid, or
+        {'error': ...}.
+    """
+    from monitor_app.mcp.common import CALLER
+    from monitor_app.segfaults import reply_delegation
+
+    def _work():
+        try:
+            return reply_delegation(finding, delegation_id, state, text, CALLER.get() or replied_by)
+        except ValueError as exc:
+            return {'error': str(exc)}
+    return await sync_to_async(_work)()
+
+
+@mcp.tool()
+async def panda_segfault_delegations(person: str = None, open_only: bool = False) -> dict:
+    """
+    The segfault delegations: findings asked of people and groups outside
+    the operations team, open ones first (swf-epicprod
+    docs/SEGFAULT_DELEGATION.md).
+
+    Args:
+        person: Only the delegations to this epicprod account or to a
+            group that lists it.
+        open_only: Only those delegated or accepted, not yet answered or
+            returned.
+
+    Returns:
+        delegations (each with id, delegate, kind, ask, by, at, state,
+        replies, finding, fid, title) and groups (the registry).
+    """
+    from monitor_app.segfaults import delegate_groups, delegations
+
+    def _work():
+        return {'delegations': delegations(person=person, open_only=open_only),
+                'groups': delegate_groups()}
+    return await sync_to_async(_work)()
+
+
+@mcp.tool()
+@requires_authority
 async def panda_segfault_reproduce(
     key: str,
     pandaid: int = None,

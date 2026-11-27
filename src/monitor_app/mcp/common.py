@@ -53,6 +53,7 @@ AUTHORITY_GUARDED_TOOLS = frozenset({
     'epicprod_live_clear', 'epicprod_declare_downtime', 'epicprod_withdraw_downtime',
     'pcs_dataset_intake', 'pcs_prodtask_intake', 'pcs_prodtask_link_input',
     'panda_segfault_finding_set', 'panda_segfault_reproduce', 'pcs_prodtask_set_status',
+    'panda_segfault_delegate', 'panda_segfault_delegation_reply',
     'pcs_prodtask_unplace',
     'swf_end_execution', 'swf_kill_agent',
     'swf_record_ai_memory',
@@ -458,6 +459,21 @@ def get_available_tools_list() -> list:
             "name": "panda_segfault_reproduce",
             "description": "Request a crash signature's reproduction: the crashed row as one payload canary on the production queue and the reference queue, recorded on the signature (the claim the nightly notice asks for).",
             "parameters": ["key", "pandaid", "queues", "requested_by"],
+        },
+        {
+            "name": "panda_segfault_delegate",
+            "description": "Delegate a segfault finding to a person or a delegate group outside the operations team, with what is asked (an operator decision).",
+            "parameters": ["finding", "delegate", "ask", "delegated_by"],
+        },
+        {
+            "name": "panda_segfault_delegation_reply",
+            "description": "Reply to an open segfault delegation as its delegate: accepted, answered or returned, with its text.",
+            "parameters": ["finding", "delegation_id", "state", "text", "replied_by"],
+        },
+        {
+            "name": "panda_segfault_delegations",
+            "description": "The segfault delegations, open ones first, optionally those of one person (directly or through a group), and the group registry.",
+            "parameters": ["person", "open_only"],
         },
         # Snapper state history (snapper-ai): coherent snapshots and the view products
         {

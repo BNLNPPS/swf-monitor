@@ -2373,7 +2373,8 @@ FINDING_KIND = 'finding'
 FINDING_CONTEXT = 'segfault'
 FINDING_FIELDS = ('date', 'frame', 'stage', 'title', 'class', 'action', 'standing',
                   'fix', 'notes', 'sources', 'signatures', 'model_reading',
-                  'detector_components', 'detector_point', 'detector_geometry')
+                  'detector_components', 'detector_point', 'detector_geometry',
+                  'delegations')
 
 # Where in the detector a finding lies, for the ePIC detector model: DD4hep
 # top-level detector names from the epic compact files (BeamPipeB0),
@@ -2612,6 +2613,7 @@ def findings(*, name=None, version=None, include_history=False):
             'signatures': rows, 'crashes': crashes,
             'tasks': len({t for r in rows for t in (r.get('task_ids') or [])}),
             'configurations': sorted(prod_tasks), 'rows_lost': rows_lost, 'events_lost': events_lost,
+            'delegations': list(f.get(DELEGATIONS_KEY) or []),
         })
         if include_history:
             current_keys = (e.data or {}).get('signatures') or [e.name]
@@ -2622,6 +2624,164 @@ def findings(*, name=None, version=None, include_history=False):
                 'current_anchor': str(current_keys[0]).replace(':', '-'),
             })
     return entries, ''
+
+
+# Delegation (swf-epicprod docs/SEGFAULT_DELEGATION.md): a finding asked of a
+# person or a named group outside the operations team, kept on the finding's
+# data under ``delegations`` in order of creation and versioned with it.
+DELEGATIONS_KEY = 'delegations'
+DELEGATION_STATES = ('delegated', 'accepted', 'answered', 'returned')
+DELEGATION_OPEN = ('delegated', 'accepted')
+DELEGATION_REPLIES = ('accepted', 'answered', 'returned')
+DELEGATE_GROUPS_KEY = 'segfault_delegate_groups'
+
+
+def delegate_groups():
+    """The delegate group registry, SysConfig ``segfault_delegate_groups``
+    (seeded empty on first read): ``{name: {'scope', 'conveners',
+    'members'}}``, members by epicprod account name. A malformed entry is
+    logged and left out."""
+    raw = SysConfig.get_setting(DELEGATE_GROUPS_KEY, {})
+    if not isinstance(raw, dict):
+        logger.error('SysConfig %s is not an object; no delegate groups', DELEGATE_GROUPS_KEY)
+        return {}
+    out = {}
+    for name, group in raw.items():
+        if not isinstance(group, dict):
+            logger.error('SysConfig %s[%r] is not an object; left out', DELEGATE_GROUPS_KEY, name)
+            continue
+        out[str(name)] = {'scope': str(group.get('scope') or ''),
+                          'conveners': [str(u) for u in group.get('conveners') or []],
+                          'members': [str(u) for u in group.get('members') or []]}
+    return out
+
+
+def finding_entry(ref):
+    """The finding named ``ref``, or numbered by it (f-23 or 23); None when
+    there is none."""
+    ref = str(ref or '').strip()
+    serial = ref[2:] if ref.lower().startswith('f-') else ref
+    for entry in finding_entries():
+        if entry.name == ref or (serial.isdigit()
+                                 and int((entry.data or {}).get('serial') or 0) == int(serial)):
+            return entry
+    return None
+
+
+def _is_account(name):
+    from django.contrib.auth import get_user_model
+    from .models import UserPreference
+    return (get_user_model().objects.filter(username=name).exists()
+            or UserPreference.objects.filter(username=name).exists())
+
+
+def _log_delegation(action, entry, by, message, **fields):
+    from .epicprod_logging import log_epicprod_action
+    log_epicprod_action('web', action, subject_type='crash_signature', subject_key=entry.name,
+                        username=by, sublevel='normal', message=message[:300], **fields)
+
+
+def delegate_finding(ref, delegate, ask, by):
+    """Delegate the finding ``ref`` to ``delegate``, an epicprod account or
+    a group of the registry, asking ``ask``. Returns the delegation with
+    its finding. Raises ValueError for an unknown finding or delegate, or a
+    missing ask or operator."""
+    from django.db import transaction
+    from uuid import uuid4
+    from .models import Entry
+    delegate, ask, by = (str(v or '').strip() for v in (delegate, ask, by))
+    if not delegate:
+        raise ValueError('a delegate is required: an epicprod account or a delegate group')
+    if not ask:
+        raise ValueError('an ask is required: what the delegate is asked to do')
+    if not by:
+        raise ValueError('the delegating operator is required')
+    groups = delegate_groups()
+    if delegate in groups:
+        kind = 'group'
+    elif _is_account(delegate):
+        kind = 'person'
+    else:
+        raise ValueError(f'{delegate!r} is neither an epicprod account nor a delegate group '
+                         f'({", ".join(sorted(groups)) or "none registered"})')
+    with transaction.atomic():
+        found = finding_entry(ref)
+        if found is None:
+            raise ValueError(f'no finding {ref!r}')
+        entry = Entry.objects.select_for_update().get(pk=found.pk)
+        delegation = {'id': uuid4().hex[:12], 'delegate': delegate, 'kind': kind, 'ask': ask,
+                      'by': by, 'at': _iso(timezone.now()), 'state': 'delegated', 'replies': []}
+        listed = list((entry.data or {}).get(DELEGATIONS_KEY) or []) + [delegation]
+        set_finding(entry.name, {DELEGATIONS_KEY: listed}, by)
+    fid = finding_id((entry.data or {}).get('serial'))
+    _log_delegation('segfault_delegated', entry, by, f'{fid} delegated to {delegate}: {ask}',
+                    delegate=delegate, delegate_kind=kind, delegation=delegation['id'], finding=fid)
+    return dict(delegation, finding=entry.name, fid=fid)
+
+
+def reply_delegation(ref, delegation_id, state, text, by):
+    """The delegate's reply to an open delegation: ``state`` accepted,
+    answered or returned, with ``text`` (required to answer or return).
+    Only the delegate, or a convener or member of the delegated group, may
+    reply. Returns the delegation with its finding; raises ValueError
+    otherwise."""
+    from django.db import transaction
+    from .models import Entry
+    state, text, by = (str(v or '').strip() for v in (state, text, by))
+    if state not in DELEGATION_REPLIES:
+        raise ValueError(f'state must be one of {", ".join(DELEGATION_REPLIES)}')
+    if state in ('answered', 'returned') and not text:
+        raise ValueError(f'a reply that {state[:-2]}s the delegation needs its text')
+    with transaction.atomic():
+        found = finding_entry(ref)
+        if found is None:
+            raise ValueError(f'no finding {ref!r}')
+        entry = Entry.objects.select_for_update().get(pk=found.pk)
+        listed = [dict(d) for d in (entry.data or {}).get(DELEGATIONS_KEY) or []]
+        delegation = next((d for d in listed if d.get('id') == delegation_id), None)
+        if delegation is None:
+            raise ValueError(f'no delegation {delegation_id!r} on {entry.name}')
+        if delegation.get('state') not in DELEGATION_OPEN:
+            raise ValueError(f"delegation {delegation_id} is {delegation.get('state')} and takes no reply")
+        if delegation.get('kind') == 'group':
+            group = delegate_groups().get(delegation['delegate'])
+            allowed = set(group['conveners']) | set(group['members']) if group else set()
+        else:
+            allowed = {delegation['delegate']}
+        if by not in allowed:
+            raise ValueError(f"{by or 'an unnamed caller'} is not {delegation['delegate']} "
+                             f"or a member of it, and cannot reply")
+        delegation['state'] = state
+        delegation['replies'] = list(delegation.get('replies') or []) + [
+            {'state': state, 'text': text, 'by': by, 'at': _iso(timezone.now())}]
+        set_finding(entry.name, {DELEGATIONS_KEY: listed}, by)
+    fid = finding_id((entry.data or {}).get('serial'))
+    _log_delegation('segfault_delegation_answered', entry, by,
+                    f"{fid} delegation to {delegation['delegate']} {state} by {by}"
+                    + (f': {text}' if text else ''),
+                    delegate=delegation['delegate'], delegation=delegation_id, state=state, finding=fid)
+    return dict(delegation, finding=entry.name, fid=fid)
+
+
+def delegations(*, person=None, open_only=False):
+    """Every delegation on the findings, open ones first and then newest
+    first, each with its finding's name, fid and title. With ``person``,
+    only those to that account or to a group that lists it."""
+    groups = delegate_groups()
+    mine = ({name for name, g in groups.items() if person in g['conveners'] or person in g['members']}
+            | {person}) if person else None
+    out = []
+    for entry in finding_entries():
+        for d in (entry.data or {}).get(DELEGATIONS_KEY) or []:
+            if mine is not None and d.get('delegate') not in mine:
+                continue
+            if open_only and d.get('state') not in DELEGATION_OPEN:
+                continue
+            out.append(dict(d, finding=entry.name, title=entry.title,
+                            fid=finding_id((entry.data or {}).get('serial'))))
+    out.sort(key=lambda d: d.get('at') or '', reverse=True)
+    out.sort(key=lambda d: d.get('state') not in DELEGATION_OPEN)
+    return out
 
 
 def finding_failure_rules():
