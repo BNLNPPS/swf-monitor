@@ -11,7 +11,9 @@ no trace and a runnable row and no attempt in flight (a reproduction is
 the only extraction left), the traced ones no finding reads, and the
 ones whose reproduction has settled (the row ran clean, or crashed
 without a trace) that no finding reads: those are read from the record
-into a finding, never run again. A session takes a reproduction item
+into a finding, never run again. Bad-input and Hilog signatures are
+never in the reproduction list, since no run settles them; they are
+listed apart with their reading (the FATAL line, the programs). A session takes a reproduction item
 by requesting it on the record (the signature page's Reproduce, or the
 MCP tool panda_segfault_reproduce), which every session sees on the
 runs page, so two never submit the same row; a reading is written with
@@ -47,7 +49,7 @@ django.setup()
 
 from monitor_app.models import CrashSignature  # noqa: E402
 from monitor_app.reproductions import SETTLED_OUTCOMES, attempts  # noqa: E402
-from monitor_app.segfaults import covering_finding, signature_summary  # noqa: E402
+from monitor_app.segfaults import covering_finding, is_hilog, is_input, signature_summary  # noqa: E402
 
 TJAI_MCP_URL = os.environ.get('TJAI_MCP_URL', 'https://etaverse.com/tjai/mcp/')
 LOCATION = os.environ.get('TJAI_LOCATION_NAME', 'swf-testbed')
@@ -107,8 +109,8 @@ def census():
               'frame_groups': sum(1 for s in sigs if s.level == 'trace'),
               'crashes': 0, 'covered': 0, 'covered_crashes': 0,
               'traced_unread': 0, 'settled_unread': 0, 'untraced_runnable': 0,
-              'untraced_unrunnable': 0, 'in_flight': 0}
-    need_run, need_read, need_reading = [], [], []
+              'untraced_unrunnable': 0, 'in_flight': 0, 'record_unread': 0}
+    need_run, need_read, need_reading, need_record = [], [], [], []
     for sig in sigs:
         if sig.level == 'trace':
             continue
@@ -129,7 +131,20 @@ def census():
                'queue': ', '.join(s['site_names'][:2]), 'last_seen': (s['last_seen'] or '')[:10],
                'frame': s['frame'], 'trace_status': s['trace_status'],
                'runnable': s['runnable'], 'outcome': s.get('reproduction_outcome') or ''}
-        if s['trace_status'] == 'found':
+        if is_input(sig) or is_hilog(sig):
+            # A run cannot settle a bad-input or Hilog signature (SEGFAULT_KINDS.md:
+            # Bad input, reproduction not built; Hilog, read from its report): the
+            # finding is written from its reading, the FATAL line or the programs.
+            data = sig.data or {}
+            if is_input(sig):
+                reading = (data.get('input') or {}).get('fatal') or 'FATAL line not yet read'
+            else:
+                top = ((data.get('hilog_reading') or {}).get('by_program') or [{}])[0]
+                reading = (f"{top['program']} {top['mb']} MB" if top.get('program')
+                           else 'programs not yet read')
+            counts['record_unread'] += 1
+            need_record.append(dict(row, reading=reading))
+        elif s['trace_status'] == 'found':
             counts['traced_unread'] += 1
             need_read.append(row)
         elif row['outcome'] in SETTLED_OUTCOMES:
@@ -148,10 +163,11 @@ def census():
     need_run.sort(key=lambda r: -(r['crashes'] or 0))
     need_read.sort(key=lambda r: -(r['crashes'] or 0))
     need_reading.sort(key=lambda r: -(r['crashes'] or 0))
-    return counts, need_run, need_read, need_reading
+    need_record.sort(key=lambda r: -(r['crashes'] or 0))
+    return counts, need_run, need_read, need_reading, need_record
 
 
-def compose(counts, need_run, need_read, need_reading, limit):
+def compose(counts, need_run, need_read, need_reading, need_record, limit):
     c = counts
     lines = [
         f"Segfault catalog, nightly: {c['signatures']} signatures "
@@ -161,6 +177,7 @@ def compose(counts, need_run, need_read, need_reading, limit):
         f"{c['untraced_runnable']} with no trace and a runnable row; "
         f"{c['traced_unread']} traced with no reading; "
         f"{c['settled_unread']} settled by a reproduction with no trace and no reading; "
+        f"{c['record_unread']} bad-input or Hilog with no reading; "
         f"{c['untraced_unrunnable']} with no trace and no runnable row (manifest reconstruction).",
     ]
     if need_run:
@@ -177,6 +194,12 @@ def compose(counts, need_run, need_read, need_reading, limit):
             f"(per host and per day), not another run ({min(len(need_reading), limit)} of {len(need_reading)}):")
         for r in need_reading[:limit]:
             lines.append(f"  {r['key']}  {r['class']}  {r['crashes']:,} crashes  {r['outcome']}  {r['queue']}  last {r['last_seen']}")
+    if need_record:
+        lines.append(
+            f"Bad input and Hilog, no finding reads them: a reading from the record (the FATAL line, "
+            f"the programs), never a run ({min(len(need_record), limit)} of {len(need_record)}):")
+        for r in need_record[:limit]:
+            lines.append(f"  {r['key']}  {r['class']}  {r['crashes']:,}  {r['reading'][:90]}  last {r['last_seen']}")
     lines.append(
         "Someone swf take it: a reproduction is requested on the record with panda_segfault_reproduce(key) "
         "or the signature page's Reproduce; the runs page shows what is already requested, so check it "
@@ -205,11 +228,12 @@ def main():
     ap.add_argument('--dry-run', action='store_true', help='compose and print, send nothing')
     ap.add_argument('--limit', type=int, default=12, help='signatures listed per list')
     args = ap.parse_args()
-    counts, need_run, need_read, need_reading = census()
-    text = compose(counts, need_run, need_read, need_reading, args.limit)
+    counts, need_run, need_read, need_reading, need_record = census()
+    text = compose(counts, need_run, need_read, need_reading, need_record, args.limit)
     out = {'counts': counts, 'listed_run': [r['key'] for r in need_run[:args.limit]],
            'listed_read': [r['key'] for r in need_read[:args.limit]],
            'listed_settled': [r['key'] for r in need_reading[:args.limit]],
+           'listed_record': [r['key'] for r in need_record[:args.limit]],
            'host': socket.gethostname()}
     if args.dry_run:
         out['message'] = text
