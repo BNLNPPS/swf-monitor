@@ -2676,8 +2676,14 @@ def _is_account(name):
 
 
 def _log_delegation(action, entry, by, message, **fields):
+    """One delegation incident (swf-epicprod docs/SEGFAULT_DELEGATION.md,
+    Notices). It carries what a subscriber filters on (``delegate``,
+    ``delegated_by``) and what notice routing composes from (``title``,
+    ``summary``, a path-form ``url``, swf-monitor NOTICE_ROUTING.md,
+    Delivery)."""
     from .epicprod_logging import log_epicprod_action
     log_epicprod_action('web', action, subject_type='crash_signature', subject_key=entry.name,
+                        subject_label=fields.get('finding') or entry.name,
                         username=by, sublevel='normal', message=message[:300], **fields)
 
 
@@ -2715,7 +2721,10 @@ def delegate_finding(ref, delegate, ask, by):
         set_finding(entry.name, {DELEGATIONS_KEY: listed}, by)
     fid = finding_id((entry.data or {}).get('serial'))
     _log_delegation('segfault_delegated', entry, by, f'{fid} delegated to {delegate}: {ask}',
-                    delegate=delegate, delegate_kind=kind, delegation=delegation['id'], finding=fid)
+                    delegate=delegate, delegate_kind=kind, delegated_by=by,
+                    delegation=delegation['id'], finding=fid,
+                    title=f'Finding {fid} delegated to {delegate}', summary=ask[:500],
+                    url='/panda/segfaults/delegated/')
     return dict(delegation, finding=entry.name, fid=fid)
 
 
@@ -2759,7 +2768,12 @@ def reply_delegation(ref, delegation_id, state, text, by):
     _log_delegation('segfault_delegation_answered', entry, by,
                     f"{fid} delegation to {delegation['delegate']} {state} by {by}"
                     + (f': {text}' if text else ''),
-                    delegate=delegation['delegate'], delegation=delegation_id, state=state, finding=fid)
+                    delegate=delegation['delegate'], delegate_kind=delegation.get('kind', ''),
+                    delegated_by=delegation.get('by', ''), delegation=delegation_id,
+                    state=state, finding=fid,
+                    title=f'Finding {fid} delegation {state} by {by}',
+                    summary=(text or delegation.get('ask', ''))[:500],
+                    url=f'/panda/segfaults/findings/#{fid}' if fid else '/panda/segfaults/findings/')
     return dict(delegation, finding=entry.name, fid=fid)
 
 
