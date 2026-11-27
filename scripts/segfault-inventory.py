@@ -37,9 +37,11 @@ job (1768411):
     this way; chains run to depth 9). The log LFN's six-digit serial is
     JEDI's job counter, not the row (task 39623: 4 rows, serials to 11),
     and is not used.
-  * The payload digest in ``jobmetrics`` (``payloadStage=...``) exists on
-    payload 0.11 jobs only, so the stage is mostly unknown for the
-    campaign to date; the dig (stage 3) supplies it.
+  * The payload digest in ``jobmetrics`` names the stage (``pStage=``, or
+    ``payloadStage=`` before payload 0.25.37; both read through
+    ``swf_epicprod.payload.metric_keys``) on payload 0.11 and later jobs
+    only, so the stage of earlier jobs is unknown; the dig (stage 3)
+    supplies it.
 
 Nothing on an existing row outside the crash fields is touched: the
 payload report the sweep files under ``data['payload_report']`` and the
@@ -71,6 +73,7 @@ chain step::
         --since 2026-07-01            # the campaign back-fill
     ... --days 3                      # the nightly top-up (overlap intended)
     ... --check --since 2026-07-01    # the record's count against swfdb's
+    ... --days 3 --restage            # stage the rows recorded with none, then the passes
 
 Every run records one ``segfault_inventory`` action on the epicprod action
 stream with the window and the counts; a failure records outcome ``error``
@@ -102,6 +105,7 @@ from monitor_app.models import CrashSignature, EpicProdJob  # noqa: E402
 from monitor_app.panda.constants import PANDA_SCHEMA  # noqa: E402
 from pcs.manifests import expand, record_of  # noqa: E402
 from pcs.models import PandaTasks  # noqa: E402
+from swf_epicprod.payload import metric_keys  # noqa: E402
 
 CRASH_EXITS = ('134', '135', '136', '139')
 SIGNAL_NAMES = {6: 'SIGABRT', 7: 'SIGBUS', 8: 'SIGFPE', 11: 'SIGSEGV'}
@@ -123,7 +127,13 @@ JOB_FIELDS = (
 )
 # The dispatcher exec in the job parameters: evgen_job_dispatcher.py <seq> <task>
 DISPATCHER_SEQ_RE = re.compile(r'evgen_job_dispatcher\.py(?:%20|\s)+(\d+)')
-DIGEST_RE = re.compile(r'payload(Stage|StageStatus|Trail|Events|Version|Exit)=(\S+)')
+# The payload digest's fields in the job metrics (EPICPROD_PAYLOAD.md, The
+# job digest), read through the shared name table, which holds the short
+# names written since payload 0.25.37 and the long ones written before.
+DIGEST_FIELDS = ('stage', 'stage_status', 'trail', 'registration', 'events', 'version',
+                 'threads', 'exit', 'fatal_signal', 'fatal_stage', 'fatal_stalled')
+# Rows per PanDA read in the restage (one ANY(%s) array each).
+RESTAGE_BATCH = 5000
 
 log = logging.getLogger('segfault-inventory')
 
@@ -353,10 +363,8 @@ def _minutes(start, end):
 
 def _digest(jobmetrics):
     """The payload digest fields in the job metrics, when the job carried one."""
-    out = {}
-    for key, value in DIGEST_RE.findall(jobmetrics or ''):
-        out[key.lower()] = value
-    return out
+    fields = metric_keys.parse(jobmetrics)
+    return {f: fields[f] for f in DIGEST_FIELDS if fields.get(f)}
 
 
 def _summary(stage, signal, minutes, site):
@@ -472,6 +480,55 @@ def write_batch(jobs, manifests, chains, dry_run, counts):
             ['jeditaskid', 'prod_task', 'seq_number', 'job_index', 'status',
              'phase', 'failure_summary', 'data', 'last_refreshed_at', 'updated_at'],
             batch_size=BATCH)
+
+
+def restage(dry_run):
+    """Give each job row recorded with no stage the stage its job metrics
+    name. Until 2026-11-27 the digest was read by its long names alone, so
+    the rows of jobs carrying the short names (payload 0.25.37 on) were
+    recorded with no stage, and a signature split by stage could not find
+    its own jobs. Returns the count restaged and their tasks by phase."""
+    from django.db.models import Q
+    phases = (PHASE, MEMORY_PHASE, INPUT_PHASE, HILOG_PHASE)
+    ids = list(EpicProdJob.objects.filter(phase__in=phases)
+               .filter(Q(data__crash__stage='') | Q(data__crash__stage__isnull=True))
+               .values_list('pandaid', flat=True))
+    stage_sql = metric_keys.sql_value('stage', column='"jobmetrics"')
+    metrics = {}
+    for i in range(0, len(ids), RESTAGE_BATCH):
+        for r in _panda(
+                f"""SELECT "pandaid", "jobmetrics" FROM "{PANDA_SCHEMA}"."jobsarchived4"
+                    WHERE "pandaid" = ANY(%s) AND {stage_sql} IS NOT NULL""",
+                [ids[i:i + RESTAGE_BATCH]]):
+            metrics[int(r['pandaid'])] = r['jobmetrics']
+    summaries = {MEMORY_PHASE: _memory_summary, INPUT_PHASE: _input_summary,
+                 HILOG_PHASE: _hilog_summary}
+    now = timezone.now()
+    rows, tasks = [], {p: set() for p in phases}
+    for obj in EpicProdJob.objects.filter(pandaid__in=list(metrics)):
+        crash = dict((obj.data or {}).get('crash') or {})
+        digest = _digest(metrics[obj.pandaid])
+        if crash.get('stage') or not digest.get('stage'):
+            continue
+        crash['stage'], crash['digest'] = digest['stage'], digest
+        data = dict(obj.data or {})
+        data['crash'] = crash
+        obj.data = data
+        obj.failure_summary = (
+            _summary(crash['stage'], crash.get('signal'), crash.get('minutes'),
+                     crash.get('computingsite')) if obj.phase == PHASE
+            else summaries[obj.phase](crash))
+        obj.updated_at = now
+        rows.append(obj)
+        if obj.jeditaskid:
+            tasks[obj.phase].add(int(obj.jeditaskid))
+    if rows and not dry_run:
+        EpicProdJob.objects.bulk_update(rows, ['data', 'failure_summary', 'updated_at'],
+                                        batch_size=BATCH)
+    log.info('restage: %d of %d stage-less rows carry a stage in their job metrics%s',
+             len(rows), len(ids), ' (dry run)' if dry_run else '')
+    return {'restaged': len(rows), 'stage_less_rows': len(ids),
+            'restaged_tasks': {p: sorted(t) for p, t in tasks.items() if t}}
 
 
 # ------------------------------------------------------------ memory kills
@@ -805,6 +862,9 @@ def run(args):
         summary.update(es_pass(since))
         summary['seconds'] = round(time.monotonic() - t0, 1)
         return summary, t0
+    restaged = restage(args.dry_run) if args.restage else None
+    if restaged:
+        counts['tasks'].update(restaged['restaged_tasks'].get(PHASE, []))
     jobs = crashed_jobs(since, args.limit)
     log.info('%d crash-class jobs in the record', len(jobs))
     manifests = ManifestRows(establish=not args.dry_run and not args.no_manifest_establish)
@@ -828,6 +888,8 @@ def run(args):
                       'unavailable': manifests.unavailable},
         'dry_run': bool(args.dry_run),
     }
+    if restaged:
+        summary.update(restaged)
     if not args.dry_run and not args.no_signatures:
         summary.update(signature_pass(sorted(counts['tasks']), args))
     if not args.dry_run and not args.no_memory:
@@ -908,6 +970,9 @@ def main():
                     help='skip the Event Service unit pass')
     ap.add_argument('--es-only', action='store_true',
                     help='the Event Service unit pass alone over the window (its back-fill)')
+    ap.add_argument('--restage', action='store_true',
+                    help='first give each row recorded with no stage the stage its job '
+                         'metrics name, then run the passes')
     ap.add_argument('--no-rows-lost', action='store_true',
                     help='skip the delivery lookup behind rows_lost')
     ap.add_argument('--no-manifest-establish', action='store_true',

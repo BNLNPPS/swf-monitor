@@ -2634,6 +2634,31 @@ PAYLOAD_STAGE_ORDER = [
 ]
 
 
+# A pilot that runs several jobs in turn writes them all to one stdout:
+# each job's part opens with "processing PanDA job <id>" and the pilot
+# writes "Ready for new job" between one job and the next.
+_PILOT_JOB_RE = re.compile(r'\| processing PanDA job (\d+)\b')
+_PILOT_NEXT_JOB = 'Ready for new job'
+
+
+def pilot_log_section(text, pandaid):
+    """The part of a pilot's stdout that belongs to job ``pandaid``: the
+    whole text when the log names no job, the job's own part when it names
+    this one, and '' when it names only other jobs."""
+    lines = (text or '').splitlines(keepends=True)
+    named = [(i, int(m.group(1))) for i, line in enumerate(lines)
+             for m in [_PILOT_JOB_RE.search(line)] if m]
+    if not named:
+        return text
+    own = [i for i, p in named if p == int(pandaid)]
+    if not own:
+        return ''
+    at = own[0]
+    begin = next((k + 1 for k in range(at - 1, -1, -1) if _PILOT_NEXT_JOB in lines[k]), 0)
+    end = next((k for k in range(at + 1, len(lines)) if _PILOT_NEXT_JOB in lines[k]), len(lines))
+    return ''.join(lines[begin:end])
+
+
 def _payload_report(conn, pandaid):
     """The epicprod payload's own report of this job, from the PanDA
     metatable, shaped for display.
@@ -3337,7 +3362,9 @@ def study_job(pandaid, include_batch_reason=False, include_log_analysis=True,
                             direct_url, timeout=30, verify=False,
                         )
                         if resp.status_code == 200 and resp.text:
-                            log_text = resp.text
+                            # The worker's pilot log, which holds every job
+                            # the pilot ran: this job's part only.
+                            log_text = pilot_log_section(resp.text, pandaid)
                             log_source = (
                                 'nersc_portal'
                                 if 'portal.nersc.gov' in direct_url
