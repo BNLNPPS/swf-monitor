@@ -2,8 +2,8 @@
 """segfault-finding-append.py — add a reading to an existing segfault
 finding without re-sending its text: a paragraph appended to its reading
 (``what``), a dated line appended to its notes, signatures and sources
-added (each once), a sentence of the reading replaced where it is, and
-the title replaced. Writes through ``segfaults.set_finding``, so the
+added (each once), a sentence of the reading or of the notes replaced
+where it is, and the title replaced. Writes through ``segfaults.set_finding``, so the
 finding keeps its version history and the write is an action on the
 stream (swf-epicprod docs/SEGFAULT_DIAGNOSIS.md, Findings). A new
 finding is written with the MCP tool ``panda_segfault_finding_set``.
@@ -21,7 +21,8 @@ Usage::
         --replace-file replace.json --title '...' --by swf-1 [--apply]
 
 ``--replace-file`` holds a JSON list of [old, new] pairs; each old text
-must occur exactly once in the reading. Dry run by default: the changes
+must occur exactly once in the reading. ``--replace-notes-file`` does the
+same in the notes (an issue draft kept there, say). Dry run by default: the changes
 are printed and nothing is written.
 """
 import argparse
@@ -70,6 +71,7 @@ def main():
                     metavar=('LABEL', 'URL'))
     ap.add_argument('--sources-file', help='JSON [{"label": ..., "url": ...}, ...] added')
     ap.add_argument('--replace-file', help='JSON [[old, new], ...] in the reading')
+    ap.add_argument('--replace-notes-file', help='JSON [[old, new], ...] in the notes')
     ap.add_argument('--title')
     ap.add_argument('--by', required=True, help='who writes (the version stamp)')
     ap.add_argument('--apply', action='store_true')
@@ -80,20 +82,29 @@ def main():
     fid = f"f-{data.get('serial')}"
     fields = {}
 
+    def replaced(text, path, where):
+        for old, new in json.loads(_read(path)):
+            n = text.count(old)
+            if n != 1:
+                sys.exit(f'{fid}: {where} replace text occurs {n} times, not once: {old[:80]!r}')
+            text = text.replace(old, new)
+        return text
+
     what = entry.content or ''
     if args.replace_file:
-        for old, new in json.loads(_read(args.replace_file)):
-            n = what.count(old)
-            if n != 1:
-                sys.exit(f'{fid}: replace text occurs {n} times, not once: {old[:80]!r}')
-            what = what.replace(old, new)
+        what = replaced(what, args.replace_file, 'reading')
     if args.paragraph_file:
         what = what.rstrip() + '\n\n' + _read(args.paragraph_file)
     if what != (entry.content or ''):
         fields['what'] = what
 
+    notes = data.get('notes') or ''
+    if args.replace_notes_file:
+        notes = replaced(notes, args.replace_notes_file, 'notes')
     if args.notes_file:
-        fields['notes'] = ((data.get('notes') or '').rstrip() + '\n\n' + _read(args.notes_file)).strip()
+        notes = (notes.rstrip() + '\n\n' + _read(args.notes_file)).strip()
+    if notes != (data.get('notes') or ''):
+        fields['notes'] = notes
 
     sigs = list(data.get('signatures') or [entry.name])
     added = [k for k in args.add_signatures if k not in sigs]
